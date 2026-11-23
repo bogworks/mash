@@ -149,7 +149,7 @@ type specCommand struct {
 }
 
 // confTrack names the release the build is held to.
-func confTrack(c confCmd) bool { return c.meta("x-release") == "0.5.6" }
+func confTrack(c confCmd) bool { return c.meta("x-release") == "0.5.8" }
 
 type confRan struct {
 	out, errs string
@@ -312,7 +312,7 @@ func TestConformance(t *testing.T) {
 		}
 	})
 	if len(tracked) == 0 {
-		t.Fatal("no command of release 0.5.6 in spec/mashctl.json")
+		t.Fatal("no command of release 0.5.8 in spec/mashctl.json")
 	}
 	help := confRun(t, "--help")
 	if help.code != 0 {

@@ -65,6 +65,7 @@ type toolFile struct {
 		Title       string `json:"title"`
 		Version     string `json:"version"`
 		Description string `json:"description"`
+		Source      string `json:"x-source"`
 	} `json:"info"`
 	Command *cmdSpec `json:"command"`
 }
@@ -193,7 +194,7 @@ func buildTree(c *cmdSpec, path []string, inherited string, root bool) (*node, e
 // page content.
 func Generate(specDir string) (map[string][]byte, error) {
 	var tools []*node
-	var current string
+	var current, source string
 	for _, name := range []string{"mash", "mashctl"} {
 		var f toolFile
 		if err := readJSON(filepath.Join(specDir, name+".json"), &f); err != nil {
@@ -207,6 +208,11 @@ func Generate(specDir string) (map[string][]byte, error) {
 			current = v
 		} else if v != current {
 			return nil, fmt.Errorf("%s.json: version %s differs from %s", name, v, current)
+		}
+		if name == "mash" {
+			source = f.Info.Source
+		} else if f.Info.Source != source {
+			return nil, fmt.Errorf("%s.json: x-source %q differs from %q", name, f.Info.Source, source)
 		}
 		root, err := buildTree(f.Command, nil, current, true)
 		if err != nil {
@@ -222,12 +228,13 @@ func Generate(specDir string) (map[string][]byte, error) {
 	if err := readJSON(filepath.Join(specDir, "rules.json"), &rules); err != nil {
 		return nil, err
 	}
-	g := &gen{current: current, pages: map[string][]byte{}, mcp: mcp, rules: rules, tools: tools}
+	g := &gen{current: current, source: source, pages: map[string][]byte{}, mcp: mcp, rules: rules, tools: tools}
 	return g.run()
 }
 
 type gen struct {
 	current string
+	source  string
 	pages   map[string][]byte
 	mcp     mcpFile
 	rules   rulesFile
@@ -1020,6 +1027,9 @@ func (g *gen) readme() {
 	b := newPage("Reference")
 	b.blank()
 	b.para("The mash and mashctl command reference for release " + g.current + ", generated from the spec files in spec/.")
+	if g.source != "" {
+		b.para("Source: " + g.source + ".")
+	}
 	b.para("Regenerate: " + code("go run ./scripts/refgen") + ". A test fails when these pages differ from the spec.")
 	b.heading(2, "Commands")
 	for _, t := range g.tools {

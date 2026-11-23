@@ -3,8 +3,9 @@
  "opencli": "0.1",
  "info": {
   "title": "mash",
-  "version": "0.5.6-spec.1",
-  "description": "Speaks as one endpoint: send and read mail, see who is there, check itself."
+  "version": "0.5.8-spec.0",
+  "description": "Speaks as one endpoint: send and read mail, see who is there, check itself.",
+  "x-source": "v0.5.8 (8e8fe56)"
  },
  "command": {
   "name": "mash",
@@ -279,7 +280,7 @@
      },
      {
       "name": "x-release",
-      "value": "0.5.6"
+      "value": "0.5.8"
      },
      {
       "name": "x-output",
@@ -460,7 +461,7 @@
      },
      {
       "name": "x-release",
-      "value": "0.5.6"
+      "value": "0.5.8"
      },
      {
       "name": "x-output",
@@ -620,7 +621,7 @@
      },
      {
       "name": "x-release",
-      "value": "0.5.6"
+      "value": "0.5.8"
      },
      {
       "name": "x-output",
@@ -791,7 +792,7 @@
      },
      {
       "name": "x-release",
-      "value": "0.5.6"
+      "value": "0.5.8"
      },
      {
       "name": "x-output",
@@ -918,7 +919,7 @@
      },
      {
       "name": "x-release",
-      "value": "0.5.6"
+      "value": "0.5.8"
      },
      {
       "name": "x-output",
@@ -1078,7 +1079,7 @@
      },
      {
       "name": "x-release",
-      "value": "0.5.6"
+      "value": "0.5.8"
      },
      {
       "name": "x-output",
@@ -1307,7 +1308,7 @@
      },
      {
       "name": "x-release",
-      "value": "0.5.6"
+      "value": "0.5.8"
      },
      {
       "name": "x-output",
@@ -1414,7 +1415,7 @@
      },
      {
       "name": "x-release",
-      "value": "0.5.6"
+      "value": "0.5.8"
      },
      {
       "name": "x-output",
@@ -1567,7 +1568,7 @@
        },
        {
         "name": "x-release",
-        "value": "0.5.6"
+        "value": "0.5.8"
        },
        {
         "name": "x-output",
@@ -1632,7 +1633,7 @@
      },
      {
       "name": "x-release",
-      "value": "0.5.6"
+      "value": "0.5.8"
      }
     ]
    },
@@ -1715,7 +1716,7 @@
      },
      {
       "name": "x-release",
-      "value": "0.5.6"
+      "value": "0.5.8"
      },
      {
       "name": "x-output",
@@ -1774,7 +1775,7 @@
      },
      {
       "name": "x-release",
-      "value": "0.5.6"
+      "value": "0.5.8"
      },
      {
       "name": "x-output",
@@ -1861,7 +1862,7 @@
      },
      {
       "name": "x-release",
-      "value": "0.5.6"
+      "value": "0.5.8"
      },
      {
       "name": "x-output",

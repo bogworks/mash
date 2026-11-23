@@ -1,6 +1,6 @@
 package main
 
-// The output half of the conformance test: every x-output case of every command of release 0.5.6 in spec/mashctl.json
+// The output half of the conformance test: every x-output case of every command of release 0.5.8 in spec/mashctl.json
 // (text, stream and exit code) is run against the build and compared exactly, with two exceptions the specification's
 // rules make: a case whose whole text stands in round brackets is a description and is skipped (confIsDescription), and
 // a part of a case that the command's notes name as varying is matched as the notes say and nothing more loosely
@@ -674,7 +674,7 @@ func confOutputs(t *testing.T, tracked []specCommand) {
 	t.Run("table", func(t *testing.T) {
 		for key := range confOutputRunners {
 			if !checked[key] {
-				t.Errorf("a runner for %q, which is no x-output case of a 0.5.6 command (or did not run)", key)
+				t.Errorf("a runner for %q, which is no x-output case of a 0.5.8 command (or did not run)", key)
 			}
 		}
 	})

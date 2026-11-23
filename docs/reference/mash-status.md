@@ -5,7 +5,7 @@ Generated from spec/*.json by go run ./scripts/refgen. Do not edit.
 Say in one line whether mail works for this endpoint, and whether it is
 online.
 
-Release: 0.5.6. Group: Everyday.
+Release: 0.5.8. Group: Everyday.
 
 ## Usage
 

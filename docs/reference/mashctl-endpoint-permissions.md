@@ -5,7 +5,7 @@ Generated from spec/*.json by go run ./scripts/refgen. Do not edit.
 Print the NATS permissions an endpoint's user needs, for someone who runs
 their own NATS.
 
-Release: 0.5.6. Group: Endpoints.
+Release: 0.5.8. Group: Endpoints.
 
 ## Usage
 

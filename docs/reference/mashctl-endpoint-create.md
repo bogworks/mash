@@ -4,7 +4,7 @@ Generated from spec/*.json by go run ./scripts/refgen. Do not edit.
 
 Create an endpoint and its credentials.
 
-Release: 0.5.6. Group: Endpoints.
+Release: 0.5.8. Group: Endpoints.
 
 ## Usage
 

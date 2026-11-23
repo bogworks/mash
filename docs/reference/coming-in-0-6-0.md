@@ -2,7 +2,7 @@ Generated from spec/*.json by go run ./scripts/refgen. Do not edit.
 
 # Coming in 0.6.0
 
-What changes in 0.6.0. None of it is in 0.5.6.
+What changes in 0.6.0. None of it is in 0.5.8.
 
 ## Changes
 
