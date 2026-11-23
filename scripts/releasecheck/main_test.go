@@ -12,7 +12,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -57,6 +56,11 @@ type fixture struct {
 	specs      []string    // for each measurement, "<binary dir>:<serve args joined by space>", in the same order
 }
 
+// fixtureVersion is the version the fixture releases: at or below 0.5.7, so its releases carry the three scripts (the
+// migration script too) that the published releases up to 0.5.7 still carry and are re-verified with. The 0.5.8 tests
+// below move the fixture to the first release that carries two (fixtureAt058).
+const fixtureVersion = "0.1.0"
+
 // newFixture: a repo whose main (pushed to a local "release repository") holds the candidate X with a buildable
 // cmd/mash that prints its version line, a signed tag v0.1.0 on X, and a fake gh serving CI runs and assets.
 func newFixture(t *testing.T) *fixture {
@@ -75,7 +79,7 @@ func newFixture(t *testing.T) *fixture {
 	write(t, repo, "mash-setup/.claude-plugin/plugin.json", "{\"name\": \"mash-setup\", \"version\": \"0.1.0\"}\n")
 	write(t, repo, release.PluginHooks, hardenedHooks)
 	write(t, repo, renderContractPath, "contract v1\n")
-	for _, n := range release.ScriptNames() {
+	for _, n := range release.ScriptNamesFor(fixtureVersion) {
 		write(t, repo, "scripts/"+n, scriptBody(n))
 	}
 	write(t, repo, release.PluginMCP, "{\"mcpServers\": {\"mash\": {\"command\": \"mash\", \"args\": [\"serve\"]}}}\n")
@@ -129,7 +133,7 @@ esac
 		t.Fatal(err)
 	}
 	write(t, root, "x", x)
-	f.o = Options{Repo: repo, X: x, Version: "0.1.0", GH: gh, GHRepo: "bogworks/mash", Remote: origin, Out: &bytes.Buffer{},
+	f.o = Options{Repo: repo, X: x, Version: fixtureVersion, GH: gh, GHRepo: "bogworks/mash", Remote: origin, Out: &bytes.Buffer{},
 		Signers: filepath.Join(root, "allowed_signers")}
 	t.Setenv("RELEASE_SIGNING_KEY", sumsKey.priv)
 	f.setCI(release.RequiredChecks...)
@@ -263,7 +267,7 @@ func scriptBody(name string) string { return "#!/bin/sh\n# " + name + "\nexit 0\
 // goodCIAsset is the content the fixture gives an SBOM (a CycloneDX 1.5 document) or the provenance (a Sigstore-bundle
 // line naming release.yml).
 func goodCIAsset(name string) string {
-	if slices.Contains(release.ScriptNames(), name) {
+	if strings.HasSuffix(name, ".sh") {
 		return scriptBody(name)
 	}
 	if name == release.ProvenanceName {
@@ -282,13 +286,13 @@ func setAssets(t *testing.T, f *fixture, mutate func(map[string]string)) {
 	}
 	filesDir := filepath.Join(filepath.Dir(f.o.GH), "files")
 	ci := map[string]string{}
-	for _, n := range release.CIAssetNames() {
+	for _, n := range release.CIAssetNames(f.o.Version) {
 		body := goodCIAsset(n)
 		write(t, filesDir, n, body)
 		have[n] = "sha256:" + shaOf(body)
 		ci[n] = shaOf(body)
 	}
-	sums := release.ExpectedSums(h, ci, f.keyless)
+	sums := release.ExpectedSums(f.o.Version, h, ci, f.keyless)
 	have[release.SumsName] = "sha256:" + shaOf(sums)
 	if mutate != nil {
 		mutate(have)
@@ -523,6 +527,44 @@ func TestAssets_passWithOurBuildsAndASignedTagAtX(t *testing.T) {
 	setAssets(t, f, nil)
 	if err := checkAssets(context.Background(), f.o); err != nil {
 		t.Fatalf("a correct release was refused: %v", err)
+	}
+}
+
+// fixtureAt058 moves the fixture to a candidate that releases 0.5.8, the first release without the 0.5.5 migration script
+// (ADR 0161): the manifests say 0.5.8, the script is gone from scripts/, and v0.5.8 is a signed tag on the new X.
+func fixtureAt058(t *testing.T) *fixture {
+	t.Helper()
+	f := newFixture(t)
+	gitT(t, f.repo, "rm", "-q", "scripts/"+release.MigrationScriptName)
+	write(t, f.repo, "plugin/.claude-plugin/plugin.json", "{\"name\": \"mash\", \"version\": \"0.5.8\"}\n")
+	write(t, f.repo, "mash-setup/.claude-plugin/plugin.json", "{\"name\": \"mash-setup\", \"version\": \"0.5.8\"}\n")
+	gitT(t, f.repo, "add", "-A")
+	gitT(t, f.repo, "commit", "-q", "-m", "0.5.8")
+	gitT(t, f.repo, "push", "-q", "origin", "main")
+	f.x = gitT(t, f.repo, "rev-parse", "HEAD")
+	gitT(t, f.repo, "tag", "-s", "v0.5.8", "-m", "release", f.x)
+	gitT(t, f.repo, "push", "-q", "origin", "v0.5.8")
+	write(t, filepath.Dir(f.o.GH), "x", f.x)
+	f.o.X, f.o.Version = f.x, "0.5.8"
+	f.setCI(release.RequiredChecks...)
+	return f
+}
+
+func TestAssets_from058TheReleaseCarriesTwoScripts(t *testing.T) {
+	f := fixtureAt058(t)
+	setAssets(t, f, nil)
+	if err := checkAssets(context.Background(), f.o); err != nil {
+		t.Fatalf("a 0.5.8 release with the two scripts was refused: %v", err)
+	}
+}
+
+func TestAssets_from058TheMigrationScriptIsRefused(t *testing.T) {
+	f := fixtureAt058(t)
+	body := scriptBody(release.MigrationScriptName)
+	setAssets(t, f, func(m map[string]string) { m[release.MigrationScriptName] = "sha256:" + shaOf(body) })
+	err := checkAssets(context.Background(), f.o)
+	if err == nil || exitCode(err) != 3 || !strings.Contains(err.Error(), release.MigrationScriptName) {
+		t.Fatalf("a 0.5.8 release carrying %s: err = %v (exit %d), want a refusal naming it", release.MigrationScriptName, err, exitCode(err))
 	}
 }
 
