@@ -219,7 +219,12 @@ func runPublish(o Options, w world, x string) error {
 		verify = w.VerifyNotLatest
 	}
 	if err := verify(tag); err != nil {
-		return stepErr(err)
+		// The release is already published: a failed check is not a refusal, so it is exit 4.
+		fix := "--latest"
+		if o.NotLatest {
+			fix = "--latest=false"
+		}
+		return stepErr(op(fmt.Errorf("%s is published; rerun to re-verify, or gh release edit %s %s: %w", tag, tag, fix, err)))
 	}
 	if err := w.Assets(); err != nil {
 		return stepErr(err)
@@ -433,12 +438,12 @@ func (r realWorld) Publish(tag string) error {
 	if err := verifySupplyChain(r.o, tag, x); err != nil {
 		return fmt.Errorf("refused: not publishing %s: %w", tag, err)
 	}
-	return publishRelease(r.o, tag)
+	return publishRelease(r.o, tag, r.Sleep)
 }
 
 // publishRelease is the irreversible edit: the draft becomes the published release. With o.NotLatest the edit passes
 // --latest=false, otherwise --latest; either way the release list is read back and the flag must have taken.
-func publishRelease(o Options, tag string) error {
+func publishRelease(o Options, tag string, sleep func(time.Duration)) error {
 	args := []string{"release", "edit", tag, "--repo", o.GHRepo, "--draft=false"}
 	if o.NotLatest {
 		args = append(args, "--latest=false")
@@ -448,10 +453,19 @@ func publishRelease(o Options, tag string) error {
 	if _, err := gh(o, args...); err != nil {
 		return op(err)
 	}
+	// The release is published now: a failed check is not a refusal, so it is exit 4.
+	var verr error
+	fix := "--latest"
 	if o.NotLatest {
-		return verifyNotLatest(o, tag)
+		fix = "--latest=false"
+		verr = verifyNotLatest(o, tag, sleep)
+	} else {
+		verr = verifyLatest(o, tag, sleep)
 	}
-	return verifyLatest(o, tag)
+	if verr != nil {
+		return op(fmt.Errorf("%s is published; rerun to re-verify, or gh release edit %s %s: %w", tag, tag, fix, verr))
+	}
+	return nil
 }
 
 // isLatest reads the release list back (gh release view has no isLatest field): whether the tag is marked latest.
@@ -473,36 +487,52 @@ func isLatest(o Options, tag string) (bool, error) {
 			return r.IsLatest, nil
 		}
 	}
-	return false, op(fmt.Errorf("%s not found in the release list after publishing", tag))
+	return false, op(fmt.Errorf("%s not found in the release list after publishing: %w", tag, errNotListed))
 }
+
+const (
+	latestReads    = 5
+	latestInterval = 2 * time.Second
+)
+
+// verifyMarker polls isLatest up to latestReads times, latestInterval apart (through sleep), until it equals want.
+// Only the wrong state and a tag not yet listed are retried; a gh failure is returned at once.
+func verifyMarker(o Options, tag string, want bool, sleep func(time.Duration), wrong error) error {
+	var last error
+	for i := 0; i < latestReads; i++ {
+		if i > 0 {
+			sleep(latestInterval)
+		}
+		l, err := isLatest(o, tag)
+		switch {
+		case errors.Is(err, errNotListed):
+			last = err
+		case err != nil:
+			return err
+		case l == want:
+			return nil
+		default:
+			last = wrong
+		}
+	}
+	return last
+}
+
+var errNotListed = errors.New("not listed")
 
 // verifyNotLatest: the tag must be listed and not marked latest. The publish step and the read-only verification of a
 // published release both use it.
-func verifyNotLatest(o Options, tag string) error {
-	l, err := isLatest(o, tag)
-	if err != nil {
-		return err
-	}
-	if l {
-		return fmt.Errorf("%s was published with --not-latest but is marked latest", tag)
-	}
-	return nil
+func verifyNotLatest(o Options, tag string, sleep func(time.Duration)) error {
+	return verifyMarker(o, tag, false, sleep, fmt.Errorf("%s was published with --not-latest but is marked latest", tag))
 }
 
 // verifyLatest: the tag must be listed and be the one marked latest.
-func verifyLatest(o Options, tag string) error {
-	l, err := isLatest(o, tag)
-	if err != nil {
-		return err
-	}
-	if !l {
-		return fmt.Errorf("%s was published but is not marked Latest", tag)
-	}
-	return nil
+func verifyLatest(o Options, tag string, sleep func(time.Duration)) error {
+	return verifyMarker(o, tag, true, sleep, fmt.Errorf("%s was published but is not marked Latest", tag))
 }
 
-func (r realWorld) VerifyLatest(tag string) error    { return verifyLatest(r.o, tag) }
-func (r realWorld) VerifyNotLatest(tag string) error { return verifyNotLatest(r.o, tag) }
+func (r realWorld) VerifyLatest(tag string) error    { return verifyLatest(r.o, tag, r.Sleep) }
+func (r realWorld) VerifyNotLatest(tag string) error { return verifyNotLatest(r.o, tag, r.Sleep) }
 
 func (r realWorld) Now() time.Time        { return time.Now() }
 func (r realWorld) Sleep(d time.Duration) { time.Sleep(d) }

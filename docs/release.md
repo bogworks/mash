@@ -14,7 +14,7 @@ It runs the pre-tag gate, the signed tag and push, waits for `release.yml`'s dra
 the draft, and verifies the published release. It finds its state from the world and resumes there, so after a
 failure or an interruption you rerun the same command: no tag means the gate and the tag; a tag at X and no release
 means waiting for the draft (`--wait`, default 45 minutes; it stops early if the tag's `release.yml` run failed); a
-draft means the pre-tag gate (again, for a tag pushed by hand; not twice in one run), the `--assets` gate and publishing; a published release is only verified, and nothing is created. `--not-latest` publishes with `gh release edit --latest=false` and then reads `gh release list` back: one still marked latest, or missing from the list, is an error (use it for a release above every published version that must not become the repository's latest, for example a pre-release that deployments should not pick up; it does not relax the ordering gates, and a lower backport is still refused). A tag at
+draft means the pre-tag gate (again, for a tag pushed by hand; not twice in one run), the `--assets` gate and publishing; a published release is only verified, and nothing is created. The plain publish passes `--draft=false --latest` and reads `gh release list` back, retrying briefly (5 reads, 2 s apart) for the marker to settle; a release that is not Latest after that fails with exit 4 (it is published: rerun to re-verify, or `gh release edit v<version> --latest`). Re-verifying an older, already published release without `--not-latest` fails, because it is not the latest; pass `--not-latest` to verify it that way. `--not-latest` publishes with `--draft=false --latest=false` and reads the list back the same way: one still marked latest, or missing from the list, is an error (use it for a release above every published version that must not become the repository's latest, for example a pre-release that deployments should not pick up; it does not relax the ordering gates, and a lower backport is still refused). A tag at
 a commit other than X is refused and nothing is changed. The pre-tag gate also refuses a version that is not strictly
 above the latest published release, and the same ordering checks run again immediately before publishing (another version may have been published during the asset gate; a violation is refused, exit 3). The tag is signed with `git -c gpg.format=ssh -c user.signingkey=$RELEASE_SIGNING_KEY` (an SSH public key path, default
 `~/.ssh/id_ed25519.pub`; a missing file fails before any tag is made), independent of the machine's git signing
@@ -37,14 +37,11 @@ attested subject instead. Every attestation check pins four facts: `-R <repo>`, 
 commit). `release-check --assets` verifies the eight binaries (`mash` and `mashctl`, see [ADR 0148](decisions/0148-releases-build-mashctl-beside-mash-with-the-same-supply-chain-checks.md)) and `SHA256SUMS` that way and rebuilds the binaries. After
 `--assets` passes, publication is `scripts/release-check publish <version> <X>` (for 0.5.6 and later: no `--not-latest`, see below): once the service's tag exists at X it
 runs the pre-tag gate, `--assets` and the final checks (the sums and every attestation again) immediately before
-`gh release edit v<version> --draft=false`, so the publish step is bound to what was just verified. It makes no tag and
-signs nothing. Do not publish a keyless draft with a bare `gh release edit`.
+the publish edit (`--draft=false --latest`), so the publish step is bound to what was just verified. It makes no tag and
+signs nothing. Publish only with `scripts/release-check publish`; a bare `gh release edit` is not used.
 
 **Releases are published as Latest: no `--not-latest`.** `install.sh` and the one-line install
-commands download from `releases/latest/download`, so a release that is not Latest is not what they install. Required step of
-the procedure: after `scripts/release-check publish <version> <X>` reports success, read back
-`gh release list --json tagName,isLatest` and check that the new tag, and only it, is marked `isLatest`; if it is not, fix
-it (`gh release edit v<version> --latest`) and say so in the release record. A tag never moves (rule 25 of the release
+commands download from `releases/latest/download`, so a release that is not Latest is not what they install. `release-check publish` passes `--latest` and checks the read-back itself; rerunning it re-verifies. A tag never moves (rule 25 of the release
 standard): once the release is published, its page text may still be corrected with `gh release edit`, but the tag and the
 assets are not changed.
 
