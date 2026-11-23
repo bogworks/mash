@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -52,7 +54,11 @@ func TestJudgeLatency(t *testing.T) {
 		{"previous finding is a note", ok(100 * ms), ptr(withFinding(ok(100*ms), "fyi woke")), 0, []string{"the previous release v0.2.6: fyi woke"}},
 		{"candidate never delivered: one problem, no double count", withFinding(latencies{Fresh: freshTimeout}, "no notification"), ptr(ok(100 * ms)), 1, nil},
 	} {
-		problems, notes := judgeLatency(c.cand, c.prev, "v0.2.6")
+		tag := "v0.2.6"
+		if c.prev == nil {
+			tag = "" // the first release: there is no previous tag either
+		}
+		problems, notes := judgeLatency(c.cand, c.prev, tag)
 		if len(problems) != c.problems {
 			t.Errorf("%s: %d problems %v, want %d", c.name, len(problems), problems, c.problems)
 		}
@@ -136,7 +142,7 @@ func TestMeasureLatencies_currentTree(t *testing.T) {
 	if env["MASH_SPOOL_FROM_START"] != "1" {
 		t.Fatalf("the plugin's env block is %v: the measurement would not run serve the way the plugin does", env)
 	}
-	got, err := measureLatencies(context.Background(), bin, spec, true, true)
+	got, err := measureLatencies(context.Background(), bin, spec, true, true, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -342,6 +348,124 @@ func TestWhoOnlineBothForms(t *testing.T) {
 		}
 		if got := whoTextOnline(c.out, "r1"); got != c.text {
 			t.Errorf("%s: text reading %v, want %v", c.name, got, c.text)
+		}
+	}
+}
+
+func TestNoBaselineWhenPreviousNeverCameOnline(t *testing.T) {
+	cand := latencies{Fresh: 100 * time.Millisecond, FreshOK: true}
+	none := latencies{} // FreshOK false: Fresh is 0, not a measurement
+	const want = "no baseline: the previous release v0.5.5 has no fresh-session first-mail time to compare with"
+	problems, notes := judgeLatency(cand, &none, "v0.5.5")
+	if len(problems) != 1 || problems[0].Error() != want {
+		t.Errorf("judgeLatency: problems %v, want one no-baseline", problems)
+	}
+	if !strings.Contains(strings.Join(notes, "\n"), "note  fresh-session first mail: candidate 0.10s, v0.5.5 none") {
+		t.Errorf("judgeLatency: notes %v lack the candidate's own time", notes)
+	}
+	// The caller runs both judges: the missing baseline is reported once.
+	p2, n2 := judgeUnderPrevPlugin(cand, none, "v0.5.5")
+	if len(p2) != 0 || len(n2) != 1 {
+		t.Errorf("judgeUnderPrevPlugin: problems %v notes %v, want no problem and one note", p2, n2)
+	}
+	if all := append(problems, p2...); len(all) != 1 {
+		t.Errorf("both judges: %d problems, want 1: %v", len(all), all)
+	}
+}
+
+func TestNoPreviousBinaryIsAProblem(t *testing.T) {
+	cand := latencies{Fresh: 100 * time.Millisecond, FreshOK: true}
+	problems, notes := judgeLatency(cand, nil, "v0.5.5")
+	if len(problems) != 1 || !strings.Contains(problems[0].Error(), "no previous release to compare with: the previous release v0.5.5 has no binary here") {
+		t.Errorf("judgeLatency: problems %v, want one no-previous-release", problems)
+	}
+	if !strings.Contains(strings.Join(notes, "\n"), "candidate 0.10s") {
+		t.Errorf("notes %v lack the candidate's own time", notes)
+	}
+	// The step: the plugin step failed before it had the previous binary (hasPrev, no prev).
+	fake := func(context.Context, string, serveSpec, bool, bool, bool) (latencies, error) { return cand, nil }
+	var out strings.Builder
+	b := &binaries{cand: "cand", hasPrev: true, prevTag: "v0.5.5"}
+	err := latencyStep(context.Background(), Options{measure: fake, Out: &out}, b)
+	if err == nil || !strings.Contains(err.Error(), "no previous release to compare with") {
+		t.Errorf("latencyStep: err %v, want no-previous-release problem", err)
+	}
+	if strings.Contains(out.String(), "no slower than the previous release") || strings.Contains(out.String(), "judged alone") {
+		t.Errorf("output claims a comparison:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "candidate 0.10s") {
+		t.Errorf("output lacks the candidate's time:\n%s", out.String())
+	}
+	// The first release: no previous tag, nothing to compare, no problem.
+	out.Reset()
+	if err := latencyStep(context.Background(), Options{measure: fake, Out: &out}, &binaries{cand: "cand"}); err != nil {
+		t.Errorf("first release: %v", err)
+	}
+	if !strings.Contains(out.String(), "no previous release to compare with") {
+		t.Errorf("first release output:\n%s", out.String())
+	}
+}
+
+func TestBaselinePassesWhenPreviousOnline(t *testing.T) {
+	ok := latencies{Fresh: 100 * time.Millisecond, FreshOK: true}
+	if problems, _ := judgeLatency(ok, &ok, "v0.5.5"); len(problems) != 0 {
+		t.Errorf("judgeLatency: %v", problems)
+	}
+	if problems, _ := judgeUnderPrevPlugin(ok, ok, "v0.5.5"); len(problems) != 0 {
+		t.Errorf("judgeUnderPrevPlugin: %v", problems)
+	}
+}
+
+func TestLabEnvLegacyHasLegacyVariables(t *testing.T) {
+	env := strings.Join(labConnEnv("alice", "bob", "nats://x:1", "/c", true), "\n")
+	for _, want := range []string{"MASH_URL=nats://x:1", "MASH_INSECURE_PLAINTEXT=1", "MASH_ENDPOINT=alice." + labGroup + ".bob", "MASH_NAME=bob", "MASH_OWNER=alice", "MASH_GROUP=" + labGroup, "MASH_SERVER=nats://x:1", "MASH_CREDS=/c"} {
+		if !strings.Contains(env, want) {
+			t.Errorf("env lacks %q:\n%s", want, env)
+		}
+	}
+}
+
+func TestLabEnvCurrentHasNoLegacyVariables(t *testing.T) {
+	env := labConnEnv("alice", "bob", "nats://x:1", "/c", false)
+	for _, kv := range env {
+		for _, bad := range []string{"MASH_INSECURE_PLAINTEXT", "MASH_URL", "MASH_NAME", "MASH_OWNER", "MASH_GROUP"} {
+			if strings.HasPrefix(kv, bad+"=") {
+				t.Errorf("a current binary gets %s", kv)
+			}
+		}
+	}
+	joined := strings.Join(env, "\n")
+	for _, want := range []string{"MASH_ENDPOINT=alice." + labGroup + ".bob", "MASH_SERVER=nats://x:1", "MASH_CREDS=/c", "MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("env lacks %q:\n%s", want, joined)
+		}
+	}
+}
+
+func TestLatencyStepLegacyOnlyForPreviousBelowEndpointEnvSince(t *testing.T) {
+	for tag, want := range map[string]bool{"v0.5.5": true, "v0.5.6": false, "v0.5.7": false} {
+		var mu sync.Mutex
+		got := map[string][]bool{}
+		fake := func(_ context.Context, bin string, _ serveSpec, _, _, legacy bool) (latencies, error) {
+			mu.Lock()
+			got[bin] = append(got[bin], legacy)
+			mu.Unlock()
+			return latencies{Fresh: 100 * time.Millisecond, FreshOK: true}, nil
+		}
+		b := &binaries{cand: "cand", prev: "prev", prevTag: tag, prevSpec: &serveSpec{Args: []string{"serve"}}}
+		if err := latencyStep(context.Background(), Options{measure: fake, Out: io.Discard}, b); err != nil {
+			t.Errorf("%s: latencyStep: %v", tag, err)
+		}
+		if len(got["cand"]) != 2 {
+			t.Errorf("%s: candidate measured %v, want two calls", tag, got["cand"])
+		}
+		for _, l := range got["cand"] {
+			if l {
+				t.Errorf("%s: the candidate got legacy=true", tag)
+			}
+		}
+		if g := got["prev"]; len(g) != 1 || g[0] != want {
+			t.Errorf("%s: previous got legacy %v, want %v", tag, g, want)
 		}
 	}
 }

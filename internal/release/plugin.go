@@ -175,6 +175,11 @@ func PreviousTag(tags []string, version string) (string, bool) {
 // the plugin's tolerant hook wrapper exists to absorb. It is cmd/mash's pluginMinMash (plugin_hook_test.go).
 const HookSince = "0.2.0"
 
+// EndpointEnvSince is the first mash version configured by MASH_ENDPOINT. A release older than this reads MASH_NAME,
+// MASH_OWNER, MASH_GROUP and MASH_URL, and needs MASH_INSECURE_PLAINTEXT; this version and later refuse to start with
+// MASH_INSECURE_PLAINTEXT set (config.SkipEncryptionFrom).
+const EndpointEnvSince = "0.5.6"
+
 // tagKey parses vN.N.N.
 func tagKey(s string) ([3]int, bool) {
 	m := tagRE.FindStringSubmatch(s)

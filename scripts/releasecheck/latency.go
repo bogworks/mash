@@ -95,8 +95,9 @@ type latencies struct {
 
 // measureFunc measures bin; an error is a failure to run the measurement, not a finding about the binary.
 // hasHook is whether bin has `mash hook`; candidate is whether bin is the candidate (and not the previous release), which
-// must pass every scenario where the previous release may merely lack a feature.
-type measureFunc func(ctx context.Context, bin string, spec serveSpec, hasHook, candidate bool) (latencies, error)
+// must pass every scenario where the previous release may merely lack a feature. legacy is whether bin is a release below
+// release.EndpointEnvSince, which is configured through the legacy variables and not MASH_ENDPOINT.
+type measureFunc func(ctx context.Context, bin string, spec serveSpec, hasHook, candidate, legacy bool) (latencies, error)
 
 // freshAllowed is the slowest first-mail time a candidate may have, given the previous release's: twice as slow, but never
 // less than a second slower, so 0.1 s against 0.3 s is noise and not a regression.
@@ -113,6 +114,11 @@ func judgeLatency(cand latencies, prev *latencies, prevTag string) (problems []e
 	for _, f := range cand.Findings {
 		problems = append(problems, errors.New("the candidate: "+f))
 	}
+	if prev == nil && prevTag != "" { // a previous release exists but was not measured: a check that cannot compare must not pass
+		problems = append(problems, fmt.Errorf("no previous release to compare with: the previous release %s has no binary here (the plugin step did not get it)", prevTag))
+		notes = append(notes, fmt.Sprintf("note  fresh-session first mail: candidate %s, %s none", secs(cand.Fresh), prevTag))
+		return problems, notes
+	}
 	if prev == nil {
 		notes = append(notes, fmt.Sprintf("note  fresh-session first mail: candidate %s (no previous release to compare with)", secs(cand.Fresh)))
 		return problems, notes
@@ -122,6 +128,11 @@ func judgeLatency(cand latencies, prev *latencies, prevTag string) (problems []e
 	}
 	for _, f := range prev.Findings {
 		notes = append(notes, fmt.Sprintf("note  the previous release %s: %s", prevTag, f))
+	}
+	if !prev.FreshOK {
+		problems = append(problems, fmt.Errorf("no baseline: the previous release %s has no fresh-session first-mail time to compare with", prevTag))
+		notes = append(notes, fmt.Sprintf("note  fresh-session first mail: candidate %s, %s none", secs(cand.Fresh), prevTag))
+		return problems, notes
 	}
 	notes = append(notes, fmt.Sprintf("note  fresh-session first mail: candidate %s, %s %s", secs(cand.Fresh), prevTag, secs(prev.Fresh)))
 	if cand.FreshOK && cand.Fresh > freshAllowed(prev.Fresh) {
@@ -141,6 +152,10 @@ func judgeUnderPrevPlugin(cand, prev latencies, prevTag string) (problems []erro
 	}
 	for _, f := range cand.Findings {
 		problems = append(problems, errors.New(who+": "+f))
+	}
+	if !prev.FreshOK { // judgeLatency, which always runs first, has reported the missing baseline
+		notes = append(notes, fmt.Sprintf("note  fresh-session first mail: %s %s, %s none", who, secs(cand.Fresh), prevTag))
+		return problems, notes
 	}
 	notes = append(notes, fmt.Sprintf("note  fresh-session first mail: %s %s, %s %s", who, secs(cand.Fresh), prevTag, secs(prev.Fresh)))
 	if cand.FreshOK && cand.Fresh > freshAllowed(prev.Fresh) {
@@ -361,6 +376,7 @@ type lab struct {
 	mu      sync.Mutex // minting and provisioning one at a time
 	dir     string
 	senderE []string
+	legacy  bool // bin predates release.EndpointEnvSince: it gets the legacy variables, and no other binary may
 }
 
 // labGroup is the group token of every endpoint of the lab.
@@ -390,9 +406,36 @@ func (l *lab) endpointEnv(ctx context.Context, name string, plugin bool) ([]stri
 	if plugin {
 		env = append(env, l.spec.envPairs()...)
 	}
-	return append(env, "MASH_ENDPOINT="+l.ne.Owner+"."+labGroup+"."+name, "MASH_SERVER="+l.ne.URL, "MASH_CREDS="+creds,
+	return append(env, labConnEnv(l.ne.Owner, name, l.ne.URL, creds, l.legacy)...), nil
+}
+
+// labConnEnv is the endpoint name and connection settings of a lab binary. Every binary gets MASH_ENDPOINT, MASH_SERVER,
+// MASH_CREDS and the explicit no-TLS override. Only a legacy binary (below release.EndpointEnvSince, v0.5.5) also gets
+// the variables it reads instead: MASH_NAME, MASH_OWNER, MASH_GROUP, MASH_URL and MASH_INSECURE_PLAINTEXT. Since v0.5.6
+// mash refuses to start with MASH_INSECURE_PLAINTEXT set at all (config.SkipEncryptionFrom), so a current binary must
+// never see them.
+func labConnEnv(owner, name, url, creds string, legacy bool) []string {
+	env := []string{"MASH_ENDPOINT=" + owner + "." + labGroup + "." + name}
+	if legacy {
+		env = append(env, endpointNameEnv(owner, name)...)
+		env = append(env, legacyConnEnv(url)...)
+	}
+	return append(env, "MASH_SERVER="+url, "MASH_CREDS="+creds,
 		// REQ-014: this check is not about TLS; the override is explicit.
-		"MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1"), nil
+		"MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1")
+}
+
+// endpointNameEnv is the endpoint name as a legacy binary (v0.5.5) reads it: MASH_NAME, MASH_OWNER and MASH_GROUP, which
+// current releases replaced with MASH_ENDPOINT. Only a legacy lab gets it.
+func endpointNameEnv(owner, name string) []string {
+	return []string{"MASH_NAME=" + name, "MASH_OWNER=" + owner, "MASH_GROUP=" + labGroup}
+}
+
+// legacyConnEnv is what v0.5.5 needs to connect: it reads its server only from MASH_URL and refuses nats:// without
+// MASH_INSECURE_PLAINTEXT (internal/config/config.go). v0.5.6 and later refuse to start with MASH_INSECURE_PLAINTEXT set,
+// so only a legacy lab gets it.
+func legacyConnEnv(url string) []string {
+	return []string{"MASH_URL=" + url, "MASH_INSECURE_PLAINTEXT=1"}
 }
 
 // sendMail sends the standard probe text from the sender to to, with the binary under test.
@@ -766,7 +809,7 @@ func (l *lab) measure(ctx context.Context, hasHook, candidate bool) (latencies, 
 
 // measureLatencies is the real measure: a throwaway NATS server in mash's account setup, a sender endpoint, and the
 // scenarios against bin. A failure to set any of it up is an op error.
-func measureLatencies(ctx context.Context, bin string, spec serveSpec, hasHook, candidate bool) (latencies, error) {
+func measureLatencies(ctx context.Context, bin string, spec serveSpec, hasHook, candidate, legacy bool) (latencies, error) {
 	dir, err := os.MkdirTemp("", "release-check-latency-")
 	if err != nil {
 		return latencies{}, op(err)
@@ -789,7 +832,7 @@ func measureLatencies(ctx context.Context, bin string, spec serveSpec, hasHook, 
 	if err := adm.Init(ctx); err != nil {
 		return latencies{}, op(fmt.Errorf("initialising the directory: %w", err))
 	}
-	l := &lab{bin: bin, spec: spec, ne: ne, adm: adm, dir: dir}
+	l := &lab{bin: bin, spec: spec, ne: ne, adm: adm, dir: dir, legacy: legacy}
 	if l.senderE, err = l.endpointEnv(ctx, "sender", false); err != nil {
 		return latencies{}, op(err)
 	}
@@ -823,17 +866,17 @@ func latencyStep(ctx context.Context, o Options, b *binaries) error {
 		underPrevPlugin     = comparePrev && b.prevSpec != nil
 	)
 	wg.Add(1)
-	go func() { defer wg.Done(); cand, cerr = measure(ctx, b.cand, spec, true, true) }()
+	go func() { defer wg.Done(); cand, cerr = measure(ctx, b.cand, spec, true, true, false) }()
 	if comparePrev {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			prev, perr = measure(ctx, b.prev, prevBaseSpec, !release.TagBelow(b.prevTag, release.HookSince), false)
+			prev, perr = measure(ctx, b.prev, prevBaseSpec, !release.TagBelow(b.prevTag, release.HookSince), false, release.TagBelow(b.prevTag, release.EndpointEnvSince))
 		}()
 	}
 	if underPrevPlugin { // the candidate launched as the previous release's plugin launches serve
 		wg.Add(1)
-		go func() { defer wg.Done(); candOld, oerr = measure(ctx, b.cand, *b.prevSpec, true, true) }()
+		go func() { defer wg.Done(); candOld, oerr = measure(ctx, b.cand, *b.prevSpec, true, true, false) }()
 	}
 	wg.Wait()
 	if cerr != nil {
@@ -849,9 +892,8 @@ func latencyStep(ctx context.Context, o Options, b *binaries) error {
 	switch {
 	case comparePrev:
 		pp = &prev
-	case b.hasPrev: // the plugin step failed before it had the previous release's binary, and said so
-		fmt.Fprintf(o.Out, "note  the previous release %s has no binary here: the candidate is judged alone\n", b.prevTag)
 	}
+	// With b.hasPrev and no binary (the plugin step failed before it had it), pp stays nil and judgeLatency reports the problem.
 	problems, notes := judgeLatency(cand, pp, b.prevTag)
 	switch {
 	case underPrevPlugin:

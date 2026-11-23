@@ -150,7 +150,7 @@ func (f *fixture) setLatency(by func(which string) latencies) {
 // setLatencySpec is setLatency for a fake that also sees the serve spec the binary is measured with; the spec is
 // recorded in f.specs.
 func (f *fixture) setLatencySpec(by func(which string, spec serveSpec) latencies) {
-	f.o.measure = func(_ context.Context, bin string, spec serveSpec, _, _ bool) (latencies, error) {
+	f.o.measure = func(_ context.Context, bin string, spec serveSpec, _, _, _ bool) (latencies, error) {
 		which := filepath.Base(filepath.Dir(bin))
 		f.measuredMu.Lock()
 		f.measured = append(f.measured, which)
@@ -1199,7 +1199,7 @@ func TestCheck_aCandidatesUrgentOrFyiFindingIsRefusedWithoutAPreviousRelease(t *
 
 func TestCheck_aFailedMeasurementIsFourNotARefusal(t *testing.T) {
 	f := newFixture(t)
-	f.o.measure = func(context.Context, string, serveSpec, bool, bool) (latencies, error) {
+	f.o.measure = func(context.Context, string, serveSpec, bool, bool, bool) (latencies, error) {
 		return latencies{}, op(errors.New("no nats"))
 	}
 	if err := f.check(); err == nil || exitCode(err) != 4 {
