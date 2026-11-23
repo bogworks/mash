@@ -37,7 +37,7 @@ Chosen option: the second, by the maintainer's ruling on #1239 (decision 289).
   `signing.pub`) is one of them and is required to stay present and plain (`Candidate.RequiredPlain`); a revocation proceeds
   with a warning when it is absent from the JWT and refuses before any push when it has become scoped.
 * **Scoped foreign keys are still refused.** A scoped signing key mashctl did not create, or a scoped configured key, is
-  refused as ADR 0059 says, naming it by public key and role; `diff` and `drift` report it.
+  refused as ADR 0059 says, naming it by public key and role; `diff` and `drift` report it. [ADR 0124](0124-the-reconciles-yes-acts-only-on-the-plan-the-person-read-and-an-adopted-accounts-first-apply-drops-the-signing-keys-mash-did-not-make.md)'s first-generation drop of a foreign scoped key stands unchanged: 0.5.7 never carries a scoped key it did not make.
 * **Everything else in ADR 0059 stands:** the issuer, subject and signature checks, and TLS for admin and system connections.
   Only the sentence "any other signing key ... scoped or plain, is refused" is replaced.
 
