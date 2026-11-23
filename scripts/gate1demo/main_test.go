@@ -28,9 +28,10 @@ func fixture(t *testing.T, next, nextFile string) string {
 	write(t, dir, "mash.json", tool(next))
 	write(t, dir, "mashctl.json", emptyTool)
 	write(t, dir, "rules.json", rules)
-	if nextFile != "" {
-		write(t, dir, "next.json", nextFile)
+	if nextFile == "" {
+		nextFile = "{}"
 	}
+	write(t, dir, "next.json", nextFile)
 	return dir
 }
 
@@ -53,8 +54,40 @@ func TestCommandReplaces(t *testing.T) {
 func TestReplacesMissing(t *testing.T) {
 	dir := fixture(t, `[{"case":"New","text":"x","replaces":"Nope"}]`, "")
 	out, err := render(dir)
-	if err != nil || !strings.Contains(out, `no current case named "Nope"`) {
-		t.Fatalf("%v\n%s", err, out)
+	if err == nil || out != "" || !strings.Contains(err.Error(), "mashx init") || !strings.Contains(err.Error(), `"Nope"`) {
+		t.Fatalf("want error naming command and target, got %v\n%s", err, out)
+	}
+}
+
+func TestRuleReplacesMissing(t *testing.T) {
+	dir := fixture(t, `[]`, `{"rules_next":[{"rule":"New rule","detail":"d","replaces":"Nope"}]}`)
+	out, err := render(dir)
+	if err == nil || out != "" || !strings.Contains(err.Error(), "New rule") || !strings.Contains(err.Error(), `"Nope"`) {
+		t.Fatalf("want error naming rule and target, got %v\n%s", err, out)
+	}
+}
+
+func TestMissingNextJSON(t *testing.T) {
+	dir := fixture(t, `[]`, "")
+	if err := os.Remove(filepath.Join(dir, "next.json")); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := render(dir); err == nil || out != "" {
+		t.Fatalf("want error, got %v\n%s", err, out)
+	}
+}
+
+func TestItemReplacesToday(t *testing.T) {
+	dir := fixture(t, `[]`, `{"items":[{"id":"flag","case":"c","text":"new flag text","replaces":"old flag text","stream":"stderr","exit":2}]}`)
+	out, err := render(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "Today:\n\n```\nold flag text\n```\n\n0.5.8:") {
+		t.Errorf("Today block wrong:\n%s", out)
+	}
+	if strings.Count(out, "stream:") != 1 {
+		t.Errorf("Today must not repeat stream/exit:\n%s", out)
 	}
 }
 

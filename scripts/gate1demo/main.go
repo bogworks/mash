@@ -161,7 +161,7 @@ func (r *renderer) widths(where, text string) {
 	}
 }
 
-func (r *renderer) entry(where, issue string, c outCase, today *outCase, todayMissing bool) {
+func (r *renderer) entry(where, issue string, c outCase, today *outCase, todayStream bool) {
 	r.nitems++
 	h := "## " + where
 	if issue != "" {
@@ -174,9 +174,10 @@ func (r *renderer) entry(where, issue string, c outCase, today *outCase, todayMi
 	if today != nil {
 		r.b.WriteString("Today:\n\n")
 		fence(&r.b, today.Text)
-		r.b.WriteString(streamLine(*today) + "\n\n")
-	} else if todayMissing {
-		r.b.WriteString("Today: (no current case named \"" + c.Replace + "\")\n\n")
+		if todayStream {
+			r.b.WriteString(streamLine(*today) + "\n")
+		}
+		r.b.WriteString("\n")
 	}
 	r.b.WriteString("0.5.8:\n\n")
 	fence(&r.b, c.Text)
@@ -211,9 +212,11 @@ func (r *renderer) walk(c *command, path []string) error {
 		for _, n := range next {
 			var t *outCase
 			if n.Replace != "" {
-				t = lookup(cur, n.Replace)
+				if t = lookup(cur, n.Replace); t == nil {
+					return fmt.Errorf("%s: case %q replaces %q, which is not a case in x-output", full, n.Case, n.Replace)
+				}
 			}
-			r.entry(full+" / "+n.Case, n.Issue, n, t, n.Replace != "" && t == nil)
+			r.entry(full+" / "+n.Case, n.Issue, n, t, true)
 		}
 	}
 	for i := range c.Commands {
@@ -242,11 +245,7 @@ func render(dir string) (string, error) {
 		}
 	}
 	var nf nextFile
-	if b, err := os.ReadFile(filepath.Join(dir, "next.json")); err == nil {
-		if err := json.Unmarshal(b, &nf); err != nil {
-			return "", fmt.Errorf("next.json: %w", err)
-		}
-	} else if !os.IsNotExist(err) {
+	if err := readJSON(filepath.Join(dir, "next.json"), &nf); err != nil {
 		return "", err
 	}
 	for _, it := range nf.Items {
@@ -254,7 +253,11 @@ func render(dir string) (string, error) {
 		if it.Where != "" {
 			where += " [" + it.Where + "]"
 		}
-		r.entry(where, it.Issue, it.outCase, nil, false)
+		var t *outCase
+		if it.Replace != "" {
+			t = &outCase{Text: it.Replace}
+		}
+		r.entry(where, it.Issue, it.outCase, t, false)
 	}
 	var rf rulesFile
 	if len(nf.RulesNext) > 0 {
@@ -276,7 +279,7 @@ func render(dir string) (string, error) {
 				}
 			}
 			if !found {
-				r.b.WriteString("Today: (no current rule titled \"" + rn.Replaces + "\")\n\n")
+				return "", fmt.Errorf("rule %q replaces %q, which is not a rule in rules.json", rn.Rule, rn.Replaces)
 			}
 		}
 		r.b.WriteString("0.5.8:\n\n")
