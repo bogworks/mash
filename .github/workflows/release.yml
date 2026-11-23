@@ -89,6 +89,55 @@ jobs:
           set -euo pipefail
           gh release list --limit 200 --json tagName,isDraft > "$RUNNER_TEMP/releases.json"
           scripts/draft-guard "$GITHUB_REF_NAME" "$RUNNER_TEMP/releases.json"
+  test-macos:
+    name: test (macos)
+    # Runs on every v* tag (rule 21: macOS only on tagged releases), in parallel with build. ADVISORY (ADR 0079): not in release.RequiredChecks and no
+    # job needs it, so a macOS runner outage never blocks a tag; its result is on the tag's run. Not on a workflow_dispatch dry run: with the Mac
+    # runner offline the job would queue for up to 24 h and the next dry run would wait behind it (concurrency release-<ref>, no cancel).
+    if: ${{ github.event_name == 'push' }}
+    timeout-minutes: 30
+    runs-on: [self-hosted, rh-macos]
+    env:
+      # release.yml sets CGO_ENABLED=0 for the reproducible builds; go test -race needs cgo, as it had in ci.yml.
+      CGO_ENABLED: "1"
+    steps:
+      # The build cache and temp dir are job-local under RUNNER_TEMP, which is wiped below (the self-hosted runner is reused
+      # between jobs). The module cache is the host's shared one (GOPATH and GOMODCACHE stay at the host's defaults), checked
+      # against go.sum on every run by `go mod verify` below.
+      - name: Job-local Go build cache and temp dir
+        run: |
+          mkdir -p "$RUNNER_TEMP/gocache" "$RUNNER_TEMP/tmp"
+          {
+            echo "GOCACHE=$RUNNER_TEMP/gocache"
+            echo "TMPDIR=$RUNNER_TEMP/tmp"
+          } >> "$GITHUB_ENV"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Verify the module cache against go.sum
+        run: |
+          set -euo pipefail
+          go mod verify
+      - run: go vet ./...
+      # -timeout 20m: under -race, scripts/releasecheck takes about 4x as long on the macOS runner (2 vCPU, Intel x64) as
+      # on Linux, past go test's default 10 m (run 41292329623). A real hang still fails.
+      - name: go test
+        env:
+          MASH_FORBIDDEN_WORDS: ${{ vars.MASH_FORBIDDEN_WORDS }}
+        run: |
+          set -eu
+          # scripts/releasecheck builds release binaries and takes about 440 s even without -race, a third of the
+          # job's wall time on the 2-vCPU macOS runner (#275); Linux runs it, with -race, on every event.
+          # shellcheck disable=SC2046 # the package list is meant to split into one argument per import path
+          go test -race -timeout 20m $(go list ./... | grep -v '/scripts/releasecheck$')
+      - name: Leave nothing behind
+        if: always()
+        run: |
+          chmod -R u+w "$RUNNER_TEMP" 2>/dev/null || true
+          rm -rf "$RUNNER_TEMP/gocache" "$RUNNER_TEMP/tmp"
+          git clean -ffdx || true
   build:
     # On a tag push the guard must have succeeded. On a dispatch the guard is skipped (a skipped needed job skips its
     # dependents unless the condition says otherwise), so a dispatch on main builds anyway, and on any other ref nothing

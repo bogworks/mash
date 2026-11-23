@@ -299,7 +299,7 @@ func TestGateJobsUseGateRunners(t *testing.T) {
 }
 
 // TestEphJobUsesEphemeralRunners pins which jobs run on the ephemeral one-job runners (ADR 0123): exactly the advisory
-// shadow job ci.yml/test-eph, and no other job in any workflow.
+// shadow job nightly.yml/test-eph, and no other job in any workflow.
 func TestEphJobUsesEphemeralRunners(t *testing.T) {
 	files, err := filepath.Glob("../../.github/workflows/*.yml")
 	if err != nil || len(files) == 0 {
@@ -325,7 +325,7 @@ func TestEphJobUsesEphemeralRunners(t *testing.T) {
 			}
 		}
 	}
-	if len(got) != 1 || !got["ci.yml/test-eph"] {
-		t.Errorf("jobs on %s = %v, want exactly ci.yml/test-eph", ephLabels, got)
+	if len(got) != 1 || !got["nightly.yml/test-eph"] {
+		t.Errorf("jobs on %s = %v, want exactly nightly.yml/test-eph", ephLabels, got)
 	}
 }

@@ -119,7 +119,7 @@ The numbered steps are what the command does in each state, and the manual path 
    ran and passed, and only when every commit between that commit and X changes documentation alone (the same definition as
    `scripts/ci-changes`; at most 50 commits back; a failed, cancelled or spoofed run, or a code commit without passing
    checks, is refused). `test (macos)` runs
-   on every push to `main` but is advisory (ADR 0079): the gate neither requires it nor reads its conclusion.
+   on every `v*` tag (release.yml; macOS runs on tagged releases only, ADR 0160) but is advisory (ADR 0079): the gate neither requires it nor reads its conclusion.
 2. **Prepare the release commit** (a pull request like any other, before the gate). Release preparation is where the
    shared files are written ([ADR 0068](decisions/0068-a-change-log-entry-is-a-fragment-file-and-the-adr-index-is-generated.md)):
    ```sh

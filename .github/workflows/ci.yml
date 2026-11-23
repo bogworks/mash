@@ -2,8 +2,8 @@ name: ci
 # A push to main skips the heavy jobs when the paths it added are docs-only (scripts/ci-changes; the merge queue's fast-forward of
 # a docs-only batch is one): the release gate (internal/release CheckCIWalk) judges such a head by the newest commit below
 # it whose tests ran, provided every commit between is docs-only. Every job runs on a
-# self-hosted runner picked by literal labels: [self-hosted, rh-linux] or [self-hosted, rh-macos] (ADR 0079). A pull
-# request from a fork runs on them too; the repository holds an outside contributor's run for a person's approval. Every pull request runs, so it always gets the pr-check that its review waits for (scripts/review-pr); a docs-only one skips the heavy jobs (test, test-macos, reproducible, conformance) at job level, so every check name still reports, and runs the cheap ones (changes, adr-numbers, pr-check). The review watcher waits only on pr-check, so conformance, which gates nothing, is skipped on docs-only too. What counts as docs-only is in scripts/ci-changes; docs/branch-protection.md states the rule. The macOS test job is advisory (ADR 0079), and so is the eph one: both run only on a Mergify queue draft (head branch mergify/...), not on every pull request push (Randy 2026-11-21).
+# self-hosted runner picked by literal labels: [self-hosted, rh-linux] or [self-hosted, rh-gate] (ADR 0079; the macOS leg runs in release.yml on tags, the eph pilot in nightly.yml, rule 21 and ADR 0160). A pull
+# request from a fork runs on them too; the repository holds an outside contributor's run for a person's approval. Every pull request runs, so it always gets the pr-check that its review waits for (scripts/review-pr); a docs-only one skips the heavy jobs (test, reproducible, conformance) at job level, so every check name still reports, and runs the cheap ones (changes, adr-numbers, pr-check). The review watcher waits only on pr-check, so conformance, which gates nothing, is skipped on docs-only too. What counts as docs-only is in scripts/ci-changes; docs/branch-protection.md states the rule. Neither a macOS nor an eph job runs here (rule 21, ADR 0160): macOS runs on tagged releases in release.yml, the eph pilot nightly on main in nightly.yml; docs/ci-table.md is the table.
 on:
   push:
     branches: [main]
@@ -102,73 +102,8 @@ jobs:
       - uses: ./.github/actions/go-test
         with:
           forbidden-words: ${{ vars.MASH_FORBIDDEN_WORDS }}
-  # test (linux, eph) is ADVISORY like test (macos) (ADR 0079, ADR 0123): the same steps as test (linux), through the same
-  # local action, on the ephemeral one-job runner pilot ([self-hosted, rh-linux-eph], runner group mash-ephemeral), so its
-  # result can be compared with rh-linux. It is not in pr-check's needs, not in release.RequiredChecks and not in
-  # .mergify.yml: it gates no merge and no release. No fallback and no hosted label: with no such runner online it waits.
-  test-eph:
-    name: test (linux, eph)
-    needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' && startsWith(github.head_ref, 'mergify/') }}
-    timeout-minutes: 45
-    runs-on: [self-hosted, rh-linux-eph]
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./.github/actions/go-test
-        with:
-          forbidden-words: ${{ vars.MASH_FORBIDDEN_WORDS }}
-  # TODO(macos-gate): test (macos) is ADVISORY (ADR 0079): its result is visible on every pull request and push, but it
-  # is not in pr-check's needs, not in release.RequiredChecks and not a required status check, so it gates no merge and
-  # no release. It goes back into pr-check's needs (and RequiredChecks, docs/branch-protection.md) when x-lead confirms
-  # the macOS runner no longer pauses running jobs. No continue-on-error: a failure shows as a failed check.
-  # The macOS runner takes one job at a time; a queued macOS job waits and the wait is accepted.
-  test-macos:
-    name: test (macos)
-    needs: changes
-    # A heavy job: skipped only when changes says docs-only (code=false). !cancelled() lets it run when changes itself
-    # failed (the output is then empty, not false), so a broken classifier runs the work rather than skipping it; pr-check
-    # fails on a changes job that did not succeed.
-    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' && startsWith(github.head_ref, 'mergify/') }}
-    timeout-minutes: 30
-    runs-on: [self-hosted, rh-macos]
-    steps:
-      # The build cache and temp dir are job-local under RUNNER_TEMP, which is wiped below (the self-hosted runner is reused
-      # between jobs). The module cache is the host's shared one (GOPATH and GOMODCACHE stay at the host's defaults), checked
-      # against go.sum on every run by `go mod verify` below.
-      - name: Job-local Go build cache and temp dir
-        run: |
-          mkdir -p "$RUNNER_TEMP/gocache" "$RUNNER_TEMP/tmp"
-          {
-            echo "GOCACHE=$RUNNER_TEMP/gocache"
-            echo "TMPDIR=$RUNNER_TEMP/tmp"
-          } >> "$GITHUB_ENV"
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: false
-      - name: Verify the module cache against go.sum
-        run: |
-          set -euo pipefail
-          go mod verify
-      - run: go vet ./...
-      # -timeout 20m: under -race, scripts/releasecheck takes about 4x as long on the macOS runner (2 vCPU, Intel x64) as
-      # on Linux, past go test's default 10 m (run 41292329623). A real hang still fails.
-      - name: go test
-        env:
-          MASH_FORBIDDEN_WORDS: ${{ vars.MASH_FORBIDDEN_WORDS }}
-        run: |
-          set -eu
-          # scripts/releasecheck builds release binaries and takes about 440 s even without -race, a third of the
-          # job's wall time on the 2-vCPU macOS runner (#275); Linux runs it, with -race, on every event.
-          # shellcheck disable=SC2046 # the package list is meant to split into one argument per import path
-          go test -race -timeout 20m $(go list ./... | grep -v '/scripts/releasecheck$')
-      - name: Leave nothing behind
-        if: always()
-        run: |
-          chmod -R u+w "$RUNNER_TEMP" 2>/dev/null || true
-          rm -rf "$RUNNER_TEMP/gocache" "$RUNNER_TEMP/tmp"
-          git clean -ffdx || true
+  # Rule 21 (dev-process 0.8.x, Randy 2026-11-21): test (macos) runs on tagged releases only (release.yml) and test (linux, eph) nightly on main
+  # (nightly.yml); neither runs per change. docs/ci-table.md is the one table, pinned by internal/release/ci_table_test.go.
   # The release gate (scripts/release-check, release.RequiredChecks) requires a check run named exactly "reproducible"
   # on the candidate, so the name is explicit and the job is not matrixed. The candidate is a commit on main, which a push
   # Runs on a queue draft and on a push, not on an ordinary pull request push (Randy 2026-11-21: the queue tests the batch once; the release gate
