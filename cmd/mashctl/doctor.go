@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -654,12 +655,26 @@ func doctorKeys(rep *doctorReport, ctx context.Context, adm *admin.Admin, cfg co
 	ctx, cancel := context.WithTimeout(ctx, applyDeadline)
 	defer cancel()
 	var attempts []connScan
-	for i := 0; i < churnTries; i++ {
+	stopped := false // the deadline or a cancel ended the reads after at least one complete one
+	for i := 0; i < churnTries && !stopped; i++ {
 		if i > 0 && churnPause > 0 {
-			time.Sleep(churnPause)
+			t := time.NewTimer(churnPause)
+			select {
+			case <-ctx.Done():
+				t.Stop()
+				stopped = true
+			case <-t.C:
+			}
+			if stopped {
+				break
+			}
 		}
 		sc, err := scanConns(ctx, nc, account, serverCount(cfg))
 		if err != nil {
+			if len(attempts) > 0 && (ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)) {
+				stopped = true
+				break
+			}
 			failKeys(err.Error())
 			return
 		}
@@ -670,15 +685,33 @@ func doctorKeys(rep *doctorReport, ctx context.Context, adm *admin.Admin, cfg co
 	}
 	scan := attempts[len(attempts)-1]
 	var warns []finding
-	if scan.Unsettled && !auditUsers {
-		// Still changing after every try. Churn among users mashctl did not issue is not a finding; churn of one of its own
-		// users, or of nothing that can be named, is.
-		if churnIsMashs(attempts, recs) {
-			warns = append(warns, finding{fmt.Sprintf("mash's connections kept changing; checked %d times", churnTries), "mashctl doctor"})
+	churn := false
+	if scan.Unsettled {
+		// Every read so far was unsettled (the loop ends early only on a settled one): after the last try, or when the
+		// deadline stopped the reads.
+		reads := "read " + plural(len(attempts), "once", fmt.Sprintf("%d times", len(attempts)))
+		if !auditUsers {
+			// Churn among users mashctl did not issue is not a finding; churn of one of mashctl's users is.
+			if churnIsMashs(attempts, recs) {
+				warns = append(warns, finding{"mashctl's users kept connecting and leaving; " + reads, "wait a minute, then run mashctl doctor again"})
+			}
+			scan.Incomplete = ""
+		} else {
+			churn = true
+			scan.Incomplete = fmt.Sprintf("%s; %s", scan.Incomplete, reads)
 		}
-		scan.Incomplete = ""
 	}
 	unrecorded, keyless, revoked := connectedFindings(scan.Conns, recs)
+	// A key recorded as revoked that was connected in ANY read counts, even when the last read no longer saw it.
+	for _, a := range attempts[:len(attempts)-1] {
+		_, _, r := connectedFindings(a.Conns, recs)
+		for _, k := range r {
+			if !slices.Contains(revoked, k) {
+				revoked = append(revoked, k)
+			}
+		}
+	}
+	slices.Sort(revoked)
 	var fails []finding
 	const fix = "mashctl endpoint list"
 	auditFix := "revoke it with the tool that issued it (mashctl revokes only its own)"
@@ -689,7 +722,11 @@ func doctorKeys(rep *doctorReport, ctx context.Context, adm *admin.Admin, cfg co
 		fails = append(fails, finding{fmt.Sprintf("%s still connected", count(n, "revoked key")+" "+plural(n, "is", "are")), fix})
 	}
 	if scan.Incomplete != "" {
-		fails = append(fails, finding{oneLine(scan.Incomplete), initFix})
+		f := finding{oneLine(scan.Incomplete), initFix}
+		if churn && len(fails) == 0 && len(unrecorded)+keyless == 0 {
+			f.fix = "wait a minute, then run mashctl doctor --audit-users again"
+		}
+		fails = append(fails, f)
 	}
 	auditText := ""
 	audited := auditUsers && len(unrecorded)+keyless > 0
@@ -713,36 +750,47 @@ func doctorKeys(rep *doctorReport, ctx context.Context, adm *admin.Admin, cfg co
 	}
 }
 
-// churnIsMashs reports whether the connections that came and went between the attempts include a key the issue record
-// holds, or whether none can be named (then it is taken to be mash's).
+// churnIsMashs reports whether mashctl's users came or went between the reads: some key the issue record holds has a
+// different set of connection ids in two reads (a recorded key appearing or disappearing counts). Foreign keys,
+// keyless connections and a foreign key reconnecting are not mashctl's. With one read there is nothing to compare, and
+// mashctl's users cannot be ruled out (the deadline stopped the reads), so it reports true. With several reads that
+// differ in nothing, it reports false.
 func churnIsMashs(attempts []connScan, recs []store.Issued) bool {
+	if len(attempts) < 2 {
+		return true
+	}
 	recorded := map[string]bool{}
 	for _, r := range recs {
 		recorded[r.PublicKey] = true
 	}
-	count := map[string]int{}
-	for _, a := range attempts {
-		seen := map[string]bool{}
+	sets := func(a connScan) map[string]map[string]bool {
+		m := map[string]map[string]bool{}
 		for _, s := range a.Conns {
 			for _, c := range s.Conns {
-				if c.Key != "" && !seen[c.Key] {
-					seen[c.Key] = true
-					count[c.Key]++
+				if !recorded[c.Key] {
+					continue
 				}
+				if m[c.Key] == nil {
+					m[c.Key] = map[string]bool{}
+				}
+				m[c.Key][fmt.Sprintf("%s/%d", s.Name, c.CID)] = true
+			}
+		}
+		return m
+	}
+	first := sets(attempts[0])
+	for _, a := range attempts[1:] {
+		next := sets(a)
+		if len(next) != len(first) {
+			return true
+		}
+		for k, ids := range first {
+			if !maps.Equal(ids, next[k]) {
+				return true
 			}
 		}
 	}
-	differ := false
-	for k, n := range count {
-		if n == len(attempts) {
-			continue
-		}
-		differ = true
-		if recorded[k] {
-			return true
-		}
-	}
-	return !differ
+	return false
 }
 
 // anyPlainRefused reports whether any server in the list is a plain URL the encryption rule refuses: a configuration

@@ -70,7 +70,7 @@ server that does not answer shows one `FAIL` line and four `skip` lines, not fiv
 | `sign-in` | the server refuses the admin credentials, or they cannot be used | | `mashctl init --config <file>` |
 | `storage` | the directory or lease bucket is missing, the lease bucket allows rollup writes (it has not been hardened) or cannot be read | another bucket is missing, a bucket's size cap is below the configured one, or a bucket is 90% full or more | `mashctl init --config <file>` |
 | `endpoints` | a directory record cannot be read; an inbox has no endpoint record; a record has no inbox; an inbox lost mail unread; a retirement was started and not finished; the retired-name bucket has no size cap or a bad configuration | an inbox is 90% full or more; the retired-name bucket is at or over 50% of its cap; a lease has no endpoint record | the command for the first finding: `mashctl endpoint show ADDRESS`, `mashctl endpoint inbox ADDRESS`, `mashctl endpoint delete ADDRESS`, `mashctl limits apply ADDRESS` |
-| `keys` | a key recorded as revoked is still connected, not every server answered, or, with `--audit-users`, a connected user was not issued by mashctl (the finding names it) | no `system_creds` in the configuration, so nothing was checked (a failure under `--audit-users`, which cannot audit without it); mash's own connections kept changing while they were read (`mash's connections kept changing; checked 3 times`) | `mashctl endpoint list`; `mashctl doctor`; `mashctl init --config <file>`; with `--audit-users`, `revoke it with the tool that issued it (mashctl revokes only its own)` |
+| `keys` | a key recorded as revoked is still connected, not every server answered, or, with `--audit-users`, a connected user was not issued by mashctl (the finding names it) | no `system_creds` in the configuration, so nothing was checked (a failure under `--audit-users`, which cannot audit without it); mashctl's users kept connecting and leaving while they were read (`mashctl's users kept connecting and leaving; read 3 times`) | `mashctl endpoint list`; `wait a minute, then run mashctl doctor again`; with `--audit-users` and only a changing list, `wait a minute, then run mashctl doctor --audit-users again`; `mashctl init --config <file>`; with `--audit-users`, `revoke it with the tool that issued it (mashctl revokes only its own)` |
 
 When a check finds several things its detail lists them, separated by `;`, failures first, and names up to three
 addresses for each (`and N more` after that).
@@ -146,14 +146,18 @@ When the `keys` row fails without `--audit-users` (a revoked key is still connec
 
 The check is complete only when every server answered: the servers it expects are the count under `servers` in
 `config.json`, and a cluster that reports more servers than are listed is not complete either. A server that did not
-answer fails the check with the reason, even when no other user was found. 
+answer fails the check with the reason, even when no other user was found.
+
 Other tools' connections come and go, so the list can change while it is read. `doctor` then reads it again, up to
 three times in all, with a short pause between. If a read settles, that is the result. If it is still changing after
 the third, a change among users mashctl did not issue is not a finding: they are counted as usual and the row stays ok,
-with or without `--strict`. If one of mash's own users keeps changing (or none can be told apart), the row warns
-`mash's connections kept changing; checked 3 times` with the fix `mashctl doctor`: `--strict` then exits 1 as for any
-warning, and a plain run exits 0. `--audit-users` does not make that allowance: an audit that could not read the whole
-list fails with `server NAME's user list kept changing: it is not complete`, because it must not pass on part of the list.
+with or without `--strict`. If one of mashctl's users kept connecting and leaving (or the time ran out with only one
+read to compare), the row warns `mashctl's users kept connecting and leaving; read 3 times` with the fix `wait a
+minute, then run mashctl doctor again`: `--strict` then exits 1 as for any warning, and a plain run exits 0. A revoked
+key seen connected in any of the reads fails the row. `--audit-users` does not make that allowance: an audit that could
+not read the whole list fails with `server NAME's connected users kept changing; read 3 times` and the fix `wait a
+minute, then run mashctl doctor --audit-users again`, because it must not pass on part of the list.
+On a busy account one run can miss a connection; run it again.
 
 Without the issue record (the `mash-issued` bucket) the keys row fails with `no issue record; mashctl cannot tell its users from others` and the fix `mashctl init --config <file>`, with or without `--audit-users`. Without `system_creds` the check warns and reads nothing; with `--audit-users` it fails instead, since no user was audited.
 

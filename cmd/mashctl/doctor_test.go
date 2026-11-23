@@ -843,14 +843,25 @@ func scriptScans(t *testing.T, scans ...connScan) *int {
 	return &calls
 }
 
+// keyScan is one read in which each key is connected once, with connection id 1 (see cidScan).
 func keyScan(unsettled bool, keys ...string) connScan {
-	var cs []apply.ConnzConn
+	cids := map[string]uint64{}
 	for _, k := range keys {
-		cs = append(cs, apply.ConnzConn{Key: k})
+		cids[k] = 1
+	}
+	return cidScan(unsettled, cids)
+}
+
+// cidScan is one read of server s1 with each key connected under the given connection id; a key "" is a keyless
+// connection.
+func cidScan(unsettled bool, cids map[string]uint64) connScan {
+	var cs []apply.ConnzConn
+	for k, id := range cids {
+		cs = append(cs, apply.ConnzConn{Key: k, CID: id})
 	}
 	sc := connScan{Conns: []apply.ConnzServer{{Name: "s1", Conns: cs}}}
 	if unsettled {
-		sc.Incomplete = "server s1's user list kept changing: it is not complete"
+		sc.Incomplete = "server s1's connected users kept changing"
 		sc.Unsettled = true
 	}
 	return sc
@@ -880,12 +891,12 @@ func TestDoctorKeysChurnOfForeignUsersIsNotAFinding(t *testing.T) {
 	checkFits80(t, e, "doctor")
 }
 
-// Persistent churn of one of mash's own users warns after three reads: exit 0, and 1 with --strict.
+// Persistent churn of one of mashctl's users warns after three reads: exit 0, and 1 with --strict.
 func TestDoctorKeysChurnOfMashUsersWarns(t *testing.T) {
 	e := newXYEnv(t)
 	_, xKey := credsSubject(t, e.credsPath(xy("x").String()))
 	calls := scriptScans(t, keyScan(true, xKey), keyScan(true), keyScan(true, xKey))
-	const line = "mash's connections kept changing; checked 3 times"
+	const line = "mashctl's users kept connecting and leaving; read 3 times"
 	for _, c := range []struct {
 		args []string
 		exit int
@@ -893,10 +904,11 @@ func TestDoctorKeysChurnOfMashUsersWarns(t *testing.T) {
 		*calls = 0
 		_, by, code := doctorJSON(t, e.run, c.args...)
 		k := by["keys"]
-		if code != c.exit || k.State != "warn" || !strings.HasPrefix(k.Detail, line) || k.Fix == nil || *k.Fix != "mashctl doctor" || *calls != 3 {
+		if code != c.exit || k.State != "warn" || !strings.HasPrefix(k.Detail, line) || k.Fix == nil || *k.Fix != "wait a minute, then run mashctl doctor again" || *calls != 3 {
 			t.Fatalf("%v: %d calls %d %+v", c.args, code, *calls, k)
 		}
 	}
+	*calls = 0
 	out, _, _ := e.run("doctor")
 	if !strings.Contains(cleanText(e, out), "keys       warn  "+line) {
 		t.Fatalf("%q", cleanText(e, out))
@@ -907,10 +919,10 @@ func TestDoctorKeysChurnOfMashUsersWarns(t *testing.T) {
 // With --audit-users an unsettled read fails in plain words, and never names the scan's inner workings.
 func TestDoctorAuditUsersFailsOnChurn(t *testing.T) {
 	e := newXYEnv(t)
-	scriptScans(t, keyScan(true, "UFOREIGN1"))
+	scriptScans(t, keyScan(true))
 	_, by, code := doctorJSON(t, e.run, "--audit-users")
 	k := by["keys"]
-	if code != 1 || k.State != "fail" || !strings.Contains(k.Detail, "server s1's user list kept changing: it is not complete") {
+	if code != 1 || k.State != "fail" || k.Detail != "server s1's connected users kept changing; read 3 times" || k.Fix == nil || *k.Fix != "wait a minute, then run mashctl doctor --audit-users again" {
 		t.Fatalf("%d %+v", code, k)
 	}
 	if low := strings.ToLower(k.Detail); strings.Contains(low, "connz") || strings.Contains(low, "nats") || strings.Contains(low, "scans") {
@@ -945,5 +957,113 @@ func TestDoctorKeysSetIncompleteIsNotChurn(t *testing.T) {
 	_, by, code := doctorJSON(t, e.run)
 	if k := by["keys"]; code != 1 || k.State != "fail" || !strings.Contains(k.Detail, "1 server(s) replied") || *calls != 1 {
 		t.Fatalf("%d calls %d %+v", code, *calls, k)
+	}
+}
+
+func runBoth(t *testing.T, e *applyEnv, calls *int, wantState string, strictExit int, f func(c doctorCheck)) {
+	t.Helper()
+	for _, args := range [][]string{{}, {"--strict"}} {
+		*calls = 0
+		_, by, code := doctorJSON(t, e.run, args...)
+		want := 0
+		if len(args) > 0 {
+			want = strictExit
+		}
+		if c := by["keys"]; code != want || c.State != wantState {
+			t.Fatalf("%v: %d %+v", args, code, c)
+		}
+		if f != nil {
+			f(by["keys"])
+		}
+	}
+}
+
+// A revoked key seen in an earlier unsettled read but not the last still fails.
+func TestDoctorKeysRevokedSeenInEarlierReadFails(t *testing.T) {
+	e := newXYEnv(t)
+	_, xKey := credsSubject(t, e.credsPath(xy("x").String()))
+	adm, ctx, closeAdm := e.admin()
+	defer closeAdm()
+	if err := adm.MarkRevoked(ctx, xKey, time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+	calls := scriptScans(t, keyScan(true, xKey, "UFOREIGN1"), keyScan(true, "UFOREIGN1"), keyScan(true, "UFOREIGN1"))
+	for _, args := range [][]string{{}, {"--strict"}} {
+		*calls = 0
+		_, by, code := doctorJSON(t, e.run, args...)
+		if c := by["keys"]; code != 1 || c.State != "fail" || !strings.HasPrefix(c.Detail, "1 revoked key is still connected") || c.Fix == nil || *c.Fix != "mashctl endpoint list" {
+			t.Fatalf("%v: %d %+v", args, code, c)
+		}
+	}
+}
+
+// A foreign key that reconnects (same key, new connection id) is not mashctl's churn.
+func TestDoctorKeysForeignReconnectIsNotChurn(t *testing.T) {
+	e := newXYEnv(t)
+	calls := scriptScans(t, cidScan(true, map[string]uint64{"UFOREIGN1": 1}), cidScan(true, map[string]uint64{"UFOREIGN1": 2}), cidScan(true, map[string]uint64{"UFOREIGN1": 3}))
+	runBoth(t, e, calls, "ok", 0, func(c doctorCheck) {
+		if c.Detail != "mashctl's users ok; 1 other user, not issued by mashctl" {
+			t.Fatalf("%+v", c)
+		}
+	})
+}
+
+// Churn of keyless connections only is not mashctl's.
+func TestDoctorKeysKeylessChurnIsNotChurn(t *testing.T) {
+	e := newXYEnv(t)
+	calls := scriptScans(t, cidScan(true, map[string]uint64{"": 1}), cidScan(true, map[string]uint64{"": 2}), cidScan(true, map[string]uint64{"": 3, "UFOREIGN1": 9}))
+	runBoth(t, e, calls, "ok", 0, nil)
+}
+
+// Unsettled reads that do not differ even by connection id are not mashctl's churn.
+func TestDoctorKeysUnsettledButIdenticalIsOK(t *testing.T) {
+	e := newXYEnv(t)
+	_, xKey := credsSubject(t, e.credsPath(xy("x").String()))
+	calls := scriptScans(t, cidScan(true, map[string]uint64{xKey: 5, "UFOREIGN1": 1}))
+	runBoth(t, e, calls, "ok", 0, nil)
+}
+
+// A recorded key whose connection ids differ between reads is mashctl's churn.
+func TestDoctorKeysRecordedCIDChangeWarns(t *testing.T) {
+	e := newXYEnv(t)
+	_, xKey := credsSubject(t, e.credsPath(xy("x").String()))
+	calls := scriptScans(t, cidScan(true, map[string]uint64{xKey: 1}), cidScan(true, map[string]uint64{xKey: 2}), cidScan(true, map[string]uint64{xKey: 2}))
+	runBoth(t, e, calls, "warn", 1, func(c doctorCheck) {
+		if !strings.HasPrefix(c.Detail, "mashctl's users kept connecting and leaving; read 3 times") || c.Fix == nil || *c.Fix != "wait a minute, then run mashctl doctor again" {
+			t.Fatalf("%+v", c)
+		}
+	})
+}
+
+// The deadline after one complete read is unsettled handling, not a failure from the error. One unsettled read cannot
+// rule out mashctl's users, so it warns; --audit-users fails on the unsettled list.
+func TestDoctorKeysDeadlineAfterOneRead(t *testing.T) {
+	e := newXYEnv(t)
+	oldScan, oldPause := scanConns, churnPause
+	t.Cleanup(func() { scanConns, churnPause = oldScan, oldPause })
+	churnPause = 0
+	calls := 0
+	scanConns = func(ctx context.Context, _ *nats.Conn, _ string, _ int) (connScan, error) {
+		calls++
+		if calls > 1 {
+			return connScan{}, context.DeadlineExceeded
+		}
+		return keyScan(true), nil
+	}
+	_, by, code := doctorJSON(t, e.run)
+	if c := by["keys"]; code != 0 || c.State != "warn" || !strings.HasPrefix(c.Detail, "mashctl's users kept connecting and leaving; read once") {
+		t.Fatalf("%d %+v", code, c)
+	}
+	calls = 0
+	_, by, code = doctorJSON(t, e.run, "--audit-users")
+	if c := by["keys"]; code != 1 || c.State != "fail" || c.Detail != "server s1's connected users kept changing; read once" {
+		t.Fatalf("%d %+v", code, c)
+	}
+	// An error on the first read still fails.
+	scanConns = func(context.Context, *nats.Conn, string, int) (connScan, error) {
+		return connScan{}, context.DeadlineExceeded
+	}
+	if _, by, code := doctorJSON(t, e.run); code != 1 || by["keys"].State != "fail" {
+		t.Fatalf("%d %+v", code, by["keys"])
 	}
 }

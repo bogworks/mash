@@ -230,7 +230,7 @@ func (n NATS) connzScan(ctx context.Context, cs *ConnzServer, account string, pa
 			prev = nil
 		}
 		if attempt == connzScanTries {
-			cs.Incomplete = fmt.Sprintf("server %s's user list kept changing: it is not complete", config.Clean(cs.Name))
+			cs.Incomplete = fmt.Sprintf("server %s's connected users kept changing", config.Clean(cs.Name))
 			return nil
 		}
 		if r, err = n.connzFetch(ctx, cs, account, 0, page); err != nil {
