@@ -111,7 +111,7 @@ unsafe_path() {
 }
 
 main() {
-    local os arch uname_s uname_m dir real tag sumsname name want got tmp line shown resolved ghout ghline ghver ghmajor ghminor
+    local os arch uname_s uname_m dir real tag sumsname name want got tmp line shown resolved ghout ghline ghver ghmajor ghminor ghpatch ghpre
     local -a names staged_new
 
     [[ $REPO =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || die "MASH_REPO $REPO is not owner/name"
@@ -195,12 +195,16 @@ main() {
     else
         ghout=$(gh --version 2>/dev/null) || ghout=
         ghline=$(printf '%s\n' "$ghout" | head -n 1)
-        ghver=$(printf '%s\n' "$ghline" | awk '$1 == "gh" && $2 == "version" && $3 ~ /^[0-9]+\.[0-9]+\.[0-9]+/ { split($3, v, /[^0-9]+/); print v[1], v[2], v[3] }')
-        if [ -z "$ghver" ]; then
+        ghver=$(printf '%s\n' "$ghline" | awk '$1 == "gh" && $2 == "version" && $3 ~ /^[0-9]+\.[0-9]+\.[0-9]+/ { split($3, v, /[^0-9]+/); print v[1], v[2], v[3], ($3 ~ /^[0-9.]+-/ ? "pre" : "") }')
+        if [ -z "$ghout" ]; then
             echo "gh did not run: the checksums come from the same download, so this trusts github.com's TLS; see docs/install.md to verify the attestation"
+        elif [ -z "$ghver" ]; then
+            echo "gh's version could not be read: the checksums come from the same download, so this trusts github.com's TLS; see docs/install.md to verify the attestation"
         else
-            read -r ghmajor ghminor _ <<<"$ghver"
-            if [ "$ghmajor" -lt 2 ] || { [ "$ghmajor" -eq 2 ] && [ "$ghminor" -lt 102 ]; }; then
+            read -r ghmajor ghminor ghpatch ghpre <<<"$ghver"
+            # A prerelease of 2.102.0 itself is older than 2.102.0.
+            if [ "$ghmajor" -lt 2 ] || { [ "$ghmajor" -eq 2 ] && [ "$ghminor" -lt 102 ]; } ||
+                { [ "$ghmajor" -eq 2 ] && [ "$ghminor" -eq 102 ] && [ "$ghpatch" -eq 0 ] && [ -n "$ghpre" ]; }; then
                 echo "gh is older than 2.102.0, so it cannot be trusted to check the attestation: the checksums come from the same download, so this trusts github.com's TLS; upgrade gh to verify (see docs/install.md)"
             else
                 fetch mash.intoto.jsonl

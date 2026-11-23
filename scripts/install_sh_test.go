@@ -493,9 +493,9 @@ func TestInstallSh_aTruncatedScriptInstallsNothing(t *testing.T) {
 	}
 }
 
-// ghStub answers --version with GH_VERSION (default 2.105.0), exiting GH_VERSION_EXIT (default 0), without logging;
-// every other call is logged and exits GH_EXIT (default 0).
-const ghStub = `case "$*" in --version) echo "gh version ${GH_VERSION:-2.105.0} (2026-11-18)"; exit "${GH_VERSION_EXIT:-0}";; esac
+// ghStub answers --version with real gh's two lines for GH_VERSION (default 2.105.0), or GH_VERSION_OUT verbatim when
+// set, exiting GH_VERSION_EXIT (default 0), without logging; every other call is logged and exits GH_EXIT (default 0).
+const ghStub = `case "$*" in --version) if [ -n "${GH_VERSION_OUT+x}" ]; then printf '%s\n' "$GH_VERSION_OUT"; else printf 'gh version %s (2026-11-18)\nhttps://github.com/cli/cli/releases/tag/v%s\n' "${GH_VERSION:-2.105.0}" "${GH_VERSION:-2.105.0}"; fi; exit "${GH_VERSION_EXIT:-0}";; esac
 echo "$*" >> "$GH_LOG"
 exit "${GH_EXIT:-0}"
 `
@@ -612,7 +612,7 @@ func TestInstallSh_latestIsResolvedToATagFirst(t *testing.T) {
 
 func TestInstallSh_ghBeforeTheMinimumFallsBackToChecksumsWithAnHonestNote(t *testing.T) {
 	const note = "gh is older than 2.102.0, so it cannot be trusted to check the attestation: the checksums come from the same download, so this trusts github.com's TLS; upgrade gh to verify (see docs/install.md)\n"
-	for _, v := range []string{"2.48.0", "2.67.0", "2.101.0", "2.101.9", "2.9.0", "1.99.0"} {
+	for _, v := range []string{"2.48.0", "2.67.0", "2.101.0", "2.101.9", "2.9.0", "1.99.0", "2.102.0-rc1"} {
 		t.Run(v, func(t *testing.T) {
 			rel, _, _ := fakeRelease(t)
 			log := filepath.Join(t.TempDir(), "gh.log")
@@ -637,7 +637,7 @@ func TestInstallSh_ghBeforeTheMinimumFallsBackToChecksumsWithAnHonestNote(t *tes
 func TestInstallSh_ghAtOrAboveTheMinimumVerifiesAndSaysSo(t *testing.T) {
 	const want = "attestation verify SHA256SUMS -R bogworks/mash --bundle mash.intoto.jsonl --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/v0.5.6"
 	const line = "Verified SHA256SUMS against the release attestation: built by bogworks/mash's release workflow from v0.5.6\n"
-	for _, v := range []string{"2.102.0", "2.105.0", "2.200.1", "3.0.0"} {
+	for _, v := range []string{"2.102.0", "2.102.1", "2.103.0-rc1", "2.105.0", "2.200.1", "3.0.0"} {
 		t.Run(v, func(t *testing.T) {
 			rel, _, _ := fakeRelease(t)
 			log := filepath.Join(t.TempDir(), "gh.log")
@@ -662,14 +662,35 @@ func TestInstallSh_ghAtOrAboveTheMinimumVerifiesAndSaysSo(t *testing.T) {
 func TestInstallSh_ghThatDoesNotRunSaysSoAndFallsBack(t *testing.T) {
 	const note = "gh did not run: the checksums come from the same download, so this trusts github.com's TLS; see docs/install.md to verify the attestation\n"
 	for name, env := range map[string][]string{
-		"exit 127": {"GH_VERSION_EXIT=127"},
-		"garbage":  {"GH_VERSION=garbage"},
+		"exit 127":  {"GH_VERSION_EXIT=127"},
+		"no output": {"GH_VERSION_OUT="},
 	} {
 		t.Run(name, func(t *testing.T) {
 			rel, _, _ := fakeRelease(t)
 			log := filepath.Join(t.TempDir(), "gh.log")
 			tools := installTools(t, map[string]string{"gh": ghStub})
 			r := runInstall(t, rel, tools, append([]string{"GH_LOG=" + log}, env...)...)
+			if r.err != nil {
+				t.Fatalf("install failed: %v\n%s", r.err, r.out)
+			}
+			if strings.Count(r.out, note) != 1 {
+				t.Errorf("want the note once:\n%s", r.out)
+			}
+			if b, _ := os.ReadFile(log); len(b) != 0 {
+				t.Errorf("verify must not run: %s", b)
+			}
+		})
+	}
+}
+
+func TestInstallSh_ghWhoseVersionCannotBeParsedSaysSoAndFallsBack(t *testing.T) {
+	const note = "gh's version could not be read: the checksums come from the same download, so this trusts github.com's TLS; see docs/install.md to verify the attestation\n"
+	for name, v := range map[string]string{"DEV": "gh version DEV (2026-11-18)", "v prefix": "gh version v2.105.0 (2026-11-18)", "garbage": "garbage"} {
+		t.Run(name, func(t *testing.T) {
+			rel, _, _ := fakeRelease(t)
+			log := filepath.Join(t.TempDir(), "gh.log")
+			tools := installTools(t, map[string]string{"gh": ghStub})
+			r := runInstall(t, rel, tools, "GH_LOG="+log, "GH_VERSION_OUT="+v+"\nhttps://github.com/cli/cli/releases/tag/x")
 			if r.err != nil {
 				t.Fatalf("install failed: %v\n%s", r.err, r.out)
 			}
