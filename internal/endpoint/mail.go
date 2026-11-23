@@ -370,6 +370,9 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 			// A redelivery of mail already refused (its ack was lost): still refused, whatever the directory or the
 			// setting says now. Acknowledged without a second count.
 			if id := e.refusedStream.Load(); id != nil && e.refusedSeq(ref.Seq, *id) {
+				if err := e.reconcileRefusedCount(*id); err != nil {
+					e.log.Printf("refused count not repaired: %v", err)
+				}
 				if e.mayAck(pending{}) {
 					_ = m.Ack()
 				} else {
