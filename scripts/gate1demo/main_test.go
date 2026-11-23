@@ -1,0 +1,141 @@
+package main
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func write(t *testing.T, dir, name, body string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func tool(next string) string {
+	return `{"command":{"name":"mashx","commands":[{"name":"init","metadata":[
+	{"name":"x-output","value":[{"case":"Set up","text":"old text","stream":"stdout","exit":0}]},
+	{"name":"x-output-next","value":` + next + `}]}]}}`
+}
+
+const emptyTool = `{"command":{"name":"mashctl"}}`
+const rules = `{"rules":[{"rule":"Old rule","detail":"old detail"}]}`
+
+func fixture(t *testing.T, next, nextFile string) string {
+	dir := t.TempDir()
+	write(t, dir, "mash.json", tool(next))
+	write(t, dir, "mashctl.json", emptyTool)
+	write(t, dir, "rules.json", rules)
+	if nextFile != "" {
+		write(t, dir, "next.json", nextFile)
+	}
+	return dir
+}
+
+func TestCommandReplaces(t *testing.T) {
+	dir := fixture(t, `[{"case":"New","text":"new text","stream":"stderr","exit":1,"issue":"#1055","replaces":"Set up","note":"a note"}]`, "")
+	out, err := render(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range []string{"## mashx init / New (#1055)", "Today:", "old text", "0.5.8:", "new text", "stream: stderr, exit: 1", "Note: a note"} {
+		if !strings.Contains(out, w) {
+			t.Errorf("missing %q in\n%s", w, out)
+		}
+	}
+	if strings.Index(out, "old text") > strings.Index(out, "new text") {
+		t.Error("Today must precede 0.5.8")
+	}
+}
+
+func TestReplacesMissing(t *testing.T) {
+	dir := fixture(t, `[{"case":"New","text":"x","replaces":"Nope"}]`, "")
+	out, err := render(dir)
+	if err != nil || !strings.Contains(out, `no current case named "Nope"`) {
+		t.Fatalf("%v\n%s", err, out)
+	}
+}
+
+func TestItemsAndRules(t *testing.T) {
+	dir := fixture(t, `[]`, `{"items":[{"id":"inst","where":"install.sh","case":"c","text":"hello","stream":"stdout","exit":0,"issue":"#9"}],
+	"rules_next":[{"rule":"New rule","detail":"new detail","replaces":"Old rule"}]}`)
+	out, err := render(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range []string{"## inst [install.sh] (#9)", "hello", "## rule: New rule", "old detail", "new detail"} {
+		if !strings.Contains(out, w) {
+			t.Errorf("missing %q in\n%s", w, out)
+		}
+	}
+}
+
+func TestWidth(t *testing.T) {
+	l := func(n int) string { return strings.Repeat("a", n) }
+	dir := fixture(t, `[{"case":"A","text":"`+l(69)+`"},{"case":"B","text":"`+l(75)+`"},{"case":"C","text":"`+l(80)+`"}]`, "")
+	out, err := render(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "width: 69") || !strings.Contains(out, "width: 75 columns") || !strings.Contains(out, "width: 80 columns") {
+		t.Errorf("flagging wrong:\n%s", out)
+	}
+	dir = fixture(t, `[{"case":"D","text":"ok\n`+l(81)+`"}]`, "")
+	if out, err := render(dir); err == nil || out != "" || !strings.Contains(err.Error(), "81 columns") {
+		t.Errorf("want width error, got %v", err)
+	}
+}
+
+func TestSecretsRefused(t *testing.T) {
+	bad := []string{
+		"SU" + strings.Repeat("A", 40),
+		"SAAB" + strings.Repeat("2", 40),
+		"-----BEGIN PRIVATE KEY-----",
+		"nkey: " + strings.Repeat("x", 30),
+		"seed=" + strings.Repeat("y", 30),
+		"eyJhbGciOiJIUzI1NiJ9.abc",
+		"MASH_SETUP_TOKEN=abc",
+	}
+	for _, s := range bad {
+		for name, dir := range map[string]string{
+			"command": fixture(t, `[{"case":"A","text":"`+s+`"}]`, ""),
+			"item":    fixture(t, `[]`, `{"items":[{"id":"i","case":"c","text":"`+s+`"}]}`),
+			"rule":    fixture(t, `[]`, `{"rules_next":[{"rule":"r","detail":"`+s+`"}]}`),
+		} {
+			out, err := render(dir)
+			if err == nil || out != "" {
+				t.Errorf("%s %q: not refused", name, s)
+			}
+		}
+	}
+	// The clean cases do not trip it.
+	if _, err := render(fixture(t, `[{"case":"A","text":"seed phrase and SUnshine"}]`, "")); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestDeterministic(t *testing.T) {
+	dir := fixture(t, `[{"case":"A","text":"a"},{"case":"B","text":"b"}]`, `{"items":[{"id":"i","case":"c","text":"t"}]}`)
+	a, _ := render(dir)
+	b, _ := render(dir)
+	if a == "" || a != b {
+		t.Error("not deterministic")
+	}
+	if strings.Index(a, "A (") > strings.Index(a, "mashx init / B") && strings.Contains(a, "/ A") {
+		t.Error("order")
+	}
+}
+
+func TestRealSpec(t *testing.T) {
+	out, err := render("../../spec")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range []string{"installer-verified [install.sh]", "rule: Both doctors work the same way", "Both doctors work the same way"} {
+		if !strings.Contains(out, w) {
+			t.Errorf("missing %q in\n%s", w, out)
+		}
+	}
+}

@@ -1,0 +1,145 @@
+{
+ "info": {
+  "version": "0.5.8-spec.0"
+ },
+ "items": [
+  {
+   "id": "installer-unauth-gh-not-found",
+   "where": "install.sh",
+   "case": "Not authenticated: gh not found",
+   "text": "warning: gh not found, so this download was not authenticated; it was checked\n  only against checksums from the same release. See docs/install.md to verify\n  it.",
+   "stream": "stdout",
+   "exit": 0,
+   "issue": "#1274",
+   "note": "The installer still installs (checksums only). Wrapped here to fit the 80-column limit; as one line it is 157 columns. Wording to be settled: shorter words or this wrapping."
+  },
+  {
+   "id": "installer-unauth-gh-did-not-run",
+   "where": "install.sh",
+   "case": "Not authenticated: gh did not run",
+   "text": "warning: gh did not run, so this download was not authenticated; it was checked\n  only against checksums from the same release. See docs/install.md to verify\n  it.",
+   "stream": "stdout",
+   "exit": 0,
+   "issue": "#1274",
+   "note": "The installer still installs (checksums only). Wrapped here to fit the 80-column limit; as one line it is 159 columns. Wording to be settled: shorter words or this wrapping."
+  },
+  {
+   "id": "installer-unauth-gh-version-unreadable",
+   "where": "install.sh",
+   "case": "Not authenticated: gh's version could not be read",
+   "text": "warning: gh's version could not be read, so this download was not authenticated;\n  it was checked only against checksums from the same release. See\n  docs/install.md to verify it.",
+   "stream": "stdout",
+   "exit": 0,
+   "issue": "#1274",
+   "note": "The installer still installs (checksums only). Wrapped here to fit the 80-column limit; as one line it is 175 columns. Wording to be settled: shorter words or this wrapping."
+  },
+  {
+   "id": "installer-unauth-gh-too-old",
+   "where": "install.sh",
+   "case": "Not authenticated: gh is older than 2.102.0",
+   "text": "warning: gh is older than 2.102.0, so this download was not authenticated; it\n  was checked only against checksums from the same release. See docs/install.md\n  to verify it.",
+   "stream": "stdout",
+   "exit": 0,
+   "issue": "#1274",
+   "note": "The installer still installs (checksums only). Open for the planner: REQ-014 says refuse for gh older than 2.102.0; the PR warns and installs. Wrapped here to fit the 80-column limit; as one line it is 169 columns. Wording to be settled: shorter words or this wrapping."
+  },
+  {
+   "id": "installer-verified",
+   "where": "install.sh",
+   "case": "Verified",
+   "text": "Verified SHA256SUMS against the release attestation: built by bogworks/mash's\n  release workflow from v0.5.8",
+   "stream": "stdout",
+   "exit": 0,
+   "issue": "#1152",
+   "note": "Wrapped here to fit the 80-column limit; as one line it is 106 columns. Wording to be settled: shorter words or this wrapping."
+  },
+  {
+   "id": "installer-verify-failed",
+   "where": "install.sh",
+   "case": "A failed verification",
+   "text": "error: the attestation of the release's SHA256SUMS did not verify: nothing was\n  installed",
+   "stream": "stderr",
+   "exit": 1,
+   "issue": "#1274",
+   "note": "Unchanged; shown for completeness. Wrapped here to fit the 80-column limit; as one line it is 88 columns. Wording to be settled: shorter words or this wrapping."
+  },
+  {
+   "id": "setup-nats-server-sbin",
+   "where": "setup script",
+   "case": "nats-server found off PATH",
+   "text": "nats-server: using /usr/sbin/nats-server (that folder is not on your PATH)",
+   "stream": "stdout",
+   "exit": 0,
+   "issue": "#1151",
+   "note": "Printed once, only when nats-server is not on PATH and a root-owned, not group- or other-writable one is in /usr/sbin, /usr/local/sbin or /sbin (in that order); the folder in the line is the one found."
+  },
+  {
+   "id": "policy-field-prefix",
+   "where": "policy document",
+   "case": "Policy document field",
+   "text": "\"prefix\": \"foo\"",
+   "stream": "n/a",
+   "exit": 0,
+   "issue": "#1262",
+   "note": "Was \"range\". The document's field naming the address prefix it is for. Hard cut: a document with a \"range\" field is refused. The field appears on the wire (the signed document), in stored state (list set, the bucket name pattern) and in policy tooling output; a 0.5.7 program sees nothing (the policy code is not linked into 0.5.7)."
+  },
+  {
+   "id": "policy-flag-prefix",
+   "where": "policy tooling",
+   "case": "The flag",
+   "text": "--prefix is needed to check a first list set's prefix when nothing is in force",
+   "stream": "stderr",
+   "exit": 1,
+   "issue": "#1262",
+   "replaces": "--range is needed to check a first list set's range when nothing is in force"
+  },
+  {
+   "id": "policy-plan-line-prefix",
+   "where": "policy tooling",
+   "case": "The plan line",
+   "text": "refused: nothing would change\n  [prefix] prefix: the document's `prefix` field is bar and the selected address\n    prefix is foo\n  [validate] sender \"foo.c.core\": address prefix \"foo\" is not the account's\n    address prefix \"bar\"",
+   "stream": "stdout",
+   "exit": 1,
+   "issue": "#1258",
+   "replaces": "refused: nothing would change\n  [range] range: the document is for address prefix bar and the selected address prefix is foo\n  [validate] sender \"foo.c.core\": address prefix \"foo\" is not the account's address prefix \"bar\"",
+   "note": "Wrapped here to fit the 80-column limit; as one line it is 96 columns. Wording to be settled: shorter words or this wrapping."
+  },
+  {
+   "id": "policy-bucket-placeholder",
+   "where": "policy tooling",
+   "case": "The bucket placeholder",
+   "text": "policy bucket: the pattern has {prefix} but the prefix is empty",
+   "stream": "stderr",
+   "exit": 1,
+   "issue": "#1262",
+   "replaces": "policy bucket: the pattern has {range} but the range name is empty"
+  },
+  {
+   "id": "policy-show-prefix",
+   "where": "policy tooling",
+   "case": "show",
+   "text": "generation: 3\nprefix: foo",
+   "stream": "stdout",
+   "exit": 0,
+   "issue": "#1262",
+   "replaces": "generation: 3\nrange: foo"
+  }
+ ],
+ "rules_next": [
+  {
+   "rule": "Both doctors work the same way",
+   "detail": "mash doctor and mashctl doctor print every row every time, each marked ok, warn, FAIL or skip; a row that cannot run because an earlier one failed is skip, with what it needs. 'checks' in --json always lists every row, whatever failed. After the rows come one blank line and a count ('No problems.', '1 problem, 1 warning.'). A doctor that found a problem always ends with exactly one hint. The hint is a command of ours when one fixes the problem, otherwise one plain sentence naming who or what does. It is never a command that only checks, and never one that replaces credentials, moves a folder or changes permissions unless the doctor found exactly the condition that command fixes. Exit 1 when there is a problem; warnings alone exit 0, or 1 with --strict. A server row shows the address as configured.",
+   "replaces": "Both doctors work the same way"
+  },
+  {
+   "rule": "Missing credentials read the same in every everyday command",
+   "detail": "When the chosen endpoint's creds file is not where the configuration says: 'error: acme.demo.bob has no credentials here: ~/.config/mash/acme.demo.bob.creds is missing' and 'hint: mash doctor', exit 1, from send, inbox, read and who alike; status says the same as its reason (reason_code creds_missing) and doctor in its creds row. Never the operating system's own wording. A recipient that takes no mail reads 'error: <address> is suspended or was deleted; nothing was sent', hint 'mash who', exit 1; never the server's wording. The sender cannot tell the two apart: all it sees is that no stream took the message, and a recipient deleted while the sender's directory cache still lists it looks the same; a marker in the directory record that tells them apart is planned for 0.6.0. When the set-aside file <address>.creds.deleted is present, send, inbox, read and who say 'error: <address>: this endpoint was deleted; its address cannot be used again' with 'hint: mash doctor', as mash status does.",
+   "replaces": "Missing credentials read the same in every everyday command"
+  },
+  {
+   "rule": "Encryption can be turned off in one way only, and it says so every time",
+   "detail": "Both tools talk to the server over TLS. The one way to turn that off is the environment variable MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1. There is no flag and no configuration-file key for it: this is the one setting that cannot be given three ways, so that it cannot be left on in a file and forgotten. While it is set, every command of both tools, errors included, first prints, on stderr: 'warning: no encryption to the server (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION)'. The older names, MASH_INSECURE_PLAINTEXT and the key insecure_plaintext, are refused with an error naming the new one.",
+   "replaces": "Encryption can be turned off in one way only, and it says so every time"
+  }
+ ]
+}

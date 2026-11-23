@@ -227,6 +227,35 @@
      {
       "name": "x-notes",
       "value": "Safe to run again with the same settings. It never replaces what a folder already holds: if the folder was set up with a different operator key, account key, server, system creds, admin creds or owner, it refuses and changes nothing, in one line of the same form naming which ('... was set up with a different owner; nothing was changed'), and the way on is a new configuration folder (--config-dir) or moving the old folder aside yourself. Someone who removes a script-made server and sets one up again meets this every time; it is a known issue for 0.5.6 with that workaround. THE SETUP FILE is YAML, and holds paths, never secrets: 'servers' (a list of addresses), 'ca' (the certificate authority's certificate, if the server uses its own), 'owner' (the first owner), 'admin_creds' (the administrator's creds file), 'system_creds' (the system account's creds file), 'operator_key' (the operator key that signs the account: its identity key when the server was set up with the nats command, or a signing key if your operator uses one), 'account_key' (the account's identity key) and, optionally, 'signing_key' (one of the account's signing seeds, a 0600 file: when set, endpoint users are signed with it, which a strict operator needs; init refuses a key that is not listed in the account JWT, is the identity key or is scoped). The operator and account keys are what cancelling a deleted endpoint's key needs. Know what this means: with a server set up by the script, mashctl's folder holds the operator's identity key, the strongest key there is, with which the operator itself can be re-issued. It is protected only as your own files are. A hosted NATS where you do not hold the operator key, such as Synadia Cloud, is not supported by mashctl in 0.5.6; mash itself works against any conforming server."
+     },
+     {
+      "name": "x-output-next",
+      "value": [
+       {
+        "case": "A signing key is set",
+        "text": "Initialized mash on tls://localhost:4222 for owner acme\nSigning key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "stream": "stdout",
+        "exit": 0,
+        "issue": "#1260 / #1299",
+        "note": "The current Set up case stays. The key is a clearly fake placeholder of 56 characters (a public account key starts with A). Dry-run and --json unchanged."
+       },
+       {
+        "case": "A strict operator and no signing_key",
+        "text": "warning: no signing_key is set but the account lists signing keys",
+        "stream": "stderr",
+        "exit": 0,
+        "issue": "#1255",
+        "note": "PROPOSED. One warning line before the result; exit stays 0; printed once; not with signing_key set. Applies to init only."
+       },
+       {
+        "case": "The owner is too long",
+        "text": "mash-setup.yaml: owner is not a valid name: use lower-case letters, digits and\n  single hyphens, starting with a letter, up to 32 characters",
+        "stream": "stderr",
+        "exit": 1,
+        "issue": "#1172",
+        "note": "Today the text says 48 and the server refuses over 32. Wrapped here to fit the 80-column limit; as one line it is 138 columns. Wording to be settled: shorter words or this wrapping."
+       }
+      ]
      }
     ]
    },
@@ -302,6 +331,19 @@
      {
       "name": "x-today",
       "value": "New in 0.5.6."
+     },
+     {
+      "name": "x-output-next",
+      "value": [
+       {
+        "case": "No server is configured",
+        "text": "error: no server is configured\nhint: mashctl init --config <file>",
+        "stream": "stderr",
+        "exit": 1,
+        "issue": "#1097",
+        "note": "PROPOSED without \"here\"; wording follows `mashctl endpoint create`. --json: {\"error\":\"no server is configured\",\"hint\":\"mashctl init --config <file>\"} on stdout, exit 1."
+       }
+      ]
      }
     ]
    },
@@ -386,6 +428,27 @@
      {
       "name": "x-notes",
       "value": "What is a warning and what is a problem. Warnings: a lease with no endpoint, a retired name seen in use, and a missing record store (issued, adoption or retired); the fix for a missing store is to run mashctl init --config <file> again, which is safe. A problem: an endpoint whose credentials were being cancelled and never finished; the fix is to run that mashctl endpoint delete again."
+     },
+     {
+      "name": "x-output-next",
+      "value": [
+       {
+        "case": "No server is configured",
+        "text": "config     FAIL  no server is configured\nserver     skip  needs the config\nsign-in    skip  needs the server\nstorage    skip  needs sign-in\nendpoints  skip  needs the storage\nkeys       skip  needs sign-in\n\n1 problem.\nhint: mashctl init --config <file>",
+        "stream": "stdout, then the hint on stderr",
+        "exit": 1,
+        "issue": "#1097",
+        "note": "Rows and skip wording are the code's (cmd/mashctl/doctor.go); only the config detail is new."
+       },
+       {
+        "case": "Server not answering",
+        "text": "config     ok\nserver     FAIL  the server did not answer\nsign-in    skip  needs the server\nstorage    skip  needs sign-in\nendpoints  skip  needs the storage\nkeys       skip  needs sign-in\n\n1 problem.\nhint: start the NATS server; if the local script set it up:\n  mash-local-nats-setup.sh --start",
+        "stream": "stdout, then the hint on stderr",
+        "exit": 1,
+        "issue": "#1099",
+        "note": "Wrapped here to fit the 80-column limit; as one line it is 92 columns. Wording to be settled: shorter words or this wrapping."
+       }
+      ]
      }
     ]
    },
@@ -837,6 +900,101 @@
        {
         "name": "x-notes",
         "value": "Order. The endpoint's key is cancelled on every server first; only when every server confirms is anything removed, so a failure there leaves the endpoint whole. If this machine holds the endpoint's creds file, it is set aside as <address>.creds.deleted, so mash no longer counts it as installed; the path is predictable and nothing prints it. Nothing else on any machine is touched. THE LATE-FAILURE LINE in 0.5.6 is not how it should read: it carries an internal word (PARTIAL), the flat name with underscores, a key id and the server's raw error. Two parts of it vary: the eight-character key id after 'user key', and the cause between 'did not complete: ' and '; run the same command again'. From 0.5.7 one line replaces it: 'error: deleted acme.demo.bob, but the removal did not finish: <cause in plain words>' with the same hint; its credentials already no longer work, and running the command again is safe."
+       },
+       {
+        "name": "x-output-next",
+        "value": [
+         {
+          "case": "Cancelled everywhere, then a later step failed: a. the server's lock on this endpoint was lost",
+          "text": "error: deleted acme.demo.bob, but the removal did not finish: the server's lock\n  on this endpoint was lost\nhint: mashctl endpoint delete acme.demo.bob",
+          "stream": "stderr",
+          "exit": 1,
+          "issue": "#1081",
+          "replaces": "Cancelled everywhere, then a later step failed (0.5.6 as built)",
+          "note": "Its credentials already no longer work; running the command again is safe. PROPOSED plain words (the cause part only). Wrapped here to fit the 80-column limit; as one line it is 105 columns. Wording to be settled: shorter words or this wrapping."
+         },
+         {
+          "case": "Cancelled everywhere, then a later step failed: b. its directory record could not be read",
+          "text": "error: deleted acme.demo.bob, but the removal did not finish: its directory\n  record could not be read\nhint: mashctl endpoint delete acme.demo.bob",
+          "stream": "stderr",
+          "exit": 1,
+          "issue": "#1081",
+          "replaces": "Cancelled everywhere, then a later step failed (0.5.6 as built)",
+          "note": "Wrapped here to fit the 80-column limit; as one line it is 100 columns. Wording to be settled: shorter words or this wrapping."
+         },
+         {
+          "case": "Cancelled everywhere, then a later step failed: c. its directory record was changed by someone else",
+          "text": "error: deleted acme.demo.bob, but the removal did not finish: its directory\n  record was changed by someone else\nhint: mashctl endpoint delete acme.demo.bob",
+          "stream": "stderr",
+          "exit": 1,
+          "issue": "#1081",
+          "replaces": "Cancelled everywhere, then a later step failed (0.5.6 as built)",
+          "note": "Wrapped here to fit the 80-column limit; as one line it is 110 columns. Wording to be settled: shorter words or this wrapping."
+         },
+         {
+          "case": "Cancelled everywhere, then a later step failed: d. the server did not confirm that its directory record was removed",
+          "text": "error: deleted acme.demo.bob, but the removal did not finish: the server did not\n  confirm that its directory record was removed\nhint: mashctl endpoint delete acme.demo.bob",
+          "stream": "stderr",
+          "exit": 1,
+          "issue": "#1081",
+          "replaces": "Cancelled everywhere, then a later step failed (0.5.6 as built)",
+          "note": "Wrapped here to fit the 80-column limit; as one line it is 126 columns. Wording to be settled: shorter words or this wrapping."
+         },
+         {
+          "case": "Cancelled everywhere, then a later step failed: e. its name could not be released",
+          "text": "error: deleted acme.demo.bob, but the removal did not finish: its name could not\n  be released\nhint: mashctl endpoint delete acme.demo.bob",
+          "stream": "stderr",
+          "exit": 1,
+          "issue": "#1081",
+          "replaces": "Cancelled everywhere, then a later step failed (0.5.6 as built)",
+          "note": "Wrapped here to fit the 80-column limit; as one line it is 92 columns. Wording to be settled: shorter words or this wrapping."
+         },
+         {
+          "case": "Cancelled everywhere, then a later step failed: f. its address could not be closed to new sessions",
+          "text": "error: deleted acme.demo.bob, but the removal did not finish: its address could\n  not be closed to new sessions\nhint: mashctl endpoint delete acme.demo.bob",
+          "stream": "stderr",
+          "exit": 1,
+          "issue": "#1081",
+          "replaces": "Cancelled everywhere, then a later step failed (0.5.6 as built)",
+          "note": "Wrapped here to fit the 80-column limit; as one line it is 109 columns. Wording to be settled: shorter words or this wrapping."
+         },
+         {
+          "case": "Cancelled everywhere, then a later step failed: g. its inbox could not be removed",
+          "text": "error: deleted acme.demo.bob, but the removal did not finish: its inbox could\n  not be removed\nhint: mashctl endpoint delete acme.demo.bob",
+          "stream": "stderr",
+          "exit": 1,
+          "issue": "#1081",
+          "replaces": "Cancelled everywhere, then a later step failed (0.5.6 as built)",
+          "note": "Wrapped here to fit the 80-column limit; as one line it is 92 columns. Wording to be settled: shorter words or this wrapping."
+         },
+         {
+          "case": "Cancelled everywhere, then a later step failed: h. an earlier, unfinished removal could not be completed",
+          "text": "error: deleted acme.demo.bob, but the removal did not finish: an earlier,\n  unfinished removal could not be completed\nhint: mashctl endpoint delete acme.demo.bob",
+          "stream": "stderr",
+          "exit": 1,
+          "issue": "#1081",
+          "replaces": "Cancelled everywhere, then a later step failed (0.5.6 as built)",
+          "note": "Wrapped here to fit the 80-column limit; as one line it is 115 columns. Wording to be settled: shorter words or this wrapping."
+         },
+         {
+          "case": "Cancelled everywhere, then a later step failed: i. its credentials file could not be set aside",
+          "text": "error: deleted acme.demo.bob, but the removal did not finish: its credentials\n  file could not be set aside\nhint: mashctl endpoint delete acme.demo.bob",
+          "stream": "stderr",
+          "exit": 1,
+          "issue": "#1081",
+          "replaces": "Cancelled everywhere, then a later step failed (0.5.6 as built)",
+          "note": "Wrapped here to fit the 80-column limit; as one line it is 105 columns. Wording to be settled: shorter words or this wrapping."
+         },
+         {
+          "case": "Cancelled everywhere, then a later step failed: j. its credentials path is not a regular file and was left in place",
+          "text": "error: deleted acme.demo.bob, but the removal did not finish: its credentials\n  path is not a regular file and was left in place\nhint: mashctl endpoint delete acme.demo.bob",
+          "stream": "stderr",
+          "exit": 1,
+          "issue": "#1081",
+          "replaces": "Cancelled everywhere, then a later step failed (0.5.6 as built)",
+          "note": "Wrapped here to fit the 80-column limit; as one line it is 126 columns. Wording to be settled: shorter words or this wrapping."
+         }
+        ]
        }
       ]
      },
