@@ -37,7 +37,7 @@ func Check(ls ListSet, c *Compiled) error {
 	bad := func(entry, format string, a ...any) { ps = append(ps, Problem{entry, fmt.Sprintf(format, a...)}) }
 
 	if c.Range != m.rng {
-		bad("compiled range "+quote(c.Range), "is not the list set's range %q", m.rng)
+		bad("compiled address prefix "+quote(c.Range), "is not the list set's address prefix %q", m.rng)
 	}
 
 	senderGroups := map[string]bool{}
@@ -367,7 +367,7 @@ func (m *model) lineRefusal(s sender, dir, line string) string {
 		return fmt.Sprintf("has verb %q, which is none of mail, prompt, status, hb", toks[1])
 	}
 	if toks[2] != m.rng {
-		return fmt.Sprintf("range part %q is not the account's range %q", toks[2], m.rng)
+		return fmt.Sprintf("address prefix %q is not the account's address prefix %q", toks[2], m.rng)
 	}
 	own := s.addr.String()
 	lit := toks[2] + "." + toks[3] + "." + toks[4]

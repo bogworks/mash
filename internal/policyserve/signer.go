@@ -163,7 +163,7 @@ func (s *Issuer) splitKeys(base *jwt.AccountClaims) (kept map[string]string, min
 		return nil, nil, nil, nil, fmt.Errorf("owner group keys: %w", err)
 	}
 	if s.Range == "" {
-		return nil, nil, nil, nil, errors.New("the issuer has no range: cannot tell which signing keys are this range's")
+		return nil, nil, nil, nil, errors.New("the issuer has no address prefix: cannot tell which signing keys are its own")
 	}
 	groupOf := map[string]string{} // public key -> owner group
 	for g, pub := range ours {

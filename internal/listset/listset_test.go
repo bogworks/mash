@@ -23,9 +23,9 @@ func TestAT002_BadEntriesRefuseTheWholeSet(t *testing.T) {
 		{"wildcard in a deny", func(l *ListSet) { l.Senders[0].Deny = append(l.Senders[0].Deny, "foo.*.sdk") }, `"foo.*.sdk"`, "wildcard"},
 		{"wildcard sender", func(l *ListSet) { l.Senders = append(l.Senders, SenderLists{Sender: "foo.c.*"}) }, `sender "foo.c.*"`, "wildcard"},
 		{"wildcard group", func(l *ListSet) { l.Switches = append(l.Switches, SwitchEntry{"foo.*", Mail, Shared}) }, `switch "foo.*"`, "wildcard"},
-		{"other range", func(l *ListSet) { l.Senders[1].Allow = append(l.Senders[1].Allow, "bar.c.lead") }, `"bar.c.lead"`, "range part"},
-		{"other range sender", func(l *ListSet) { l.Senders = append(l.Senders, SenderLists{Sender: "bar.c.lead"}) }, `sender "bar.c.lead"`, "range part"},
-		{"other range group", func(l *ListSet) { l.Switches = append(l.Switches, SwitchEntry{"bar.c", Mail, Shared}) }, `switch "bar.c"`, "range part"},
+		{"other range", func(l *ListSet) { l.Senders[1].Allow = append(l.Senders[1].Allow, "bar.c.lead") }, `"bar.c.lead"`, "address prefix"},
+		{"other range sender", func(l *ListSet) { l.Senders = append(l.Senders, SenderLists{Sender: "bar.c.lead"}) }, `sender "bar.c.lead"`, "address prefix"},
+		{"other range group", func(l *ListSet) { l.Switches = append(l.Switches, SwitchEntry{"bar.c", Mail, Shared}) }, `switch "bar.c"`, "address prefix"},
 		{"grammar failing part", func(l *ListSet) { l.Senders[2].Allow = append(l.Senders[2].Allow, "foo.C.lead") }, `"foo.C.lead"`, "lower-case"},
 		{"grammar failing name", func(l *ListSet) { l.Senders[2].Allow = append(l.Senders[2].Allow, "foo.c.-lead") }, `"foo.c.-lead"`, "letter"},
 		{"two parts", func(l *ListSet) { l.Senders[2].Allow = append(l.Senders[2].Allow, "foo.c") }, `"foo.c"`, "three"},
@@ -38,7 +38,7 @@ func TestAT002_BadEntriesRefuseTheWholeSet(t *testing.T) {
 		{"sender twice", func(l *ListSet) { l.Senders = append(l.Senders, SenderLists{Sender: "foo.c.lead"}) }, `sender "foo.c.lead"`, "twice"},
 		{"allow twice", func(l *ListSet) { l.Senders[0].Allow = []string{"foo.c.lead", "foo.c.lead"} }, `allow of "foo.c.core"`, "twice"},
 		{"allow and deny", func(l *ListSet) { l.Senders[0].Deny = []string{"foo.c.lead"} }, `deny of "foo.c.core"`, "allow list"},
-		{"bad range", func(l *ListSet) { l.Range = "" }, `range ""`, "empty"},
+		{"bad range", func(l *ListSet) { l.Range = "" }, `address prefix ""`, "empty"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

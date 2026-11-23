@@ -122,7 +122,7 @@ type responder struct {
 // several responders share the load. stop drains the service.
 func Mount(nc *nats.Conn, opts Options) (stop func() error, err error) {
 	if opts.Range == "" {
-		return nil, errors.New("policyview: no range")
+		return nil, errors.New("policyview: no address prefix")
 	}
 	if opts.Store == nil {
 		return nil, errors.New("policyview: no store")
@@ -181,7 +181,7 @@ func (r *responder) handle(req micro.Request) {
 		return
 	}
 	if parts := strings.Split(caller, "."); len(parts) != 3 || parts[0] != r.opts.Range {
-		refuse(req, fmt.Sprintf("the sender is not an endpoint of range %q", r.opts.Range))
+		refuse(req, fmt.Sprintf("the sender is not an endpoint under address prefix %q", r.opts.Range))
 		return
 	}
 	var q Request

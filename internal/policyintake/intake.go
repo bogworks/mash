@@ -297,7 +297,7 @@ func (in *Intake) retry(ctx context.Context, what string, superseded func() bool
 func (in *Intake) Run(ctx context.Context) error {
 	switch {
 	case in.Account == "" || in.Range == "":
-		return errors.New("policyintake: Account and Range are required")
+		return errors.New("policyintake: the account and address prefix are required")
 	case in.KV == nil || in.Marker == nil || in.Lock == nil || in.Decode == nil || in.InForce == nil || in.Apply == nil || in.Report == nil || in.HeldKeys == nil:
 		return errors.New("policyintake: KV, Marker, Lock, Decode, InForce, Apply, Report and HeldKeys are required")
 	}
@@ -499,7 +499,7 @@ func (in *Intake) pass(ctx context.Context, e jetstream.KeyValueEntry, q *queue,
 		in.refuse(ctx, doc.Generation, raw, StageAccount, "the document names another account than the key it was written to")
 		return false
 	case doc.Range != in.Range:
-		in.refuse(ctx, doc.Generation, raw, StageRange, "the document names another range than this one serves")
+		in.refuse(ctx, doc.Generation, raw, StageRange, "the document names another address prefix than this one serves")
 		return false
 	}
 

@@ -202,7 +202,7 @@ func Explain(ls ListSet, c *Compiled, sender, receiver string) (Explanation, err
 		return Explanation{}, fmt.Errorf("receiver %q: %s", receiver, reason)
 	}
 	if ra.rng != m.rng {
-		return Explanation{}, fmt.Errorf("receiver %q: range part %q is not the list set's range %q", receiver, ra.rng, m.rng)
+		return Explanation{}, fmt.Errorf("receiver %q: address prefix %q is not the list set's address prefix %q", receiver, ra.rng, m.rng)
 	}
 	who, to := sa.String(), ra.String()
 	reach, err := reachOver(c, who, []string{to})

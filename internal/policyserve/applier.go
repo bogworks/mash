@@ -184,7 +184,7 @@ func (a *Applier) Apply(ctx context.Context, d policyintake.Doc, g policyintake.
 	ctx, cancel := context.WithTimeout(ctx, ApplyTimeout)
 	defer cancel()
 	if a.Range == "" {
-		return policyintake.Result{}, errors.New("the applier has no range")
+		return policyintake.Result{}, errors.New("the applier has no address prefix")
 	}
 	doc, err := policydoc.Decode(d.Raw, policydoc.DecodeOptions{}) // the intake verified the signature
 	if err != nil {
