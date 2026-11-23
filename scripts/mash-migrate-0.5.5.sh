@@ -223,7 +223,8 @@ main() {
     # Enter the folder once, physically (symlinks resolved).  From here the process's
     # working directory is the folder's own inode.  A folder that cannot be entered is,
     # as before, a file that is not there.
-    cd -P -- "$dir" 2>/dev/null || refuse "nothing to migrate: $file does not exist" \
+    # shellcheck disable=SC1007 # an empty CDPATH for this one cd, so it cannot search or print
+    CDPATH= cd -P -- "$dir" 2>/dev/null || refuse "nothing to migrate: $file does not exist" \
         "this script is for a machine that ran mash 0.5.5"
     local rfile=./config.json rbackup=./config.json.0.5.5
     [ ! -L "$rfile" ] || refuse "$file is a symbolic link; not touching it" \
