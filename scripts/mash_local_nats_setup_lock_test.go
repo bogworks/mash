@@ -187,8 +187,8 @@ for a; do case $a in */.lock) f=$a ;; esac; done
 if [ -n "${f:-}" ]; then
   c=0; [ ! -f "$STATE" ] || c=$(` + realCat + ` "$STATE"); c=$((c + 1)); echo "$c" >"$STATE"
   if [ "$c" = 2 ]; then
-    if [ "$MODE" = missing ]; then /bin/rm -f "$f"; else : >"$f"; fi
-    printf '%s\n' "$LIVE" >"$f.c"; /bin/mv -f "$f.c" "$f"
+    if [ "$MODE" = missing ]; then rm -f "$f"; else : >"$f"; fi
+    printf '%s\n' "$LIVE" >"$f.c"; mv -f "$f.c" "$f"
     [ "$MODE" = missing ] && exit 1
     exit 0
   fi
@@ -303,5 +303,104 @@ func TestEmptyLockIsLeftOver(t *testing.T) {
 				t.Error(".lock.recover left behind")
 			}
 		})
+	}
+}
+
+// catStage runs --stop with a cat wrapper on PATH. The wrapper counts the script's reads of a path ending in /.lock;
+// body is shell run on the read numbered $c (1 = first). If body does not exit, the real cat then runs.
+func catStage(t *testing.T, script, dir, body string, extra ...string) (rc int, errOut string) {
+	t.Helper()
+	realCat, err := exec.LookPath("cat")
+	if err != nil {
+		t.Skip("cat not found")
+	}
+	wrap := t.TempDir()
+	sh := `#!/bin/sh
+for a; do case $a in */.lock) f=$a ;; esac; done
+if [ -n "${f:-}" ]; then
+  c=0; [ ! -f "$STATE" ] || c=$(` + realCat + ` "$STATE"); c=$((c + 1)); echo "$c" >"$STATE"
+` + body + `
+fi
+exec ` + realCat + ` "$@"
+`
+	if err := os.WriteFile(filepath.Join(wrap, "cat"), []byte(sh), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	env := append([]string{"PATH=" + wrap + ":" + os.Getenv("PATH"), "STATE=" + filepath.Join(wrap, "n")}, extra...)
+	rc, _, errOut, err = runStopEnv(script, dir, env...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rc, errOut
+}
+
+func startLive(t *testing.T) int {
+	t.Helper()
+	live := exec.Command("sleep", "60")
+	if err := live.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = live.Process.Kill(); _ = live.Wait() }) // only the process this test started
+	return live.Process.Pid
+}
+
+// The #1093 interleaving: runs A and B both read the same stale pid. A takes over and starts; B then reads .lock again
+// under .lock.recover and must see A's new pid, end busy with it, and leave A's .lock alone.
+func TestSecondRunSeesFirstRunsNewLockAtReread(t *testing.T) {
+	script, dir := lockTestDir(t)
+	live := startLive(t)
+	lock := filepath.Join(dir, ".lock")
+	stale := deadPid(t)
+	writeLockFile(t, lock, stale)
+	// read 1 is B's outside read (the stale pid); before read 2 (under .lock.recover) A replaces .lock with its pid
+	rc, errOut := catStage(t, script, dir, `  if [ "$c" = 2 ]; then printf '%s\n' "$LIVE" >"$f.c"; mv -f "$f.c" "$f"; fi`,
+		fmt.Sprintf("LIVE=%d", live))
+	if rc != 1 || !strings.Contains(errOut, fmt.Sprintf("another run is using %s (pid %d)", dir, live)) ||
+		strings.Contains(errOut, fmt.Sprint(stale)) {
+		t.Fatalf("rc=%d stderr=%q; want rc 1 and busy with A's pid %d", rc, errOut, live)
+	}
+	if b, _ := os.ReadFile(lock); strings.TrimSpace(string(b)) != fmt.Sprint(live) {
+		t.Fatalf("A's .lock was removed or replaced: %q", b)
+	}
+	if _, err := os.Lstat(filepath.Join(dir, ".lock.recover")); err == nil {
+		t.Error(".lock.recover left behind")
+	}
+}
+
+// .lock is empty on the first outside read and missing on the second: nothing is left over, the lock is just taken.
+func TestEmptyThenMissingLockIsNotLeftOver(t *testing.T) {
+	script, dir := lockTestDir(t)
+	lock := filepath.Join(dir, ".lock")
+	if err := os.WriteFile(lock, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rc, errOut := catStage(t, script, dir, `  if [ "$c" = 2 ]; then rm -f "$f"; exit 1; fi`)
+	if rc != 0 || strings.Contains(errOut, "left over") {
+		t.Fatalf("rc=%d stderr=%q; want rc 0 and no left-over error", rc, errOut)
+	}
+	noLockFiles(t, dir)
+}
+
+// .lock is empty on both outside reads but gets a live pid during the wait under .lock.recover: not left over, busy.
+func TestEmptyLockGetsPidDuringRecoverWait(t *testing.T) {
+	script, dir := lockTestDir(t)
+	live := startLive(t)
+	lock := filepath.Join(dir, ".lock")
+	if err := os.WriteFile(lock, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// after read 2 returns, the live run writes its pid 0.4 s later, inside the 1 s wait under .lock.recover
+	rc, errOut := catStage(t, script, dir, `  if [ "$c" = 2 ]; then
+    ( sleep 0.4; printf '%s\n' "$LIVE" >"$f.c"; mv -f "$f.c" "$f" ) </dev/null >/dev/null 2>&1 &
+  fi`, fmt.Sprintf("LIVE=%d", live))
+	if rc != 1 || strings.Contains(errOut, "left over") ||
+		!strings.Contains(errOut, fmt.Sprintf("another run is using %s (pid %d)", dir, live)) {
+		t.Fatalf("rc=%d stderr=%q; want rc 1 and busy with pid %d, no left-over error", rc, errOut, live)
+	}
+	if b, _ := os.ReadFile(lock); strings.TrimSpace(string(b)) != fmt.Sprint(live) {
+		t.Fatalf("the live run's .lock was removed or replaced: %q", b)
+	}
+	if _, err := os.Lstat(filepath.Join(dir, ".lock.recover")); err == nil {
+		t.Error(".lock.recover left behind")
 	}
 }

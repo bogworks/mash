@@ -456,6 +456,10 @@ lock_recover() {
         return 1
     fi
     # re-read under the recover lock: remove .lock only if it is still the stale one
+    if [ "$_stale" = empty ]; then
+        # a run that took .lock may still be about to write its pid: wait, then read again
+        sleep 1
+    fi
     _cur=$(lock_state "$DIR/.lock")
     if [ "$_stale" = empty ]; then
         if [ -f "$DIR/.lock" ] && [ ! -L "$DIR/.lock" ] && [ -z "$_cur" ]; then
@@ -465,6 +469,8 @@ lock_recover() {
         release_lock; return 1
     fi
     if [ "$_cur" != "$_stale" ]; then release_lock; return 1; fi
+    # the stale pid may have been reused by a live run since it was read
+    [ "$_cur" = dir ] || ! kill -0 "$_cur" 2>/dev/null || busy "$_cur"
     if [ "$_cur" = dir ]; then
         rmdir "$DIR/.lock" 2>/dev/null || busy "$(lock_pid "$DIR/.lock")"
     else
@@ -482,9 +488,14 @@ lock_dir() {
         lock_make && { LOCKED=1; return 0; }
         _lp=$(lock_state "$DIR/.lock")
         if [ -z "$_lp" ]; then
+            # "empty" only if .lock existed (a regular file) and was empty on both
+            # reads; if it was missing on either, look again (lock_make retries)
+            _e1=0; [ -f "$DIR/.lock" ] && [ ! -L "$DIR/.lock" ] && _e1=1
             sleep 1
             _lp=$(lock_state "$DIR/.lock")
-            [ -n "$_lp" ] || _lp=empty
+            if [ -z "$_lp" ]; then
+                if [ "$_e1" = 1 ] && [ -f "$DIR/.lock" ] && [ ! -L "$DIR/.lock" ]; then _lp=empty; else continue; fi
+            fi
         fi
         if [ "$_lp" != dir ] && [ "$_lp" != empty ] && [ -n "$_lp" ] && kill -0 "$_lp" 2>/dev/null; then busy "$_lp"; fi
         # stale: its run is gone; take over under .lock.recover
