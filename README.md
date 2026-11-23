@@ -1,8 +1,6 @@
 # mash
 
 [![release](https://img.shields.io/github/v/release/bogworks/mash)](https://github.com/bogworks/mash/releases/latest)
-[![CI](https://img.shields.io/github/actions/workflow/status/bogworks/mash/ci.yml?branch=main&label=CI)](https://github.com/bogworks/mash/actions/workflows/ci.yml)
-[![security checks](https://img.shields.io/github/actions/workflow/status/bogworks/mash/security.yml?branch=main&label=security)](https://github.com/bogworks/mash/actions/workflows/security.yml)
 [![license: Apache-2.0](https://img.shields.io/github/license/bogworks/mash)](LICENSE)
 [![quick start](https://img.shields.io/badge/quick%20start-two%20sessions-blue)](docs/guide/quickstart.md)
 [![Ask DeepWiki](https://img.shields.io/badge/Ask-DeepWiki-blue)](https://deepwiki.com/bogworks/mash)
@@ -10,6 +8,8 @@
 **mash ("mail mesh") gives each of your AI agent sessions an inbox that keeps its mail.** The inbox lives on a NATS server (NATS is an open-source message server). Mail waits (in a single-replica inbox; see [durability](docs/operations.md#durability-and-sync_interval)), signed
 by its sender, until the recipient has seen it, whether that session is busy, idle or stopped, on this machine or
 another. In Claude Code it arrives by itself: no polling, no extra turns for mail that can wait.
+
+**▶ [Watch the 2½-minute demo](docs/demo/mash-demo.mp4)**: the setup skill installs mash, then two Claude Code sessions, Bob and Alice, exchange mail, including a wake of an idle session. Recorded on a personal Claude account with Claude Code's development-channels flag, which a personal account needs to wake an idle session, as the setup skill offers. To try it yourself, start at [the quick start](docs/guide/quickstart.md).
 
 mash is deliberately small: one Go binary per agent (an "agent" here is one running Claude Code session, named by you; the docs also call it an endpoint), one outbound connection to one NATS server, no open ports and no
 per-agent server. It layers an opinionated approach to agent communication on top of the Synadia Agent Protocol (SAP)
@@ -45,12 +45,13 @@ A2A at the edge, mash inside. See [how mash compares](docs/comparison.md), inclu
 Two paths, one bus: live traffic (presence, status, live prompts) rides plain NATS and is not stored; mail rides
 JetStream (the NATS feature that stores messages on the server) and is kept up to 30 days. ([details](docs/comparison.md#4-two-paths-live-and-durable))
 
-**Status: v0.5.6, pre-1.0.** One host adapter (Claude Code). Linux and macOS, amd64 and arm64; Windows is not supported (WSL 2 with the Linux binary is expected to work but has not been tested). Interfaces may still change before 1.0. Known limits are listed in [the comparison](docs/comparison.md#9-known-limits).
+**Status: v0.5.8, pre-1.0.** One host adapter (Claude Code). Linux and macOS, amd64 and arm64; Windows is not supported (WSL 2 with the Linux binary is expected to work but has not been tested). Interfaces may still change before 1.0. Known limits are listed in [the comparison](docs/comparison.md#9-known-limits).
 
 ## Get started
 
 mash gives each Claude Code session an inbox. Here two sessions on one
-machine mail each other. You need Ubuntu, Debian or macOS, git and Claude Code. Everything
+machine mail each other. You need Debian or macOS (tested) or Ubuntu (expected to work; see
+[compatibility](docs/compatibility.md)), git and Claude Code 2.1.312 or newer. The Claude Code part was last run live on 0.5.7. Everything
 is installed in your home folder, with no sudo.
 
 1. Add the setup skill:
@@ -89,21 +90,33 @@ is installed in your home folder, with no sudo.
 Mail waits. Close Alice's session, send again from Bob's, reopen hers, and
 it is there.
 
-- Watch it first: a [2-minute video](docs/demo/mash-demo.mp4) of these steps, recorded on a personal Claude account with the development flag, as the setup skill offers.
 - Something wrong: `mash doctor`, then [troubleshooting](docs/troubleshooting.md).
 - The same thing, typed yourself: [by hand](docs/guide/by-hand.md).
 - How mash, SAP and NATS fit together: [the stack](docs/guide/stack.md).
 - Remove everything: [uninstall](docs/install.md#uninstall).
+
+## Install the programs yourself
+
+The setup skill above does this for you. To do it by hand, download the install script of the latest release, check it, and run it. It puts `mash` and `mashctl` in `~/.local/bin`, with no sudo:
+
+```sh
+BASE=https://github.com/bogworks/mash/releases/latest/download
+curl -fsSLO $BASE/install.sh -O $BASE/SHA256SUMS &&
+grep ' install.sh$' SHA256SUMS | sha256sum -c - &&  # macOS: shasum -a 256 -c -
+bash install.sh
+```
+
+More in [docs/install.md](docs/install.md).
 
 ## Check the download
 
 `install.sh` checks each binary against the release's `SHA256SUMS`. When a current GitHub CLI (`gh`) is installed it also verifies `SHA256SUMS` against the release's build attestation (a record signed by GitHub that the release workflow built these files from the release tag), and installs nothing if that fails. Without `gh` it says so and trusts the TLS connection to github.com. `gh attestation verify` needs a current `gh`; [which version, and where to get it](docs/security/verify-your-download.md#what-you-need). To check by hand before you run anything, download the files and verify the attestation:
 
 ```sh
-BASE=https://github.com/bogworks/mash/releases/download/v0.5.6
+BASE=https://github.com/bogworks/mash/releases/download/v0.5.8
 curl -fsSLO $BASE/install.sh -O $BASE/SHA256SUMS -O $BASE/mash.intoto.jsonl &&
 gh attestation verify SHA256SUMS -R bogworks/mash --bundle mash.intoto.jsonl \
-  --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/v0.5.6
+  --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/v0.5.8
 ```
 
 
@@ -117,7 +130,7 @@ The rest (checking `install.sh` itself against `SHA256SUMS`, and building from s
 
 ## Synadia Cloud
 
-Synadia Cloud is not supported by mashctl in 0.5.6: see [docs/synadia.md](docs/synadia.md).
+Synadia Cloud is not supported in 0.5.8 ([#876](https://github.com/bogworks/mash/issues/876)); see [docs/synadia.md](docs/synadia.md).
 
 
 ## Addresses and the Synadia Agent Protocol

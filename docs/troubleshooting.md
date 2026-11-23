@@ -66,7 +66,7 @@ mash reads `$MASH_CONFIG_DIR/config.json` when that variable is set (an absolute
 ## The creds file is missing or refused
 
 - `the creds file is missing: <path>` (`status`), or `creds  FAIL` in `doctor`: the file for this endpoint is not at `<owner>.<group>.<name>.creds` in the config directory (`~/.config/mash` unless `XDG_CONFIG_HOME` points at a mash config). Put it there or set `MASH_CREDS` (or `creds` in config.json).
-- `mash: credentials file <path> has mode 0644: it is readable by other users. Run: chmod 600 <path>`: run exactly that. Creds files hold the endpoint's private key and must not be readable by others.
+- `the creds file can be read by other users: <path>` (`status`), `creds  FAIL` in `doctor` with the hint `chmod 600 <path>`, or `mash: credentials file <path> has mode 0644: it is readable by other users. Run: chmod 600 <path>`: run exactly that. Creds files hold the endpoint's private key and must not be readable by others.
 - A creds path that is a directory or is not readable: fix the path or ownership.
 - `mash: <path> is not operator-mode JWT credentials ...`: the file has no user JWT or no seed (a bare token, a `user:password` line, a plain nkey seed, an empty file, or a JWT without its seed). mash supports only JWT user credentials from an operator-mode server ([requirements](nats-server.md#requirements)). Next: make the endpoint again with `mashctl endpoint create` and `mash join` ([operations.md](operations.md#adding-an-endpoint)), or ask whoever runs the server for a creds file, and set `creds` (or `admin_creds`) to it.
 - A server url that carries a password or token: mash ignores it. Remove it from the url and use a creds file.
