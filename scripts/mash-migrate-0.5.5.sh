@@ -217,17 +217,26 @@ main() {
     fi
     while [ "${#dir}" -gt 1 ] && [ "${dir%/}" != "$dir" ]; do dir=${dir%/}; done
 
+    # $file and $backup are the names messages show; every check, read and write uses the
+    # names relative to the working directory, so a swapped parent path cannot redirect them.
     local file=$dir/config.json backup=$dir/config.json.0.5.5
-    [ ! -L "$file" ] || refuse "$file is a symbolic link; not touching it" \
-        "migrate the file it points to by hand"
-    [ -f "$file" ] || refuse "nothing to migrate: $file does not exist" \
+    # Enter the folder once, physically (symlinks resolved).  From here the process's
+    # working directory is the folder's own inode.  A folder that cannot be entered is,
+    # as before, a file that is not there.
+    # shellcheck disable=SC1007 # an empty CDPATH for this one cd, so it cannot search or print
+    CDPATH= cd -P -- "$dir" 2>/dev/null || refuse "nothing to migrate: $file does not exist" \
         "this script is for a machine that ran mash 0.5.5"
-    [ -r "$file" ] || refuse "cannot read $file" "check its permissions"
+    local rfile=./config.json rbackup=./config.json.0.5.5
+    [ ! -L "$rfile" ] || refuse "$file is a symbolic link; not touching it" \
+        "migrate the file it points to by hand"
+    [ -f "$rfile" ] || refuse "nothing to migrate: $file does not exist" \
+        "this script is for a machine that ran mash 0.5.5"
+    [ -r "$rfile" ] || refuse "cannot read $file" "check its permissions"
 
     # a folder other users can write in is not one to put files in (a sticky one is fine)
     local perms
     # shellcheck disable=SC2012 # ls -ld is the portable way to read a mode
-    perms=$(ls -ld -- "$dir/." | awk '{print $1}')
+    perms=$(ls -ld -- ./. | awk '{print $1}')
     case "${perms:5:1}${perms:8:1}" in
     *w*)
         case "${perms:9:1}" in
@@ -238,15 +247,18 @@ main() {
     esac
 
     trap cleanup EXIT
-    local nonl=0
-    if [ -s "$file" ] && [ -n "$(tail -c 1 "$file" | tr -d '\n')" ]; then nonl=1; fi
-
     umask 077
     local rc=0
     # unpredictable names, made by mktemp (GNU and BSD alike), each recorded for cleanup
-    TMP=$(mktemp "$dir/.mash-migrate.XXXXXX" 2>/dev/null) || { TMP=''; refuse "cannot write in $dir" "check the folder's permissions"; }
-    STAT=$(mktemp "$dir/.mash-migrate.XXXXXX" 2>/dev/null) || { STAT=''; refuse "cannot write in $dir" "check the folder's permissions"; }
-    LC_ALL=C awk -v st="$STAT" -v nonl="$nonl" "$AWK_PROG" "$file" >"$TMP" || rc=$?
+    TMP=$(mktemp ./.mash-migrate.XXXXXX 2>/dev/null) || { TMP=''; refuse "cannot write in $dir" "check the folder's permissions"; }
+    STAT=$(mktemp ./.mash-migrate.XXXXXX 2>/dev/null) || { STAT=''; refuse "cannot write in $dir" "check the folder's permissions"; }
+    # config.json is read once: copied (keeping the mode) to a private temp that becomes the
+    # backup, and every later check reads that copy, so the checks and the backup agree.
+    BTMP=$(mktemp ./.mash-migrate.XXXXXX 2>/dev/null) || { BTMP=''; refuse "cannot write in $dir" "check the folder's permissions"; }
+    cp -p "$rfile" "$BTMP" || refuse "cannot write the backup $backup" "check the folder's permissions"
+    local nonl=0
+    if [ -s "$BTMP" ] && [ -n "$(tail -c 1 "$BTMP" | tr -d '\n')" ]; then nonl=1; fi
+    LC_ALL=C awk -v st="$STAT" -v nonl="$nonl" "$AWK_PROG" "$BTMP" >"$TMP" || rc=$?
     if [ "$rc" != 0 ]; then
         local why
         why=$(sed -n 's/^err //p' "$STAT" 2>/dev/null | head -n 1)
@@ -279,29 +291,26 @@ main() {
     fi
 
     chmod 600 "$TMP" || refuse "cannot set the mode of the new file" "check the folder's permissions"
-    { [ ! -e "$backup" ] && [ ! -L "$backup" ]; } || refuse "$backup already exists; not overwriting it" \
+    { [ ! -e "$rbackup" ] && [ ! -L "$rbackup" ]; } || refuse "$backup already exists; not overwriting it" \
         "move it aside, or remove it if you no longer need it, and run again"
-    # The backup: a complete copy (keeping the mode) under a private name, then hard-linked
-    # to the backup name.  ln does not replace anything, so a backup that appeared meanwhile
-    # is refused, and the backup name never shows a partial file.
-    BTMP=$(mktemp "$dir/.mash-migrate.XXXXXX" 2>/dev/null) || { BTMP=''; refuse "cannot write in $dir" "check the folder's permissions"; }
-    cp -p "$file" "$BTMP" || refuse "cannot write the backup $backup" "check the folder's permissions"
-    ln -- "$BTMP" "$backup" 2>/dev/null ||
+    # The backup: the private copy made above, hard-linked to the backup name.  ln does not
+    # replace anything, so a backup that appeared meanwhile is refused, and the backup name
+    # never shows a partial file.
+    ln -- "$BTMP" "$rbackup" 2>/dev/null ||
         refuse "cannot make the backup $backup (it exists, or links are not allowed here)" \
             "move an existing backup aside and run again"
-    BACKUP_MADE=$backup
-    rm -f -- "$BTMP" || refuse "cannot remove the temporary copy $BTMP" "check the folder's permissions"
+    BACKUP_MADE=$rbackup
+    rm -f -- "$BTMP" || refuse "cannot remove the temporary copy $dir/${BTMP#./}" "check the folder's permissions"
     BTMP=''
-    # From here the new file and the backup are no longer cleanup's to remove: an
+    # From here the backup is no longer cleanup's to remove: an
     # interrupt after the replace must not delete the backup.  If the replace
     # itself fails, remove both by their recorded paths.
-    local newfile=$TMP
-    TMP=''
     BACKUP_MADE=''
-    if ! mv -f "$newfile" "$file"; then
-        rm -f -- "$newfile" "$backup"
+    if ! mv -f "$TMP" "$rfile"; then
+        rm -f -- "$TMP" "$rbackup"
         refuse "cannot replace $file" "check the folder's permissions"
     fi
+    TMP=''
 
     local what=''
     [ "$has_url" = 0 ] || what='url -> servers'
