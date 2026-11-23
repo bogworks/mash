@@ -4,14 +4,8 @@ package main
 // spec/mash-mcp.json (the MCP tools) and spec/rules.json (the rules), by walking the specification and asking the build.
 //
 // Every check is a subtest named by what it checks. A check yields a list of problems, each saying the check, what the
-// specification expects and what the build gives. What a check may fail on is decided in one place per kind:
-//
-//   - knownGaps: things the specification has and the build does not have yet (or has in a form that is not yet the
-//     generated one). Each has a one-line reason. The test fails if a listed gap is closed (the entry must go, so the
-//     list only shrinks) and fails for any difference that is not listed.
-//   - knownDrift: a difference in something that is built, held here only so the suite is green while a fix is in
-//     flight in another pull request. The same rules apply: a closed one fails until removed. A difference of a built
-//     command's options or descriptions is never a known gap; a drift entry names the pull request that closes it.
+// specification expects and what the build gives. There are no waivers: no table lists a gap or a drift, and any
+// mismatch fails.
 //
 // What it checks:
 //
@@ -36,40 +30,16 @@ import (
 	"testing"
 )
 
-// knownGaps: key is "<check> <name>" as the subtest names it. The value is why it is not built yet.
-var knownGaps = map[string]string{}
-
-// knownDrift: key is "<rule> <command>"; the value says what differs and what closes it.
-var knownDrift = map[string]string{}
-
 // confHelpFirst: rules.json says options go before or after the command, and help is also a command; the build takes a
 // help option before the command as the tool's own help (cmd/mash/main.go, cli.go).
 const confHelpFirst = "a help option before the command prints the tool's own help; rules.json: 'mash -h version' is 'mash version --help'"
 
-// confCheck applies the rule of the two tables to the problems of one check.
-func confCheck(t *testing.T, table map[string]string, tableName, key string, problems []string) {
+// confFail reports every problem of one check as a failure. There are no waivers: a mismatch fails.
+func confFail(t *testing.T, key string, problems []string) {
 	t.Helper()
-	reason, listed := table[key]
-	switch {
-	case listed && len(problems) == 0:
-		t.Errorf("%s: listed in %s (%s) but it now conforms; remove it from the table", key, tableName, reason)
-	case listed:
-		t.Logf("%s: %s: %s", tableName, key, reason)
-	default:
-		for _, p := range problems {
-			t.Errorf("%s: %s", key, p)
-		}
+	for _, p := range problems {
+		t.Errorf("%s: %s", key, p)
 	}
-}
-
-// confCheckAny looks the key up in knownGaps, then in knownDrift.
-func confCheckAny(t *testing.T, key string, problems []string) {
-	t.Helper()
-	if _, ok := knownDrift[key]; ok {
-		confCheck(t, knownDrift, "knownDrift", key, problems)
-		return
-	}
-	confCheck(t, knownGaps, "knownGaps", key, problems)
 }
 
 func TestConformance(t *testing.T) {
@@ -104,7 +74,7 @@ func TestConformance(t *testing.T) {
 		for _, sc := range tracked {
 			sc := sc
 			t.Run(sc.path, func(t *testing.T) {
-				confCheckAny(t, "help "+sc.path, confHelpProblems(spec, env, sc.path, sc.c))
+				confFail(t, "help "+sc.path, confHelpProblems(spec, env, sc.path, sc.c))
 			})
 		}
 	})
@@ -133,7 +103,7 @@ func TestConformance(t *testing.T) {
 				if !found {
 					p = append(p, fmt.Sprintf("listed: want %q under %q in mash --help, not listed", sc.path, group))
 				}
-				confCheckAny(t, "toplevel "+sc.path, p)
+				confFail(t, "toplevel "+sc.path, p)
 			})
 		}
 		t.Run("layout", func(t *testing.T) {
@@ -165,7 +135,7 @@ func TestConformance(t *testing.T) {
 					p = append(p, fmt.Sprintf("width: line %d is %d columns, want at most 80", i+1, n))
 				}
 			}
-			confCheck(t, knownGaps, "knownGaps", "toplevel layout", p)
+			confFail(t, "toplevel layout", p)
 		})
 		t.Run("unlisted", func(t *testing.T) {
 			listed := map[string]bool{}
@@ -211,7 +181,7 @@ func TestConformance(t *testing.T) {
 				} else {
 					p = confToolProblems(want, g)
 				}
-				confCheckAny(t, "tools "+want.Name, p)
+				confFail(t, "tools "+want.Name, p)
 			})
 		}
 		t.Run("unexpected", func(t *testing.T) {
@@ -353,7 +323,7 @@ func confRules(t *testing.T, spec confSpec) {
 						p = append(p, fmt.Sprintf("line %d is %d columns, want at most 80: %q", i+1, n, line))
 					}
 				}
-				confCheckAny(t, "width "+name, p)
+				confFail(t, "width "+name, p)
 			})
 
 			t.Run("bad option", func(t *testing.T) { // (b) and (d): exit 2, an error line, the command's own help as the hint
@@ -376,7 +346,7 @@ func confRules(t *testing.T, spec confSpec) {
 						p = append(p, fmt.Sprintf("hint line: want %q, got %q", want, lines[1]))
 					}
 				}
-				confCheckAny(t, "bad-option "+name, p)
+				confFail(t, "bad-option "+name, p)
 			})
 
 			t.Run("bad option as json", func(t *testing.T) { // (c): {error, hint} on stdout, nothing on stderr, the same exit code
@@ -394,7 +364,7 @@ func confRules(t *testing.T, spec confSpec) {
 				if r.code != 2 {
 					p = append(p, fmt.Sprintf("exit: want 2, got %d", r.code))
 				}
-				confCheckAny(t, "bad-option-json "+name, p)
+				confFail(t, "bad-option-json "+name, p)
 			})
 
 			if name != "version" && !setup[name] { // (d) and the rule on having no endpoint: the same three-wording sentence everywhere
@@ -404,7 +374,7 @@ func confRules(t *testing.T, spec confSpec) {
 					if r.code != 2 || r.out != "" || r.errs != confNoEndpoint {
 						p = append(p, fmt.Sprintf("with no endpoint installed: want exit 2, no stdout, stderr %q; got exit %d, stdout %q, stderr %q", confNoEndpoint, r.code, r.out, r.errs))
 					}
-					confCheckAny(t, "no-endpoint "+name, p)
+					confFail(t, "no-endpoint "+name, p)
 				})
 				t.Run("no endpoint as json", func(t *testing.T) {
 					r := runMash(env, append(append([]string{}, words...), append(pos, "--json")...)...)
@@ -413,7 +383,7 @@ func confRules(t *testing.T, spec confSpec) {
 					if r.code != 2 || r.out != want || r.errs != "" {
 						p = append(p, fmt.Sprintf("with no endpoint installed and --json: want exit 2, stdout %q, no stderr; got exit %d, stdout %q, stderr %q", want, r.code, r.out, r.errs))
 					}
-					confCheckAny(t, "no-endpoint-json "+name, p)
+					confFail(t, "no-endpoint-json "+name, p)
 				})
 			}
 
@@ -426,7 +396,7 @@ func confRules(t *testing.T, spec confSpec) {
 				if after != before {
 					p = append(p, fmt.Sprintf("%v after the command and before it differ: after %+v, before %+v", globals, after, before))
 				}
-				confCheckAny(t, "globals "+name, p)
+				confFail(t, "globals "+name, p)
 			})
 		})
 	}
@@ -456,7 +426,7 @@ func confRules(t *testing.T, spec confSpec) {
 					p = append(p, fmt.Sprintf("mash %v: want exactly what mash version --help prints (%d lines), got exit %d and %d lines starting %q",
 						h, strings.Count(want.out, "\n"), r.code, strings.Count(r.out, "\n"), strings.SplitN(r.out, "\n", 2)[0]))
 				}
-				confCheckAny(t, "help-spelling "+strings.Join(h, " "), p)
+				confFail(t, "help-spelling "+strings.Join(h, " "), p)
 			})
 		}
 	})

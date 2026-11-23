@@ -4,13 +4,9 @@ package main
 // spec/rules.json (the rules), by walking the specification and asking the build. It is the twin of the test of the same
 // name in cmd/mash. Only help and usage-error paths run: nothing here needs a server.
 //
-// Every check is a subtest named by what it checks. A check yields a list of problems, each saying what the specification
-// expects and what the build gives. What a check may fail on is decided in one place per kind:
-//
-//   - knownGaps: things the specification has and the build does not have yet. Each has a one-line reason. The test fails
-//     if a listed gap is closed (the entry must go, so the list only shrinks) and fails for any difference not listed.
-//   - knownDrift: a difference in something that is built, held here only so the suite is green while a fix is in flight.
-//     The same rules apply; the entry says what closes it.
+// Every check is a subtest named by what it checks. A check yields a list of problems, each saying what the
+// specification expects and what the build gives. There are no waivers: no table lists a gap or a drift, and any
+// mismatch fails.
 //
 // What it checks:
 //
@@ -26,8 +22,7 @@ package main
 //	extra-option/...     an option a --help lists that the specification lacks for the command (its own and the global ones)
 //	extra-command/...    a subcommand a --help lists that the specification lacks for the command, and the other way round
 //	outputs/<path> <case>  every x-output case of the specification (text, stream, exit code) run against the build and
-//	                     compared exactly (conformance_outputs_test.go); confUnchecked names each case that cannot be run
-//	                     here, with the reason, and fails when a listed case is checked after all
+//	                     compared exactly (conformance_outputs_test.go); a case with no runner fails
 
 import (
 	"bytes"
@@ -41,29 +36,11 @@ import (
 	"testing"
 )
 
-// confGaps: key is "<check> <name>" as the subtest names it. The value is why it is not built yet.
-var confGaps = map[string]string{}
-
-// confDrift: key is "<check> <name>"; the value says what differs and what closes it.
-var confDrift = map[string]string{}
-
-// confCheck applies the rule of the two tables to the problems of one check.
-func confCheck(t *testing.T, key string, problems []string) {
+// confFail reports every problem of one check as a failure. There are no waivers: a mismatch fails.
+func confFail(t *testing.T, key string, problems []string) {
 	t.Helper()
-	table, tableName := confGaps, "confGaps"
-	if _, ok := confDrift[key]; ok {
-		table, tableName = confDrift, "confDrift"
-	}
-	reason, listed := table[key]
-	switch {
-	case listed && len(problems) == 0:
-		t.Errorf("%s: listed in %s (%s) but it now conforms; remove it from the table", key, tableName, reason)
-	case listed:
-		t.Logf("%s: %s: %s", tableName, key, reason)
-	default:
-		for _, p := range problems {
-			t.Errorf("%s: %s", key, p)
-		}
+	for _, p := range problems {
+		t.Errorf("%s: %s", key, p)
 	}
 }
 
@@ -373,7 +350,7 @@ func TestConformance(t *testing.T) {
 						p = append(p, fmt.Sprintf("argument %s: want it named, not found", a.Name))
 					}
 				}
-				confCheck(t, "commands "+sc.path, p)
+				confFail(t, "commands "+sc.path, p)
 			})
 		}
 	})
@@ -407,7 +384,7 @@ func TestConformance(t *testing.T) {
 					if !known[o] {
 						p = append(p, fmt.Sprintf("mashctl %s --help lists option %s, which spec/mashctl.json does not have for the command", sc.path, o))
 					}
-					confCheck(t, "extra-option "+sc.path+" "+o, p)
+					confFail(t, "extra-option "+sc.path+" "+o, p)
 				})
 			}
 			specSubs := map[string]bool{}
@@ -419,7 +396,7 @@ func TestConformance(t *testing.T) {
 					if !h.subs[c.Name] {
 						p = append(p, fmt.Sprintf("mashctl %s --help: want subcommand %s listed, not found", sc.path, c.Name))
 					}
-					confCheck(t, "missing-command "+sc.path+" "+c.Name, p)
+					confFail(t, "missing-command "+sc.path+" "+c.Name, p)
 				})
 			}
 			var subs []string
@@ -434,7 +411,7 @@ func TestConformance(t *testing.T) {
 					if !specSubs[c] {
 						p = append(p, fmt.Sprintf("mashctl %s --help lists subcommand %s, which spec/mashctl.json does not have for the command", sc.path, c))
 					}
-					confCheck(t, "extra-command "+sc.path+" "+c, p)
+					confFail(t, "extra-command "+sc.path+" "+c, p)
 				})
 			}
 		}
@@ -457,7 +434,7 @@ func TestConformance(t *testing.T) {
 				if !listed[sc.path] {
 					p = append(p, fmt.Sprintf("listed: want %q in mashctl --help, not listed", sc.path))
 				}
-				confCheck(t, "toplevel "+sc.path, p)
+				confFail(t, "toplevel "+sc.path, p)
 			})
 		}
 		t.Run("unlisted", func(t *testing.T) {
@@ -475,7 +452,7 @@ func TestConformance(t *testing.T) {
 					} else if !confTrack(c) {
 						p = append(p, fmt.Sprintf("mashctl --help lists %q, which the specification gives to release %s", v, c.meta("x-release")))
 					}
-					confCheck(t, "toplevel-unlisted "+v, p)
+					confFail(t, "toplevel-unlisted "+v, p)
 				})
 			}
 		})
@@ -494,7 +471,7 @@ func TestConformance(t *testing.T) {
 				if r.code != 2 || r.out != "" || r.errs != want {
 					p = append(p, fmt.Sprintf("want exit 2, no stdout, stderr %q; got exit %d, stdout %q, stderr %q", want, r.code, r.out, r.errs))
 				}
-				confCheck(t, "removed "+v, p)
+				confFail(t, "removed "+v, p)
 			})
 		}
 		for _, o := range []struct {
@@ -524,7 +501,7 @@ func TestConformance(t *testing.T) {
 				if r.code != 2 || r.out != "" || r.errs != want {
 					p = append(p, fmt.Sprintf("want exit 2, no stdout, stderr %q; got exit %d, stdout %q, stderr %q", want, r.code, r.out, r.errs))
 				}
-				confCheck(t, "removed "+name, p)
+				confFail(t, "removed "+name, p)
 			})
 		}
 	})
@@ -539,7 +516,7 @@ func TestConformance(t *testing.T) {
 						p = append(p, fmt.Sprintf("line %d is %d columns, want at most 80: %q", i+1, n, line))
 					}
 				}
-				confCheck(t, "width "+name, p)
+				confFail(t, "width "+name, p)
 			})
 		}
 		check("mashctl", "--help")
@@ -566,7 +543,7 @@ func TestConformance(t *testing.T) {
 				if len(lines) != 2 || lines[0] != "error: unknown option --bogus" || lines[1] != "hint: mashctl "+sc.path+" --help" {
 					p = append(p, fmt.Sprintf("stderr: want %q, got %q", "error: unknown option --bogus\nhint: mashctl "+sc.path+" --help\n", r.errs))
 				}
-				confCheck(t, "bad-option "+sc.path, p)
+				confFail(t, "bad-option "+sc.path, p)
 			})
 			t.Run(sc.path+" as json", func(t *testing.T) {
 				r := confRun(t, append(append([]string{}, base...), "--bogus", "--json")...)
@@ -583,7 +560,7 @@ func TestConformance(t *testing.T) {
 				if r.code != 2 {
 					p = append(p, fmt.Sprintf("exit: want 2, got %d", r.code))
 				}
-				confCheck(t, "bad-option-json "+sc.path, p)
+				confFail(t, "bad-option-json "+sc.path, p)
 			})
 		}
 	})
@@ -609,7 +586,7 @@ func TestConformance(t *testing.T) {
 						p = append(p, fmt.Sprintf("with a required argument missing: want exit 2 and no stdout, got exit %d, stdout %q, stderr %q", r.code, r.out, r.errs))
 					}
 				}
-				confCheck(t, "usage-exit "+sc.path, p)
+				confFail(t, "usage-exit "+sc.path, p)
 			})
 		}
 	})

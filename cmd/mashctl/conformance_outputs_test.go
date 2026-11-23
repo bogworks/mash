@@ -4,8 +4,7 @@ package main
 // (text, stream and exit code) is run against the build and compared exactly, with two exceptions the specification's
 // rules make: a case whose whole text stands in round brackets is a description and is skipped (confIsDescription), and
 // a part of a case that the command's notes name as varying is matched as the notes say and nothing more loosely
-// (confMidCause). A case that cannot be run for another reason would be listed in confUnchecked with the reason (none now); a case that is
-// neither run nor listed fails, a listed case that is checked after all fails, so the table only shrinks.
+// (confMidCause). A case that is not run and not such a description fails: there are no waivers.
 //
 // The cases run in process against the embedded server of the other tests (no binary, no outside network): a world is
 // a server set up by `mashctl init` for owner acme, with the endpoints a case needs, and the folder is ~/.config/mash
@@ -45,10 +44,6 @@ import (
 	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/store"
 )
-
-// confUnchecked: key is "<command> <case>" as the specification names them; the value is why the case cannot be run
-// here. It is empty: every case is run or skipped as a description.
-var confUnchecked = map[string]string{}
 
 // confMidCause: key is "<command> <case>". The cases listed here carry parts that vary from run to run, which the
 // command's x-notes in spec/mashctl.json name with the words before and after them (rules.json: "A part of a case that
@@ -293,7 +288,7 @@ type confOutRun struct {
 	subs []string
 }
 
-// confOutputRunners: key is "<command> <case>". A case not here and not in confUnchecked fails.
+// confOutputRunners: key is "<command> <case>". A case not here, and not a description, fails.
 var confOutputRunners = map[string]func(t *testing.T) confOutRun{}
 
 func init() {
@@ -649,40 +644,21 @@ func confOutputs(t *testing.T, tracked []specCommand) {
 			key := sc.path + " " + oc.Case
 			t.Run(key, func(t *testing.T) {
 				if confIsDescription(oc.Text) {
-					if _, listed := confUnchecked[key]; listed || confOutputRunners[key] != nil {
-						t.Errorf("%s: a description is skipped, so it needs no runner and no confUnchecked entry", key)
+					if confOutputRunners[key] != nil {
+						t.Errorf("%s: a description is skipped, so it needs no runner", key)
 					}
 					t.Skipf("%s: the text is a description, not the output", key)
 				}
 				run, ok := confOutputRunners[key]
-				reason, listed := confUnchecked[key]
-				switch {
-				case ok && listed:
-					t.Errorf("%s: it is checked, so it must not be in confUnchecked (%s)", key, reason)
-				case !ok && !listed:
-					t.Errorf("%s: neither checked nor listed in confUnchecked: no case is skipped silently", key)
-				case !ok:
-					t.Logf("confUnchecked: %s: %s", key, reason)
-				default:
-					checked[key] = true
-					r := run(t)
-					confCheck(t, "output "+key, confOutputProblems(sc.path, oc, r))
+				if !ok {
+					t.Fatalf("%s: no runner and not a description: no case is skipped silently", key)
 				}
+				checked[key] = true
+				confFail(t, "output "+key, confOutputProblems(sc.path, oc, run(t)))
 			})
 		}
 	}
 	t.Run("table", func(t *testing.T) {
-		for key := range confUnchecked {
-			found := false
-			for _, sc := range tracked {
-				for _, oc := range sc.c.outputs() {
-					found = found || sc.path+" "+oc.Case == key
-				}
-			}
-			if !found {
-				t.Errorf("confUnchecked has %q, which is no x-output case of a 0.5.6 command", key)
-			}
-		}
 		for key := range confOutputRunners {
 			if !checked[key] {
 				t.Errorf("a runner for %q, which is no x-output case of a 0.5.6 command (or did not run)", key)
