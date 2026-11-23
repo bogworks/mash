@@ -97,6 +97,9 @@ jobs:
     if: ${{ github.event_name == 'push' }}
     timeout-minutes: 30
     runs-on: [self-hosted, rh-macos]
+    env:
+      # release.yml sets CGO_ENABLED=0 for the reproducible builds; go test -race needs cgo, as it had in ci.yml.
+      CGO_ENABLED: "1"
     steps:
       # The build cache and temp dir are job-local under RUNNER_TEMP, which is wiped below (the self-hosted runner is reused
       # between jobs). The module cache is the host's shared one (GOPATH and GOMODCACHE stay at the host's defaults), checked

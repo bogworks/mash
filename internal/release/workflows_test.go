@@ -1342,6 +1342,9 @@ func TestCI_prCheckGatesOnEveryRequiredJob(t *testing.T) {
 	if mj := load(t, "release.yml").Jobs["test-macos"]; mj.ContinueOnError != nil || mj.If != "${{ github.event_name == 'push' }}" || !strings.Contains(fmt.Sprint(mj.RunsOn), "rh-macos") {
 		t.Errorf("release.yml test-macos must run on every tag push (not the dry run), on rh-macos, and never with continue-on-error: %+v", mj)
 	}
+	if got := load(t, "release.yml").Jobs["test-macos"].Env["CGO_ENABLED"]; got != "1" {
+		t.Errorf("release.yml test-macos CGO_ENABLED = %q, want \"1\": the workflow default is 0 and go test -race needs cgo", got)
+	}
 	for jn, rj := range load(t, "release.yml").Jobs {
 		if jn != "test-macos" && strings.Contains(fmt.Sprint(rj.Needs), "test-macos") {
 			t.Errorf("release.yml job %s needs test-macos, which is advisory (ADR 0079): a macOS runner outage must not block a tag", jn)
