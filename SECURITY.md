@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-mash is pre-1.0. Only the newest version is supported, currently v0.5.6. Fixes go into the next release; older releases are not patched.
+mash is pre-1.0. Only the newest version is supported, currently v0.5.8. Fixes go into the next release; older releases are not patched.
 
 ## Reporting a vulnerability
 
@@ -49,7 +49,7 @@ Out of scope, because mash does not try to defend against them:
 
 ## Known limits
 
-These are known and not yet fixed. They are not vulnerabilities to report privately. The full list for this release is the GitHub issues labelled [known-0.5.6](https://github.com/bogworks/mash/issues?q=label%3Aknown-0.5.6). The main ones:
+These are known and not yet fixed. They are not vulnerabilities to report privately. The full list for this release is the GitHub issues labelled [known-0.5.8](https://github.com/bogworks/mash/issues?q=label%3Aknown-0.5.8). The main ones:
 
 - **An endpoint of the same owner can fill another endpoint's inbox.** An endpoint's NATS user may send mail to any endpoint of its owner, and each inbox stream holds 16 MiB. The stream discards the oldest messages when full, and deleting and purging are denied. So a flood evicts older mail, including mail not yet read, and no endpoint can purge the stream. `mashctl doctor` reports an inbox that lost mail unread as a problem and a nearly full inbox (90% or more) as a warning. `mashctl endpoint suspend` stops new mail to an inbox. `mashctl endpoint delete` removes the inbox and the name for good.
 - **A plain-text connection is possible only with an explicit override.** Every mash and mashctl connection requires TLS (`tls://` or `wss://`), loopback included, and refuses a plain URL before connecting. The environment variable `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1` (the only way: no flag, no `config.json` key) allows plain text. Then every command prints `warning: encryption to the server is OFF (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set)` on standard error, `mash doctor` shows the `server` row as `warn`, and anyone on the network can read mail and obtain signatures. The setting covers mash's own connections only. TLS between your NATS servers is set in nats-server, as [docs/tls-and-clusters.md](docs/tls-and-clusters.md) describes. See [Turning encryption off](docs/install.md#turning-encryption-off).
