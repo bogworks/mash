@@ -127,6 +127,20 @@ func TestDoctorWarningAndStrict(t *testing.T) {
 	}
 }
 
+// --audit-users without system_creds cannot audit anyone: the keys row fails and the exit is 1; plain doctor still warns.
+func TestDoctorAuditUsersNoSysCreds(t *testing.T) {
+	f := newAuditEnv(t)
+	f.endpoint(t, ad("a"))
+	out, errb, code := ctlRun(t, f.e, "doctor", "--audit-users")
+	line := "keys       FAIL  no system_creds: connected users cannot be audited\n"
+	if code != 1 || !strings.Contains(out, line) || !strings.Contains(errb, "hint: mashctl init --config <file>\n") {
+		t.Fatalf("exit %d stderr %q\n%q", code, errb, out)
+	}
+	if out, _, code := ctlRun(t, f.e, "doctor"); code != 0 || !strings.Contains(out, "keys       warn  no system_creds in the configuration; connected keys were not checked\n") {
+		t.Fatalf("plain doctor: exit %d\n%q", code, out)
+	}
+}
+
 // Wrong command lines are usage errors that attempt nothing; the removed verbs are unknown commands.
 func TestDoctorUsageAndRemovedVerbs(t *testing.T) {
 	f := newAuditEnv(t)

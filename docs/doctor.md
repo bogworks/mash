@@ -70,7 +70,7 @@ server that does not answer shows one `FAIL` line and four `skip` lines, not fiv
 | `sign-in` | the server refuses the admin credentials, or they cannot be used | | `mashctl init --config <file>` |
 | `storage` | the directory or lease bucket is missing, the lease bucket allows rollup writes (it has not been hardened) or cannot be read | another bucket is missing, a bucket's size cap is below the configured one, or a bucket is 90% full or more | `mashctl init --config <file>` |
 | `endpoints` | a directory record cannot be read; an inbox has no endpoint record; a record has no inbox; an inbox lost mail unread; a retirement was started and not finished; the retired-name bucket has no size cap or a bad configuration | an inbox is 90% full or more; the retired-name bucket is at or over 50% of its cap; a lease has no endpoint record | the command for the first finding: `mashctl endpoint show ADDRESS`, `mashctl endpoint inbox ADDRESS`, `mashctl endpoint delete ADDRESS`, `mashctl limits apply ADDRESS` |
-| `keys` | a key recorded as revoked is still connected, not every server answered, or, with `--audit-users`, a connected user was not issued by mashctl (the finding names it) | no `system_creds` in the configuration, so nothing was checked | `mashctl endpoint list`; `mashctl init --config <file>` |
+| `keys` | a key recorded as revoked is still connected, not every server answered, or, with `--audit-users`, a connected user was not issued by mashctl (the finding names it) | no `system_creds` in the configuration, so nothing was checked (a failure under `--audit-users`, which cannot audit without it) | `mashctl endpoint list`; `mashctl init --config <file>` |
 
 When a check finds several things its detail lists them, separated by `;`, failures first, and names up to three
 addresses for each (`and N more` after that).
@@ -145,7 +145,7 @@ Revoking a user mashctl did not issue is done with `nsc`. With no such user, `--
 The check is complete only when every server answered: the servers it expects are the count under `servers` in
 `config.json`, and a cluster that reports more servers than are listed is not complete either. A server that did not
 answer, or whose connection list changed while it was read and could not be read whole, fails the check with the reason,
-even when no other user was found. Without `system_creds` the check warns and reads nothing.
+even when no other user was found. Without `system_creds` the check warns and reads nothing; with `--audit-users` it fails instead, since no user was audited.
 
 ## Exit codes
 

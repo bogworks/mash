@@ -585,8 +585,12 @@ func connectedFindings(conns []apply.ConnzServer, recs []store.Issued) (unrecord
 }
 
 // doctorKeys is the keys check: every key connected to the account was issued here and none that was revoked is still
-// connected. It needs the system account credentials; without them it warns and checks nothing.
+// connected. It needs the system account credentials; without them it warns and checks nothing, or fails under --audit-users.
 func doctorKeys(rep *doctorReport, ctx context.Context, adm *admin.Admin, cfg config.Config, env func(string) string, auditUsers bool) {
+	if cfg.SysCreds == "" && auditUsers {
+		rep.add("keys", stateFail, "no system_creds: connected users cannot be audited", initFix)
+		return
+	}
 	if cfg.SysCreds == "" {
 		rep.add("keys", stateWarn, "no system_creds in the configuration; connected keys were not checked", initFix)
 		return
