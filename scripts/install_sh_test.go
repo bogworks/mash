@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -135,6 +136,13 @@ func patchedInstall(t *testing.T) string {
 
 func runInstallIn(t *testing.T, release, toolPath, home, dest, script string, env ...string) installRun {
 	t.Helper()
+	return runInstallGroup(t, false, release, toolPath, home, dest, script, env...)
+}
+
+// runInstallGroup is runInstallIn with the option to start bash in its own process group, so a test can signal the
+// whole group the way a terminal does for Ctrl-C.
+func runInstallGroup(t *testing.T, ownGroup bool, release, toolPath, home, dest, script string, env ...string) installRun {
+	t.Helper()
 	bash, err := exec.LookPath("bash")
 	if err != nil {
 		t.Skip("no bash")
@@ -151,6 +159,9 @@ func runInstallIn(t *testing.T, release, toolPath, home, dest, script string, en
 		"MASH_INSTALL_DIR=" + dest,
 		"MASH_VERSION=v0.5.6",
 	}, env...)
+	if ownGroup {
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	}
 	out, err := cmd.CombinedOutput()
 	return installRun{out: string(out), err: err, home: home, dest: dest}
 }
@@ -566,10 +577,13 @@ func TestInstallSh_bothBinariesOrNeither(t *testing.T) {
 	}
 }
 
-// A SIGTERM that arrives while mashctl is being put in place must not leave the two binaries from different
-// releases. The stub mv is a direct child of the bash running install.sh, so $PPID is that bash. It sends SIGTERM,
-// then gives bash a moment to die. If it died (the script did not shield itself), the interruption landed before the
-// mashctl rename, so the stub stops without renaming, as a real kill would. If bash is still there, the stub renames.
+// A signal that arrives while mashctl is being put in place must not leave the two binaries from different
+// releases. bash runs in its own process group and the stub mv signals the whole group, as a terminal does for
+// Ctrl-C (a signal to bash's PID alone is deferred by a non-interactive bash, which would hide a missing guard).
+// The stub mv is a direct child of bash, so $PPID is bash, and bash is its group's leader, so -$PPID is the group.
+// Without the guard the signal kills bash and the stub (both in the group), so mashctl is never renamed and the
+// install fails. With the guard the ignore disposition is inherited by the stub and the real mv, so the install
+// completes with both new.
 func TestInstallSh_aSignalDuringTheRenamesLeavesOneRelease(t *testing.T) {
 	for _, sig := range []string{"TERM", "INT", "HUP"} {
 		t.Run(sig, func(t *testing.T) {
@@ -591,23 +605,19 @@ func TestInstallSh_aSignalDuringTheRenamesLeavesOneRelease(t *testing.T) {
 			}
 			stub := "for a; do last=$a; done\n" +
 				"case \"$last\" in */mashctl)\n" +
-				"  kill -" + sig + " \"$PPID\"\n" +
-				"  i=0\n" +
-				"  while [ $i -lt 40 ]; do\n" +
-				"    kill -0 \"$PPID\" 2>/dev/null || exit 143\n" +
-				"    \"$REAL_SLEEP\" 0.05\n" +
-				"    i=$((i+1))\n" +
-				"  done;;\n" +
+				"  kill -s " + sig + " -- \"-$PPID\"\n" +
+				"  \"$REAL_SLEEP\" 0.2;;\n" +
 				"esac\n" +
 				"exec \"$REAL_MV\" \"$@\"\n"
 			tools := installTools(t, map[string]string{"mv": stub})
-			runInstallIn(t, rel, tools, home, dest, "install.sh", "REAL_MV="+realMv, "REAL_SLEEP="+realSleep)
+			r := runInstallGroup(t, true, rel, tools, home, dest, "install.sh", "REAL_MV="+realMv, "REAL_SLEEP="+realSleep)
+			if r.err != nil {
+				t.Errorf("want the install to finish despite SIG%s, got err=%v\n%s", sig, r.err, r.out)
+			}
 			m, _ := os.ReadFile(filepath.Join(dest, "mash"))
 			c, _ := os.ReadFile(filepath.Join(dest, "mashctl"))
-			oldBoth := string(m) == "OLD-MASH" && string(c) == "OLD-CTL"
-			newBoth := strings.Contains(string(m), fakeMashVersion) && strings.Contains(string(c), fakeCtlVersion)
-			if !oldBoth && !newBoth {
-				t.Errorf("mash = %q, mashctl = %q: want both old or both new", m, c)
+			if !strings.Contains(string(m), fakeMashVersion) || !strings.Contains(string(c), fakeCtlVersion) {
+				t.Errorf("mash = %q, mashctl = %q: want both new", m, c)
 			}
 		})
 	}
