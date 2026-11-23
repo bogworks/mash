@@ -164,3 +164,44 @@ func TestApplyPresenceIgnoresMetadataOwner(t *testing.T) {
 		t.Fatalf("a subject that is not the directory key's counted %d", n)
 	}
 }
+
+// A second credential answering for X's subject does not make X present: the directory key for the address is not
+// its user, with or without an id_sig of its own, and an answer with no id_sig is not counted. Who then shows X
+// offline with a zero LastSeen.
+func TestApplyPresenceRefusesOtherCredential(t *testing.T) {
+	const key = "acme_team1_ops1"
+	a, b := newFormIdentity(t), newFormIdentity(t)
+	e := keyEndpoint(map[string]store.Record{key: {Owner: "acme", Group: "team1", Instance: "ops1", User: a.User}})
+	subj := "agents.prompt.acme.team1.ops1"
+	answer := func(id sap.Identity, sign bool) *nats.Msg {
+		md := map[string]string{"owner": "acme", "agent": sap.AgentName, "account": id.Account, "user_nkey": id.User}
+		if sign {
+			sig, err := id.IDSig(sap.AgentName, "acme", subj)
+			if err != nil {
+				t.Fatal(err)
+			}
+			md["id_sig"] = sig
+		}
+		d, _ := json.Marshal(map[string]any{"metadata": md, "endpoints": []map[string]string{{"name": "prompt", "subject": subj}}})
+		return &nats.Msg{Data: d}
+	}
+	for _, c := range []struct {
+		desc string
+		id   sap.Identity
+		sign bool
+	}{
+		{"other credential, valid id_sig of its own", b, true},
+		{"other credential, no id_sig", b, false},
+		{"the directory's own key, no id_sig", a, false},
+	} {
+		if n := e.applyPresence(answer(c.id, c.sign)); n != 0 || !e.lastSeen[key].IsZero() {
+			t.Errorf("%s: counted %d, lastSeen %v", c.desc, n, e.lastSeen[key])
+		}
+	}
+	for _, p := range e.Who() {
+		t.Logf("Who: %s online=%v lastSeen=%v", flatOf(p.Record), p.Online, p.LastSeen)
+		if p.Online || !p.LastSeen.IsZero() {
+			t.Errorf("%s shows present: %+v", flatOf(p.Record), p)
+		}
+	}
+}

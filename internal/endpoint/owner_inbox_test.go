@@ -272,3 +272,42 @@ func TestDiscoverMatchesSubjectNotMetadata(t *testing.T) {
 		}
 	}
 }
+
+// Discovery accepts a subject only when it is exactly the wanted prompt subject: a wildcard, an extra token or
+// another verb on the same T3.T4.T5 is not an answer for the address.
+func TestDiscoverRefusesMalformedSubjects(t *testing.T) {
+	want := taddr("ghost").Subjects().Prompt
+	tail := strings.TrimPrefix(want, "agents.prompt.")
+	for _, c := range []struct{ desc, subject string }{
+		{"wildcard token", "agents.prompt.*.o.s"},
+		{"full wildcard", "agents.prompt.>"},
+		{"extra token", want + ".x"},
+		{"status verb", "agents.status." + tail},
+		{"mail verb", "agents.mail." + tail},
+	} {
+		f := newFixture(t, "a", "b")
+		answerInfo(t, f.client(t, "a"), map[string]string{"owner": taddr("ghost").Owner}, c.subject)
+		subj, err := Discover(context.Background(), f.client(t, "b").Conn(), taddr("ghost"))
+		if err == nil {
+			t.Errorf("%s: discovered %q", c.desc, subj)
+			continue
+		}
+		if !strings.Contains(err.Error(), "not online") {
+			t.Errorf("%s: error %q is not the not-online error", c.desc, err)
+		}
+	}
+}
+
+// Accepted residual: discovery is a presence check only. An unsigned $SRV.INFO answer (no id_sig) whose prompt
+// subject equals the wanted one makes Discover succeed, so a credential in the same account can make an address look
+// reachable for prompt. Whether it can receive the prompt rests on the server's subscribe permission on the
+// subject, not on discovery (planner ruling).
+func TestDiscoverAcceptsUnsignedAnswerResidual(t *testing.T) {
+	want := taddr("ghost").Subjects().Prompt
+	f := newFixture(t, "a", "b")
+	answerInfo(t, f.client(t, "a"), nil, want)
+	subj, err := Discover(context.Background(), f.client(t, "b").Conn(), taddr("ghost"))
+	if err != nil || subj != want {
+		t.Fatalf("unsigned answer for the wanted subject: got (%q, %v)", subj, err)
+	}
+}
