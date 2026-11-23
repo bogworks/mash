@@ -43,9 +43,13 @@ func lockTestDir(t *testing.T) (script, dir string) {
 }
 
 func runStop(script, dir string) (rc int, stdout, stderr string, err error) {
+	return runStopEnv(script, dir)
+}
+
+func runStopEnv(script, dir string, extra ...string) (rc int, stdout, stderr string, err error) {
 	var so, se bytes.Buffer
 	c := exec.Command("bash", script, "--stop", "--dir", dir)
-	c.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + filepath.Dir(dir)}
+	c.Env = append([]string{"PATH=" + os.Getenv("PATH"), "HOME=" + filepath.Dir(dir)}, extra...)
 	c.Stdout, c.Stderr = &so, &se
 	err = c.Run()
 	if ee, ok := err.(*exec.ExitError); ok {
@@ -134,6 +138,85 @@ func TestDeadRecoverHolderStopsWithHint(t *testing.T) {
 	}
 }
 
+// An empty .lock.recover is left by a run that died between creating it and writing its pid: same error and hint as a
+// dead pid, not "another run is using ... (pid ...)" with no way out.
+func TestEmptyLockRecoverFileIsLeftOver(t *testing.T) {
+	script, dir := lockTestDir(t)
+	writeLockFile(t, filepath.Join(dir, ".lock"), deadPid(t))
+	rec := filepath.Join(dir, ".lock.recover")
+	if err := os.WriteFile(rec, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rc, _, errOut, err := runStop(script, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rc != 1 || !strings.Contains(errOut, "error: "+rec+" is left over") ||
+		!strings.Contains(errOut, "hint: remove that one file ("+rec+")") ||
+		strings.Contains(errOut, "another run is using") {
+		t.Fatalf("rc=%d stderr=%q; want rc 1, the left-over error and hint", rc, errOut)
+	}
+	if _, err := os.Stat(rec); err != nil {
+		t.Fatalf("a run that did not hold .lock.recover removed it: %v", err)
+	}
+}
+
+// The takeover re-reads .lock under .lock.recover. If that read gives nothing (missing or empty) a live run C may have
+// taken .lock in between through the fast path, so the takeover must not remove it. The script has no test hook; a
+// wrapper cat on PATH stages the timing: the first read of .lock is real (the stale pid), on the second (the re-read)
+// it shows an empty or missing .lock and then C's live pid appears in .lock.
+func TestTakeoverDoesNotRemoveLiveLockAtReread(t *testing.T) {
+	for _, mode := range []string{"empty", "missing"} {
+		t.Run(mode, func(t *testing.T) {
+			realCat, err := exec.LookPath("cat")
+			if err != nil {
+				t.Skip("cat not found")
+			}
+			script, dir := lockTestDir(t)
+			live := exec.Command("sleep", "60")
+			if err := live.Start(); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = live.Process.Kill(); _ = live.Wait() }) // only the process this test started
+			lock := filepath.Join(dir, ".lock")
+			writeLockFile(t, lock, deadPid(t))
+			wrap := t.TempDir()
+			state := filepath.Join(wrap, "n")
+			sh := `#!/bin/sh
+for a; do case $a in */.lock) f=$a ;; esac; done
+if [ -n "${f:-}" ]; then
+  c=0; [ ! -f "$STATE" ] || c=$(` + realCat + ` "$STATE"); c=$((c + 1)); echo "$c" >"$STATE"
+  if [ "$c" = 2 ]; then
+    if [ "$MODE" = missing ]; then /bin/rm -f "$f"; else : >"$f"; fi
+    printf '%s\n' "$LIVE" >"$f.c"; /bin/mv -f "$f.c" "$f"
+    [ "$MODE" = missing ] && exit 1
+    exit 0
+  fi
+fi
+exec ` + realCat + ` "$@"
+`
+			if err := os.WriteFile(filepath.Join(wrap, "cat"), []byte(sh), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			rc, _, errOut, err := runStopEnv(script, dir,
+				"PATH="+wrap+":"+os.Getenv("PATH"), "STATE="+state, "MODE="+mode, fmt.Sprintf("LIVE=%d", live.Process.Pid))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if rc != 1 || !strings.Contains(errOut, "another run is using") ||
+				!strings.Contains(errOut, fmt.Sprintf("pid %d", live.Process.Pid)) {
+				t.Fatalf("rc=%d stderr=%q; want rc 1 and busy with the live run's pid", rc, errOut)
+			}
+			if b, _ := os.ReadFile(lock); strings.TrimSpace(string(b)) != fmt.Sprint(live.Process.Pid) {
+				t.Fatalf("the live run's .lock was removed or replaced: %q", b)
+			}
+			if _, err := os.Lstat(filepath.Join(dir, ".lock.recover")); err == nil {
+				t.Error(".lock.recover left behind")
+			}
+		})
+	}
+}
+
 // Best effort: the script has no test hooks, so the overlap cannot be forced. Eight runs start at once against one
 // stale lock; each must exit 0 or say busy, at least one must succeed, and none may leave a lock file behind.
 func TestConcurrentTakeoverOfStaleLock(t *testing.T) {
@@ -176,4 +259,20 @@ func TestConcurrentTakeoverOfStaleLock(t *testing.T) {
 		}
 		noLockFiles(t, dir)
 	}
+}
+
+// An old-format lock is a folder; it is stale (nothing holds it) and is taken over.
+func TestStaleLockFolderIsTakenOver(t *testing.T) {
+	script, dir := lockTestDir(t)
+	if err := os.Mkdir(filepath.Join(dir, ".lock"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	rc, out, errOut, err := runStop(script, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rc != 0 {
+		t.Fatalf("rc=%d stdout=%q stderr=%q; want 0", rc, out, errOut)
+	}
+	noLockFiles(t, dir)
 }
