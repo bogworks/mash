@@ -222,12 +222,12 @@ func runPublish(o Options, w world, x string) error {
 	}
 	if err := verify(tag); err != nil {
 		// The release is already published: a failed check is not a refusal, so it is exit 4.
-		// Only a run that just published may suggest moving Latest: a re-verify of an older release must not.
+		// A re-verify cannot tell the newest release from an older one, so it names both fixes.
 		hint := fmt.Sprintf("gh release edit %s --latest", tag)
 		if o.NotLatest {
 			hint = fmt.Sprintf("gh release edit %s --latest=false", tag)
 		} else if !publishedNow {
-			hint = "if this is an older release, rerun with --not-latest"
+			hint = fmt.Sprintf("if this is the newest release: gh release edit %s --latest; if it is older: rerun with --not-latest", tag)
 		}
 		return stepErr(op(fmt.Errorf("%s is published; rerun to re-verify, or %s: %w", tag, hint, err)))
 	}
