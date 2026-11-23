@@ -1,1 +1,1 @@
-**`mash join` says what is wrong when the user JWT's name is not the join file's address.** It used to answer only "not a join file this mash can read". It now names both the JWT's name and the address it expected.
+**`mash join` says what is wrong when a join file's user JWT was made for another address.** It used to answer only "not a join file this mash can read". It now says `<file> was made for "<name>", but its address is "<address>"` (or `has no name`), and a hint to ask whoever made the file for a new one with `mashctl endpoint reissue`.

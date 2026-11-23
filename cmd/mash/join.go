@@ -50,10 +50,16 @@ func notJoinFile(path string) *cliframe.Error {
 }
 
 // wrongJWTName is the failure for a user JWT whose name is not the join file's address (a user signed outside mashctl,
-// say). It names both, which are not secrets, so the person can see what to fix; nothing else of the file is shown.
+// say). It leads with the problem and names both, which are not secrets; nothing else of the file is shown. The
+// names are cleaned, not quoted again, so a control byte is escaped once.
 func wrongJWTName(path, jwtName, address string) *cliframe.Error {
-	return cliframe.Failf("%s is not a join file this mash can read: its user JWT is named %q but the join file's address is %q; they must be the same",
-		config.Clean(path), config.Clean(jwtName), config.Clean(address))
+	made := "has no name"
+	if jwtName != "" {
+		made = `was made for "` + config.Clean(jwtName) + `"`
+	}
+	addr := config.Clean(address)
+	return cliframe.Failf("%s %s, but its address is \"%s\"", config.Clean(path), made, addr).
+		WithHint("ask whoever made this file for a new one: mashctl endpoint reissue " + addr + " --out " + addr + ".join")
 }
 
 // readJoinFile reads and parses the join file at path, and checks its address, its creds or JWT and its certificate.
