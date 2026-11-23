@@ -20,9 +20,9 @@
 #
 # One exclusive lifecycle lock (the file DIR/.lock, holding the pid) is held
 # across the whole of create, --start, --stop and --remove, so they cannot
-# overlap; a lock whose pid is gone is taken over.
-# Two runs that take over the same stale lock at the same instant can both
-# win; that is accepted for a same-user script.
+# overlap; a lock whose pid is gone is taken over, under a second exclusive
+# file (DIR/.lock.recover), so only one run can take it over. If a run is
+# killed in that tiny window, the next run stops and names the file to remove.
 #
 # Portability: file owner and mode come from GNU stat (-c) or BSD stat (-f),
 # found by trying `stat -c %u /` once; process checks use /proc on Linux and
@@ -401,7 +401,12 @@ start_server() { # needs PORT
 
 # ---------------------------------------------------------------- lock
 LOCKED=0
+RLOCKED=0
 release_lock() {
+    if [ "$RLOCKED" = 1 ]; then
+        RLOCKED=0
+        [ "$(cat "$DIR/.lock.recover" 2>/dev/null || true)" != "$$" ] || rm -f "$DIR/.lock.recover" 2>/dev/null || true
+    fi
     if [ "$LOCKED" = 1 ]; then
         LOCKED=0
         [ "$(cat "$DIR/.lock" 2>/dev/null || true)" != "$$" ] || rm -f "$DIR/.lock" 2>/dev/null || true
@@ -413,8 +418,49 @@ busy() { die 1 "another run is using $DIR (pid ${1:-?})" "wait for it to finish,
 # which is atomic and exclusive on every system (mkdir is not, in uutils
 # coreutils on Ubuntu 26.04)
 lock_make() { ( set -C; printf '%s\n' "$$" >"$DIR/.lock" ) 2>/dev/null; }
+# a pid read from a lock file: digits only, else empty
+lock_pid() {
+    _v=$(cat "$1" 2>/dev/null || true)
+    case $_v in *[!0-9]*) _v='' ;; esac
+    printf '%s' "$_v"
+}
+# take over a stale DIR/.lock (its pid, $1, is gone) under a second lock,
+# DIR/.lock.recover, so that only one run can do it. Returns 0 with the lock
+# taken, or 1 when another run's recovery finished meanwhile (the caller looks
+# at .lock again).
+lock_recover() {
+    _stale=$1
+    if ! ( set -C; printf '%s\n' "$$" >"$DIR/.lock.recover" ) 2>/dev/null; then
+        _rp=$(lock_pid "$DIR/.lock.recover")
+        if [ -n "$_rp" ] && kill -0 "$_rp" 2>/dev/null; then busy "$_rp"; fi
+        sleep 1
+        # a file that still holds the same dead pid after the wait was left by
+        # a stopped run; anything else is a finished recovery by another run
+        if [ -n "$_rp" ] && [ "$(lock_pid "$DIR/.lock.recover")" = "$_rp" ]; then
+            die 1 "$DIR/.lock.recover is left over from a run that was stopped while it took over a stale lock" \
+                "remove that one file ($DIR/.lock.recover), then run $SELF again"
+        fi
+        return 1
+    fi
+    RLOCKED=1
+    # re-read under the recover lock: remove .lock only if it is still the stale one
+    _cur=$(lock_pid "$DIR/.lock")
+    if [ -n "$_cur" ] && [ "$_cur" != "$_stale" ]; then busy "$_cur"; fi
+    if [ -d "$DIR/.lock" ] && [ ! -L "$DIR/.lock" ]; then
+        rmdir "$DIR/.lock" 2>/dev/null || busy "$_stale"
+    else
+        rm -f "$DIR/.lock" 2>/dev/null || busy "$_stale"
+    fi
+    lock_make || busy "$_stale"
+    LOCKED=1
+    RLOCKED=0
+    [ "$(cat "$DIR/.lock.recover" 2>/dev/null || true)" != "$$" ] || rm -f "$DIR/.lock.recover" 2>/dev/null || true
+}
 lock_dir() {
-    if ! lock_make; then
+    _try=0
+    while [ "$_try" -lt 3 ]; do
+        _try=$((_try + 1))
+        lock_make && { LOCKED=1; return 0; }
         _lp=$(cat "$DIR/.lock" 2>/dev/null || true)
         if [ -z "$_lp" ]; then
             sleep 1
@@ -422,15 +468,10 @@ lock_dir() {
         fi
         case $_lp in *[!0-9]*) _lp='' ;; esac
         if [ -n "$_lp" ] && kill -0 "$_lp" 2>/dev/null; then busy "$_lp"; fi
-        # stale: its run is gone; take over by recorded path
-        if [ -d "$DIR/.lock" ] && [ ! -L "$DIR/.lock" ]; then
-            rmdir "$DIR/.lock" 2>/dev/null || busy "$_lp"
-        else
-            rm -f "$DIR/.lock" 2>/dev/null || busy "$_lp"
-        fi
-        lock_make || busy "$_lp"
-    fi
-    LOCKED=1
+        # stale: its run is gone; take over under .lock.recover
+        lock_recover "$_lp" && return 0
+    done
+    busy "$_lp"
 }
 lock_mode() { # for --start, --stop, --remove
     trap release_lock EXIT
