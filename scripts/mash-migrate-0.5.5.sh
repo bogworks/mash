@@ -247,15 +247,18 @@ main() {
     esac
 
     trap cleanup EXIT
-    local nonl=0
-    if [ -s "$rfile" ] && [ -n "$(tail -c 1 "$rfile" | tr -d '\n')" ]; then nonl=1; fi
-
     umask 077
     local rc=0
     # unpredictable names, made by mktemp (GNU and BSD alike), each recorded for cleanup
     TMP=$(mktemp ./.mash-migrate.XXXXXX 2>/dev/null) || { TMP=''; refuse "cannot write in $dir" "check the folder's permissions"; }
     STAT=$(mktemp ./.mash-migrate.XXXXXX 2>/dev/null) || { STAT=''; refuse "cannot write in $dir" "check the folder's permissions"; }
-    LC_ALL=C awk -v st="$STAT" -v nonl="$nonl" "$AWK_PROG" "$rfile" >"$TMP" || rc=$?
+    # config.json is read once: copied (keeping the mode) to a private temp that becomes the
+    # backup, and every later check reads that copy, so the checks and the backup agree.
+    BTMP=$(mktemp ./.mash-migrate.XXXXXX 2>/dev/null) || { BTMP=''; refuse "cannot write in $dir" "check the folder's permissions"; }
+    cp -p "$rfile" "$BTMP" || refuse "cannot write the backup $backup" "check the folder's permissions"
+    local nonl=0
+    if [ -s "$BTMP" ] && [ -n "$(tail -c 1 "$BTMP" | tr -d '\n')" ]; then nonl=1; fi
+    LC_ALL=C awk -v st="$STAT" -v nonl="$nonl" "$AWK_PROG" "$BTMP" >"$TMP" || rc=$?
     if [ "$rc" != 0 ]; then
         local why
         why=$(sed -n 's/^err //p' "$STAT" 2>/dev/null | head -n 1)
@@ -290,27 +293,24 @@ main() {
     chmod 600 "$TMP" || refuse "cannot set the mode of the new file" "check the folder's permissions"
     { [ ! -e "$rbackup" ] && [ ! -L "$rbackup" ]; } || refuse "$backup already exists; not overwriting it" \
         "move it aside, or remove it if you no longer need it, and run again"
-    # The backup: a complete copy (keeping the mode) under a private name, then hard-linked
-    # to the backup name.  ln does not replace anything, so a backup that appeared meanwhile
-    # is refused, and the backup name never shows a partial file.
-    BTMP=$(mktemp ./.mash-migrate.XXXXXX 2>/dev/null) || { BTMP=''; refuse "cannot write in $dir" "check the folder's permissions"; }
-    cp -p "$rfile" "$BTMP" || refuse "cannot write the backup $backup" "check the folder's permissions"
+    # The backup: the private copy made above, hard-linked to the backup name.  ln does not
+    # replace anything, so a backup that appeared meanwhile is refused, and the backup name
+    # never shows a partial file.
     ln -- "$BTMP" "$rbackup" 2>/dev/null ||
         refuse "cannot make the backup $backup (it exists, or links are not allowed here)" \
             "move an existing backup aside and run again"
     BACKUP_MADE=$rbackup
     rm -f -- "$BTMP" || refuse "cannot remove the temporary copy $dir/${BTMP#./}" "check the folder's permissions"
     BTMP=''
-    # From here the new file and the backup are no longer cleanup's to remove: an
+    # From here the backup is no longer cleanup's to remove: an
     # interrupt after the replace must not delete the backup.  If the replace
     # itself fails, remove both by their recorded paths.
-    local newfile=$TMP
-    TMP=''
     BACKUP_MADE=''
-    if ! mv -f "$newfile" "$rfile"; then
-        rm -f -- "$newfile" "$rbackup"
+    if ! mv -f "$TMP" "$rfile"; then
+        rm -f -- "$TMP" "$rbackup"
         refuse "cannot replace $file" "check the folder's permissions"
     fi
+    TMP=''
 
     local what=''
     [ "$has_url" = 0 ] || what='url -> servers'

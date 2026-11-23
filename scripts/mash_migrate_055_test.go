@@ -78,12 +78,17 @@ func TestMigrate055NoDirPathAfterCd(t *testing.T) {
 			continue
 		}
 		// messages may show $dir, $file and $backup; operations may not build a path from them
-		if strings.Contains(l, "refuse ") || strings.Contains(l, "printf") {
-			continue
+		// only the text before "refuse " (the operation) or before "printf" (its arguments) is
+		// checked; what follows is a message
+		if j := strings.Index(l, "refuse "); j >= 0 {
+			l = l[:j]
 		}
-		for _, v := range []string{`"$dir/`, `$file`, `${file}`, `$backup`, `${backup}`} {
+		if j := strings.Index(l, "printf"); j >= 0 {
+			l = l[:j]
+		}
+		for _, v := range []string{`$dir/`, `${dir}/`, `$file`, `${file}`, `$backup`, `${backup}`} {
 			if strings.Contains(l, v) {
-				t.Errorf("line %d after the cd still uses %s outside refuse and printf: %s", i, v, l)
+				t.Errorf("line %d after the cd still uses %s outside a message: %s", i, v, l)
 			}
 		}
 	}
@@ -101,12 +106,20 @@ func migrateGlob(t *testing.T, dir string) []string {
 	return left
 }
 
-// A fake cp, first on PATH, re-points the parent symlink on its first call and then runs the
-// real cp.  The script needs no hook for this: it runs cp after it has resolved the folder.
+// A fake for one external command, first on PATH, re-points the parent symlink on its first
+// call and then runs the real command.  The script needs no hook for this: it runs each of
+// these after it has resolved the folder.  ls is the first external command after the cd,
+// before any read of config.json; mktemp, cp, tail and awk run in and around the one read.
 func TestMigrate055ParentSwapDuringRun(t *testing.T) {
-	realCp, err := exec.LookPath("cp")
+	for _, name := range []string{"ls", "mktemp", "cp", "tail", "awk", "ln", "mv"} {
+		t.Run(name, func(t *testing.T) { migrateSwapDuringRun(t, name) })
+	}
+}
+
+func migrateSwapDuringRun(t *testing.T, name string) {
+	realCp, err := exec.LookPath(name)
 	if err != nil {
-		t.Skip("no cp")
+		t.Skip("no " + name)
 	}
 	script, err := filepath.Abs("mash-migrate-0.5.5.sh")
 	if err != nil {
@@ -138,7 +151,7 @@ func TestMigrate055ParentSwapDuringRun(t *testing.T) {
 		"  rm -f '" + dot + "' && ln -s '" + filepath.Join(home, "evil") + "' '" + dot + "'\n" +
 		"fi\n" +
 		"exec '" + realCp + "' \"$@\"\n"
-	if err := os.WriteFile(filepath.Join(bin, "cp"), []byte(fake), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(bin, name), []byte(fake), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	cmd := exec.Command("bash", script)
@@ -146,7 +159,7 @@ func TestMigrate055ParentSwapDuringRun(t *testing.T) {
 	cmd.Env = append(os.Environ(), "HOME="+home, "MASH_CONFIG_DIR=", "XDG_CONFIG_HOME=", "PATH="+bin+":"+os.Getenv("PATH"))
 	out, err := cmd.CombinedOutput()
 	if _, serr := os.Stat(filepath.Join(bin, "swapped")); serr != nil {
-		t.Fatalf("the fake cp never ran: the swap did not happen\n%s", out)
+		t.Fatalf("the fake "+name+" never ran: the swap did not happen\n%s", out)
 	}
 	if err != nil {
 		t.Fatalf("script failed: %v\n%s", err, out)
@@ -156,6 +169,9 @@ func TestMigrate055ParentSwapDuringRun(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(held, "config.json.0.5.5")); err != nil {
 		t.Errorf("backup missing in the held folder: %v", err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(held, "config.json.0.5.5")); string(got) != migrateIn {
+		t.Errorf("backup is not the original input: %q", got)
 	}
 	if got, _ := os.ReadFile(filepath.Join(evil, "config.json")); string(got) != evilIn {
 		t.Errorf("evil config changed: %q", got)
