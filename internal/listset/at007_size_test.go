@@ -35,7 +35,7 @@ func exceptionSet(n, p, l int) (ListSet, string) {
 		allow[i] = gb + "." + padName(fmt.Sprintf("r%d", i), l)
 	}
 	return ListSet{
-		Range:    "foo",
+		Prefix:   "foo",
 		Switches: concat(switches(ga, Closed, Closed, Closed, Closed), switches(gb, Closed, Closed, Closed, Closed)),
 		Senders: []SenderLists{
 			{Sender: sender, Allow: allow},

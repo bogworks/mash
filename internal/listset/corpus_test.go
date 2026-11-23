@@ -35,7 +35,7 @@ func all4(addrs ...string) map[Verb][]string {
 // shared; the only exception is that core allows lead.
 func at001() ListSet {
 	return ListSet{
-		Range:    "foo",
+		Prefix:   "foo",
 		Switches: switches("foo.c", Closed, Closed, Shared, Closed),
 		Senders: []SenderLists{
 			{Sender: "foo.c.core", Allow: []string{"foo.c.lead"}},
@@ -49,7 +49,7 @@ func at001() ListSet {
 // beside it has every verb closed and no deny.
 func at003Deny() ListSet {
 	return ListSet{
-		Range: "foo",
+		Prefix: "foo",
 		Switches: concat(
 			switches("foo.c", Shared, Shared, Closed, Shared),
 			switches("foo.d", Closed, Closed, Closed, Closed)),
@@ -76,7 +76,7 @@ func corpus() []corpusCase {
 		{
 			name: "a sender allowed nobody, zero tags, every verb closed",
 			ls: ListSet{
-				Range:    "foo",
+				Prefix:   "foo",
 				Switches: switches("foo.c", Closed, Closed, Closed, Closed),
 				Senders:  []SenderLists{{Sender: "foo.c.core"}, {Sender: "foo.c.lead"}},
 			},
@@ -96,7 +96,7 @@ func corpus() []corpusCase {
 		{
 			name: "cross-group allows go one way; an allow of a shared verb's own group is harmless",
 			ls: ListSet{
-				Range: "foo",
+				Prefix: "foo",
 				Switches: concat(
 					switches("foo.a", Closed, Closed, Closed, Closed),
 					switches("foo.b", Shared, Shared, Shared, Shared)),
@@ -115,7 +115,7 @@ func corpus() []corpusCase {
 		{
 			name: "an exception covers all four verbs with one tag, whatever the group's mix",
 			ls: ListSet{
-				Range:    "foo",
+				Prefix:   "foo",
 				Switches: switches("foo.c", Shared, Closed, Shared, Closed),
 				Senders: []SenderLists{
 					{Sender: "foo.c.core", Allow: []string{"foo.c.sdk", "foo.x.out"}},

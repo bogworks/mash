@@ -21,8 +21,8 @@ type Candidate struct {
 	// permissions and revocations alone, so a JWT with a different or an extra signer can be read as the generation:
 	// that is for tests only. A caller in production MUST pass Signers; Run and Gate refuse a target without it.
 	Signers map[string]string
-	// Kept maps group -> public key of the scoped signing keys of other ranges that the account JWT keeps beside this
-	// range's (the serve signer leaves them alone). When Kept is non-nil each must be present as a scoped signer
+	// Kept maps group -> public key of the scoped signing keys of other prefixes that the account JWT keeps beside this
+	// prefix's (the serve signer leaves them alone). When Kept is non-nil each must be present as a scoped signer
 	// with its group as role, its group must not be a template of this candidate, and no key beyond Signers and Kept
 	// may be present. A kept key missing, or with another role, fails the read.
 	Kept map[string]string
@@ -36,7 +36,7 @@ type Candidate struct {
 }
 
 // GenerationOf says which candidate the account JWT carries. The JWT carries no marker: a scoped signing key whose
-// role is a template's Group (the role is the owner group "range.owner", the name the template is filed under)
+// role is a template's Group (the role is the owner group "prefix.owner", the name the template is filed under)
 // carries that generation's Template.Permissions, and the revocation list holds every key the generation revokes. A
 // scoped key for a group of another candidate that this one lacks must be absent. When several candidates match the
 // first wins, so list the target first. A target equal in content to the previous generation therefore matches the

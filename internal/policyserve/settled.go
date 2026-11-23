@@ -146,7 +146,7 @@ func allKeysRevoked(held []policyapply.IssueEntry, claims []*jwt.AccountClaims) 
 	return n > 0
 }
 
-// groupOf is the owner group of a sender address: range.owner of range.owner.name.
+// groupOf is the owner group of a sender address: prefix.owner of prefix.owner.name.
 func groupOf(sender string) string {
 	if i := strings.LastIndex(sender, "."); i >= 0 {
 		return sender[:i]

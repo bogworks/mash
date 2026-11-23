@@ -26,7 +26,7 @@ import (
 )
 
 const (
-	testRange     = "foo"
+	testPrefix    = "foo"
 	retryInitial  = 5 * time.Millisecond
 	retryMax      = 20 * time.Millisecond
 	waitLimit     = 10 * time.Second
@@ -54,7 +54,7 @@ func newUser(t *testing.T) keyPair {
 type payload struct {
 	Schema         int    `json:"schema"`
 	Account        string `json:"account"`
-	Range          string `json:"range"`
+	Prefix         string `json:"prefix"`
 	Generation     uint64 `json:"generation"`
 	BaseGeneration uint64 `json:"base_generation"`
 	NextSubmitter  string `json:"next_submitter,omitempty"`
@@ -100,7 +100,7 @@ func decode(raw []byte, expected string) (policyintake.Doc, error) {
 	if p.Schema != 1 {
 		return policyintake.Doc{}, fmt.Errorf("%w: unknown schema %d", policyintake.ErrDocument, p.Schema)
 	}
-	return policyintake.Doc{Account: p.Account, Range: p.Range, Generation: p.Generation, BaseGeneration: p.BaseGeneration,
+	return policyintake.Doc{Account: p.Account, Prefix: p.Prefix, Generation: p.Generation, BaseGeneration: p.BaseGeneration,
 		Verified: !p.Unverified, NextSubmitter: p.NextSubmitter}, nil
 }
 
@@ -307,7 +307,7 @@ func newRig(t *testing.T, adopt bool) *rig {
 		t.Fatal(err)
 	}
 	js, _ := jetstream.New(nc)
-	kv, err := js.CreateKeyValue(ctx, jetstream.KeyValueConfig{Bucket: "team_" + testRange + "_policy", History: 8})
+	kv, err := js.CreateKeyValue(ctx, jetstream.KeyValueConfig{Bucket: "team_" + testPrefix + "_policy", History: 8})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -328,7 +328,7 @@ func newRig(t *testing.T, adopt bool) *rig {
 }
 
 func (r *rig) intake() *policyintake.Intake {
-	return &policyintake.Intake{Account: r.account, Range: testRange, KV: r.kv, Marker: r.marker, Lock: r.lock, Decode: decode,
+	return &policyintake.Intake{Account: r.account, Prefix: testPrefix, KV: r.kv, Marker: r.marker, Lock: r.lock, Decode: decode,
 		InForce: func(ctx context.Context) (string, error) { return r.inForceFn(ctx) }, Apply: r.app, Report: r.rep, HeldKeys: r.heldFn,
 		Log: log.New(r.logbuf, "", 0), RetryInitial: retryInitial, RetryMax: retryMax}
 }
@@ -365,7 +365,7 @@ func (r *rig) put(raw []byte) uint64 {
 }
 
 func (r *rig) doc(gen, base uint64) payload {
-	return payload{Account: r.account, Range: testRange, Generation: gen, BaseGeneration: base}
+	return payload{Account: r.account, Prefix: testPrefix, Generation: gen, BaseGeneration: base}
 }
 
 func eventually(t *testing.T, what string, cond func() bool) {
@@ -417,7 +417,7 @@ func TestGoodDocAppliesOnceWithTheRightDoc(t *testing.T) {
 	r.put(raw)
 	r.waitApplied(1)
 	d := r.app.applied()[0]
-	if d.Account != r.account || d.Range != testRange || d.Generation != 1 || d.BaseGeneration != 0 || !d.Verified || !bytes.Equal(d.Raw, raw) {
+	if d.Account != r.account || d.Prefix != testPrefix || d.Generation != 1 || d.BaseGeneration != 0 || !d.Verified || !bytes.Equal(d.Raw, raw) {
 		t.Fatalf("doc %+v", d)
 	}
 	r.settle(1, 0)
@@ -472,7 +472,7 @@ func TestRefusals(t *testing.T) {
 		}, policyintake.StageDocument, 0},
 		{"not verified", func(r *rig) []byte { p := r.doc(4, 0); p.Unverified = true; return sign(t, r.submitter, p) }, policyintake.StageSignature, 4},
 		{"account mismatch", func(r *rig) []byte { p := r.doc(5, 0); p.Account = other2.pub; return sign(t, r.submitter, p) }, policyintake.StageAccount, 5},
-		{"range mismatch", func(r *rig) []byte { p := r.doc(6, 0); p.Range = "bar"; return sign(t, r.submitter, p) }, policyintake.StageRange, 6},
+		{"prefix mismatch", func(r *rig) []byte { p := r.doc(6, 0); p.Prefix = "bar"; return sign(t, r.submitter, p) }, policyintake.StagePrefix, 6},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

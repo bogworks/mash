@@ -57,8 +57,8 @@ type ExecInput struct {
 	Inventory int
 	// Signers are the list set's scoped keys by group, as for policyapply.RunInput.Signers.
 	Signers map[string]string
-	// Held is the key store's GroupPublics: the account JWT's scoped keys for another range's owner groups (not the list
-	// set's range) stay beside Signers (OtherRangesKept), so the generation checks and the gate count them as kept.
+	// Held is the key store's GroupPublics: the account JWT's scoped keys for another prefix's owner groups (not the list
+	// set's prefix) stay beside Signers (OtherPrefixesKept), so the generation checks and the gate count them as kept.
 	Held map[string]string
 	// Signing is the public key of the configured account signing key (signing_key), "" when none: a plain signing key
 	// of mash's own that stays in the account JWT.
@@ -178,7 +178,7 @@ func Execute(ctx context.Context, in ExecInput) (Result, error) {
 	if err != nil {
 		return res0, fmt.Errorf("reconcile: the JWT in force does not decode: %w", err)
 	}
-	kept, err := OtherRangesKept(prevClaims, in.Held, ls.Range)
+	kept, err := OtherPrefixesKept(prevClaims, in.Held, ls.Prefix)
 	if err != nil {
 		return res0, fmt.Errorf("reconcile: %w", err)
 	}

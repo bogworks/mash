@@ -2,7 +2,7 @@
   "show": {
     "describes": "list_set",
     "generation": 4,
-    "range": "r",
+    "prefix": "r",
     "switches": [
       {
         "group": "r.o",

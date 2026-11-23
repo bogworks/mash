@@ -83,7 +83,7 @@ func SizeCheck(c *Compiled, servers []ServerLimits) []Problem {
 		}
 		if limit := s.accountJWT(); accountSize > limit {
 			ps = append(ps, Problem{
-				fmt.Sprintf("account %s, server %s", quote(c.Range), quote(s.Server)),
+				fmt.Sprintf("account %s, server %s", quote(c.Prefix), quote(s.Server)),
 				fmt.Sprintf("the account JWT with %d scoped signing keys would be %d bytes, over the %d byte limit of server %s",
 					len(c.Templates), accountSize, limit, quote(s.Server)),
 			})

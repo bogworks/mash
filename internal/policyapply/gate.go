@@ -34,7 +34,7 @@ type GateInput struct {
 	// Signers are the expected scoped signing keys of the target (see Candidate.Signers). Required: Gate fails
 	// closed without them.
 	Signers map[string]string
-	// KeptSigners are the scoped signing keys of other ranges (group -> public key) that the account JWT keeps beside
+	// KeptSigners are the scoped signing keys of other prefixes (group -> public key) that the account JWT keeps beside
 	// Signers, for the target and the previous generation alike (see Candidate.Kept).
 	KeptSigners map[string]string
 	// PlainSigners are mash's own plain signing keys that may stand in the account JWT (see Candidate.Plain).

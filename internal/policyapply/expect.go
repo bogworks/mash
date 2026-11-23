@@ -65,13 +65,13 @@ func NewExpect(prev, target *listset.Compiled, revoked []string) (Expect, error)
 	for _, u := range prev.Users {
 		universe[u.Sender] = true
 		oldUsers[u.Sender] = u
-		addNamed(universe, prev.Range, u)
+		addNamed(universe, prev.Prefix, u)
 	}
 	for _, u := range target.Users {
 		universe[u.Sender] = true
 		newUsers[u.Sender] = true
 		newUserByS[u.Sender] = u
-		addNamed(universe, target.Range, u)
+		addNamed(universe, target.Prefix, u)
 	}
 	for s := range oldUsers {
 		if !newUsers[s] {
@@ -132,22 +132,22 @@ func NewExpect(prev, target *listset.Compiled, revoked []string) (Expect, error)
 	return e, nil
 }
 
-// addNamed adds to universe the address of each allow and deny tag of u: the range and the tag's "owner.name" value.
+// addNamed adds to universe the address of each allow and deny tag of u: the prefix and the tag's "owner.name" value.
 // The deny sentinel names no address.
-func addNamed(universe map[string]bool, rng string, u listset.User) {
+func addNamed(universe map[string]bool, prefix string, u listset.User) {
 	for _, t := range u.Tags {
 		name, val, ok := strings.Cut(t, ":")
 		if !ok || (name != listset.AllowTag && name != listset.DenyTag) || val == listset.NoDenyValue {
 			continue
 		}
-		universe[rng+"."+val] = true
+		universe[prefix+"."+val] = true
 	}
 }
 
 // withUser returns c with the user of u.Sender replaced by u: the target's templates with that sender's old name and
 // tags. c is not modified.
 func withUser(c *listset.Compiled, u listset.User) *listset.Compiled {
-	out := &listset.Compiled{Range: c.Range, Templates: c.Templates}
+	out := &listset.Compiled{Prefix: c.Prefix, Templates: c.Templates}
 	for _, x := range c.Users {
 		if x.Sender == u.Sender {
 			x = u

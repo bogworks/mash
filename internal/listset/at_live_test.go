@@ -38,7 +38,7 @@ func must[T any](v T, err error) T {
 
 func (e *pushEnv) accountJWT(c *Compiled) string {
 	ac := jwt.NewAccountClaims(e.accPub)
-	ac.Name = c.Range
+	ac.Name = c.Prefix
 	for _, tpl := range c.Templates {
 		sk, ok := e.scoped[tpl.Group]
 		if !ok {
@@ -166,7 +166,7 @@ func subscribeReaches(t *testing.T, c *conn, obs *nats.Conn, filter, subject str
 
 func flat(addr string) string { return strings.ReplaceAll(addr, ".", "_") }
 
-// inbox is the reply prefix of addr: _INBOX.<range>.<flat>, as internal/sap InboxPrefix.
+// inbox is the reply prefix of addr: _INBOX.<prefix>.<flat>, as internal/sap InboxPrefix.
 func inbox(addr string) string { return "_INBOX." + strings.SplitN(addr, ".", 2)[0] + "." + flat(addr) }
 
 // ownSubjects is what every sender keeps whatever its lists say: the fixed lines of the template for its own address.
@@ -235,9 +235,9 @@ func assertDenyAll(t *testing.T, e *liveEnv, c *Compiled, self string, named []s
 	assertOwnSubjectsReach(t, sc, admin, obs, self)
 }
 
-func denyAllSet(rng string, tagged bool) ListSet {
+func denyAllSet(prefix string, tagged bool) ListSet {
 	ls := ListSet{
-		Range: rng,
+		Prefix: prefix,
 		Switches: concat(
 			switches("foo.c", Closed, Closed, Closed, Closed),
 			switches("foo.d", Closed, Closed, Closed, Closed)),
@@ -323,7 +323,7 @@ func TestAT003OwnerLineDroppedAndDenyHolds(t *testing.T) {
 	}
 	set := func(mail Switch, coreDeny ...string) ListSet {
 		return ListSet{
-			Range:    "foo",
+			Prefix:   "foo",
 			Switches: switches("foo.c", mail, Closed, Closed, Closed),
 			Senders: []SenderLists{
 				{Sender: "foo.c.core", Deny: coreDeny},
@@ -413,8 +413,8 @@ func pinnedOpenSubjects() []openRow {
 		{"_INBOX.foo.foo_c_core.nuid1", true, nil, "its own reply prefix: no other address receives it"},
 		{subj("foo.c.core", Heartbeat), true, nil, "its own heartbeat, a fixed line; nobody here subscribed to it"},
 		{"$JS.API.INFO", true, nil, "JetStream account info: a server API call, reaches no address"},
-		{"$JS.API.STREAM.INFO.KV_mash-directory", true, nil, "reads the directory: it is public to the range by design (" + doc + ")"},
-		{"$JS.API.DIRECT.GET.KV_mash-directory.$KV.mash-directory.foo_c_lead", true, nil, "reads another address's directory record: public to the range, read only"},
+		{"$JS.API.STREAM.INFO.KV_mash-directory", true, nil, "reads the directory: it is public to the prefix by design (" + doc + ")"},
+		{"$JS.API.DIRECT.GET.KV_mash-directory.$KV.mash-directory.foo_c_lead", true, nil, "reads another address's directory record: public to the prefix, read only"},
 		{"$JS.API.STREAM.INFO.KV_mash-leases", true, nil, "reads the lease bucket's state"},
 		{"$KV.mash-leases.foo_c_core", true, nil, "its own lease key"},
 		{"$JS.API.CONSUMER.MSG.NEXT.inbox-foo_c_core.deliver", true, nil, "its own inbox consumer"},

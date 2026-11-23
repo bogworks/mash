@@ -10,8 +10,8 @@ import (
 
 // Tag names, the deny sentinel and the template layout (fixed by the contract, section 7; ADR 0102).
 //
-// A tag value is the address without its range part, "owner.name", lower case: the range is the account's and sits as
-// a literal in every template line, so no tag can name an address outside the range (INV-005) and a tag is as short as
+// A tag value is the address without its prefix part, "owner.name", lower case: the prefix is the account's and sits as
+// a literal in every template line, so no tag can name an address outside the prefix (INV-005) and a tag is as short as
 // the naming grammar allows (REQ-008's size limit). One allow tag expands in every verb's line, so an exception costs
 // one tag across mail, prompt, status and heartbeat.
 const (
@@ -19,7 +19,7 @@ const (
 	AllowTag = "allow"
 	// DenyTag is the tag name of a deny entry: deny:<owner>.<name>.
 	DenyTag = "deny"
-	// NoDenyValue is the deny sentinel's value. It expands to agents.<verb>.<range>._none, a four-token subject, never
+	// NoDenyValue is the deny sentinel's value. It expands to agents.<verb>.<prefix>._none, a four-token subject, never
 	// the five tokens of an address; "_none" is also no part the naming grammar allows (a part starts with a letter),
 	// so the sentinel addresses nothing and can never become an address.
 	NoDenyValue = "_none"
@@ -35,14 +35,14 @@ const (
 // sender. A user is modelled as its tags and nothing else: Permissions is the claims a user JWT must NOT carry (NATS
 // refuses a permission list on a user signed by a scoped key), kept here so Check can refuse a user that has one.
 type Compiled struct {
-	Range     string
+	Prefix    string
 	Templates []Template // sorted by Group
 	Users     []User     // sorted by Sender
 }
 
 // Template is the permission template on the scoped signing key of one owner group.
 type Template struct {
-	// Group is "range.owner".
+	// Group is "prefix.owner".
 	Group       string
 	Permissions jwt.Permissions
 }
@@ -76,7 +76,7 @@ func Compile(ls ListSet) (*Compiled, error) {
 // build derives the templates and tags of a validated model. It does not check them; DryRun uses it to collect the
 // refusals of Check and SizeCheck together.
 func build(m *model) *Compiled {
-	c := &Compiled{Range: m.rng}
+	c := &Compiled{Prefix: m.prefix}
 
 	denyKey := map[string]bool{}
 	for _, s := range m.senders {
@@ -95,7 +95,7 @@ func build(m *model) *Compiled {
 	sort.Strings(names)
 	for _, g := range names {
 		a := groups[g]
-		c.Templates = append(c.Templates, Template{Group: g, Permissions: template(m, a.rng, a.owner, denyKey[g])})
+		c.Templates = append(c.Templates, Template{Group: g, Permissions: template(m, a.prefix, a.owner, denyKey[g])})
 	}
 
 	for _, s := range m.senders {
@@ -115,41 +115,41 @@ func build(m *model) *Compiled {
 	return c
 }
 
-// template builds the permission template of owner group rng.owner.
+// template builds the permission template of owner group prefix.owner.
 //
 // Publish allow: the owner line of each shared publish verb; one tag line per publish verb; the fixed lines. Subscribe
 // allow: the owner line of heartbeat when shared; one tag line for heartbeat; the fixed lines. Deny lines exist only
 // when the key has a deny entry (withDeny), only for shared verbs: a deny beats an allow, and a closed verb has no
 // owner line to take an address from.
 //
-// The fixed lines name the sender through {{name()}} and the key's own range and owner, never through a tag: the
+// The fixed lines name the sender through {{name()}} and the key's own prefix and owner, never through a tag: the
 // sender's own heartbeat, its inbox stream and consumer, its reply prefix, its own prompt and status subjects, the
 // directory and its lease.
-func template(m *model, rng, owner string, withDeny bool) jwt.Permissions {
-	group := rng + "." + owner
+func template(m *model, prefix, owner string, withDeny bool) jwt.Permissions {
+	group := prefix + "." + owner
 	selfSubj := func(v Verb) string { return "agents." + v.subject() + "." + group + "." + nameFn }
 	var pub, sub, pubDeny, subDeny []string
 	for _, v := range []Verb{Mail, Prompt, Status} {
 		if m.shared(group, v) {
 			pub = append(pub, "agents."+v.subject()+"."+group+".*")
 		}
-		pub = append(pub, "agents."+v.subject()+"."+rng+"."+allowT)
+		pub = append(pub, "agents."+v.subject()+"."+prefix+"."+allowT)
 		if withDeny && m.shared(group, v) {
-			pubDeny = append(pubDeny, "agents."+v.subject()+"."+rng+"."+denyT)
+			pubDeny = append(pubDeny, "agents."+v.subject()+"."+prefix+"."+denyT)
 		}
 	}
 	if m.shared(group, Heartbeat) {
 		sub = append(sub, "agents.hb."+group+".*")
 		if withDeny {
-			subDeny = append(subDeny, "agents.hb."+rng+"."+denyT)
+			subDeny = append(subDeny, "agents.hb."+prefix+"."+denyT)
 		}
 	}
-	sub = append(sub, "agents.hb."+rng+"."+allowT)
+	sub = append(sub, "agents.hb."+prefix+"."+allowT)
 
-	flat := rng + "_" + owner + "_" + nameFn
-	pub = append(pub, fixedPub(selfSubj(Heartbeat), PolicySubject(rng), rng, flat)...)
+	flat := prefix + "_" + owner + "_" + nameFn
+	pub = append(pub, fixedPub(selfSubj(Heartbeat), PolicySubject(prefix), prefix, flat)...)
 	sub = append(sub,
-		"_INBOX."+rng+"."+flat+".>",
+		"_INBOX."+prefix+"."+flat+".>",
 		selfSubj(Prompt),
 		selfSubj(Status),
 		"$SRV.>",
@@ -163,26 +163,26 @@ func template(m *model, rng, owner string, withDeny bool) jwt.Permissions {
 	return p
 }
 
-// PolicySubject is the subject of the policy responder of range rng: "agents.policy.<range>". Every sender may publish
+// PolicySubject is the subject of the policy responder of prefix prefix: "agents.policy.<prefix>". Every sender may publish
 // to it, so `mash policy show` and `mash policy explain` can ask it; the answer returns on the sender's own _INBOX
 // prefix. It has three tokens, so it is no address subject and no reach.
-func PolicySubject(rng string) string { return "agents.policy." + rng }
+func PolicySubject(prefix string) string { return "agents.policy." + prefix }
 
 // fixedPub is the part of a sender's publish allow list that names only the sender itself and the shared plumbing:
 // its heartbeat, replies, the service API, and the JetStream and KV subjects of its own inbox, the directory and its
-// lease, and the range's policy responder. hb is the sender's own heartbeat subject, policy the responder's subject and flat its flat key (range_owner_name).
-// rng is the sender's SAP owner (this package's range): replies are bound to _INBOX.<rng>.>, as internal/admin binds
+// lease, and the prefix's policy responder. hb is the sender's own heartbeat subject, policy the responder's subject and flat its flat key (range_owner_name).
+// prefix is the sender's SAP owner (this package's prefix): replies are bound to _INBOX.<prefix>.>, as internal/admin binds
 // them to _INBOX.<owner>.>. The lines and their order
 // are those of internal/admin fixedPubKeyed (the unexported source); this copy lets the template name the sender
 // through {{name()}}. It never names another address's inbox, stream or consumer (REQ-001), and has no tag.
-func fixedPub(hb, policy, rng, flat string) []string {
+func fixedPub(hb, policy, prefix, flat string) []string {
 	inbox := "inbox-" + flat
 	dir := "KV_" + store.DirectoryBucket
 	lease := "KV_" + store.LeaseBucket
 	return []string{
 		hb,
 		policy,
-		"_INBOX." + rng + ".>", // replies (SAP prompt chunks, $SRV answers) go to inboxes of its own SAP owner only (the range here)
+		"_INBOX." + prefix + ".>", // replies (SAP prompt chunks, $SRV answers) go to inboxes of its own SAP owner only (the prefix here)
 		"$SRV.>",
 		"$JS.API.INFO",
 		"$JS.API.STREAM.INFO." + inbox,

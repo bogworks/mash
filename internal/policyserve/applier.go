@@ -37,8 +37,8 @@ const StageSize = "size"
 // probe and witness connections, and runs policyapply.Apply with everything it needs.
 type Applier struct {
 	Account string
-	// Range is the range this service applies list sets for (--range).
-	Range string
+	// Prefix is the address prefix this service applies list sets for (--prefix).
+	Prefix string
 	// Ledger is the account's ledger in the policy bucket; it keeps the record in force and writes the status.
 	Ledger Ledger
 	// Sys is a connection authenticated as a system account user.
@@ -183,7 +183,7 @@ func (a *Applier) logf(msg string, args ...any) {
 func (a *Applier) Apply(ctx context.Context, d policyintake.Doc, g policyintake.Guard) (policyintake.Result, error) {
 	ctx, cancel := context.WithTimeout(ctx, ApplyTimeout)
 	defer cancel()
-	if a.Range == "" {
+	if a.Prefix == "" {
 		return policyintake.Result{}, errors.New("the applier has no address prefix")
 	}
 	doc, err := policydoc.Decode(d.Raw, policydoc.DecodeOptions{}) // the intake verified the signature
@@ -218,7 +218,7 @@ func (a *Applier) Apply(ctx context.Context, d policyintake.Doc, g policyintake.
 		RotationStep: d.RotationStep}
 	issuer := &Issuer{
 		Ctx: ctx, Keys: a.Keys, Cluster: policyapply.NATSCluster{Conn: a.Sys, Inventory: a.Servers},
-		Resolver: apply.NATS{Conn: a.Sys, Inventory: a.Servers}, Account: a.Account, Range: a.Range, Trust: a.Trust, Servers: a.Servers, Now: a.Now,
+		Resolver: apply.NATS{Conn: a.Sys, Inventory: a.Servers}, Account: a.Account, Prefix: a.Prefix, Trust: a.Trust, Servers: a.Servers, Now: a.Now,
 		AdminUser: a.AdminUser, AdminIssuer: a.AdminIssuer, ExemptIssuers: a.ExemptIssuers,
 	}
 	markers, err := a.markersFor()

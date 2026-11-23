@@ -41,7 +41,7 @@ func TestAT016_StaleBaseRefused(t *testing.T) {
 // The base is judged before the list set is validated: a bad list set on a stale base is a stale base error.
 func TestAccept_StaleBaseBeforeValidation(t *testing.T) {
 	ls := at001()
-	ls.Range = ""
+	ls.Prefix = ""
 	ls.Base = 3
 	if _, _, err := Accept(Record{Generation: 1}, ls, recv(ls)); !errors.Is(err, ErrStaleBase) {
 		t.Fatalf("want ErrStaleBase, got %v", err)
@@ -133,7 +133,7 @@ func TestDigestListSet_ChangesWithAnyEntry(t *testing.T) {
 	base := DigestListSet(at003Deny())
 	cases := map[string]func(*ListSet){
 		"base":          func(l *ListSet) { l.Base = 1 },
-		"range":         func(l *ListSet) { l.Range = "bar" },
+		"prefix":        func(l *ListSet) { l.Prefix = "bar" },
 		"switch value":  func(l *ListSet) { l.Switches[0].Switch = Closed },
 		"switch verb":   func(l *ListSet) { l.Switches[0].Verb = Status },
 		"switch group":  func(l *ListSet) { l.Switches[0].Group = "foo.e" },
@@ -246,7 +246,7 @@ func TestAccept_NoReceivedBytesRefused(t *testing.T) {
 	}
 	// Bytes are checked before compiling: no bytes on an invalid list set reports the missing bytes.
 	bad := at001()
-	bad.Range = ""
+	bad.Prefix = ""
 	if _, _, err := Accept(Record{}, bad, nil); !errors.Is(err, ErrNoReceivedBytes) {
 		t.Fatalf("want ErrNoReceivedBytes, got %v", err)
 	}

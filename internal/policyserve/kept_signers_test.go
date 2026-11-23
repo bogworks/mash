@@ -13,8 +13,8 @@ import (
 	"github.com/bogworks/mash/internal/listset"
 )
 
-// The kept signers are the other ranges' group keys that the account JWT carries; a group whose name merely starts
-// with the range's name, without the dot, is another range's. A key store key of another range that the JWT does not
+// The kept signers are the other prefixes' group keys that the account JWT carries; a group whose name merely starts
+// with the prefix's name, without the dot, is another prefix's. A key store key of another prefix that the JWT does not
 // carry is neither kept (the gate would require it) nor retained by Sign (the target would lack it).
 func TestKeptSignersAreOtherRangesGroupsInTheJWT(t *testing.T) {
 	op, _ := nkeys.CreateOperator()
@@ -38,7 +38,7 @@ func TestKeptSignersAreOtherRangesGroupsInTheJWT(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().Add(5 * time.Second)
-	iss := &Issuer{Ctx: context.Background(), Keys: keys, Resolver: oneJWT{tok}, Account: apub, Trust: trust, Servers: 1, Range: "foo",
+	iss := &Issuer{Ctx: context.Background(), Keys: keys, Resolver: oneJWT{tok}, Account: apub, Trust: trust, Servers: 1, Prefix: "foo",
 		Now: func() time.Time { return now }}
 	got, err := iss.Kept(context.Background(), 0)
 	if err != nil {
@@ -49,7 +49,7 @@ func TestKeptSignersAreOtherRangesGroupsInTheJWT(t *testing.T) {
 		t.Errorf("got %v, want %v", got, want)
 	}
 	c, err := listset.Compile(listset.ListSet{
-		Range: "foo",
+		Prefix: "foo",
 		Switches: []listset.SwitchEntry{{Group: "foo.c", Verb: listset.Mail, Switch: listset.Closed}, {Group: "foo.c", Verb: listset.Prompt, Switch: listset.Closed},
 			{Group: "foo.c", Verb: listset.Status, Switch: listset.Closed}, {Group: "foo.c", Verb: listset.Heartbeat, Switch: listset.Closed}},
 		Senders: []listset.SenderLists{{Sender: "foo.c.x"}},
@@ -97,11 +97,11 @@ func TestSignKeepsTheConfiguredAccountSigningKey(t *testing.T) {
 			t.Fatal(err)
 		}
 		now := time.Now().Add(5 * time.Second)
-		return &Issuer{Ctx: context.Background(), Keys: keys, Resolver: oneJWT{tok}, Account: apub, Trust: trust, Servers: 1, Range: "foo",
+		return &Issuer{Ctx: context.Background(), Keys: keys, Resolver: oneJWT{tok}, Account: apub, Trust: trust, Servers: 1, Prefix: "foo",
 			Now: func() time.Time { return now }}
 	}
 	c, err := listset.Compile(listset.ListSet{
-		Range: "foo",
+		Prefix: "foo",
 		Switches: []listset.SwitchEntry{{Group: "foo.c", Verb: listset.Mail, Switch: listset.Closed}, {Group: "foo.c", Verb: listset.Prompt, Switch: listset.Closed},
 			{Group: "foo.c", Verb: listset.Status, Switch: listset.Closed}, {Group: "foo.c", Verb: listset.Heartbeat, Switch: listset.Closed}},
 		Senders: []listset.SenderLists{{Sender: "foo.c.x"}},

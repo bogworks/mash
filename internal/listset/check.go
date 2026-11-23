@@ -20,7 +20,7 @@ import (
 // is not reachable.
 //
 // The addresses compared are every address the list set names plus probes: another name in each owner group, another
-// owner group in the range, another range. Check also refuses a template with no tag-free allow line in either
+// owner group in the prefix, another prefix. Check also refuses a template with no tag-free allow line in either
 // direction, a user that carries permission claims or a tag other than allow: and deny:, a deny-key user without a
 // deny tag, and any line outside the fixed set and the agents. subjects the lists give.
 //
@@ -36,8 +36,8 @@ func Check(ls ListSet, c *Compiled) error {
 	var ps []Problem
 	bad := func(entry, format string, a ...any) { ps = append(ps, Problem{entry, fmt.Sprintf(format, a...)}) }
 
-	if c.Range != m.rng {
-		bad("compiled address prefix "+quote(c.Range), "is not the list set's address prefix %q", m.rng)
+	if c.Prefix != m.prefix {
+		bad("compiled address prefix "+quote(c.Prefix), "is not the list set's address prefix %q", m.prefix)
 	}
 
 	senderGroups := map[string]bool{}
@@ -126,14 +126,14 @@ func Check(ls ListSet, c *Compiled) error {
 			}
 		}
 		// Every fixed grant the sender needs must be present and survive the deny lines.
-		flat := s.addr.rng + "_" + s.addr.owner + "_" + s.addr.name
-		for _, line := range fixedPub(subj(s.addr.String(), Heartbeat), PolicySubject(s.addr.rng), s.addr.rng, flat) {
+		flat := s.addr.prefix + "_" + s.addr.owner + "_" + s.addr.name
+		for _, line := range fixedPub(subj(s.addr.String(), Heartbeat), PolicySubject(s.addr.prefix), s.addr.prefix, flat) {
 			if !slices.Contains(p.pubAllow, line) || !p.canPub(concrete(line)) {
 				bad(who, "required publish grant %q is missing or denied: %s", line, fixedBreaks(line))
 			}
 		}
 		for _, line := range []string{
-			"_INBOX." + s.addr.rng + "." + flat + ".>",
+			"_INBOX." + s.addr.prefix + "." + flat + ".>",
 			subj(s.addr.String(), Prompt),
 			subj(s.addr.String(), Status),
 			"$SRV.>",
@@ -230,7 +230,7 @@ func reachVerb(v Verb) string {
 	return "publish " + string(v) + " to"
 }
 
-// isPolicySubject reports whether line is a policy responder subject, agents.policy.<range>: three tokens, no address.
+// isPolicySubject reports whether line is a policy responder subject, agents.policy.<prefix>: three tokens, no address.
 func isPolicySubject(line string) bool {
 	toks := strings.Split(line, ".")
 	return len(toks) == 3 && toks[0] == "agents" && toks[1] == "policy"
@@ -284,7 +284,7 @@ func (m *model) universeAll() []address {
 }
 
 // universeOf is every address the list set names plus probes: a name no list names in each owner group the set
-// mentions, another owner group of the range, and another range.
+// mentions, another owner group of the prefix, and another prefix.
 func universeOf(m *model) []string {
 	named := m.universeAll()
 	taken := map[string]bool{}
@@ -293,8 +293,8 @@ func universeOf(m *model) []string {
 		taken[a.String()] = true
 		owners[a.owner] = true
 	}
-	free := func(rng, owner, name string) address {
-		a := address{rng, owner, name}
+	free := func(prefix, owner, name string) address {
+		a := address{prefix, owner, name}
 		for i := 2; taken[a.String()]; i++ {
 			a.name = fmt.Sprintf("%s%d", name, i)
 		}
@@ -317,10 +317,10 @@ func universeOf(m *model) []string {
 	sort.Strings(keys)
 	for _, g := range keys {
 		a := groups[g]
-		out = append(out, free(a.rng, a.owner, "probe-name"))
-		out = append(out, free("probe-range", a.owner, "probe-name"))
+		out = append(out, free(a.prefix, a.owner, "probe-name"))
+		out = append(out, free("probe-prefix", a.owner, "probe-name"))
 	}
-	out = append(out, free(m.rng, freeOwner, "probe-name"))
+	out = append(out, free(m.prefix, freeOwner, "probe-name"))
 	res := make([]string, len(out))
 	for i, a := range out {
 		res[i] = a.String()
@@ -331,13 +331,13 @@ func universeOf(m *model) []string {
 
 // fixedLines are the non-agents lines a sender's expanded template may hold: publish, then subscribe.
 func fixedLines(s sender) (pub, sub []string) {
-	flat := s.addr.rng + "_" + s.addr.owner + "_" + s.addr.name
-	for _, l := range fixedPub("", PolicySubject(s.addr.rng), s.addr.rng, flat) {
+	flat := s.addr.prefix + "_" + s.addr.owner + "_" + s.addr.name
+	for _, l := range fixedPub("", PolicySubject(s.addr.prefix), s.addr.prefix, flat) {
 		if (!strings.HasPrefix(l, "agents.") || isPolicySubject(l)) && l != "" {
 			pub = append(pub, l)
 		}
 	}
-	return pub, []string{"_INBOX." + s.addr.rng + "." + flat + ".>", "$SRV.>"}
+	return pub, []string{"_INBOX." + s.addr.prefix + "." + flat + ".>", "$SRV.>"}
 }
 
 // lineRefusal says why an expanded allow line is not one the lists could have asked for, or "".
@@ -366,8 +366,8 @@ func (m *model) lineRefusal(s sender, dir, line string) string {
 	if v == "" {
 		return fmt.Sprintf("has verb %q, which is none of mail, prompt, status, hb", toks[1])
 	}
-	if toks[2] != m.rng {
-		return fmt.Sprintf("address prefix %q is not the account's address prefix %q", toks[2], m.rng)
+	if toks[2] != m.prefix {
+		return fmt.Sprintf("address prefix %q is not the account's address prefix %q", toks[2], m.prefix)
 	}
 	own := s.addr.String()
 	lit := toks[2] + "." + toks[3] + "." + toks[4]

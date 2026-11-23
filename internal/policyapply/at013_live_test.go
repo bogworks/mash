@@ -27,7 +27,7 @@ import (
 // key), mail is closed and foo.c.core may mail docs and sdk by allow tags.
 func at013Prev() listset.ListSet {
 	return listset.ListSet{
-		Range:    "foo",
+		Prefix:   "foo",
 		Switches: switches("foo.c", listset.Closed, listset.Closed, listset.Shared, listset.Closed),
 		Senders: []listset.SenderLists{
 			{Sender: "foo.c.core", Allow: []string{"foo.c.docs", "foo.c.sdk"}},
@@ -41,7 +41,7 @@ func at013Prev() listset.ListSet {
 func at013Target() listset.ListSet {
 	return listset.ListSet{
 		Base:     1,
-		Range:    "foo",
+		Prefix:   "foo",
 		Switches: switches("foo.c", listset.Closed, listset.Closed, listset.Closed, listset.Closed),
 		Senders: []listset.SenderLists{
 			{Sender: "foo.c.core", Allow: []string{"foo.c.sdk"}},

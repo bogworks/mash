@@ -42,10 +42,10 @@ type Issuer struct {
 	// Resolver reads the account JWT from every server.
 	Resolver apply.Resolver
 	Account  string
-	// Range is the range this service applies list sets for. Only the signing keys of its owner groups ("range.owner")
-	// are replaced or dropped; the keys of other ranges' groups are kept as they are.
-	Range string
-	Trust apply.Trust
+	// Prefix is the prefix this service applies list sets for. Only the signing keys of its owner groups ("prefix.owner")
+	// are replaced or dropped; the keys of other prefixes' groups are kept as they are.
+	Prefix string
+	Trust  apply.Trust
 	// Servers is the declared server count (0 none given).
 	Servers int
 	// Now gives the time; nil means time.Now.
@@ -144,9 +144,9 @@ func SigningPub(ks any) (string, error) {
 	return "", fmt.Errorf("account signing key: %w", err)
 }
 
-// keptFrom splits the signing keys of base. kept is the other ranges' group keys of the key store (group -> public
+// keptFrom splits the signing keys of base. kept is the other prefixes' group keys of the key store (group -> public
 // key) that base also carries: the ones the next account JWT retains, and the ones the generation read must find. A
-// key store key of another range that base does not carry is in neither. mine are this range's keys in base, which are
+// key store key of another prefix that base does not carry is in neither. mine are this prefix's keys in base, which are
 // rebuilt from the list set. nonMash are the signing keys of base that are not a scoped owner group key of the key
 // store: Sign drops them after the issuer check, or refuses when it may not.
 func (s *Issuer) keptFrom(base *jwt.AccountClaims) (kept map[string]string, mine, nonMash []string, err error) {
@@ -162,7 +162,7 @@ func (s *Issuer) splitKeys(base *jwt.AccountClaims) (kept map[string]string, min
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("owner group keys: %w", err)
 	}
-	if s.Range == "" {
+	if s.Prefix == "" {
 		return nil, nil, nil, nil, errors.New("the issuer has no address prefix: cannot tell which signing keys are its own")
 	}
 	groupOf := map[string]string{} // public key -> owner group
@@ -181,7 +181,7 @@ func (s *Issuer) splitKeys(base *jwt.AccountClaims) (kept map[string]string, min
 			nonMash = append(nonMash, k)
 			continue
 		}
-		if strings.HasPrefix(g, s.Range+".") {
+		if strings.HasPrefix(g, s.Prefix+".") {
 			mine = append(mine, k)
 		} else {
 			kept[g] = k
@@ -201,8 +201,8 @@ func (s *Issuer) Plain(ctx context.Context) ([]string, error) {
 	return plain, err
 }
 
-// Kept is the scoped signing keys the next account JWT keeps beside this range's, as Sign retains them: the owner
-// group keys of other ranges that the account JWT the servers hold now carries. It maps group to public key and is
+// Kept is the scoped signing keys the next account JWT keeps beside this prefix's, as Sign retains them: the owner
+// group keys of other prefixes that the account JWT the servers hold now carries. It maps group to public key and is
 // never nil. A non-mash signing key is an error unless the issuer may drop it (see AdminIssuer): only when generation,
 // the one about to be signed, is the first.
 func (s *Issuer) Kept(ctx context.Context, generation uint64) (map[string]string, error) {
@@ -222,11 +222,11 @@ func (s *Issuer) Kept(ctx context.Context, generation uint64) (map[string]string
 
 // Sign builds the account JWT of a generation: the account JWT the servers hold now, with the scoped signing keys
 // replaced by one per owner group of c (the group's key from the key store, role = group, the template compiled from c).
-// The other ranges' signing keys it carries are kept (see Kept). Everything else in it (limits, exports, revocations,
+// The other prefixes' signing keys it carries are kept (see Kept). Everything else in it (limits, exports, revocations,
 // the account's own settings) is kept. A signing key that is not an owner group key of the key store is not dropped
 // silently: without AdminIssuer and ExemptIssuers the apply is refused; with them it is dropped once admin.CheckIssuersKept
 // shows that the admin user and the connected exempt users stay signed by a kept key (the account key, an owner group
-// key of another range that the JWT carries, or a key of the list set), and refused with that check's error otherwise.
+// key of another prefix that the JWT carries, or a key of the list set), and refused with that check's error otherwise.
 // Only the first generation's apply drops (ADR 0124): from the second on, a non-mash key is refused as without the
 // fields. It implements policyapply.Signer.
 func (s *Issuer) Sign(rec listset.Record, c *listset.Compiled) (string, error) {
@@ -254,8 +254,8 @@ func (s *Issuer) Sign(rec listset.Record, c *listset.Compiled) (string, error) {
 		}
 	}
 	if len(nonMash) > 0 {
-		// The keys that stay: the account's own key (CheckIssuersKept counts it), the other ranges' keys the JWT
-		// carries and the target's. This range's keys that the list set no longer names go, so a user under one is not kept.
+		// The keys that stay: the account's own key (CheckIssuersKept counts it), the other prefixes' keys the JWT
+		// carries and the target's. This prefix's keys that the list set no longer names go, so a user under one is not kept.
 		stay := map[string]bool{}
 		for _, k := range kept {
 			stay[k] = true
@@ -278,7 +278,7 @@ func (s *Issuer) Sign(rec listset.Record, c *listset.Compiled) (string, error) {
 		}
 	}
 	for _, k := range mine {
-		delete(base.SigningKeys, k) // this range's: rebuilt below from the list set
+		delete(base.SigningKeys, k) // this prefix's: rebuilt below from the list set
 	}
 	for i, tpl := range c.Templates {
 		pub := pubs[i]

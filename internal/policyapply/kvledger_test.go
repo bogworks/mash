@@ -51,11 +51,11 @@ func connectJS(t *testing.T, url string) *nats.Conn {
 // newJetStreamConn is a connection to a JetStream server of its own.
 func newJetStreamConn(t *testing.T) *nats.Conn { return connectJS(t, startJetStream(t)) }
 
-const kvRange = "r1"
+const kvPrefix = "r1"
 
 // kvBucket is the test bucket name, as an operator's pattern would give it.
 var kvBucket = func() string {
-	b, err := PolicyBucket("test_{range}_policy", kvRange)
+	b, err := PolicyBucket("test_{prefix}_policy", kvPrefix)
 	if err != nil {
 		panic(err)
 	}
@@ -437,7 +437,7 @@ func TestKVLedgerStatusRefusedWritten(t *testing.T) {
 		t.Fatal(err)
 	}
 	ls := set2()
-	ls.Senders = append(ls.Senders, listset.SenderLists{Sender: "bar.c.x"}) // refused: a sender outside the range
+	ls.Senders = append(ls.Senders, listset.SenderLists{Sender: "bar.c.x"}) // refused: a sender outside the prefix
 	st, err := Run(context.Background(), w.run(l, ls, "bytes-bad"))
 	if err != nil || st.State != StateRefused {
 		t.Fatalf("%+v %v", st, err)
@@ -737,22 +737,22 @@ func TestKVLedgerRequiresBucket(t *testing.T) {
 
 func TestPolicyBucket(t *testing.T) {
 	for _, c := range []struct {
-		pattern, rng, want string
-		ok                 bool
+		pattern, prefix, want string
+		ok                    bool
 	}{
-		{"mgr_{range}_policy", "r1", "mgr_r1_policy", true},
-		{"{range}-{range}", "a", "a-a", true},
+		{"mgr_{prefix}_policy", "r1", "mgr_r1_policy", true},
+		{"{prefix}-{prefix}", "a", "a-a", true},
 		{"fixed_policy", "", "fixed_policy", true},
 		{"fixed_policy", "ignored", "fixed_policy", true},
 		{"", "r1", "", false},
-		{"mgr_{range}_policy", "", "", false},
-		{"mgr_{range}_policy", "a.b", "", false},
-		{"mgr.{range}", "r1", "", false},
-		{"mgr {range}", "r1", "", false},
+		{"mgr_{prefix}_policy", "", "", false},
+		{"mgr_{prefix}_policy", "a.b", "", false},
+		{"mgr.{prefix}", "r1", "", false},
+		{"mgr {prefix}", "r1", "", false},
 	} {
-		got, err := PolicyBucket(c.pattern, c.rng)
+		got, err := PolicyBucket(c.pattern, c.prefix)
 		if (err == nil) != c.ok || got != c.want {
-			t.Errorf("PolicyBucket(%q, %q) = %q, %v", c.pattern, c.rng, got, err)
+			t.Errorf("PolicyBucket(%q, %q) = %q, %v", c.pattern, c.prefix, got, err)
 		}
 	}
 }
@@ -825,7 +825,7 @@ func TestKVLedgerWriteRefusal(t *testing.T) {
 	if jwt, _ := l.InForceJWT(); jwt != "jwt-1" {
 		t.Errorf("jwt = %q", jwt)
 	}
-	if got, ok, _ := l.InForceListSet(); !ok || got.Range != set.Range {
+	if got, ok, _ := l.InForceListSet(); !ok || got.Prefix != set.Prefix {
 		t.Errorf("list set = %+v %v", got, ok)
 	}
 	// The lease is released: another ledger takes it at once.
@@ -1136,8 +1136,8 @@ func TestKVLedgerInForceViewAndStatus(t *testing.T) {
 	wantRec, _ := l.InForce()
 	wantSt, _, _ := l.LatestStatus(ctx)
 	wantView, wantLS, _, _ := l.InForceView()
-	if rec != wantRec || rec != wantView || ls.Range != wantLS.Range || ls.Range != set.Range {
-		t.Errorf("in force %+v %q disagrees with %+v %+v", rec, ls.Range, wantRec, wantView)
+	if rec != wantRec || rec != wantView || ls.Prefix != wantLS.Prefix || ls.Prefix != set.Prefix {
+		t.Errorf("in force %+v %q disagrees with %+v %+v", rec, ls.Prefix, wantRec, wantView)
 	}
 	if st.State != wantSt.State || st.State != StateRefused || st.Generation != wantSt.Generation {
 		t.Errorf("status %+v disagrees with %+v", st, wantSt)

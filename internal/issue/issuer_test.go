@@ -127,7 +127,7 @@ type fixture struct {
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
 	c, err := listset.Compile(listset.ListSet{
-		Range: "foo",
+		Prefix: "foo",
 		Switches: []listset.SwitchEntry{
 			{Group: "foo.c", Verb: listset.Mail, Switch: listset.Closed}, {Group: "foo.c", Verb: listset.Prompt, Switch: listset.Closed},
 			{Group: "foo.c", Verb: listset.Status, Switch: listset.Closed}, {Group: "foo.c", Verb: listset.Heartbeat, Switch: listset.Closed},

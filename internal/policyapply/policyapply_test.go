@@ -160,7 +160,7 @@ func TestGenerationOf(t *testing.T) {
 	if _, ok := GenerationOf("not a jwt", cands); ok {
 		t.Error("garbage matched")
 	}
-	other := compile(t, listset.ListSet{Range: "foo", Switches: switches("foo.c", "shared", "shared", "shared", "shared"),
+	other := compile(t, listset.ListSet{Prefix: "foo", Switches: switches("foo.c", "shared", "shared", "shared", "shared"),
 		Senders: []listset.SenderLists{{Sender: "foo.c.core"}}})
 	if _, ok := GenerationOf(w.k.build(t, other), cands); ok {
 		t.Error("unknown templates matched")
@@ -571,7 +571,7 @@ func TestGateOldKeyNotRevoked(t *testing.T) {
 	}
 	// A removed sender's keys must be revoked too.
 	in = w.gate()
-	in.Compiled = &listset.Compiled{Range: w.c2.Range, Templates: w.c2.Templates, Users: w.c2.Users[1:]}
+	in.Compiled = &listset.Compiled{Prefix: w.c2.Prefix, Templates: w.c2.Templates, Users: w.c2.Users[1:]}
 	in.OldKeys = map[string][]OldKey{"foo.c.core": {{PublicKey: "UOLD"}}, "foo.c.docs": {}, "foo.c.sdk": {}}
 	if st, _ = Gate(context.Background(), in); !hasFailure(st, "", "foo.c.core", CheckOldKeyNotRevoked) {
 		t.Fatalf("removed sender: %+v", st.Failing)
@@ -826,7 +826,7 @@ func TestRunRefusesOversizedListSet(t *testing.T) {
 func TestGateSelfReachOnlyRemoval(t *testing.T) {
 	solo := func(mail listset.Switch) listset.ListSet {
 		return listset.ListSet{
-			Range:    "foo",
+			Prefix:   "foo",
 			Switches: switches("foo.c", mail, listset.Closed, listset.Closed, listset.Closed),
 			Senders:  []listset.SenderLists{{Sender: "foo.c.solo"}},
 		}

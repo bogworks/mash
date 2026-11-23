@@ -35,7 +35,7 @@ func newLiveEnv(t *testing.T, c *Compiled) *liveEnv {
 	acc, _ := nkeys.CreateAccount()
 	accPub, _ := acc.PublicKey()
 	ac := jwt.NewAccountClaims(accPub)
-	ac.Name = c.Range
+	ac.Name = c.Prefix
 	e := &liveEnv{t: t, acc: acc, accPub: accPub, scoped: map[string]nkeys.KeyPair{}}
 	for _, tpl := range c.Templates {
 		sk, _ := nkeys.CreateAccount()
@@ -192,7 +192,7 @@ func TestLiveMatchesCheck(t *testing.T) {
 			env := newLiveEnv(t, c)
 			m, _ := validate(ls)
 			universe := universeNamed(m)
-			universe = append(universe, ls.Range+".probe-owner.probe-name", ls.Range+"."+m.senders[0].addr.owner+".probe-name")
+			universe = append(universe, ls.Prefix+".probe-owner.probe-name", ls.Prefix+"."+m.senders[0].addr.owner+".probe-name")
 
 			admin, err := env.connect(env.acc, "admin", nil, false)
 			if err != nil {

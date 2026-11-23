@@ -9,16 +9,16 @@ import (
 	"github.com/bogworks/mash/internal/sap"
 )
 
-// address is a parsed three-part address, "range.owner.name": the endpoint address owner.group.instance, with the
-// account's range as the owner token.
-type address struct{ rng, owner, name string }
+// address is a parsed three-part address, "prefix.owner.name": the endpoint address owner.group.instance, with the
+// account's prefix as the owner token.
+type address struct{ prefix, owner, name string }
 
-func (a address) String() string { return a.rng + "." + a.owner + "." + a.name }
+func (a address) String() string { return a.prefix + "." + a.owner + "." + a.name }
 
-// group is "range.owner".
-func (a address) group() string { return a.rng + "." + a.owner }
+// group is "prefix.owner".
+func (a address) group() string { return a.prefix + "." + a.owner }
 
-// tail is "owner.name", the tag value form of an address inside the account's range.
+// tail is "owner.name", the tag value form of an address inside the account's prefix.
 func (a address) tail() string { return a.owner + "." + a.name }
 
 // parseAddress parses a three-part address with mash's naming grammar (sap.ParseAddress). The grammar
@@ -34,8 +34,8 @@ func parseAddress(s string) (address, string) {
 	return address{id.Owner, id.Group, id.Instance}, ""
 }
 
-// parseGroup parses "range.owner". A three-part value is a switch for a single sender.
-func parseGroup(s string) (rng, owner, reason string) {
+// parseGroup parses "prefix.owner". A three-part value is a switch for a single sender.
+func parseGroup(s string) (prefix, owner, reason string) {
 	if strings.ContainsAny(s, "*>") {
 		return "", "", "wildcards are refused: a switch names one exact owner group"
 	}
@@ -55,7 +55,7 @@ func parseGroup(s string) (rng, owner, reason string) {
 
 // model is a validated list set in a form the compiler and the checker share.
 type model struct {
-	rng      string
+	prefix   string
 	switches map[string]map[Verb]Switch // group -> verb -> switch
 	senders  []sender                   // sorted by address
 }
@@ -88,19 +88,19 @@ func validate(ls ListSet) (*model, error) {
 	var ps []Problem
 	bad := func(entry, format string, a ...any) { ps = append(ps, Problem{entry, fmt.Sprintf(format, a...)}) }
 
-	if _, err := sap.NewAddress(ls.Range, "a", "a"); err != nil {
-		bad("address prefix "+quote(ls.Range), "%s", strings.TrimPrefix(err.Error(), "sap: "))
+	if _, err := sap.NewAddress(ls.Prefix, "a", "a"); err != nil {
+		bad("address prefix "+quote(ls.Prefix), "%s", strings.TrimPrefix(err.Error(), "sap: "))
 	}
-	m := &model{rng: ls.Range, switches: map[string]map[Verb]Switch{}}
+	m := &model{prefix: ls.Prefix, switches: map[string]map[Verb]Switch{}}
 
 	for _, e := range ls.Switches {
 		entry := fmt.Sprintf("switch %s %s", quote(e.Group), quote(string(e.Verb)))
-		rng, owner, reason := parseGroup(e.Group)
+		prefix, owner, reason := parseGroup(e.Group)
 		ok := reason == ""
 		if !ok {
 			bad(entry, "%s", reason)
-		} else if rng != ls.Range {
-			bad(entry, "address prefix %q is not the account's address prefix %q", rng, ls.Range)
+		} else if prefix != ls.Prefix {
+			bad(entry, "address prefix %q is not the account's address prefix %q", prefix, ls.Prefix)
 			ok = false
 		}
 		if !e.Verb.valid() {
@@ -114,7 +114,7 @@ func validate(ls ListSet) (*model, error) {
 		if !ok {
 			continue
 		}
-		g := rng + "." + owner
+		g := prefix + "." + owner
 		if _, dup := m.switches[g][e.Verb]; dup {
 			bad(entry, "stated twice; a group and verb take one value, even the same one")
 			continue
@@ -144,8 +144,8 @@ func validate(ls ListSet) (*model, error) {
 			}
 			continue
 		}
-		if addr.rng != ls.Range {
-			bad("sender "+quote(sl.Sender), "address prefix %q is not the account's address prefix %q", addr.rng, ls.Range)
+		if addr.prefix != ls.Prefix {
+			bad("sender "+quote(sl.Sender), "address prefix %q is not the account's address prefix %q", addr.prefix, ls.Prefix)
 			continue
 		}
 		if seen[addr.String()] {
@@ -155,8 +155,8 @@ func validate(ls ListSet) (*model, error) {
 		seen[addr.String()] = true
 		groupsWithSender[addr.group()] = true
 		s := sender{addr: addr}
-		s.allow = parseList(sl.Allow, "allow", addr, ls.Range, bad)
-		s.deny = parseList(sl.Deny, "deny", addr, ls.Range, bad)
+		s.allow = parseList(sl.Allow, "allow", addr, ls.Prefix, bad)
+		s.deny = parseList(sl.Deny, "deny", addr, ls.Prefix, bad)
 		for _, d := range s.deny {
 			entry := "deny of " + quote(sl.Sender) + ": " + quote(d.String())
 			switch {
@@ -193,8 +193,8 @@ func validate(ls ListSet) (*model, error) {
 	return m, nil
 }
 
-// parseList parses one allow or deny list, refusing a bad address, another range and a repeat.
-func parseList(in []string, kind string, owner address, rng string, bad func(string, string, ...any)) []address {
+// parseList parses one allow or deny list, refusing a bad address, another prefix and a repeat.
+func parseList(in []string, kind string, owner address, prefix string, bad func(string, string, ...any)) []address {
 	var out []address
 	for _, s := range in {
 		entry := kind + " of " + quote(owner.String()) + ": " + quote(s)
@@ -202,8 +202,8 @@ func parseList(in []string, kind string, owner address, rng string, bad func(str
 		switch {
 		case reason != "":
 			bad(entry, "%s", reason)
-		case a.rng != rng:
-			bad(entry, "address prefix %q is not the account's address prefix %q", a.rng, rng)
+		case a.prefix != prefix:
+			bad(entry, "address prefix %q is not the account's address prefix %q", a.prefix, prefix)
 		case slices.Contains(out, a):
 			bad(entry, "listed twice")
 		default:

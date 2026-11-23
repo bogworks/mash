@@ -16,7 +16,7 @@ import (
 // at014Prev is the previous generation of AT-014: mail is shared in foo.c, with two senders.
 func at014Prev() listset.ListSet {
 	return listset.ListSet{
-		Range:    "foo",
+		Prefix:   "foo",
 		Switches: switches("foo.c", listset.Shared, listset.Closed, listset.Closed, listset.Closed),
 		Senders:  []listset.SenderLists{{Sender: "foo.c.core"}, {Sender: "foo.c.docs"}},
 	}
@@ -26,7 +26,7 @@ func at014Prev() listset.ListSet {
 func at014Target() listset.ListSet {
 	return listset.ListSet{
 		Base:     1,
-		Range:    "foo",
+		Prefix:   "foo",
 		Switches: switches("foo.c", listset.Shared, listset.Closed, listset.Closed, listset.Closed),
 		Senders: []listset.SenderLists{
 			{Sender: "foo.c.core", Deny: []string{"foo.c.docs", "foo.c.new"}},
@@ -436,7 +436,7 @@ func TestRunOrderedRefusedHoldsWithReason(t *testing.T) {
 		t.Fatal("want a stale base error")
 	}
 	w = newWorld14(t)
-	w.in.ListSet.Range = "" // fails validation: a refused status and no error
+	w.in.ListSet.Prefix = "" // fails validation: a refused status and no error
 	os, err := RunOrdered(context.Background(), w.in, w.prov)
 	if err != nil || os.Status.State != StateRefused || len(os.Provisioned) != 0 {
 		t.Fatalf("refused: %+v %v", os, err)

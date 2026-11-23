@@ -29,7 +29,7 @@ func switches(group string, mail, prompt, status, hb listset.Switch) []listset.S
 // testSet is a list set with one group, foo.c, and the senders foo.c.core and foo.c.docs.
 func testSet() listset.ListSet {
 	return listset.ListSet{
-		Range:    "foo",
+		Prefix:   "foo",
 		Switches: switches("foo.c", listset.Shared, listset.Closed, listset.Closed, listset.Closed),
 		Senders:  []listset.SenderLists{{Sender: "foo.c.core"}, {Sender: "foo.c.docs"}},
 	}
@@ -439,7 +439,7 @@ func TestExpectedSigners(t *testing.T) {
 	}
 }
 
-// Another range's owner-group key, held by the key store, is mash's and stays: it is not a signing-key line, not
+// Another prefix's owner-group key, held by the key store, is mash's and stays: it is not a signing-key line, not
 // counted, and a user it signed is neither a signing-key finding nor an issuer problem.
 func TestAnotherRangesHeldScopedKeyIsKept(t *testing.T) {
 	w := newWorld(t)
@@ -460,10 +460,10 @@ func TestAnotherRangesHeldScopedKeyIsKept(t *testing.T) {
 		t.Errorf("signing keys %+v unknown %d status %q", p.SigningKeys, p.Unknown, p.Status)
 	}
 	if len(p.IssuerProblems) != 0 {
-		t.Errorf("a user signed by another range's kept key is flagged: %+v", p.IssuerProblems)
+		t.Errorf("a user signed by another prefix's kept key is flagged: %+v", p.IssuerProblems)
 	}
 	if strings.Contains(p.Text(), other) {
-		t.Errorf("text names the other range's key:\n%s", p.Text())
+		t.Errorf("text names the other prefix's key:\n%s", p.Text())
 	}
 }
 
@@ -580,10 +580,10 @@ func TestPlanDigestIgnoresTimesAndConnectionsButNotTheRevocations(t *testing.T) 
 	}
 }
 
-// A same-range group the incoming list set drops: its held key is removed by the apply (Issuer.Sign rebuilds this
-// range's keys from the list set), so an exempt user it signed is an issuer problem, in a file preview and in force.
-// Another range's held key stays, so a user it signed is not.
-func TestSameRangeGroupTheListSetDropsIsNotKept(t *testing.T) {
+// A same-prefix group the incoming list set drops: its held key is removed by the apply (Issuer.Sign rebuilds this
+// prefix's keys from the list set), so an exempt user it signed is an issuer problem, in a file preview and in force.
+// Another prefix's held key stays, so a user it signed is not.
+func TestSamePrefixGroupTheListSetDropsIsNotKept(t *testing.T) {
 	for _, src := range []Source{SourceListSetFile, SourceInForce} {
 		t.Run(string(src), func(t *testing.T) {
 			w := newWorld(t)

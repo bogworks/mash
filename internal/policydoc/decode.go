@@ -1,5 +1,5 @@
 // Package policydoc decodes the list-set document: the one value per account that a policy author keeps and mash applies. It
-// decodes the document (raw canonical JSON, or a compact JWS signed by the range's submitter key) into a
+// decodes the document (raw canonical JSON, or a compact JWS signed by the prefix's submitter key) into a
 // listset.ListSet and checks the format's rules.
 //
 // DECISION D211 (and DEC-004) IS PENDING: the document's schema value and field names are the proposed author-mash
@@ -41,7 +41,7 @@ var (
 
 // DecodeOptions configures Decode.
 type DecodeOptions struct {
-	// Submitter is the nkeys public key of the range's submitter. When set, the document must be a JWS whose signature
+	// Submitter is the nkeys public key of the prefix's submitter. When set, the document must be a JWS whose signature
 	// verifies under it. When empty, a JWS's signature is not checked and the result is not Verified.
 	Submitter string
 }
@@ -56,7 +56,7 @@ type DecodeOptions struct {
 type Document struct {
 	Schema         string
 	Account        string
-	Range          string
+	Prefix         string
 	Generation     uint64
 	BaseGeneration uint64
 	IssuedAt       time.Time
@@ -83,7 +83,7 @@ type wireSender struct {
 type wireDoc struct {
 	Schema         *string                `json:"schema"`
 	Account        *string                `json:"account"`
-	Range          *string                `json:"range"`
+	Prefix         *string                `json:"prefix"`
 	Generation     *uint64                `json:"generation"`
 	BaseGeneration *uint64                `json:"base_generation"`
 	Groups         map[string]*wireGroup  `json:"groups"`
@@ -172,7 +172,7 @@ func decodePayload(p []byte) (Document, error) {
 		name    string
 		missing bool
 	}{
-		{"schema", w.Schema == nil}, {"account", w.Account == nil}, {"range", w.Range == nil},
+		{"schema", w.Schema == nil}, {"account", w.Account == nil}, {"prefix", w.Prefix == nil},
 		{"generation", w.Generation == nil}, {"base_generation", w.BaseGeneration == nil},
 		{"groups", w.Groups == nil}, {"senders", w.Senders == nil}, {"issued_at", w.IssuedAt == nil},
 	} {
@@ -183,8 +183,8 @@ func decodePayload(p []byte) (Document, error) {
 	if *w.Schema != DocumentSchema {
 		return Document{}, bad("schema is %q, not %q", *w.Schema, DocumentSchema)
 	}
-	if *w.Account == "" || *w.Range == "" {
-		return Document{}, bad("account and range must not be empty")
+	if *w.Account == "" || *w.Prefix == "" {
+		return Document{}, bad("account and prefix must not be empty")
 	}
 	if *w.BaseGeneration == math.MaxUint64 || *w.Generation != *w.BaseGeneration+1 {
 		return Document{}, bad("generation %d is not base_generation %d plus one", *w.Generation, *w.BaseGeneration)
@@ -200,9 +200,9 @@ func decodePayload(p []byte) (Document, error) {
 		}
 		next = *w.NextSubmitter
 	}
-	d := Document{Schema: *w.Schema, Account: *w.Account, Range: *w.Range, Generation: *w.Generation,
+	d := Document{Schema: *w.Schema, Account: *w.Account, Prefix: *w.Prefix, Generation: *w.Generation,
 		BaseGeneration: *w.BaseGeneration, IssuedAt: at, NextSubmitter: next}
-	d.ListSet = listset.ListSet{Range: d.Range, Base: d.BaseGeneration, Switches: []listset.SwitchEntry{}, Senders: []listset.SenderLists{}}
+	d.ListSet = listset.ListSet{Prefix: d.Prefix, Base: d.BaseGeneration, Switches: []listset.SwitchEntry{}, Senders: []listset.SenderLists{}}
 
 	owners := make([]string, 0, len(w.Groups))
 	for o := range w.Groups {
@@ -227,7 +227,7 @@ func decodePayload(p []byte) (Document, error) {
 			if *v.val != string(listset.Shared) && *v.val != string(listset.Closed) {
 				return Document{}, bad("group %q: verb %q is %q, not shared or closed", o, v.verb, *v.val)
 			}
-			d.ListSet.Switches = append(d.ListSet.Switches, listset.SwitchEntry{Group: d.Range + "." + o, Verb: v.verb, Switch: listset.Switch(*v.val)})
+			d.ListSet.Switches = append(d.ListSet.Switches, listset.SwitchEntry{Group: d.Prefix + "." + o, Verb: v.verb, Switch: listset.Switch(*v.val)})
 		}
 	}
 	names := make([]string, 0, len(w.Senders))

@@ -19,7 +19,7 @@ var update = flag.Bool("update", false, "rewrite the golden files in testdata")
 // core allows lead and sdk, lead allows core, sdk has no exception.
 func drySet() ListSet {
 	return ListSet{
-		Range:    "foo",
+		Prefix:   "foo",
 		Switches: switches("foo.c", Closed, Closed, Shared, Closed),
 		Senders: []SenderLists{
 			{Sender: "foo.c.core", Allow: []string{"foo.c.lead", "foo.c.sdk"}},
@@ -33,7 +33,7 @@ func drySet() ListSet {
 // reaches sdk), and closes one verb (status).
 func at008Next() ListSet {
 	return ListSet{
-		Range:    "foo",
+		Prefix:   "foo",
 		Switches: switches("foo.c", Closed, Closed, Closed, Closed),
 		Senders: []SenderLists{
 			{Sender: "foo.c.core", Allow: []string{"foo.c.lead"}},
@@ -268,7 +268,7 @@ func TestDryRunInForceThatDoesNotValidateIsRefused(t *testing.T) {
 
 // longSender is a sender with n allow entries at long names.
 func longSet(n int) ListSet {
-	ls := ListSet{Range: "foo", Switches: switches("foo.ownerwithalongname", Closed, Closed, Closed, Closed)}
+	ls := ListSet{Prefix: "foo", Switches: switches("foo.ownerwithalongname", Closed, Closed, Closed, Closed)}
 	var allow []string
 	for i := 0; i < n; i++ {
 		allow = append(allow, fmt.Sprintf("foo.ownerwithalongname.receiver-with-a-long-name-%03d", i))
@@ -341,7 +341,7 @@ func TestDryRunDoesNotMutateItsInputs(t *testing.T) {
 
 // reorder returns ls with every slice reversed.
 func reorder(ls ListSet) ListSet {
-	out := ListSet{Range: ls.Range}
+	out := ListSet{Prefix: ls.Prefix}
 	out.Switches = slices.Clone(ls.Switches)
 	slices.Reverse(out.Switches)
 	for _, s := range ls.Senders {

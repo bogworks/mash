@@ -2,7 +2,7 @@
 // signer executes, the removal of what the account held before its first list set that the list set does not own.
 //
 // Half (a), signing keys: a signing key of the account JWT that is not a scoped key the key store holds for an owner
-// group (of this range or any other, see KeptSigners) is a non-mash key. The gate of the first applied list set
+// group (of this prefix or any other, see KeptSigners) is a non-mash key. The gate of the first applied list set
 // refuses extra signers, so the apply removes them; the plan reports each one still present in the JWT in force as a
 // finding, and with a list set from a file, before the first apply, each one the apply would remove. It never pushes for a signing key.
 //
@@ -74,8 +74,8 @@ type Input struct {
 	Claims *jwt.AccountClaims
 	// Signers maps each template group of the list set to its scoped signing key (see ExpectedSigners).
 	Signers map[string]string
-	// Held is the key store's GroupPublics: every owner group of every range to its public key. A scoped signing key
-	// held there is mash's, whatever its range, and is kept (see KeptSigners).
+	// Held is the key store's GroupPublics: every owner group of every prefix to its public key. A scoped signing key
+	// held there is mash's, whatever its prefix, and is kept (see KeptSigners).
 	Held map[string]string
 	// Signing is the public key of the configured account signing key (signing_key), "" when none: a plain signing key
 	// of the account JWT that is mash's own, so it is kept and never reported as removed by apply.
@@ -217,12 +217,12 @@ func ExpectedSigners(groups []string, held map[string]string) (map[string]string
 	return out, nil
 }
 
-// OtherRangesKept is the scoped signing keys of the account JWT that stay beside the target's: every scoped key
-// (*jwt.UserScope) the key store holds (held, from GroupPublics) for an owner group of ANOTHER range (a group that is not
-// rng's: "rng.<name>"), group to public key. It is how policyserve.Issuer keeps them. A key of this range's is
-// rebuilt from the list set, so one the list set no longer names is not in it. rng is the list set's range.
-func OtherRangesKept(claims *jwt.AccountClaims, held map[string]string, rng string) (map[string]string, error) {
-	if rng == "" {
+// OtherPrefixesKept is the scoped signing keys of the account JWT that stay beside the target's: every scoped key
+// (*jwt.UserScope) the key store holds (held, from GroupPublics) for an owner group of ANOTHER prefix (a group that is not
+// prefix's: "prefix.<name>"), group to public key. It is how policyserve.Issuer keeps them. A key of this prefix's is
+// rebuilt from the list set, so one the list set no longer names is not in it. prefix is the list set's prefix.
+func OtherPrefixesKept(claims *jwt.AccountClaims, held map[string]string, prefix string) (map[string]string, error) {
+	if prefix == "" {
 		return nil, errors.New("no address prefix: cannot tell this list set's signing keys from those of another (the list set names none)")
 	}
 	out := map[string]string{}
@@ -230,7 +230,7 @@ func OtherRangesKept(claims *jwt.AccountClaims, held map[string]string, rng stri
 		return out, nil
 	}
 	for g, pub := range held {
-		if strings.HasPrefix(g, rng+".") {
+		if strings.HasPrefix(g, prefix+".") {
 			continue
 		}
 		if sc, _ := claims.SigningKeys.GetScope(pub); sc != nil {
@@ -244,10 +244,10 @@ func OtherRangesKept(claims *jwt.AccountClaims, held map[string]string, rng stri
 
 // KeptSigners is the account JWT's signing keys that are mash's and stay once the list set is applied, as
 // policyserve.Issuer.Sign keeps them: the list set's expected signers (the target's group keys) and the scoped keys the
-// key store holds for another range's owner groups (OtherRangesKept). A key of this range's that the list set no longer
+// key store holds for another prefix's owner groups (OtherPrefixesKept). A key of this prefix's that the list set no longer
 // names goes, so it is not kept. Every other signing key, a scoped key the key store does not hold included, is non-mash.
-func KeptSigners(claims *jwt.AccountClaims, held, signers map[string]string, rng string) (map[string]bool, error) {
-	other, err := OtherRangesKept(claims, held, rng)
+func KeptSigners(claims *jwt.AccountClaims, held, signers map[string]string, prefix string) (map[string]bool, error) {
+	other, err := OtherPrefixesKept(claims, held, prefix)
 	if err != nil {
 		return nil, err
 	}
@@ -312,7 +312,7 @@ func Build(ctx context.Context, in Input) (Plan, error) {
 	for _, k := range in.Signers {
 		scoped[k] = true
 	}
-	kept, err := KeptSigners(in.Claims, in.Held, in.Signers, in.ListSet.Range)
+	kept, err := KeptSigners(in.Claims, in.Held, in.Signers, in.ListSet.Prefix)
 	if err != nil {
 		return Plan{}, err
 	}

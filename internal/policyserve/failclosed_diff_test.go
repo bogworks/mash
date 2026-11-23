@@ -46,7 +46,7 @@ func fcDoc(t *testing.T, gen, base int, senders map[string][]string) []byte {
 		ss[s] = map[string]any{"allow": allow, "deny": []string{}}
 	}
 	b, err := json.Marshal(map[string]any{
-		"schema": policydoc.DocumentSchema, "account": "A", "range": "foo", "generation": gen, "base_generation": base,
+		"schema": policydoc.DocumentSchema, "account": "A", "prefix": "foo", "generation": gen, "base_generation": base,
 		"issued_at": "2026-11-14T10:00:00Z",
 		"groups":    map[string]any{"c": map[string]any{"mail": "closed", "prompt": "closed", "status": "shared", "heartbeat": "closed"}},
 		"senders":   ss,

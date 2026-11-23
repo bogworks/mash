@@ -1,4 +1,4 @@
 refused: nothing would change
-  [range] range: the document is for address prefix bar and the selected address prefix is foo
+  [prefix] prefix: the document's `prefix` field is bar and the selected address prefix is foo
   [validate] sender "foo.c.core": address prefix "foo" is not the account's address prefix "bar"
   [validate] sender "foo.c.lead": address prefix "foo" is not the account's address prefix "bar"

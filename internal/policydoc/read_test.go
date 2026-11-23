@@ -254,8 +254,8 @@ func TestDiff(t *testing.T) {
 	}
 
 	// Nothing in force: the first generation.
-	if _, err := Diff(ctx, fakeReader{}, doc(1, 0, nil), "", nil, nil, nil); !errors.Is(err, ErrRangeNeeded) {
-		t.Fatalf("no range with nothing in force: %v", err)
+	if _, err := Diff(ctx, fakeReader{}, doc(1, 0, nil), "", nil, nil, nil); !errors.Is(err, ErrPrefixNeeded) {
+		t.Fatalf("no prefix with nothing in force: %v", err)
 	}
 	p, err = Diff(ctx, fakeReader{}, doc(1, 0, nil), "foo", nil, arc, nil)
 	if err != nil || p.Refused || len(p.FirstCredential) != 2 {
@@ -374,22 +374,22 @@ func TestDiffAdoption(t *testing.T) {
 	}
 }
 
-// A valid document for another range is a refusal at stage range, whether the range is selected or the one in force.
-func TestDiffRangeMismatch(t *testing.T) {
+// A valid document for another prefix is a refusal at stage prefix, whether the prefix is selected or the one in force.
+func TestDiffPrefixMismatch(t *testing.T) {
 	ctx := context.Background()
 	r := fakeReader{doc: doc(7, 6, nil), st: applied(7)}
-	other := doc(8, 7, func(m map[string]any) { m["range"] = "bar" })
-	for _, rng := range []string{"foo", ""} { // selected, then the range of the list set in force
-		p, err := Diff(ctx, r, other, rng, nil, nil, nil)
-		if err != nil || !p.Refused || p.Refusals[0].Stage != StageRange ||
+	other := doc(8, 7, func(m map[string]any) { m["prefix"] = "bar" })
+	for _, prefix := range []string{"foo", ""} { // selected, then the prefix of the list set in force
+		p, err := Diff(ctx, r, other, prefix, nil, nil, nil)
+		if err != nil || !p.Refused || p.Refusals[0].Stage != StagePrefix ||
 			!strings.Contains(p.Refusals[0].Reason, "bar") || !strings.Contains(p.Refusals[0].Reason, "foo") {
-			t.Fatalf("range %q: %+v, %v", rng, p, err)
+			t.Fatalf("prefix %q: %+v, %v", prefix, p, err)
 		}
 	}
 	p, _ := Diff(ctx, r, other, "foo", nil, nil, nil)
-	golden(t, "plan_range", RenderPlan(p))
+	golden(t, "plan_prefix", RenderPlan(p))
 	if p, err := Diff(ctx, r, changedDoc(nil), "foo", nil, nil, nil); err != nil || p.Refused {
-		t.Fatalf("matching range: %+v, %v", p, err)
+		t.Fatalf("matching prefix: %+v, %v", p, err)
 	}
 }
 
@@ -408,7 +408,7 @@ func TestDiffPending(t *testing.T) {
 		return fakeReader{doc: doc(7, 6, nil), st: applied(7), pend: &listset.Record{Generation: gen, Content: content}}
 	}
 	// Other content than the pending generation's.
-	other := listset.DigestListSet(listset.ListSet{Range: "other"})
+	other := listset.DigestListSet(listset.ListSet{Prefix: "other"})
 	p, err := Diff(ctx, pendingFor(8, other), changed, "", nil, nil, nil)
 	if err != nil || !p.Refused || p.Refusals[0].Stage != StagePending || !strings.Contains(p.Refusals[0].Reason, "generation 8 is pending") {
 		t.Fatalf("%+v, %v", p, err)

@@ -29,7 +29,7 @@ func (okGuard) Before(context.Context, string) error { return nil }
 // base 1 with the very content in force.
 func sameContentApplier(t *testing.T) (*Applier, policyintake.Doc) {
 	t.Helper()
-	ls := listset.ListSet{Range: "foo"}
+	ls := listset.ListSet{Prefix: "foo"}
 	c, err := listset.Compile(ls)
 	if err != nil {
 		t.Fatal(err)
@@ -37,14 +37,14 @@ func sameContentApplier(t *testing.T) (*Applier, policyintake.Doc) {
 	rec := listset.Record{Generation: 1, Signed: listset.DigestCompiled(c)}
 	led := memLedger{policyapply.NewMemLedgerWith(rec, policyapply.InForceDetail{ListSet: &ls})}
 	a := &Applier{
-		Account: "A", Range: "foo", Ledger: led, Record: anyRecord{}, Servers: 1, URL: "nats://127.0.0.1:4222",
+		Account: "A", Prefix: "foo", Ledger: led, Record: anyRecord{}, Servers: 1, URL: "nats://127.0.0.1:4222",
 		Keys:   memKeys{},
 		keptFn: func(context.Context) (map[string]string, error) { return map[string]string{}, nil },
 		readServers: func(context.Context) ([]ServerInfo, error) {
 			return []ServerInfo{{Name: "s1", Host: "127.0.0.1", Port: 4222}}, nil
 		},
 	}
-	raw := fmt.Sprintf(`{"schema":%q,"account":"A","range":"foo","generation":2,"base_generation":1,"issued_at":"2026-11-14T10:00:00Z","groups":{},"senders":{}}`, "mash.listset/1")
+	raw := fmt.Sprintf(`{"schema":%q,"account":"A","prefix":"foo","generation":2,"base_generation":1,"issued_at":"2026-11-14T10:00:00Z","groups":{},"senders":{}}`, "mash.listset/1")
 	return a, policyintake.Doc{Raw: []byte(raw)}
 }
 
@@ -102,7 +102,7 @@ func newAddressApplier(t *testing.T, inboxes InboxChecker) (*Applier, policyinta
 	a.Ledger = memLedger{policyapply.NewMemLedger(listset.Record{})}
 	a.Inboxes = inboxes
 	a.Keys = makeKeys{memKeys{}}
-	d.Raw = []byte(fmt.Sprintf(`{"schema":%q,"account":"A","range":"foo","generation":1,"base_generation":0,"issued_at":"2026-11-14T10:00:00Z",`+
+	d.Raw = []byte(fmt.Sprintf(`{"schema":%q,"account":"A","prefix":"foo","generation":1,"base_generation":0,"issued_at":"2026-11-14T10:00:00Z",`+
 		`"groups":{"c":{"mail":"closed","prompt":"closed","status":"shared","heartbeat":"closed"}},`+
 		`"senders":{"foo.c.core":{"allow":[],"deny":[]}}}`, "mash.listset/1"))
 	called := new(bool)
@@ -149,13 +149,13 @@ func (makeKeys) GroupKey(string, bool) (nkeys.KeyPair, error) { return nkeys.Cre
 // non-mash signing key is dropped once the exempt users stay under kept keys, where without the fields it is refused.
 func TestApplierDropsANonMashKeyOnTheFirstApplyWhenTheDropFieldsAreSet(t *testing.T) {
 	w := newDropWorld(t)
-	raw := []byte(fmt.Sprintf(`{"schema":%q,"account":%q,"range":"foo","generation":1,"base_generation":0,"issued_at":"2026-11-14T10:00:00Z",`+
+	raw := []byte(fmt.Sprintf(`{"schema":%q,"account":%q,"prefix":"foo","generation":1,"base_generation":0,"issued_at":"2026-11-14T10:00:00Z",`+
 		`"groups":{"c":{"mail":"closed","prompt":"closed","status":"shared","heartbeat":"closed"}},`+
 		`"senders":{"foo.c.core":{"allow":[],"deny":[]}}}`, "mash.listset/1", w.acct))
-	exempt := map[string][]string{"UEXEMPT": {w.acct, w.otherRange}}
+	exempt := map[string][]string{"UEXEMPT": {w.acct, w.otherPrefix}}
 	for _, set := range []bool{false, true} {
 		a := &Applier{
-			Account: w.acct, Range: "foo", Ledger: memLedger{policyapply.NewMemLedger(listset.Record{})}, Record: anyRecord{}, Servers: 1,
+			Account: w.acct, Prefix: "foo", Ledger: memLedger{policyapply.NewMemLedger(listset.Record{})}, Record: anyRecord{}, Servers: 1,
 			URL: "nats://127.0.0.1:4222", Keys: w.keys, Trust: w.iss.Trust, Now: w.iss.Now,
 			Provisioner: nopProvisioner{},
 			keptFn:      func(context.Context) (map[string]string, error) { return map[string]string{}, nil },
@@ -201,7 +201,7 @@ func TestApplierDropsANonMashKeyOnTheFirstApplyWhenTheDropFieldsAreSet(t *testin
 		if _, ok := got.SigningKeys.GetScope(w.plain); ok {
 			t.Error("the non-mash key stays")
 		}
-		scopeOf(t, got, w.otherRange)
+		scopeOf(t, got, w.otherPrefix)
 	}
 }
 

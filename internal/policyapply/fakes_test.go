@@ -28,7 +28,7 @@ func switches(group string, mail, prompt, status, hb listset.Switch) []listset.S
 // set1 is the first generation: mail is shared in the group and core also has docs on its allow list.
 func set1() listset.ListSet {
 	return listset.ListSet{
-		Range:    "foo",
+		Prefix:   "foo",
 		Switches: switches("foo.c", listset.Shared, listset.Closed, listset.Closed, listset.Closed),
 		Senders: []listset.SenderLists{
 			{Sender: "foo.c.core", Allow: []string{"foo.c.docs"}},
@@ -194,7 +194,7 @@ func (p fakeProber) Refused(_ context.Context, server string, probe ProbeCred, _
 	if !ok {
 		return false, errors.New("unknown generation")
 	}
-	c := &listset.Compiled{Range: p.byGen[g].Range, Templates: p.byGen[g].Templates}
+	c := &listset.Compiled{Prefix: p.byGen[g].Prefix, Templates: p.byGen[g].Templates}
 	for _, u := range p.byGen[g].Users {
 		if u.Sender == probe.Sender {
 			u.Name, u.Tags = probe.Name, probe.Tags

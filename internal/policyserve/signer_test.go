@@ -108,7 +108,7 @@ func TestSignKeepsOtherRangesGroupKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	c, err := listset.Compile(listset.ListSet{
-		Range: "foo",
+		Prefix: "foo",
 		Switches: []listset.SwitchEntry{{Group: "foo.c", Verb: listset.Mail, Switch: listset.Closed}, {Group: "foo.c", Verb: listset.Prompt, Switch: listset.Closed},
 			{Group: "foo.c", Verb: listset.Status, Switch: listset.Closed}, {Group: "foo.c", Verb: listset.Heartbeat, Switch: listset.Closed}},
 		Senders: []listset.SenderLists{{Sender: "foo.c.x"}},
@@ -117,7 +117,7 @@ func TestSignKeepsOtherRangesGroupKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().Add(5 * time.Second)
-	iss := &Issuer{Ctx: context.Background(), Keys: keys, Resolver: oneJWT{tok}, Account: apub, Trust: trust, Servers: 1, Range: "foo",
+	iss := &Issuer{Ctx: context.Background(), Keys: keys, Resolver: oneJWT{tok}, Account: apub, Trust: trust, Servers: 1, Prefix: "foo",
 		Now: func() time.Time { return now }}
 	out, err := iss.Sign(listset.Record{}, c)
 	if err != nil {
@@ -127,15 +127,15 @@ func TestSignKeepsOtherRangesGroupKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The other range's signer stays, with its own scope.
+	// The other prefix's signer stays, with its own scope.
 	us := scopeOf(t, got, pubOf(keys.groups["bar.d"]))
 	if us.Role != "bar.d" || !slices.Contains([]string(us.Template.Pub.Allow), "keep.bar.d") {
-		t.Errorf("the other range's scope changed: %+v", us)
+		t.Errorf("the other prefix's scope changed: %+v", us)
 	}
-	// This range's group of the list set is there; a this-range group no longer in the list set is gone.
+	// This prefix's group of the list set is there; a this-prefix group no longer in the list set is gone.
 	scopeOf(t, got, pubOf(keys.groups["foo.c"]))
 	if _, ok := got.SigningKeys.GetScope(pubOf(keys.groups["foo.gone"])); ok {
-		t.Error("a group of this range that left the list set still has a valid signer")
+		t.Error("a group of this prefix that left the list set still has a valid signer")
 	}
 }
 
@@ -188,13 +188,13 @@ func TestSignPreviousStampsThePlannedRevocationTime(t *testing.T) {
 	}
 }
 
-// dropWorld is an account JWT with a plain (non-mash) signing key and another range's held group key, and an Issuer
-// for range foo over it.
+// dropWorld is an account JWT with a plain (non-mash) signing key and another prefix's held group key, and an Issuer
+// for prefix foo over it.
 type dropWorld struct {
 	keys        storeKeys
 	acct        string
 	plain       string
-	otherRange  string
+	otherPrefix string
 	iss         *Issuer
 	compiled    *listset.Compiled
 	targetGroup string
@@ -206,11 +206,11 @@ func newDropWorld(t *testing.T) *dropWorld {
 	acct, _ := nkeys.CreateAccount()
 	w := &dropWorld{acct: pubOf(acct), plain: pubOf(newGroupKey()), targetGroup: "foo.c"}
 	w.keys = storeKeys{op: op, groups: map[string]nkeys.KeyPair{"foo.c": newGroupKey(), "bar.d": newGroupKey()}}
-	w.otherRange = pubOf(w.keys.groups["bar.d"])
+	w.otherPrefix = pubOf(w.keys.groups["bar.d"])
 	ac := jwt.NewAccountClaims(w.acct)
 	addForeignScoped(ac, w.plain)
 	sc := jwt.NewUserScope()
-	sc.Key, sc.Role = w.otherRange, "bar.d"
+	sc.Key, sc.Role = w.otherPrefix, "bar.d"
 	sc.Template.Pub.Allow.Add("keep.bar.d")
 	ac.SigningKeys.AddScopedSigner(sc)
 	tok, err := ac.Encode(op)
@@ -222,7 +222,7 @@ func newDropWorld(t *testing.T) *dropWorld {
 		t.Fatal(err)
 	}
 	w.compiled, err = listset.Compile(listset.ListSet{
-		Range: "foo",
+		Prefix: "foo",
 		Switches: []listset.SwitchEntry{{Group: "foo.c", Verb: listset.Mail, Switch: listset.Closed}, {Group: "foo.c", Verb: listset.Prompt, Switch: listset.Closed},
 			{Group: "foo.c", Verb: listset.Status, Switch: listset.Closed}, {Group: "foo.c", Verb: listset.Heartbeat, Switch: listset.Closed}},
 		Senders: []listset.SenderLists{{Sender: "foo.c.x"}},
@@ -231,7 +231,7 @@ func newDropWorld(t *testing.T) *dropWorld {
 		t.Fatal(err)
 	}
 	now := time.Now().Add(5 * time.Second)
-	w.iss = &Issuer{Ctx: context.Background(), Keys: w.keys, Resolver: oneJWT{tok}, Account: w.acct, Trust: trust, Servers: 1, Range: "foo",
+	w.iss = &Issuer{Ctx: context.Background(), Keys: w.keys, Resolver: oneJWT{tok}, Account: w.acct, Trust: trust, Servers: 1, Prefix: "foo",
 		Now: func() time.Time { return now }}
 	return w
 }
@@ -267,11 +267,11 @@ func TestSignRefusesANonMashKeyWithoutTheDropFields(t *testing.T) {
 func TestSignDropsANonMashKeyAfterTheIssuerCheckAndKeepsOtherRanges(t *testing.T) {
 	w := newDropWorld(t)
 	other := newGroupKey()
-	w.enable(w.acct, map[string][]string{"UEXEMPT": {w.acct, w.otherRange}, "USYS": {pubOf(other)}}) // USYS is under a key that is neither kept nor in the JWT
+	w.enable(w.acct, map[string][]string{"UEXEMPT": {w.acct, w.otherPrefix}, "USYS": {pubOf(other)}}) // USYS is under a key that is neither kept nor in the JWT
 	if _, err := w.iss.Sign(listset.Record{Generation: 1}, w.compiled); err == nil {
 		t.Fatal("an exempt user under an unknown key passed the check")
 	}
-	w.enable(w.acct, map[string][]string{"UEXEMPT": {w.acct, w.otherRange}})
+	w.enable(w.acct, map[string][]string{"UEXEMPT": {w.acct, w.otherPrefix}})
 	out, err := w.iss.Sign(listset.Record{Generation: 1}, w.compiled)
 	if err != nil {
 		t.Fatal(err)
@@ -283,14 +283,14 @@ func TestSignDropsANonMashKeyAfterTheIssuerCheckAndKeepsOtherRanges(t *testing.T
 	if _, ok := got.SigningKeys.GetScope(w.plain); ok {
 		t.Error("the non-mash key stays")
 	}
-	if us := scopeOf(t, got, w.otherRange); us.Role != "bar.d" {
-		t.Errorf("the other range's key changed: %+v", us)
+	if us := scopeOf(t, got, w.otherPrefix); us.Role != "bar.d" {
+		t.Errorf("the other prefix's key changed: %+v", us)
 	}
 	scopeOf(t, got, pubOf(w.keys.groups["foo.c"]))
 	if len(got.SigningKeys) != 2 {
 		t.Errorf("signing keys: %d", len(got.SigningKeys))
 	}
-	if k, err := w.iss.Kept(context.Background(), 1); err != nil || k["bar.d"] != w.otherRange || len(k) != 1 {
+	if k, err := w.iss.Kept(context.Background(), 1); err != nil || k["bar.d"] != w.otherPrefix || len(k) != 1 {
 		t.Errorf("Kept: %v %v", k, err)
 	}
 }
@@ -336,7 +336,7 @@ func tokOf(t *testing.T, w *dropWorld, plain bool) string {
 		addForeignScoped(ac, w.plain)
 	}
 	sc := jwt.NewUserScope()
-	sc.Key, sc.Role = w.otherRange, "bar.d"
+	sc.Key, sc.Role = w.otherPrefix, "bar.d"
 	ac.SigningKeys.AddScopedSigner(sc)
 	tok, err := ac.Encode(w.keys.op)
 	if err != nil {
@@ -347,7 +347,7 @@ func tokOf(t *testing.T, w *dropWorld, plain bool) string {
 
 func TestSignDropsANonMashKeyOnlyOnTheFirstGeneration(t *testing.T) {
 	w := newDropWorld(t)
-	w.enable(w.acct, map[string][]string{"UEXEMPT": {w.acct, w.otherRange}})
+	w.enable(w.acct, map[string][]string{"UEXEMPT": {w.acct, w.otherPrefix}})
 	if _, err := w.iss.Sign(listset.Record{Generation: 1}, w.compiled); err != nil {
 		t.Fatalf("generation 1: %v", err)
 	}
@@ -393,10 +393,10 @@ func TestSignCarriesEveryPlainSigningKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().Add(5 * time.Second)
-	iss := &Issuer{Ctx: context.Background(), Keys: keys, Resolver: oneJWT{tok}, Account: apub, Trust: trust, Servers: 1, Range: "foo",
+	iss := &Issuer{Ctx: context.Background(), Keys: keys, Resolver: oneJWT{tok}, Account: apub, Trust: trust, Servers: 1, Prefix: "foo",
 		Now: func() time.Time { return now }}
 	c, err := listset.Compile(listset.ListSet{
-		Range: "foo",
+		Prefix: "foo",
 		Switches: []listset.SwitchEntry{{Group: "foo.c", Verb: listset.Mail, Switch: listset.Closed}, {Group: "foo.c", Verb: listset.Prompt, Switch: listset.Closed},
 			{Group: "foo.c", Verb: listset.Status, Switch: listset.Closed}, {Group: "foo.c", Verb: listset.Heartbeat, Switch: listset.Closed}},
 		Senders: []listset.SenderLists{{Sender: "foo.c.x"}},
@@ -432,7 +432,7 @@ func TestSignCarriesEveryPlainSigningKey(t *testing.T) {
 }
 
 // foreignScopedWorld is the drop world with the configured plain account signing key (signing.nk) and a foreign scoped
-// key (addForeignScoped) in the account JWT, plus another range's held group key.
+// key (addForeignScoped) in the account JWT, plus another prefix's held group key.
 func foreignScopedWorld(t *testing.T) (*dropWorld, string) {
 	t.Helper()
 	w := newDropWorld(t)

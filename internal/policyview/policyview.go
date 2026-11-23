@@ -1,6 +1,6 @@
 // Package policyview is the responder behind `mash policy show` and `mash policy explain` (REQ-010).
 //
-// A sender sees only its own reach. The responder answers a signed request on agents.policy.<range>, finds who the
+// A sender sees only its own reach. The responder answers a signed request on agents.policy.<prefix>, finds who the
 // caller is from the verified signature alone, and answers with that caller's own entry of the list set in force. It
 // never returns another sender's lists or reach; the full lists are the operator's view (mashctl).
 package policyview
@@ -45,8 +45,8 @@ type Store interface {
 
 // Options configures Mount.
 type Options struct {
-	// Range is the account's range. Required.
-	Range string
+	// Prefix is the account's prefix. Required.
+	Prefix string
 	// Store is the ledger to read. Required.
 	Store Store
 	// Now gives the time requests are judged by; nil means time.Now.
@@ -58,8 +58,8 @@ type Options struct {
 	ResolveAddress func(ctx context.Context, userPub string) (address string, ok bool, err error)
 }
 
-// Subject is the subject of the responder of range rng.
-func Subject(rng string) string { return listset.PolicySubject(rng) }
+// Subject is the subject of the responder of prefix prefix.
+func Subject(prefix string) string { return listset.PolicySubject(prefix) }
 
 // Request is the body of a request.
 type Request struct {
@@ -118,10 +118,10 @@ type responder struct {
 	views    map[uint64]listset.View
 }
 
-// Mount serves the responder on nc: a micro service with one endpoint on Subject(opts.Range), in a queue group so
+// Mount serves the responder on nc: a micro service with one endpoint on Subject(opts.Prefix), in a queue group so
 // several responders share the load. stop drains the service.
 func Mount(nc *nats.Conn, opts Options) (stop func() error, err error) {
-	if opts.Range == "" {
+	if opts.Prefix == "" {
 		return nil, errors.New("policyview: no address prefix")
 	}
 	if opts.Store == nil {
@@ -145,7 +145,7 @@ func Mount(nc *nats.Conn, opts Options) (stop func() error, err error) {
 		return nil, fmt.Errorf("policyview: %w", err)
 	}
 	if err := svc.AddEndpoint("policy", micro.HandlerFunc(r.handle),
-		micro.WithEndpointSubject(Subject(opts.Range)), micro.WithEndpointQueueGroup("mash-policy")); err != nil {
+		micro.WithEndpointSubject(Subject(opts.Prefix)), micro.WithEndpointQueueGroup("mash-policy")); err != nil {
 		_ = svc.Stop()
 		return nil, fmt.Errorf("policyview: %w", err)
 	}
@@ -180,8 +180,8 @@ func (r *responder) handle(req micro.Request) {
 		refuse(req, "the signing key names no endpoint")
 		return
 	}
-	if parts := strings.Split(caller, "."); len(parts) != 3 || parts[0] != r.opts.Range {
-		refuse(req, fmt.Sprintf("the sender is not an endpoint under address prefix %q", r.opts.Range))
+	if parts := strings.Split(caller, "."); len(parts) != 3 || parts[0] != r.opts.Prefix {
+		refuse(req, fmt.Sprintf("the sender is not an endpoint under address prefix %q", r.opts.Prefix))
 		return
 	}
 	var q Request

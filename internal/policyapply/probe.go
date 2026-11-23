@@ -20,7 +20,7 @@ import (
 	"github.com/bogworks/mash/internal/natsauth"
 )
 
-// GroupSigner signs a user JWT with the scoped signing key of an owner group (the group is "range.owner", the role
+// GroupSigner signs a user JWT with the scoped signing key of an owner group (the group is "prefix.owner", the role
 // of the key). The user's permissions then come only from the key's template.
 type GroupSigner interface {
 	SignUser(group string, uc *jwt.UserClaims) (string, error)

@@ -51,7 +51,7 @@ func RenderShow(r ShowResult) string {
 		return b.String()
 	}
 	v := r.View
-	fmt.Fprintf(&b, "generation: %d\nrange: %s\n\nswitches:\n", v.Generation, v.Range)
+	fmt.Fprintf(&b, "generation: %d\nprefix: %s\n\nswitches:\n", v.Generation, v.Prefix)
 	for _, s := range v.Switches {
 		fmt.Fprintf(&b, "  %s %s %s\n", s.Group, s.Verb, s.Switch)
 	}

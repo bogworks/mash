@@ -11,11 +11,11 @@ import (
 	"testing"
 )
 
-// showSet is two owner groups in range r: o shares mail and heartbeat and keeps prompt and status closed, p is
+// showSet is two owner groups in prefix r: o shares mail and heartbeat and keeps prompt and status closed, p is
 // closed throughout. a allows an address of p and denies c; x allows a.
 func showSet() ListSet {
 	return ListSet{
-		Range:    "r",
+		Prefix:   "r",
 		Switches: concat(switches("r.o", Shared, Closed, Closed, Shared), switches("r.p", Closed, Closed, Closed, Closed)),
 		Senders: []SenderLists{
 			{Sender: "r.o.a", Allow: []string{"r.p.x"}, Deny: []string{"r.o.c"}},
@@ -148,8 +148,8 @@ func TestExplainErrors(t *testing.T) {
 		sender, receiver string
 	}{
 		{"unknown sender", ls, "r.o.nobody", "r.o.a"},
-		{"sender in another range", ls, "q.o.a", "r.o.a"},
-		{"receiver in another range", ls, "r.o.a", "q.o.a"},
+		{"sender in another prefix", ls, "q.o.a", "r.o.a"},
+		{"receiver in another prefix", ls, "r.o.a", "q.o.a"},
 		{"receiver not an address", ls, "r.o.a", "r.o"},
 		{"receiver a wildcard", ls, "r.o.a", "r.o.*"},
 		{"invalid list set", bad, "r.o.a", "r.o.b"},
@@ -223,7 +223,7 @@ func TestShowContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v.Describes != DescribesListSet || v.Generation != 7 || v.Range != "r" || v.RawClientLimit != RawClientLimit {
+	if v.Describes != DescribesListSet || v.Generation != 7 || v.Prefix != "r" || v.RawClientLimit != RawClientLimit {
 		t.Errorf("header = %+v", v)
 	}
 	if len(v.Switches) != 8 || v.Switches[0] != (SwitchView{"r.o", Mail, Shared}) || v.Switches[7] != (SwitchView{"r.p", Heartbeat, Closed}) {
@@ -321,7 +321,7 @@ func TestShowExplainGolden(t *testing.T) {
 
 func ExampleExplain() {
 	ls := ListSet{
-		Range:    "r",
+		Prefix:   "r",
 		Switches: switches("r.o", Shared, Closed, Closed, Shared),
 		Senders: []SenderLists{
 			{Sender: "r.o.a", Deny: []string{"r.o.c"}},
