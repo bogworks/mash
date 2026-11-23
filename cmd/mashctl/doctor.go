@@ -151,7 +151,9 @@ func (r doctorReport) hint() string {
 // every hint line does, whatever stream the rest uses).
 func (r doctorReport) writeText(w, hintW io.Writer) {
 	for _, c := range r.Checks {
-		fmt.Fprintln(w, strings.TrimRight(fmt.Sprintf("%-11s%-6s%s", c.Name, doctorWord(c.State), c.Detail), " "))
+		// a detail of several lines continues under the detail column (11 + 6)
+		detail := strings.ReplaceAll(c.Detail, "\n", "\n"+strings.Repeat(" ", 17))
+		fmt.Fprintln(w, strings.TrimRight(fmt.Sprintf("%-11s%-6s%s", c.Name, doctorWord(c.State), detail), " "))
 	}
 	fmt.Fprintf(w, "\n%s\n", r.summary())
 	if h := r.hint(); h != "" {
@@ -382,6 +384,19 @@ func names(list []string) string {
 		return strings.Join(list[:3], ", ") + fmt.Sprintf(" and %d more", len(list)-3)
 	}
 	return strings.Join(list, ", ")
+}
+
+// keyLines lists up to three keys, each whole on a line of its own after a newline, then "and N more".
+func keyLines(list []string) string {
+	var b strings.Builder
+	for i, k := range list {
+		if i == 3 {
+			fmt.Fprintf(&b, "\nand %d more", len(list)-3)
+			break
+		}
+		b.WriteString("\n" + k)
+	}
+	return b.String()
 }
 
 // plural picks the verb form for n things: "1 inbox has", "2 inboxes have".
@@ -617,14 +632,14 @@ func doctorKeys(rep *doctorReport, ctx context.Context, adm *admin.Admin, cfg co
 	var fails []finding
 	const fix = "mashctl endpoint list"
 	const unlistedFix = "if another tool issued it, list it in config.json external_keys; otherwise revoke it"
-	if n := len(unrecorded); n > 0 {
-		fails = append(fails, finding{fmt.Sprintf("%s not issued here: %s", count(n, "connected key")+" "+plural(n, "was", "were"), names(unrecorded)), unlistedFix})
-	}
 	if n := len(revoked); n > 0 {
 		fails = append(fails, finding{fmt.Sprintf("%s still connected", count(n, "revoked key")+" "+plural(n, "is", "are")), fix})
 	}
 	if scan.Incomplete != "" {
 		fails = append(fails, finding{oneLine(scan.Incomplete), initFix})
+	}
+	if n := len(unrecorded); n > 0 { // last: its keys are lines of their own, so no "; ..." may follow
+		fails = append(fails, finding{fmt.Sprintf("%s not issued here:%s", count(n, "connected key")+" "+plural(n, "was", "were"), keyLines(unrecorded)), unlistedFix})
 	}
 	okDetail := "every connected key was issued here"
 	if n := len(external); n > 0 {

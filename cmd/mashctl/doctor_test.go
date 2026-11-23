@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -410,7 +411,7 @@ func TestDoctorKeysReportsAKeyMashDidNotIssue(t *testing.T) {
 		t.Fatal("the rogue did not connect")
 	}
 	out, errb, code := e.run("doctor")
-	want := "config     ok\nserver     ok    tls://localhost:4222\nsign-in    ok\nstorage    ok\nendpoints  ok    2 records, 2 inboxes\nkeys       FAIL  1 connected key was not issued here: KEY\n\n1 problem.\n"
+	want := "config     ok\nserver     ok    tls://localhost:4222\nsign-in    ok\nstorage    ok\nendpoints  ok    2 records, 2 inboxes\nkeys       FAIL  1 connected key was not issued here:\n                 KEY\n\n1 problem.\n"
 	if code != 1 || userKeyRE.ReplaceAllString(cleanText(e, out), "KEY") != want || errb != "hint: if another tool issued it, list it in config.json external_keys; otherwise revoke it\n" {
 		t.Fatalf("exit %d\n%q\nstderr %q\nwant\n%q", code, cleanText(e, out), errb, want)
 	}
@@ -426,7 +427,7 @@ func TestDoctorKeysHasNoExemptionForTheCommandsOwnAdmin(t *testing.T) {
 	e := newXYEnv(t)
 	path, _ := mintUnrecordedAdmin(t, e)
 	e.env["MASH_ADMIN_CREDS"] = path
-	if _, by, code := doctorJSON(t, e.run); code != 1 || !strings.HasPrefix(by["keys"].Detail, "1 connected key was not issued here: U") {
+	if _, by, code := doctorJSON(t, e.run); code != 1 || !strings.HasPrefix(by["keys"].Detail, "1 connected key was not issued here:\nU") {
 		t.Fatalf("an unrecorded admin was not reported: %d %+v", code, by["keys"])
 	}
 }
@@ -464,7 +465,7 @@ func TestDoctorKeysRefusesAnIncompleteServerSet(t *testing.T) {
 	}
 	e.connect(e.mintRogue("rogue"))
 	_, by, _ = doctorJSON(t, e.run)
-	if c := by["keys"]; !strings.HasPrefix(c.Detail, "1 connected key was not issued here: U") || !strings.Contains(c.Detail, "1 server(s) replied") {
+	if c := by["keys"]; !strings.HasPrefix(c.Detail, "1 server(s) replied") || !strings.Contains(c.Detail, "; 1 connected key was not issued here:\nU") {
 		t.Fatalf("%+v", c)
 	}
 	e.servers(1)
@@ -607,7 +608,7 @@ func TestDoctorKeysExternalKeys(t *testing.T) {
 
 	// absent and empty: today's failure, byte for byte
 	failFor := func(key string) string {
-		return "config     ok\nserver     ok    tls://localhost:4222\nsign-in    ok\nstorage    ok\nendpoints  ok    2 records, 2 inboxes\nkeys       FAIL  1 connected key was not issued here: " + key + "\n\n1 problem.\n"
+		return "config     ok\nserver     ok    tls://localhost:4222\nsign-in    ok\nstorage    ok\nendpoints  ok    2 records, 2 inboxes\nkeys       FAIL  1 connected key was not issued here:\n                 " + key + "\n\n1 problem.\n"
 	}
 	const unlistedHint = "hint: if another tool issued it, list it in config.json external_keys; otherwise revoke it\n"
 	failWant := failFor(listed)
@@ -640,7 +641,7 @@ func TestDoctorKeysExternalKeys(t *testing.T) {
 			t.Fatalf("%v: exit %d\n%q\nstderr %q", args, code, cleanText(e, out), errb)
 		}
 	}
-	if _, by, code := doctorJSON(t, e.run); code != 1 || by["keys"].State != "fail" || by["keys"].Detail != "1 connected key was not issued here: "+unlisted {
+	if _, by, code := doctorJSON(t, e.run); code != 1 || by["keys"].State != "fail" || by["keys"].Detail != "1 connected key was not issued here:\n"+unlisted {
 		t.Fatalf("json: %d %+v", code, by["keys"])
 	}
 }
@@ -725,6 +726,45 @@ func TestDoctorExternalKeysRefusedEntries(t *testing.T) {
 		}
 		if strings.Contains(out+errb, string(seed)) || strings.Contains(out+errb, opub) || strings.Contains(out+errb, e.acctPub) {
 			t.Errorf("%s: a key that must not be echoed was printed: %q %q", name, out, errb)
+		}
+	}
+}
+
+// Five unlisted keys: three whole keys and "and 2 more", each on its own line, every line of the human output within
+// 80 columns; --json keeps the keys whole in detail.
+func TestDoctorKeysManyUnlistedKeysOnLinesOfTheirOwn(t *testing.T) {
+	e := newXYEnv(t)
+	for i := 0; i < 5; i++ {
+		rogueKey(t, e, fmt.Sprintf("tool-%d", i))
+	}
+	out, _, code := e.run("doctor")
+	if code != 1 {
+		t.Fatalf("exit %d", code)
+	}
+	text := cleanText(e, out)
+	lines := strings.Split(text, "\n")
+	for _, l := range lines {
+		if len(l) > 80 {
+			t.Errorf("%d columns: %q", len(l), l)
+		}
+	}
+	i := slices.IndexFunc(lines, func(l string) bool { return strings.HasPrefix(l, "keys ") })
+	if i < 0 || len(lines) < i+5 || lines[i] != "keys       FAIL  5 connected keys were not issued here:" || lines[i+4] != strings.Repeat(" ", 17)+"and 2 more" {
+		t.Fatalf("%q", text)
+	}
+	for _, l := range lines[i+1 : i+4] {
+		if !regexp.MustCompile(`^ {17}U[A-Z2-7]{55}$`).MatchString(l) {
+			t.Errorf("not an indented key: %q", l)
+		}
+	}
+	_, by, _ := doctorJSON(t, e.run)
+	dl := strings.Split(by["keys"].Detail, "\n")
+	if len(dl) != 5 || dl[0] != "5 connected keys were not issued here:" || dl[4] != "and 2 more" {
+		t.Fatalf("%q", by["keys"].Detail)
+	}
+	for _, k := range dl[1:4] {
+		if !userKeyRE.MatchString(k) || len(k) != 56 {
+			t.Errorf("key not whole: %q", k)
 		}
 	}
 }

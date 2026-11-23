@@ -74,6 +74,17 @@ server that does not answer shows one `FAIL` line and four `skip` lines, not fiv
 When a check finds several things its detail lists them, separated by `;`, failures first, and names up to three
 addresses for each (`and N more` after that).
 
+Connected keys that were not issued here are the exception: each key is shown whole on a line of its own under the
+detail (up to three, then `and N more`), and that finding comes last in the `keys` line:
+
+```text
+keys       FAIL  2 connected keys were not issued here:
+                 UAB2DMH4SPCMUGKLPFSR3O54L2YQ53CAGXIUSSU2GE55OHENR3PXIN4A
+                 UDXU4RCSJNZOIQHXEVIZRFQ3C4SQ3N7KRBYQ3JNLKSDGFSAPQQBWHWKR
+```
+
+With `--json` the same lines are in the `detail` string, separated by `\n`, the keys whole.
+
 ### storage
 
 The directory and lease buckets must exist. A bucket's size cap is compared with the limit in `config.json` (`limits`, see
