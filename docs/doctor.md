@@ -159,7 +159,7 @@ not read the whole list fails with `server NAME's connected users kept changing;
 minute, then run mashctl doctor --audit-users again`, because it must not pass on part of the list.
 On a busy account one run can miss a connection; run it again. With more than 8192 of the account's connections on one
 server, under steady churn, the decisions come from partial reads and a run can miss a revoked key or a user of
-mashctl's that is connected (known issue #1360, fixed in 0.5.9).
+mashctl's that is connected (known issue #1360).
 
 Without the issue record (the `mash-issued` bucket) the keys row fails with `no issue record; mashctl cannot tell its users from others` and the fix `mashctl init --config <file>`, with or without `--audit-users`. Without `system_creds` the check warns and reads nothing; with `--audit-users` it fails instead, since no user was audited.
 
