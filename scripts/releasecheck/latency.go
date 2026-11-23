@@ -114,6 +114,11 @@ func judgeLatency(cand latencies, prev *latencies, prevTag string) (problems []e
 	for _, f := range cand.Findings {
 		problems = append(problems, errors.New("the candidate: "+f))
 	}
+	if prev == nil && prevTag != "" { // a previous release exists but was not measured: a check that cannot compare must not pass
+		problems = append(problems, fmt.Errorf("no previous release to compare with: the previous release %s has no binary here (the plugin step did not get it)", prevTag))
+		notes = append(notes, fmt.Sprintf("note  fresh-session first mail: candidate %s, %s none", secs(cand.Fresh), prevTag))
+		return problems, notes
+	}
 	if prev == nil {
 		notes = append(notes, fmt.Sprintf("note  fresh-session first mail: candidate %s (no previous release to compare with)", secs(cand.Fresh)))
 		return problems, notes
@@ -887,9 +892,8 @@ func latencyStep(ctx context.Context, o Options, b *binaries) error {
 	switch {
 	case comparePrev:
 		pp = &prev
-	case b.hasPrev: // the plugin step failed before it had the previous release's binary, and said so
-		fmt.Fprintf(o.Out, "note  the previous release %s has no binary here: the candidate is judged alone\n", b.prevTag)
 	}
+	// With b.hasPrev and no binary (the plugin step failed before it had it), pp stays nil and judgeLatency reports the problem.
 	problems, notes := judgeLatency(cand, pp, b.prevTag)
 	switch {
 	case underPrevPlugin:

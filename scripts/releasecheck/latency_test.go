@@ -54,7 +54,11 @@ func TestJudgeLatency(t *testing.T) {
 		{"previous finding is a note", ok(100 * ms), ptr(withFinding(ok(100*ms), "fyi woke")), 0, []string{"the previous release v0.2.6: fyi woke"}},
 		{"candidate never delivered: one problem, no double count", withFinding(latencies{Fresh: freshTimeout}, "no notification"), ptr(ok(100 * ms)), 1, nil},
 	} {
-		problems, notes := judgeLatency(c.cand, c.prev, "v0.2.6")
+		tag := "v0.2.6"
+		if c.prev == nil {
+			tag = "" // the first release: there is no previous tag either
+		}
+		problems, notes := judgeLatency(c.cand, c.prev, tag)
 		if len(problems) != c.problems {
 			t.Errorf("%s: %d problems %v, want %d", c.name, len(problems), problems, c.problems)
 		}
@@ -369,6 +373,39 @@ func TestNoBaselineWhenPreviousNeverCameOnline(t *testing.T) {
 	}
 }
 
+func TestNoPreviousBinaryIsAProblem(t *testing.T) {
+	cand := latencies{Fresh: 100 * time.Millisecond, FreshOK: true}
+	problems, notes := judgeLatency(cand, nil, "v0.5.5")
+	if len(problems) != 1 || !strings.Contains(problems[0].Error(), "no previous release to compare with: the previous release v0.5.5 has no binary here") {
+		t.Errorf("judgeLatency: problems %v, want one no-previous-release", problems)
+	}
+	if !strings.Contains(strings.Join(notes, "\n"), "candidate 0.10s") {
+		t.Errorf("notes %v lack the candidate's own time", notes)
+	}
+	// The step: the plugin step failed before it had the previous binary (hasPrev, no prev).
+	fake := func(context.Context, string, serveSpec, bool, bool, bool) (latencies, error) { return cand, nil }
+	var out strings.Builder
+	b := &binaries{cand: "cand", hasPrev: true, prevTag: "v0.5.5"}
+	err := latencyStep(context.Background(), Options{measure: fake, Out: &out}, b)
+	if err == nil || !strings.Contains(err.Error(), "no previous release to compare with") {
+		t.Errorf("latencyStep: err %v, want no-previous-release problem", err)
+	}
+	if strings.Contains(out.String(), "no slower than the previous release") || strings.Contains(out.String(), "judged alone") {
+		t.Errorf("output claims a comparison:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "candidate 0.10s") {
+		t.Errorf("output lacks the candidate's time:\n%s", out.String())
+	}
+	// The first release: no previous tag, nothing to compare, no problem.
+	out.Reset()
+	if err := latencyStep(context.Background(), Options{measure: fake, Out: &out}, &binaries{cand: "cand"}); err != nil {
+		t.Errorf("first release: %v", err)
+	}
+	if !strings.Contains(out.String(), "no previous release to compare with") {
+		t.Errorf("first release output:\n%s", out.String())
+	}
+}
+
 func TestBaselinePassesWhenPreviousOnline(t *testing.T) {
 	ok := latencies{Fresh: 100 * time.Millisecond, FreshOK: true}
 	if problems, _ := judgeLatency(ok, &ok, "v0.5.5"); len(problems) != 0 {
@@ -416,7 +453,9 @@ func TestLatencyStepLegacyOnlyForPreviousBelowEndpointEnvSince(t *testing.T) {
 			return latencies{Fresh: 100 * time.Millisecond, FreshOK: true}, nil
 		}
 		b := &binaries{cand: "cand", prev: "prev", prevTag: tag, prevSpec: &serveSpec{Args: []string{"serve"}}}
-		_ = latencyStep(context.Background(), Options{measure: fake, Out: io.Discard}, b)
+		if err := latencyStep(context.Background(), Options{measure: fake, Out: io.Discard}, b); err != nil {
+			t.Errorf("%s: latencyStep: %v", tag, err)
+		}
 		if len(got["cand"]) != 2 {
 			t.Errorf("%s: candidate measured %v, want two calls", tag, got["cand"])
 		}
