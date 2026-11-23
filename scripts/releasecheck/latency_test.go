@@ -345,3 +345,35 @@ func TestWhoOnlineBothForms(t *testing.T) {
 		}
 	}
 }
+
+func TestNoBaselineWhenPreviousNeverCameOnline(t *testing.T) {
+	cand := latencies{Fresh: 100 * time.Millisecond, FreshOK: true}
+	none := latencies{} // FreshOK false: Fresh is 0, not a measurement
+	problems, _ := judgeLatency(cand, &none, "v0.5.5")
+	if len(problems) != 1 || !strings.Contains(problems[0].Error(), "no baseline: the previous release v0.5.5 did not come online") {
+		t.Errorf("judgeLatency: problems %v, want one no-baseline", problems)
+	}
+	problems, _ = judgeUnderPrevPlugin(cand, none, "v0.5.5")
+	if len(problems) != 1 || !strings.Contains(problems[0].Error(), "no baseline: the previous release v0.5.5 did not come online") {
+		t.Errorf("judgeUnderPrevPlugin: problems %v, want one no-baseline", problems)
+	}
+}
+
+func TestBaselinePassesWhenPreviousOnline(t *testing.T) {
+	ok := latencies{Fresh: 100 * time.Millisecond, FreshOK: true}
+	if problems, _ := judgeLatency(ok, &ok, "v0.5.5"); len(problems) != 0 {
+		t.Errorf("judgeLatency: %v", problems)
+	}
+	if problems, _ := judgeUnderPrevPlugin(ok, ok, "v0.5.5"); len(problems) != 0 {
+		t.Errorf("judgeUnderPrevPlugin: %v", problems)
+	}
+}
+
+func TestEndpointNameEnvHasLegacyVariables(t *testing.T) {
+	env := strings.Join(endpointNameEnv("alice", "bob"), "\n")
+	for _, want := range []string{"MASH_ENDPOINT=alice." + labGroup + ".bob", "MASH_NAME=bob", "MASH_OWNER=alice", "MASH_GROUP=" + labGroup} {
+		if !strings.Contains(env, want) {
+			t.Errorf("env lacks %q:\n%s", want, env)
+		}
+	}
+}

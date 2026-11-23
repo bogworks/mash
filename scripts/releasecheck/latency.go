@@ -123,6 +123,10 @@ func judgeLatency(cand latencies, prev *latencies, prevTag string) (problems []e
 	for _, f := range prev.Findings {
 		notes = append(notes, fmt.Sprintf("note  the previous release %s: %s", prevTag, f))
 	}
+	if !prev.FreshOK {
+		problems = append(problems, fmt.Errorf("no baseline: the previous release %s did not come online, so it has no fresh-session first-mail time to compare with", prevTag))
+		return problems, notes
+	}
 	notes = append(notes, fmt.Sprintf("note  fresh-session first mail: candidate %s, %s %s", secs(cand.Fresh), prevTag, secs(prev.Fresh)))
 	if cand.FreshOK && cand.Fresh > freshAllowed(prev.Fresh) {
 		problems = append(problems, fmt.Errorf("mail to a fresh session took the candidate %s, the previous release %s took %s: at most %s is allowed (twice as slow, and never under a second slower)",
@@ -141,6 +145,10 @@ func judgeUnderPrevPlugin(cand, prev latencies, prevTag string) (problems []erro
 	}
 	for _, f := range cand.Findings {
 		problems = append(problems, errors.New(who+": "+f))
+	}
+	if !prev.FreshOK {
+		problems = append(problems, fmt.Errorf("no baseline: the previous release %s did not come online, so it has no fresh-session first-mail time to compare with", prevTag))
+		return problems, notes
 	}
 	notes = append(notes, fmt.Sprintf("note  fresh-session first mail: %s %s, %s %s", who, secs(cand.Fresh), prevTag, secs(prev.Fresh)))
 	if cand.FreshOK && cand.Fresh > freshAllowed(prev.Fresh) {
@@ -390,9 +398,17 @@ func (l *lab) endpointEnv(ctx context.Context, name string, plugin bool) ([]stri
 	if plugin {
 		env = append(env, l.spec.envPairs()...)
 	}
-	return append(env, "MASH_ENDPOINT="+l.ne.Owner+"."+labGroup+"."+name, "MASH_SERVER="+l.ne.URL, "MASH_CREDS="+creds,
+	env = append(env, endpointNameEnv(l.ne.Owner, name)...)
+	return append(env, "MASH_SERVER="+l.ne.URL, "MASH_CREDS="+creds,
 		// REQ-014: this check is not about TLS; the override is explicit.
 		"MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1"), nil
+}
+
+// endpointNameEnv names the endpoint both ways: MASH_ENDPOINT for current releases, and MASH_NAME, MASH_OWNER and
+// MASH_GROUP for older ones (v0.5.5) that read those instead. The previous release's version is not known here, so
+// every binary gets all four.
+func endpointNameEnv(owner, name string) []string {
+	return []string{"MASH_ENDPOINT=" + owner + "." + labGroup + "." + name, "MASH_NAME=" + name, "MASH_OWNER=" + owner, "MASH_GROUP=" + labGroup}
 }
 
 // sendMail sends the standard probe text from the sender to to, with the binary under test.
