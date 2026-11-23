@@ -20,7 +20,7 @@ Nothing to do. Install `mash` and `mashctl` from the same release, as before. A 
 
 ### Changed
 
-- `mash inbox` and the idle wake count waiting mail one way across the whole backlog, so the urgent count is no longer limited to the newest 200 messages ([#955](https://github.com/bogworks/mash/issues/955)).
+- `mash inbox` and the idle wake count waiting mail one way across the waiting backlog (up to 1000 messages), so the urgent count is no longer limited to the newest 200 messages ([#955](https://github.com/bogworks/mash/issues/955)).
 - `install.sh` names the folder and the `chmod go-w` fix when it refuses a folder its group can write to ([#1240](https://github.com/bogworks/mash/issues/1240)).
 - `mash-local-nats-setup.sh` no longer reads the `MLNT_UNAME` test variable and takes its platform from `uname` alone ([#1120](https://github.com/bogworks/mash/issues/1120)).
 - The local server setup allows 1024 streams and 1024 consumers, up from 64 and 128; a server you already set up keeps its old limits ([#1253](https://github.com/bogworks/mash/issues/1253)).
