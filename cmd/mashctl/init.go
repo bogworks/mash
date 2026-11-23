@@ -831,6 +831,10 @@ func addSigningPub(path, pub string) error {
 	if werr != nil {
 		return werr
 	}
+	// Another writer may have changed config.json since it was read: replace only the bytes that were read.
+	if now, err := os.ReadFile(path); err != nil || !bytes.Equal(now, raw) {
+		return fmt.Errorf("%s changed while init was adding signing_key_pub: nothing was written; run init again", path)
+	}
 	if err := os.Rename(tmp.Name(), path); err != nil {
 		return err
 	}
