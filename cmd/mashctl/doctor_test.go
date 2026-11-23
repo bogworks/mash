@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1065,5 +1066,102 @@ func TestDoctorKeysDeadlineAfterOneRead(t *testing.T) {
 	}
 	if _, by, code := doctorJSON(t, e.run); code != 1 || by["keys"].State != "fail" {
 		t.Fatalf("%d %+v", code, by["keys"])
+	}
+}
+
+// fakeShiftingConnz starts a bare nats-server whose system subjects answer like one real server "s1": the server ping,
+// and CONNZ with two connections to a page and four in all. In every read (one CONNZ ping starts a read) the second
+// page repeats the foreign connection of the first, so the pages never reconcile, and the foreign connection's id
+// differs from one read to the next. The recorded key's connection (id 1) is the same in every read.
+func fakeShiftingConnz(t *testing.T, recorded string) *nats.Conn {
+	t.Helper()
+	srv, err := server.NewServer(&server.Options{Port: -1, NoLog: true, NoSigs: true, NoSystemAccount: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	go srv.Start()
+	if !srv.ReadyForConnections(5 * time.Second) {
+		t.Fatal("server not ready")
+	}
+	t.Cleanup(srv.Shutdown)
+	nc, err := nats.Connect(srv.ClientURL())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(nc.Close)
+	var mu sync.Mutex
+	read := 0
+	srvInfo := map[string]any{"name": "s1", "id": "SID"}
+	reply := func(offset int) []byte {
+		mu.Lock()
+		foreign := uint64(100 * read)
+		mu.Unlock()
+		conn := func(key string, cid uint64) map[string]any {
+			return map[string]any{"authorized_user": key, "account": "A", "cid": cid}
+		}
+		conns := []map[string]any{conn(recorded, 1), conn("UFOREIGN", foreign)}
+		if offset > 0 {
+			conns = []map[string]any{conn("UFOREIGN", foreign), conn("UOTHER", foreign+1)} // the foreign one again
+		}
+		b, _ := json.Marshal(map[string]any{"server": srvInfo,
+			"data": map[string]any{"total": 4, "offset": offset, "connections": conns}})
+		return b
+	}
+	subs := []struct {
+		subject string
+		h       nats.MsgHandler
+	}{
+		{"$SYS.REQ.SERVER.PING", func(m *nats.Msg) {
+			b, _ := json.Marshal(map[string]any{"server": srvInfo})
+			_ = m.Respond(b)
+		}},
+		{"$SYS.REQ.SERVER.PING.CONNZ", func(m *nats.Msg) {
+			mu.Lock()
+			read++
+			mu.Unlock()
+			_ = m.Respond(reply(0))
+		}},
+		{"$SYS.REQ.SERVER.SID.CONNZ", func(m *nats.Msg) {
+			var req struct {
+				Offset int `json:"offset"`
+			}
+			_ = json.Unmarshal(m.Data, &req)
+			_ = m.Respond(reply(req.Offset))
+		}},
+	}
+	for _, s := range subs {
+		if _, err := nc.Subscribe(s.subject, s.h); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := nc.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	return nc
+}
+
+// Foreign churn found by the real scan: the pages of one server really shift (so scanConnections itself marks the
+// read unsettled), the foreign connection's id changes between reads, and the recorded key is steady. The row is ok.
+func TestDoctorKeysRealUnsettledScanOfForeignChurnIsOK(t *testing.T) {
+	e := newXYEnv(t)
+	_, xKey := credsSubject(t, e.credsPath(xy("x").String()))
+	fake := fakeShiftingConnz(t, xKey)
+	oldScan, oldPause := scanConns, churnPause
+	t.Cleanup(func() { scanConns, churnPause = oldScan, oldPause })
+	churnPause = 0
+	reads := 0
+	scanConns = func(ctx context.Context, _ *nats.Conn, account string, servers int) (connScan, error) {
+		sc, err := scanConnections(ctx, fake, account, servers)
+		if err == nil {
+			reads++
+			if !sc.Unsettled || !strings.Contains(sc.Incomplete, "kept changing") {
+				t.Errorf("read %d not unsettled by the real scan: %+v", reads, sc)
+			}
+		}
+		return sc, err
+	}
+	_, by, code := doctorJSON(t, e.run)
+	if c := by["keys"]; code != 0 || c.State != "ok" || reads < 2 {
+		t.Fatalf("%d reads, exit %d: %+v", reads, code, c)
 	}
 }

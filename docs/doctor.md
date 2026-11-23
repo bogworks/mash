@@ -149,15 +149,17 @@ The check is complete only when every server answered: the servers it expects ar
 answer fails the check with the reason, even when no other user was found.
 
 Other tools' connections come and go, so the list can change while it is read. `doctor` then reads it again, up to
-three times in all, with a short pause between. If a read settles, that is the result. If it is still changing after
+3 times in all, with a short pause between. If a read settles, that is the result. If it is still changing after
 the third, a change among users mashctl did not issue is not a finding: they are counted as usual and the row stays ok,
 with or without `--strict`. If one of mashctl's users kept connecting and leaving (or the time ran out with only one
-read to compare), the row warns `mashctl's users kept connecting and leaving; read 3 times` with the fix `wait a
+read to compare), the row warns `mashctl's users kept connecting and leaving; read N times` (N is the reads made, up to 3) with the fix `wait a
 minute, then run mashctl doctor again`: `--strict` then exits 1 as for any warning, and a plain run exits 0. A revoked
 key seen connected in any of the reads fails the row. `--audit-users` does not make that allowance: an audit that could
-not read the whole list fails with `server NAME's connected users kept changing; read 3 times` and the fix `wait a
+not read the whole list fails with `server NAME's connected users kept changing; read N times` and the fix `wait a
 minute, then run mashctl doctor --audit-users again`, because it must not pass on part of the list.
-On a busy account one run can miss a connection; run it again.
+On a busy account one run can miss a connection; run it again. With more than 8192 of the account's connections on one
+server, under steady churn, the decisions come from partial reads and a run can miss a revoked key or a user of
+mashctl's that is connected (known issue #1360, fixed in 0.5.9).
 
 Without the issue record (the `mash-issued` bucket) the keys row fails with `no issue record; mashctl cannot tell its users from others` and the fix `mashctl init --config <file>`, with or without `--audit-users`. Without `system_creds` the check warns and reads nothing; with `--audit-users` it fails instead, since no user was audited.
 

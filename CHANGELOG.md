@@ -32,7 +32,7 @@ Update both plugins, `mash` and `mash-setup`, then restart your Claude Code sess
 - `mash-local-nats-setup.sh` lets only one run take over a stale lock, and names a lock left by a run killed mid-takeover ([#1093](https://github.com/bogworks/mash/issues/1093)).
 - `mash-local-nats-setup.sh --start` says so when a running server does not answer, instead of reporting "already running" ([#1094](https://github.com/bogworks/mash/issues/1094)).
 
-Known issues: 55 known issues, listed in the [release notes](https://github.com/bogworks/mash/blob/v0.5.8/docs/release-notes/0.5.8.md#known-issues)
+Known issues: 56 known issues, listed in the [release notes](https://github.com/bogworks/mash/blob/v0.5.8/docs/release-notes/0.5.8.md#known-issues)
 Links: [Release notes](https://github.com/bogworks/mash/blob/v0.5.8/docs/release-notes/0.5.8.md), [full changes](https://github.com/bogworks/mash/compare/v0.5.7...v0.5.8), [verify your download](https://github.com/bogworks/mash/blob/v0.5.8/docs/install.md#verify-what-you-download)
 
 ## [0.5.7] - 2026-11-22
