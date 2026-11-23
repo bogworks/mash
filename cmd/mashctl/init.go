@@ -202,6 +202,15 @@ type initState struct {
 	cfgSignPub       string // signing_key_pub of the existing config.json ("" when none)
 }
 
+// recordPub is the signing key's public key config.json records: the setup file's signing_key, else the key the key
+// store already holds ("" when there is none).
+func (st *initState) recordPub() string {
+	if st.signPub != "" {
+		return st.signPub
+	}
+	return st.storedSignPub
+}
+
 // initResult is what `mashctl init --json` prints.
 type initResult struct {
 	Server     []string `json:"server"`
@@ -257,7 +266,9 @@ func doInit(setupPath string, dry, jsonOut bool, env func(string) string, lookup
 	if err != nil {
 		return failErr(err)
 	}
-	ks, err := ctlkeys.Open(keyDir)
+	// init opens the store with no expectation: it compares the key store with config.json's signing_key_pub itself, in
+	// checkStore, because it is the command that restores the files and completes the field.
+	ks, err := ctlkeys.Open(keyDir, "")
 	if err != nil {
 		return failErr(err)
 	}
@@ -307,6 +318,9 @@ func doInit(setupPath string, dry, jsonOut bool, env func(string) string, lookup
 
 	// The key store, the destination files and config.json must not conflict: checked now so nothing is written on a
 	// refusal.
+	if cfg.SigningKeyPub != "" && !nkeys.IsValidPublicAccountKey(cfg.SigningKeyPub) {
+		return cliframe.Failf("signing_key_pub in %s is not an account public key (%q): fix or restore it, or move config.json aside (nothing was changed)", st.cfgPath, cfg.SigningKeyPub)
+	}
 	st.cfgSignPub = cfg.SigningKeyPub
 	if err := checkStore(ks, st); err != nil {
 		return failErr(err)
@@ -483,6 +497,28 @@ func doInit(setupPath string, dry, jsonOut bool, env func(string) string, lookup
 			return cliframe.Failf("signing_key changed while init ran: the key imported is not the one that was checked; running init again is safe")
 		}
 	}
+	// The public key of the signing key goes into config.json right after the key is imported, not last: an init that
+	// stops after the import must not leave a key store whose signing key mashctl cannot tell from a lost one.
+	cfgWritten := false
+	writeConfig := func() error {
+		if needCfg {
+			if err := ensureDir(filepath.Dir(st.cfgPath)); err != nil {
+				return err
+			}
+			_, err := ctlkeys.InstallFile(st.cfgPath, configJSON(initSettings(cfg, sf, st)))
+			return err
+		}
+		if st.cfgNeedSignPub {
+			return addSigningPub(st.cfgPath, st.recordPub())
+		}
+		return nil
+	}
+	if st.recordPub() != "" && (needCfg || st.cfgNeedSignPub) {
+		if err := writeConfig(); err != nil {
+			return failErr(err)
+		}
+		cfgWritten = true
+	}
 	if needSys {
 		if err := ensureDir(st.serverDir); err != nil {
 			return failErr(err)
@@ -498,15 +534,8 @@ func doInit(setupPath string, dry, jsonOut bool, env func(string) string, lookup
 	if err := ctl.RecordAdminCreds(actx, adm, sf.owner, st.adminRaw); err != nil {
 		return cliframe.Failf("the admin user could not be recorded in the issue record (%v): run mashctl init again once the cause is fixed", config.Clean(err.Error()))
 	}
-	if needCfg {
-		if err := ensureDir(filepath.Dir(st.cfgPath)); err != nil {
-			return failErr(err)
-		}
-		if _, err := ctlkeys.InstallFile(st.cfgPath, configJSON(initSettings(cfg, sf, st))); err != nil {
-			return failErr(err)
-		}
-	} else if st.cfgNeedSignPub {
-		if err := addSigningPub(st.cfgPath, st.signPub); err != nil {
+	if !cfgWritten {
+		if err := writeConfig(); err != nil {
 			return failErr(err)
 		}
 	}
@@ -634,8 +663,8 @@ func initSettings(cfg config.Config, sf setupFile, st *initState) map[string]any
 	if sf.ca != "" {
 		m["ca"] = sf.ca // the setup file's own ca only: never an environment setting or an old config.json's
 	}
-	if st.signPub != "" {
-		m["signing_key_pub"] = st.signPub // the PUBLIC key only: it tells a lost signing key from none ever configured
+	if p := st.recordPub(); p != "" {
+		m["signing_key_pub"] = p // the PUBLIC key only: it tells a lost signing key from none ever configured
 	}
 	return m
 }
@@ -694,16 +723,20 @@ func checkConfigFile(st *initState, cfg config.Config, sf setupFile) error {
 	if len(differ) > 0 {
 		return differentSetup(st, map[string]string{"servers": "server", "ca": "server", "owner": "owner", "admin_creds": "admin creds", "system_creds": "system creds"}[differ[0]])
 	}
-	if st.signPub != "" {
-		var got string
-		rawv, present := have["signing_key_pub"]
-		if present {
-			_ = json.Unmarshal(rawv, &got)
+	var got string
+	if rawv, present := have["signing_key_pub"]; present {
+		if err := json.Unmarshal(rawv, &got); err != nil || (got != "" && !nkeys.IsValidPublicAccountKey(got)) {
+			return cliframe.Failf("signing_key_pub in %s is not an account public key: fix or restore it, or move config.json aside (nothing was changed)", st.cfgPath)
 		}
+	}
+	if p := st.recordPub(); p != "" {
 		switch {
-		case got != "" && got != st.signPub:
+		case got != "" && got != p:
 			return differentSetup(st, "signing key")
 		case got == "":
+			if fi, err := os.Lstat(st.cfgPath); err == nil && fi.Mode()&fs.ModeSymlink != 0 {
+				return cliframe.Failf("%s is a symbolic link: init will not rewrite it to add signing_key_pub. Point MASH_CONFIG_DIR at the real folder or replace the link with the file (nothing was changed)", st.cfgPath)
+			}
 			st.cfgNeedSignPub = true
 		}
 	}
@@ -711,9 +744,21 @@ func checkConfigFile(st *initState, cfg config.Config, sf setupFile) error {
 	return nil
 }
 
-// addSigningPub completes an existing config.json with signing_key_pub (the public key only), keeping every other key,
-// by writing a 0600 temp file in the same folder and renaming it over the original.
+// addSigningPub completes an existing config.json with signing_key_pub (the public key only). It keeps the file's bytes
+// and layout: the one member is inserted before the closing brace, in the indentation of the last member. The file is
+// then replaced by a 0600 temp file in the same folder renamed over it, and the folder is synced. A symbolic link is
+// refused, a stored value that is not an account public key is an error, and a different stored key is never replaced.
 func addSigningPub(path, pub string) error {
+	if !nkeys.IsValidPublicAccountKey(pub) {
+		return fmt.Errorf("signing key %q is not an account public key", pub)
+	}
+	fi, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if fi.Mode()&fs.ModeSymlink != 0 || !fi.Mode().IsRegular() {
+		return fmt.Errorf("%s is not a plain file (a symbolic link?): refusing to rewrite it. Replace it with the file itself", path)
+	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return err
@@ -722,18 +767,48 @@ func addSigningPub(path, pub string) error {
 	if err := json.Unmarshal(raw, &have); err != nil {
 		return fmt.Errorf("%s is not valid JSON: refusing to replace it. Move it aside", path)
 	}
-	enc, _ := json.Marshal(pub)
-	have["signing_key_pub"] = enc
-	out, err := json.MarshalIndent(have, "", "  ")
-	if err != nil {
-		return err
+	member, _ := json.Marshal(pub)
+	var out []byte
+	if rawv, present := have["signing_key_pub"]; present {
+		var got string
+		if err := json.Unmarshal(rawv, &got); err != nil || (got != "" && !nkeys.IsValidPublicAccountKey(got)) {
+			return fmt.Errorf("signing_key_pub in %s is not an account public key: refusing to replace it. Fix or restore it", path)
+		}
+		if got == pub {
+			return nil
+		}
+		if got != "" {
+			return fmt.Errorf("%s records another signing key (%s): refusing to replace it", path, got)
+		}
+		// An empty field: the member exists, so the file is re-encoded (keys sorted, indent 2, & kept as it is).
+		have["signing_key_pub"] = member
+		var b bytes.Buffer
+		enc := json.NewEncoder(&b)
+		enc.SetEscapeHTML(false)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(have); err != nil {
+			return err
+		}
+		out = b.Bytes()
+	} else {
+		var err error
+		if out, err = insertMember(raw, "signing_key_pub", member); err != nil {
+			return err
+		}
+	}
+	var check map[string]json.RawMessage
+	if err := json.Unmarshal(out, &check); err != nil || !bytes.Equal(check["signing_key_pub"], member) || len(check) != len(have)+boolInt(!hasKey(have, "signing_key_pub")) {
+		return fmt.Errorf("could not add signing_key_pub to %s safely: add it by hand", path)
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".config.json.tmp-")
 	if err != nil {
 		return err
 	}
 	defer os.Remove(tmp.Name())
-	_, werr := tmp.Write(append(out, '\n'))
+	_, werr := tmp.Write(out)
+	if werr == nil {
+		werr = tmp.Chmod(fi.Mode().Perm())
+	}
 	if werr == nil {
 		werr = tmp.Sync()
 	}
@@ -743,7 +818,58 @@ func addSigningPub(path, pub string) error {
 	if werr != nil {
 		return werr
 	}
-	return os.Rename(tmp.Name(), path)
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		return err
+	}
+	d, err := os.Open(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	return d.Sync()
+}
+
+func hasKey(m map[string]json.RawMessage, k string) bool { _, ok := m[k]; return ok }
+
+func boolInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// insertMember adds `"key": value` as the last member of the JSON object in raw, keeping every other byte.
+func insertMember(raw []byte, key string, value []byte) ([]byte, error) {
+	const ws = " \t\r\n"
+	end := len(bytes.TrimRight(raw, ws))
+	if end == 0 || raw[end-1] != '}' {
+		return nil, errors.New("not a JSON object")
+	}
+	closeAt := end - 1
+	core := bytes.TrimRight(raw[:closeAt], ws)
+	gap := raw[len(core):closeAt] // the whitespace before the closing brace
+	empty := len(core) > 0 && core[len(core)-1] == '{'
+	member := fmt.Sprintf("%q: %s", key, value)
+	var ins string
+	switch {
+	case empty && bytes.IndexByte(raw, '\n') >= 0:
+		ins = "\n  " + member + "\n"
+	case empty:
+		ins = member
+	case bytes.IndexByte(gap, '\n') >= 0:
+		last := core[bytes.LastIndexByte(core, '\n')+1:]
+		ins = "\n" + string(last[:len(last)-len(bytes.TrimLeft(last, " \t"))]) + member
+	default:
+		ins = " " + member
+	}
+	if !empty {
+		ins = "," + ins
+	}
+	var out []byte
+	out = append(out, core...)
+	out = append(out, ins...)
+	out = append(out, raw[len(core):]...)
+	return out, nil
 }
 
 // sameServers reports whether a config.json "servers" value (a list, or one comma-separated string) is want.
@@ -831,6 +957,9 @@ func checkStore(ks *ctlkeys.Authority, st *initState) error {
 			*k.have = true
 		}
 	}
+	// config.json's signing_key_pub: a key it records that is not the one stored, or not the one given, is a different
+	// signing key (the key store's own refusal comes first, as it names the stored key).
+	cfgPub := st.cfgSignPub
 	kp, pub, err := ks.Signing()
 	rec, _ := ks.SigningRecord()
 	switch {
@@ -845,7 +974,7 @@ func checkStore(ks *ctlkeys.Authority, st *initState) error {
 		if st.signPub == "" {
 			return fmt.Errorf("%v (nothing was changed)", err)
 		}
-		if rec != st.signPub {
+		if rec != st.signPub || (cfgPub != "" && rec != cfgPub) {
 			return differentSigningKey(st, rec)
 		}
 	case err != nil:
@@ -859,8 +988,15 @@ func checkStore(ks *ctlkeys.Authority, st *initState) error {
 			// A seed with no record is an init that stopped between the two writes: ImportSigning completes it.
 			st.haveSign = rec == pub
 		} else {
+			if cfgPub != "" && pub != cfgPub {
+				return cliframe.Failf("the key folder %s holds signing key %s but config.json records signing_key_pub %s; nothing was changed: give the seed of the recorded key as signing_key, or use a new key folder (set MASH_KEYS_DIR)", st.keyFolder, pub, cfgPub).WithWrap().
+					WithHint("MASH_KEYS_DIR=<a new folder> mashctl init --config <file>")
+			}
 			st.storedSignPub = pub
 		}
+	}
+	if cfgPub != "" && st.signPub != "" && cfgPub != st.signPub {
+		return differentSetup(st, "signing key")
 	}
 	return nil
 }

@@ -79,16 +79,9 @@ var (
 type Authority struct {
 	dir string
 	mu  sync.Mutex
-	// expectSigning is the public key config.json says was configured as signing_key ("" when it says none).
+	// expectSigning is the public key config.json says was configured as signing_key ("" when it says none). It is
+	// fixed at Open, so a caller cannot forget it.
 	expectSigning string
-}
-
-// ExpectSigning tells the store that config.json records a configured signing key (signing_key_pub): Signing then
-// refuses, as ErrSigningKeyLost, when signing.nk and signing.pub are both gone, instead of reporting no signing key.
-func (a *Authority) ExpectSigning(pub string) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.expectSigning = pub
 }
 
 // DirFor is the key directory: $MASH_KEYS_DIR when absolute (a relative one is an error), else <cfg.Dir>/keys.
@@ -106,11 +99,18 @@ func DirFor(cfg config.Config, env func(string) string) (string, error) {
 }
 
 // Open opens the key store at dir. It creates nothing; a missing dir is an empty store.
-func Open(dir string) (*Authority, error) {
+//
+// expectSigningPub is config.json's signing_key_pub, the public key of the signing key mashctl init was given ("" when
+// the config records none). When it is set, Signing refuses, as ErrSigningKeyLost, unless signing.nk and signing.pub
+// both hold exactly that key: the identity key never stands in for a signing key that was configured.
+func Open(dir, expectSigningPub string) (*Authority, error) {
 	if dir == "" {
 		return nil, errors.New("mashctl: empty key directory")
 	}
-	a := &Authority{dir: filepath.Clean(dir)}
+	if expectSigningPub != "" && !signingKind.valid(expectSigningPub) {
+		return nil, fmt.Errorf("mashctl: signing_key_pub in config.json (%q) is not an account public key: fix it or restore it", expectSigningPub)
+	}
+	a := &Authority{dir: filepath.Clean(dir), expectSigning: expectSigningPub}
 	if _, err := checkDir(a.dir); err != nil {
 		return nil, err
 	}
@@ -496,14 +496,24 @@ func (a *Authority) Signing() (nkeys.KeyPair, string, error) {
 		}
 		return nil, "", rerr
 	}
+	exp := a.expectSigning
 	switch {
-	case rec == "":
-		a.mu.Lock()
-		exp := a.expectSigning
-		a.mu.Unlock()
-		if exp != "" && errors.Is(err, ErrNoSigningKey) {
-			return nil, "", &SigningLostBothError{Pub: exp}
+	case exp != "" && rec == "" && errors.Is(err, ErrNoSigningKey):
+		return nil, "", &SigningLostBothError{Pub: exp}
+	case exp != "" && rec == "" && err == nil:
+		// signing.nk is here and signing.pub is gone: the record is part of the configured state, so it is not trusted
+		// until init (with the same signing_key) writes it again.
+		kp.Wipe()
+		if pub != exp {
+			return nil, "", fmt.Errorf("%w (config.json records signing_key_pub %s, signing.nk holds %s and signing.pub is missing)", ErrSigningKeyLost, exp, pub)
 		}
+		return nil, "", fmt.Errorf("%w (signing.pub is missing: run `mashctl init --config <file>` with the same signing_key to record it again)", ErrSigningKeyLost)
+	case exp != "" && rec != "" && rec != exp:
+		if kp != nil {
+			kp.Wipe()
+		}
+		return nil, "", fmt.Errorf("%w (config.json records signing_key_pub %s, signing.pub records %s)", ErrSigningKeyLost, exp, rec)
+	case rec == "":
 		return kp, pub, err
 	case err != nil:
 		// signing.nk simply missing: the record is the detail; a mode or read error is told as it is.

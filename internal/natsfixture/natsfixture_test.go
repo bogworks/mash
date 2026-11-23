@@ -39,7 +39,7 @@ func newSetup(t *testing.T) *setup {
 	root := t.TempDir()
 	s := &setup{root: root, serverDir: filepath.Join(root, "cfg", "server"), keyDir: filepath.Join(root, "keys"),
 		cfgPath: filepath.Join(root, "cfg", "config.json")}
-	ks, err := ctlkeys.Open(s.keyDir)
+	ks, err := ctlkeys.Open(s.keyDir, "")
 	if err != nil {
 		t.Fatal(err)
 	}

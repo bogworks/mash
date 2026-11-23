@@ -18,7 +18,7 @@ import (
 func newStore(t *testing.T) (*Authority, string) {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), "keys")
-	a, err := Open(dir)
+	a, err := Open(dir, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestOpenAndAccountCreateNothing(t *testing.T) {
 	if err := os.Mkdir(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Open(dir); err != nil {
+	if _, err := Open(dir, ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := a.Account(); !errors.Is(err, ErrNoAccountKey) {
@@ -109,7 +109,7 @@ func TestRefusals(t *testing.T) {
 		if err := os.Chmod(dir, 0o750); err != nil {
 			t.Fatal(err)
 		}
-		_, err := Open(dir)
+		_, err := Open(dir, "")
 		if err == nil || !strings.Contains(err.Error(), dir) || !strings.Contains(err.Error(), "chmod 700") {
 			t.Fatalf("got %v", err)
 		}
@@ -135,7 +135,7 @@ func TestRefusals(t *testing.T) {
 		if err := os.Symlink(real, link); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := Open(link); err == nil {
+		if _, err := Open(link, ""); err == nil {
 			t.Fatal("symlinked dir accepted")
 		}
 	})
@@ -175,7 +175,7 @@ func TestConcurrentInitAccount(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			// A separate Authority per goroutine, so only the filesystem arbitrates (the two-process case).
-			a, err := Open(dir)
+			a, err := Open(dir, "")
 			if err != nil {
 				t.Error(err)
 				return

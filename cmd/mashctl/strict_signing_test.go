@@ -223,7 +223,7 @@ func TestInitSigningKeyImport(t *testing.T) {
 	if mustPub(t, stored) != skPub {
 		t.Fatal("the stored signing key is not the one given")
 	}
-	ks, err := ctlkeys.Open(a.env["MASH_KEYS_DIR"])
+	ks, err := ctlkeys.Open(a.env["MASH_KEYS_DIR"], "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -463,7 +463,9 @@ func TestEndpointCreateSigningRecordUnreadableRecordsNothing(t *testing.T) {
 			t.Errorf("%s was left behind", f)
 		}
 	}
-	if err := os.Remove(filepath.Join(keysDir, "signing.pub")); err != nil {
+	// (with the field in config.json, a store whose signing.pub is missing is refused too, so the record is restored)
+	skPub, _ := sk.PublicKey()
+	if err := os.WriteFile(filepath.Join(keysDir, "signing.pub"), []byte(skPub+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	// Had the refused create recorded the endpoint, this one would say it already exists.

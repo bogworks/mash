@@ -20,7 +20,7 @@ func TestInitRefusesWhatTheFolderHoldsDifferentlyInOneForm(t *testing.T) {
 		setup func(a *initer)
 	}{
 		{"operator key", func(a *initer) {
-			ks, err := ctlkeys.Open(a.env["MASH_KEYS_DIR"])
+			ks, err := ctlkeys.Open(a.env["MASH_KEYS_DIR"], "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -29,7 +29,7 @@ func TestInitRefusesWhatTheFolderHoldsDifferentlyInOneForm(t *testing.T) {
 			}
 		}},
 		{"account key", func(a *initer) {
-			ks, err := ctlkeys.Open(a.env["MASH_KEYS_DIR"])
+			ks, err := ctlkeys.Open(a.env["MASH_KEYS_DIR"], "")
 			if err != nil {
 				t.Fatal(err)
 			}

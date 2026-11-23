@@ -13,7 +13,7 @@ import (
 
 func TestOperatorAndSystemKeys(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "keys")
-	a, err := Open(dir)
+	a, err := Open(dir, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +75,7 @@ func TestImportOperatorAndAccount(t *testing.T) {
 	acPath, acPub := write("ac", acKP, 0o600)
 
 	dir := filepath.Join(t.TempDir(), "keys")
-	a, err := Open(dir)
+	a, err := Open(dir, "")
 	if err != nil {
 		t.Fatal(err)
 	}

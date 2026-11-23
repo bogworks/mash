@@ -307,7 +307,7 @@ func init() {
 	})
 	reg("init This folder was set up for a different server", func(t *testing.T) confOutRun {
 		w := newConfWorld(t, false)
-		ks, err := ctlkeys.Open(w.a.env["MASH_KEYS_DIR"])
+		ks, err := ctlkeys.Open(w.a.env["MASH_KEYS_DIR"], "")
 		if err != nil {
 			t.Fatal(err)
 		}

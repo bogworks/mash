@@ -285,7 +285,7 @@ func TestMintSigningKey(t *testing.T) {
 // identity key, which a strict server rejects.
 func TestMintRefusesWhenTheSigningKeyIsLost(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "keys")
-	ks, err := ctlkeys.Open(dir)
+	ks, err := ctlkeys.Open(dir, "")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -632,7 +632,7 @@ func TestInitRefusals(t *testing.T) {
 	})
 	t.Run("key store holds another key", func(t *testing.T) {
 		a.t = t
-		ks, err := ctlkeys.Open(a.env["MASH_KEYS_DIR"])
+		ks, err := ctlkeys.Open(a.env["MASH_KEYS_DIR"], "")
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -62,7 +62,7 @@ type liveEnv struct {
 // startLive starts the server and connects the system user; both are closed when the test ends.
 func startLive(t *testing.T) *liveEnv {
 	t.Helper()
-	ks, err := ctlkeys.Open(filepath.Join(t.TempDir(), "keys"))
+	ks, err := ctlkeys.Open(filepath.Join(t.TempDir(), "keys"), "")
 	if err != nil {
 		t.Fatal(err)
 	}

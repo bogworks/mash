@@ -57,7 +57,7 @@ func TestReadSeedRefusesAForeignOwner(t *testing.T) {
 	if _, err := checkDir(dir); err == nil || !strings.Contains(err.Error(), "owned by uid") {
 		t.Fatalf("dir: got %v", err)
 	}
-	if _, err := Open(dir); err == nil {
+	if _, err := Open(dir, ""); err == nil {
 		t.Fatal("Open accepted a foreign-owned directory")
 	}
 	if _, err := a.Lock(time.Millisecond); err == nil {
@@ -183,7 +183,7 @@ func TestCheckStrictParentDir(t *testing.T) {
 }
 
 func TestGroupKeyIsKeptBesideTheZoneKeysAndNeverOverwritten(t *testing.T) {
-	a, err := Open(filepath.Join(t.TempDir(), "keys"))
+	a, err := Open(filepath.Join(t.TempDir(), "keys"), "")
 	if err != nil {
 		t.Fatal(err)
 	}

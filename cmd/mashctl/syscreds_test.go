@@ -59,7 +59,7 @@ func newApplyEnvOpts(t *testing.T, tweak func(e *applyEnv), optsHook func(o *ser
 	t.Helper()
 	root := t.TempDir()
 	e := &applyEnv{t: t, root: root, keyDir: filepath.Join(root, "keys")}
-	ks, err := ctlkeys.Open(e.keyDir)
+	ks, err := ctlkeys.Open(e.keyDir, "")
 	if err != nil {
 		t.Fatal(err)
 	}

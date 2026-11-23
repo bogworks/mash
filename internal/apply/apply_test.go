@@ -70,7 +70,7 @@ func (f *fake) Push(_ context.Context, tok string, _ []string) ([]ServerAck, err
 
 func setup(t *testing.T) (*ctlkeys.Authority, *fake) {
 	t.Helper()
-	ks, err := ctlkeys.Open(filepath.Join(t.TempDir(), "keys"))
+	ks, err := ctlkeys.Open(filepath.Join(t.TempDir(), "keys"), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -254,6 +254,21 @@ func TestAccountFindingsReturnsTheKnownKeysError(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := AccountFindings(context.Background(), fk, ks, 0); !errors.Is(err, ctlkeys.ErrSigningKeyLost) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+// config.json's signing_key_pub given and both signing.nk and signing.pub gone: apply's known-keys read is an
+// ErrSigningKeyLost, not an empty set that lets the identity key stand in.
+func TestAccountFindingsRefusesWhenBothSigningFilesAreGone(t *testing.T) {
+	ks, fk := setup(t)
+	sk, _ := nkeys.CreateAccount()
+	pub, _ := sk.PublicKey()
+	ks2, err := ctlkeys.Open(ks.Dir(), pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := AccountFindings(context.Background(), fk, ks2, 0); !errors.Is(err, ctlkeys.ErrSigningKeyLost) {
 		t.Fatalf("err = %v", err)
 	}
 }
