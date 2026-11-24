@@ -498,7 +498,7 @@ func plainRefused(r Result, took, limit time.Duration, override string) (bool, s
 }
 
 // at4EncryptionWarning is the line the specification gives for the override (spec/rules.json).
-const at4EncryptionWarning = "warning: encryption to the server is OFF (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set)"
+const at4EncryptionWarning = "warning: no encryption to the server (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION)"
 
 // dangerousWarned judges a command run with the override against the counting listener: it connected, and the exact
 // warning is the first line on stderr, never on stdout.

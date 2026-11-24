@@ -159,7 +159,7 @@ Every mash connection requires TLS (see [TLS](nats-server.md#tls)). A plain URL 
 There is one way to allow plain text, for `mash` and `mashctl` alike: set the environment variable `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1`. It is not a setting: there is no flag and no `config.json` key. Its only value is `1` (empty or `0` is off; anything else is an error). While it is set, every command of both tools first prints this line on stderr, and nothing extra on stdout (`--json` stays clean):
 
 ```
-warning: encryption to the server is OFF (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set)
+warning: no encryption to the server (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION)
 ```
 
 Use it for a throwaway server in a test, never on a network you do not control: plain text lets anyone on the network read mail and obtain signatures. The release's `mash-local-nats-setup.sh` makes a certificate authority for a local server and does not need it.

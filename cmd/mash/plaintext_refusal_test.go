@@ -181,10 +181,10 @@ func TestCLIWithTheOverrideConnectsAndWarnsOnStderrOnce(t *testing.T) {
 	if c.n.Load() == 0 {
 		t.Fatal("no connection was made with the override set")
 	}
-	if n := strings.Count(errb.String(), "warning: encryption to the server is OFF (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set)"); n != 1 {
+	if n := strings.Count(errb.String(), "warning: no encryption to the server (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION)"); n != 1 {
 		t.Errorf("%d warnings on stderr, want 1: %q", n, errb.String())
 	}
-	if strings.Contains(out.String(), "encryption to the server is OFF") {
+	if strings.Contains(out.String(), "no encryption to the server") {
 		t.Errorf("the warning is on stdout: %q", out.String())
 	}
 }
@@ -205,7 +205,7 @@ func TestServeWithTheOverrideWarnsOnStderrNotStdout(t *testing.T) {
 	if c.n.Load() == 0 {
 		t.Error("no connection was made with the override set")
 	}
-	if n := strings.Count(s.stderr(), "warning: encryption to the server is OFF (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set)"); n != 1 {
+	if n := strings.Count(s.stderr(), "warning: no encryption to the server (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION)"); n != 1 {
 		t.Errorf("%d warnings on stderr, want 1: %q", n, s.stderr())
 	}
 }
@@ -213,7 +213,7 @@ func TestServeWithTheOverrideWarnsOnStderrNotStdout(t *testing.T) {
 // `mash doctor` keeps the whole report, the server row's warning included, on stdout, and also says the plain-text
 // warning on standard error once (REQ-014). A tls:// URL, and a plain URL with no override, print no warning on stderr.
 func TestDoctorCommandPlainWarningOnStderr(t *testing.T) {
-	const warning = "warning: encryption to the server is OFF (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set)"
+	const warning = "warning: no encryption to the server (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION)"
 	doctorRun := func(url string, override bool) (string, string) {
 		env := plainEnv(t, url)
 		if override {
@@ -230,7 +230,7 @@ func TestDoctorCommandPlainWarningOnStderr(t *testing.T) {
 	}
 	for _, url := range []string{"tls://127.0.0.1:4222", "nats://127.0.0.1:4222"} {
 		out, errs := doctorRun(url, false)
-		if strings.Contains(errs, "encryption to the server is OFF") || strings.Contains(out, "encryption to the server is OFF") {
+		if strings.Contains(errs, "no encryption to the server") || strings.Contains(out, "no encryption to the server") {
 			t.Errorf("%s: warned: %q / %q", url, out, errs)
 		}
 	}
