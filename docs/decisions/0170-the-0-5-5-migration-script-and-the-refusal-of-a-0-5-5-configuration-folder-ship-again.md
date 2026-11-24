@@ -12,10 +12,12 @@ decision-makers: Randy Bias (mash maintainer)
 `mash-migrate-0.5.5.sh`, a one-time script that rewrites the old `config.json` keys (`url` became `servers`, `tls_ca`
 became `ca`), and made both tools refuse a configuration folder that still holds the old keys, naming the script in the
 hint. [ADR 0161](0161-0-5-8-removes-the-0-5-5-migration-script-and-the-refusal-of-a-0-5-5-configuration-folder.md)
-removed both in 0.5.8 (pull request #1185), on the ground that nobody ran 0.5.5.
+removed both (pull request #1185), on the ground that nobody ran 0.5.5.
 
-The release check still requires the script among a release's assets, so the 0.5.8 removal broke a requirement the
-project had set (REQ-028). The planner ruled on 2026-11-24 that the requirement stands. Which record governs now?
+Release 0.5.8 shipped the script. Pull request #1185 merged to main afterwards, during 0.5.9, against the 0.5.9
+contract's requirement REQ-028, which reserves that change to the maintainer, and the release check still requires the
+script among a release's assets. The planner ruled on 2026-11-24 that the requirement stands. Which record governs
+now?
 
 ## Decision Drivers
 
@@ -49,8 +51,8 @@ REQ-028 and the release check as they are.
 * Good, because a configuration folder left by 0.5.5 is named for what it is, with the script that rewrites it.
 * Bad, because every command of both tools reads `config.json` for the old keys before it starts, and the release has
   one more asset to build, attest and verify.
-* The 0.5.8 releases that omitted the script stay as they were; the script ships again from the release that carries
-  this change.
+* No release ever went out without the script: 0.5.8 carried it, and the removal never reached a release.
+* The removal is proposed again for 0.5.10 (#1446), as its own decision.
 
 ### Confirmation
 
@@ -62,7 +64,7 @@ release scripts in `internal/release` and `scripts/releasecheck`, and the same t
 ### Revert pull request #1185 and record the reversal in a new ADR (chosen)
 
 * Good, because it meets REQ-028 and keeps the history of both decisions readable.
-* Bad, because it restores code for a version the maintainer ruled was not really released.
+* Bad, because it restores code that the project had already decided to remove, until 0.5.10 takes that up again.
 
 ### Keep the removal and change the release check and the requirement
 
