@@ -397,7 +397,7 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 			}
 			return
 		}
-		if e.refuses(trust) {
+		if e.refuses(trust) && !e.deliveredEarlier(ref.Seq) {
 			// Dropped and counted, never delivered: acked so it is not redelivered for ever. The sender is told nothing.
 			// Without the lease the new holder gets it (and counts it), so it is nak'd, not counted.
 			if e.mayAck(pending{}) {
@@ -526,6 +526,7 @@ func (e *Endpoint) deliverLoop(deliver Deliverer, queue <-chan pending, quit <-c
 		if len(show) == 0 {
 			continue
 		}
+		e.recordDeliveredBatch(show) // the mail this serve is about to show or spool: past the lease, the hold and the duplicates
 		if e.hooked() {
 			e.spoolBatch(deliver, show, h, seen)
 			continue
@@ -945,7 +946,7 @@ func (e *Endpoint) toMail(raw *jetstream.RawStreamMsg) (render.Mail, bool) {
 	if id := e.inboxID.Load(); id != nil && e.refusedSeq(raw.Sequence, *id) { // refused earlier: stays refused
 		return render.Mail{Seq: raw.Sequence, From: from, Trust: trust, At: raw.Time}, false
 	}
-	if e.refuses(trust) { // stored, but not shown: serve counted and dropped it (refuse.go)
+	if e.refuses(trust) && !e.shownAtShell(raw.Sequence) { // stored, but not shown: serve counted and dropped it (refuse.go)
 		return render.Mail{Seq: raw.Sequence, From: from, Trust: trust, At: raw.Time}, false
 	}
 	replyTo, via := senderMarks(raw.Header, trust, h)

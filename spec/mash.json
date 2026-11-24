@@ -669,6 +669,14 @@
         "exit": 1
        },
        {
+        "case": "A shell reports what serve delivered",
+        "text": "(what serve refused is invisible at a shell; what serve delivered is\nshown there with its label)",
+        "stream": "n/a",
+        "exit": 0,
+        "issue": "#990",
+        "note": "The text is policy's proposed text (spec/next.json at a827f3d2), in round brackets. REQ-013. A description, not output: the whole text is in round brackets, which the rules reserve for a description, so the conformance test skips it. A message serve recorded as refused stays refused at a shell, whatever the shell's accept-unverified setting. A message serve delivered under --accept-unverified shows at a shell with its trust label, whatever the shell's setting. A message no serve has judged yet is judged by the shell's own setting, as today. The existing \"A message that was refused\" case and the inbox listing are unchanged."
+       },
+       {
         "case": "A deleted endpoint here",
         "text": "error: acme.dev.bob: this endpoint was deleted; its address cannot be used again\nhint: mash doctor",
         "stream": "stderr",

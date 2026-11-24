@@ -355,3 +355,114 @@ func (e *Endpoint) refusedStored(first, last uint64, stream string) (stored int)
 	}
 	return len(seen)
 }
+
+// deliveredSeqsFile lists, in the format of refusedSeqsFile, the inbox messages serve delivered although they were not
+// verified, because accept_unverified was on for serve. A shell command (mash read, mash inbox) shows them with their
+// trust label whatever its own setting says. Mail no serve has judged is judged by the shell's own setting. A missing or
+// damaged file means nothing is recorded: the shell uses its own setting for all of it.
+const deliveredSeqsFile = "delivered-unverified.seqs"
+
+// deliveredSeq reports whether serve delivered the unverified inbox message with this sequence (it is in the sidecar
+// and the sidecar belongs to this inbox stream).
+func (e *Endpoint) deliveredSeq(seq uint64, stream string) bool {
+	dir, err := SpoolDir(e.cfg)
+	if err != nil {
+		return false
+	}
+	id, seqs := readRefusedSeqs(filepath.Join(dir, deliveredSeqsFile))
+	return id == stream && slices.Contains(seqs, seq)
+}
+
+// shownAtShell reports whether a shell shows an unverified message that its own setting would refuse: yes when serve
+// delivered it (the delivered sidecar). The caller has already checked the refused sidecar, which wins.
+func (e *Endpoint) shownAtShell(seq uint64) bool {
+	id := e.inboxID.Load()
+	return id != nil && e.deliveredSeq(seq, *id)
+}
+
+// recordDelivered records that serve delivers the unverified message seq, before it is queued or acknowledged. An error
+// means nothing is recorded (the shell then falls back to its own setting).
+func (e *Endpoint) recordDelivered(seq uint64) error {
+	if e.cfg.StateDir == "" {
+		return errors.New("no state directory")
+	}
+	dir, err := SpoolDir(e.cfg)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	id, err := e.bindRefusals(ctx)
+	if err != nil {
+		return err
+	}
+	refusedMu.Lock()
+	defer refusedMu.Unlock()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	p := filepath.Join(dir, deliveredSeqsFile)
+	fid, seqs := readRefusedSeqs(p)
+	if fid != id {
+		seqs = nil // another stream's sequences are not this stream's
+		if err := writeRefusedSeqs(p, id, nil); err != nil {
+			return err
+		}
+	}
+	if slices.Contains(seqs, seq) {
+		return nil
+	}
+	if len(seqs) >= 2*refusedSeqsKeep {
+		// Only sequences the stream no longer holds are dropped.
+		if first, err := e.refusedFirstSeq(ctx); err == nil {
+			kept := make([]uint64, 0, len(seqs)+1)
+			for _, s := range seqs {
+				if s >= first {
+					kept = append(kept, s)
+				}
+			}
+			if len(kept) < len(seqs) {
+				return writeRefusedSeqs(p, id, append(kept, seq))
+			}
+		}
+	}
+	f, err := os.OpenFile(p, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	_, werr := fmt.Fprintf(f, "%d\n", seq)
+	if cerr := f.Close(); werr == nil {
+		werr = cerr
+	}
+	return werr
+}
+
+// deliveredEarlier reports whether serve recorded this unverified message as delivered, under accept_unverified, before:
+// a redelivery (its ack was lost, or serve restarted with the setting off) keeps that verdict and is not refused now,
+// the way a recorded refusal stays refused.
+func (e *Endpoint) deliveredEarlier(seq uint64) bool {
+	if e.cfg.StateDir == "" {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	id, err := e.bindRefusals(ctx)
+	return err == nil && e.deliveredSeq(seq, id)
+}
+
+// recordDeliveredBatch records the unverified messages serve is about to show or spool under accept_unverified, so a
+// shell shows them with their label whatever its own setting. It runs after the lease check, the no-channel hold and
+// the duplicate check: a message the worker naks unseen or holds unacknowledged is never recorded. A failure to record is logged and leaves the shell on its own setting.
+func (e *Endpoint) recordDeliveredBatch(batch []pending) {
+	if !e.cfg.AcceptUnverified {
+		return
+	}
+	for _, p := range batch {
+		if p.mail.Trust == sap.TrustVerified {
+			continue
+		}
+		if err := e.recordDelivered(p.mail.Seq); err != nil {
+			e.log.Printf("#%d: delivery of unverified mail not recorded: %v", p.mail.Seq, err)
+		}
+	}
+}

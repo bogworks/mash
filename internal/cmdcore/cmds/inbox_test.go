@@ -563,6 +563,8 @@ func TestInboxAndReadMatchesSpec(t *testing.T) {
 			rb := readBox()
 			rb.err = cmdcore.RefusedMessage(12)
 			code, out, errs = runRead(rb, cliframe.Global{}, "12")
+		case "A shell reports what serve delivered":
+			continue // a description in round brackets, not output: internal/endpoint/refuse_delivered_test.go holds the behaviour
 		case "A deleted endpoint here":
 			continue // a stderr failure: cmd/mash/deleted_here_test.go (TestEverydayCommandsDeletedHereMatchSpec) compares it
 		default:
