@@ -129,16 +129,42 @@ func openFailure(cfg config.Config, err error) error {
 	var cm *endpoint.CredsMissingError
 	switch {
 	case errors.As(err, &cm):
-		if setAsideDeleted(cm.Path) {
-			return cmdcore.EndpointDeleted(cfg.DisplayName())
+		if d := deletedHere(cfg.DisplayName(), "", err); d != nil {
+			return d
 		}
 		return cmdcore.NoCredentials(cfg.DisplayName(), config.TildeIn(cm.Path, cfg.Home))
 	case endpoint.IsAuthFailure(err):
-		return framed(cfg.DisplayName(), err)
+		return framedIn(cfg, cfg.DisplayName(), err)
 	case transient(err) || strings.Contains(err.Error(), "no servers available"):
 		return cmdcore.ServerNotAnswering(config.RedactURL(cfg.URL))
 	}
 	return err
+}
+
+// deletedHere is the one place that decides an endpoint was deleted on this machine, for the shell and the MCP tools: the
+// creds file is missing and was set aside by mashctl endpoint delete (creds is where the error says it looked), or
+// the server refused a sign-in and the configured creds file (creds, "" when unknown) has been set aside since. It
+// returns the shared sentence (cmdcore.EndpointDeleted) for addr, or nil.
+func deletedHere(addr, creds string, err error) *cliframe.Error {
+	var cm *endpoint.CredsMissingError
+	switch {
+	case errors.As(err, &cm):
+		if setAsideDeleted(cm.Path) {
+			return cmdcore.EndpointDeleted(addr)
+		}
+	case err != nil && creds != "" && endpoint.IsAuthFailure(err) && setAsideDeleted(creds):
+		return cmdcore.EndpointDeleted(addr)
+	}
+	return nil
+}
+
+// framedIn is framed for a command or tool with a configuration: a refused sign-in on a deleted endpoint is worded as
+// the deleted endpoint (deletedHere), not as a refused sign-in. addr is the endpoint's own address.
+func framedIn(cfg config.Config, addr string, err error) error {
+	if d := deletedHere(addr, credsPath(cfg), err); d != nil {
+		return d
+	}
+	return framed(addr, err)
 }
 
 // framed words err the way the rules do when it is a refused sign-in: error ADDRESS cannot sign in, hint mash doctor.

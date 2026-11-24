@@ -1,0 +1,1 @@
+**The mash tools now say when an endpoint was deleted.** When `mashctl endpoint delete` removed the endpoint on this machine, the tools in Claude Code failed with a different message from the `mash` command. They now say what `mash send` says: the endpoint was deleted and its address cannot be used again.

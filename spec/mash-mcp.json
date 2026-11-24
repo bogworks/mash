@@ -99,6 +99,12 @@
      "exit": 1
     },
     {
+     "case": "A deleted endpoint here",
+     "text": "error: acme.demo.bob: this endpoint was deleted; its address cannot be used again\nhint: mash doctor",
+     "stream": "stderr",
+     "exit": 1
+    },
+    {
      "case": "Not signed in",
      "text": "error: acme.demo.bob cannot sign in: the server refused its credentials\nhint: mash doctor",
      "stream": "stderr",
