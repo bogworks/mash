@@ -118,6 +118,9 @@ func runStatus(args []string, g cliframe.Global, env func(string) string, lookup
 			servers = append(servers, s)
 		}
 	}
+	if len(servers) == 0 {
+		return cliframe.Report(stdout, stderr, cliframe.Failf("no server is configured").WithHint(initFix), jsonOut)
+	}
 	for _, s := range servers { // a plain URL without the override is a refusal, not a state of the server
 		if _, _, err := natsauth.RequireTLS(s, cfg.SkipEncryption); err != nil {
 			return cliframe.Report(stdout, stderr, withPlainCode(cliframe.Failf("%s", strings.TrimPrefix(err.Error(), "mash: ")), err), jsonOut)

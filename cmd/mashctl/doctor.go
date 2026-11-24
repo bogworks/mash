@@ -209,7 +209,7 @@ func doctorChecks(rep *doctorReport, env func(string) string, lookup config.Look
 	case err != nil:
 		why = oneLine(err.Error())
 	case cfg.URL == "":
-		why = "no servers in the configuration"
+		why = "no server is configured"
 	case cfg.AdminCreds == "":
 		why = "no admin_creds in the configuration"
 	case cfg.Owner == "":

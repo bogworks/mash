@@ -339,6 +339,11 @@ func init() {
 		return confOutRun{ran: w.run("status"), subs: []string{"tls://localhost:4222", dead}}
 	})
 
+	reg("status No server is configured", func(t *testing.T) confOutRun {
+		w := newConfWorld(t, false)
+		return confOutRun{ran: w.run("status")}
+	})
+
 	reg("doctor All well", func(t *testing.T) confOutRun {
 		w := newConfWorld(t, true)
 		w.fleet()
@@ -359,6 +364,10 @@ func init() {
 		w.fleet()
 		w.a.src.connect(w.a.src.mintRogue("tool-a"))
 		return confOutRun{ran: w.run("doctor"), subs: urlSub(w)}
+	})
+	reg("doctor No server is configured", func(t *testing.T) confOutRun {
+		w := newConfWorld(t, false)
+		return confOutRun{ran: w.run("doctor")}
 	})
 	reg("doctor --audit-users finds a user mashctl did not issue", func(t *testing.T) confOutRun {
 		w := newConfWorld(t, true)
