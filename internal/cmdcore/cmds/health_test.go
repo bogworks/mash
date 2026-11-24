@@ -297,6 +297,12 @@ func TestStatusAndDoctorErrors(t *testing.T) {
 	}
 }
 
+// withClaude puts the claude row right after config: every doctor report has it (the command adds it) and the spec shows it.
+func withClaude(f *fakeHealth, row cmds.HealthCheck) *fakeHealth {
+	f.rep.Checks = append(f.rep.Checks[:1:1], append([]cmds.HealthCheck{row}, f.rep.Checks[1:]...)...)
+	return f
+}
+
 // Every doctor case of the specification, word for word.
 func TestDoctorMatchesSpec(t *testing.T) {
 	c, meta := specCommand(t, "doctor")
@@ -326,13 +332,15 @@ func TestDoctorMatchesSpec(t *testing.T) {
 	for _, x := range meta["x-output"].([]any) {
 		oc := x.(map[string]any)
 		var f *fakeHealth
+		noClaude := cmds.HealthCheck{Name: "claude", State: cmds.CheckSkip, Detail: "no claude command found"}
+		claudeOK := ok("claude", "2.1.320")
 		switch oc["case"] {
 		case "All well":
-			f = allWell()
+			f = withClaude(allWell(), claudeOK)
 		case "A problem and a warning":
-			f = refusedSignIn()
+			f = withClaude(refusedSignIn(), claudeOK)
 		case "A check that could not run":
-			f = skippedAfterServer()
+			f = withClaude(skippedAfterServer(), claudeOK)
 		case "Arriving mail cannot be stored on this machine":
 			// the spec gives the delivery row alone, with the path under the detail column
 			path := strings.TrimSpace(strings.SplitN(oc["text"].(string), "\n", 2)[1])
@@ -379,9 +387,9 @@ func TestDoctorMatchesSpec(t *testing.T) {
 			}
 			continue
 		case "The endpoint was deleted, seen from another machine", "The endpoint was deleted, on the machine that deleted it":
-			f = deletedEndpoint()
+			f = withClaude(deletedEndpoint(), noClaude)
 			if oc["case"] == "The endpoint was deleted, on the machine that deleted it" {
-				f = deletedOnThisMachine()
+				f = withClaude(deletedOnThisMachine(), noClaude)
 			}
 			// the tool says the same words, as an error result carrying the report
 			mcp := ""
@@ -402,6 +410,9 @@ func TestDoctorMatchesSpec(t *testing.T) {
 				t.Errorf("%s: %q lacks %q", oc["case"], out, oc["text"])
 			}
 			continue
+		case "Claude Code is recent enough", "Claude Code is too old", "Claude Code is newer than tested", "No claude command", "The version of claude is unreadable":
+			// the claude row is made by the command (cmd/mash/claudecheck_test.go), not by the report this package renders
+			continue
 		default:
 			t.Errorf("unknown spec case %v", oc["case"])
 			continue
@@ -417,7 +428,7 @@ func TestDoctorMatchesSpec(t *testing.T) {
 		}
 	}
 	// the object: the spec's x-json lists every row, each with the four keys
-	_, out, _ := runDoctor(refusedSignIn(), cliframe.Global{JSON: true})
+	_, out, _ := runDoctor(withClaude(refusedSignIn(), ok("claude", "2.1.320")), cliframe.Global{JSON: true})
 	var got, spec struct {
 		Endpoint string
 		Problems int
