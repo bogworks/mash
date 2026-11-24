@@ -989,9 +989,12 @@ type InboxRead struct {
 	// Partial is set when the counting pass stopped at its cap (countMaxMsgs, countMaxBytes) with waiting messages
 	// unread, or failed part way. State.Total and State.Waiting are then the server's numbers less the dropped
 	// messages found so far (upper bounds), NewUrgent is the count in the part read (a lower bound) and OldestWaiting
-	// is the oldest waiting message read. Internal only: what a partial count says in the output is pending Gate 1,
-	// and nothing renders it yet.
+	// is the oldest waiting message read. The count is then not exact, and the commands say so (#958).
 	Partial bool
+	// PartialBy is what stopped the pass, "messages" or "bytes", and PartialAt the cap that was reached; both are zero
+	// unless the pass stopped at the cap (not when it failed).
+	PartialBy string
+	PartialAt int
 
 	dropped      map[uint64]bool // sequences the pass read and left out (sender no longer verified, say)
 	shownWaiting int             // waiting messages the pass read and kept: what the counts are at least
@@ -1013,6 +1016,14 @@ var (
 	countMaxMsgs  = 1000
 	countMaxBytes = 32 << 20
 )
+
+// SetCountCaps lowers the cap of the counting pass and returns the function that puts it back. For tests of the
+// commands that print the count, which cannot reach the variables.
+func SetCountCaps(msgs, bytes int) (restore func()) {
+	om, ob := countMaxMsgs, countMaxBytes
+	countMaxMsgs, countMaxBytes = msgs, bytes
+	return func() { countMaxMsgs, countMaxBytes = om, ob }
+}
 
 // ReadInbox reads the inbox consumer and stream, and the messages the query lists, in one bounded pass: the listed
 // messages are read, then the waiting ones oldest first from the acknowledged floor, a batch at a time, up to the cap
@@ -1178,6 +1189,10 @@ func (e *Endpoint) readInbox(ctx context.Context, q InboxQuery) (InboxRead, erro
 				}
 				if n <= last && last-n+1 > listedAbove {
 					out.Partial = true
+					out.PartialBy, out.PartialAt = "messages", countMaxMsgs
+					if scanned < countMaxMsgs {
+						out.PartialBy, out.PartialAt = "bytes", countMaxBytes
+					}
 				}
 				break
 			}

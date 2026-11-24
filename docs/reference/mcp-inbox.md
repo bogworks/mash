@@ -25,6 +25,7 @@ The structured content of a successful result. The values are an example.
   "total": 2,
   "new": 2,
   "urgent": 1,
+  "exact": true,
   "wake_count": 15,
   "over_wake_count": false,
   "wake_age": "1h",

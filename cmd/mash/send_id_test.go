@@ -1,7 +1,7 @@
 package main
 
 import (
-	"fmt"
+	"encoding/json"
 	"strconv"
 	"strings"
 	"testing"
@@ -10,18 +10,17 @@ import (
 
 func inboxCount(t *testing.T, w *world, as string) int {
 	t.Helper()
-	out, code := w.cli(t, as, "inbox")
+	out, code := w.cli(t, as, "inbox", "--json") // the text says "about" without serve running (#958)
 	if code != 0 {
 		t.Fatalf("inbox: %d %s", code, out)
 	}
-	if strings.HasPrefix(out, "No messages for ") {
-		return 0
+	var o struct {
+		Total int `json:"total"`
 	}
-	var n int // "N messages for ADDRESS, ..."
-	if _, err := fmt.Sscanf(out, "%d message", &n); err != nil {
+	if err := json.Unmarshal([]byte(out), &o); err != nil {
 		t.Fatalf("inbox: no count in %q", out)
 	}
-	return n
+	return o.Total
 }
 
 // A CLI send re-run with the same --id lands once and the second run succeeds, naming the original message.

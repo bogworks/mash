@@ -51,10 +51,14 @@ type InboxView struct {
 	NewUrgent int
 	// OldestWaiting is when the oldest waiting message was stored; zero when none is waiting.
 	OldestWaiting time.Time
-	Messages      []MailItem
-	WakeCount     int
-	WakeAge       time.Duration
-	WakeAgeText   string // wake_age as it was written: "1h", "0"
+	// Capped is why the counting pass did not read all the waiting mail ("" when it did): the counts are then upper
+	// bounds. NoServe: mash serve is not running, so mail it has not verified cannot have been refused yet.
+	Capped      string
+	NoServe     bool
+	Messages    []MailItem
+	WakeCount   int
+	WakeAge     time.Duration
+	WakeAgeText string // wake_age as it was written: "1h", "0"
 }
 
 // ReadView is what the service reads for mash read: the endpoint, and the message, nil when the inbox has no such one.
@@ -115,6 +119,7 @@ type InboxResult struct {
 	Total         int            `json:"total"`
 	New           int            `json:"new"`
 	Urgent        int            `json:"urgent"`
+	Exact         bool           `json:"exact"`
 	WakeCount     int            `json:"wake_count"`
 	OverWakeCount bool           `json:"over_wake_count"`
 	WakeAge       string         `json:"wake_age"`
@@ -127,6 +132,7 @@ type InboxResult struct {
 	rows  []inboxRow
 	count int // wake_count, for the line that names it
 	age   string
+	why   string // why the count is not exact; "" when it is
 }
 
 type inboxRow struct {
@@ -180,7 +186,14 @@ func (r InboxResult) Text(o cmdcore.Opts) string {
 		return "No messages for " + r.Endpoint + "."
 	}
 	var b strings.Builder
-	b.WriteString(render.Plural(r.Total, "message") + " for " + r.Endpoint + ", " + strconv.Itoa(r.New) + " new, " + strconv.Itoa(r.Urgent) + " urgent.")
+	about, total := "", render.Plural(r.Total, "message")
+	if !r.Exact { // a count that is not exact says so in the count itself (#958)
+		about, total = "about ", "About "+total
+	}
+	b.WriteString(total + " for " + r.Endpoint + ", " + about + strconv.Itoa(r.New) + " new, " + about + strconv.Itoa(r.Urgent) + " urgent.")
+	if o.Detail && !r.Exact { // why, directly under the count line; Opts.Detail is read here because the result is not a Detailer, which would add a param to the MCP tool
+		b.WriteString("\nexact: no (" + r.why + ")")
+	}
 	if r.OverWakeCount {
 		b.WriteString("\nMore than " + strconv.Itoa(r.count) + " are waiting.")
 	}
@@ -247,6 +260,10 @@ var Inbox = cmdcore.Command[InboxParams, InboxResult]{
 		if r.WakeAge == "" {
 			r.WakeAge = "0"
 		}
+		r.Exact = v.Capped == "" && !(v.NoServe && v.Total > 0)
+		if !r.Exact {
+			r.why = strings.Join(nonEmpty(v.Capped, noServe(v)), "; ")
+		}
 		r.OverWakeCount = v.WakeCount > 0 && v.Waiting > v.WakeCount
 		if v.Waiting > 0 && !v.OldestWaiting.IsZero() {
 			age := at.Sub(v.OldestWaiting)
@@ -270,6 +287,26 @@ var Inbox = cmdcore.Command[InboxParams, InboxResult]{
 		}
 		return r, nil
 	},
+}
+
+// NoServeWhy is the reason of a count made while mash serve is not running.
+const NoServeWhy = "mash serve is not running, so mail it has not verified is still counted"
+
+func noServe(v InboxView) string {
+	if v.NoServe {
+		return NoServeWhy
+	}
+	return ""
+}
+
+func nonEmpty(ss ...string) []string {
+	var out []string
+	for _, s := range ss {
+		if s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // firstLine is the first line of body that is not blank, trimmed; the service hands the body over already safe to print.

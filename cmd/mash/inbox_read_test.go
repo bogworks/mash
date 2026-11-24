@@ -128,7 +128,7 @@ func TestInboxWakeSettingsFromConfig(t *testing.T) {
 	}
 	w.env["a"]["MASH_WAKE_COUNT"] = "2"
 	out, code := w.cli(t, "a", "inbox", "--limit", "1")
-	if code != 0 || !strings.HasPrefix(out, "3 messages for o.dev.a, 3 new, 0 urgent.\nMore than 2 are waiting.\n\nNUMBER  ") || strings.Count(out, "\n") != 5 {
+	if code != 0 || !strings.HasPrefix(out, "About 3 messages for o.dev.a, about 3 new, about 0 urgent.\nMore than 2 are waiting.\n\nNUMBER  ") || strings.Count(out, "\n") != 5 {
 		t.Fatalf("inbox: %d %q", code, out)
 	}
 	js, _ := w.cli(t, "a", "inbox", "--json")
@@ -147,7 +147,7 @@ func TestInboxWakeSettingsFromConfig(t *testing.T) {
 	// A bad wake setting is serve's to refuse: the other commands ignore it and use the default.
 	w.env["a"]["MASH_WAKE_COUNT"] = "many"
 	w.env["a"]["MASH_WAKE_AGE"] = "30 seconds"
-	if out, code := w.cli(t, "a", "inbox"); code != 0 || !strings.Contains(out, "3 messages for o.dev.a") || strings.Contains(out, "More than") {
+	if out, code := w.cli(t, "a", "inbox"); code != 0 || !strings.Contains(out, "About 3 messages for o.dev.a") || strings.Contains(out, "More than") {
 		t.Fatalf("bad setting: %d %q", code, out)
 	}
 	for _, args := range [][]string{{"who"}, {"read", "1"}, {"send", tTo("b"), "still works"}} {
@@ -206,7 +206,7 @@ func TestInboxUrgentAndKind(t *testing.T) {
 		}
 	}
 	out, _ := w.cli(t, "a", "inbox")
-	if !strings.HasPrefix(out, "2 messages for o.dev.a, 2 new, 1 urgent.\n\n") || !strings.Contains(out, " new    yes     blocker  stuck now\n") || !strings.Contains(out, " new    no      task     plain\n") {
+	if !strings.HasPrefix(out, "About 2 messages for o.dev.a, about 2 new, about 1 urgent.\n\n") || !strings.Contains(out, " new    yes     blocker  stuck now\n") || !strings.Contains(out, " new    no      task     plain\n") {
 		t.Fatalf("inbox: %q", out)
 	}
 	js, _ := w.cli(t, "a", "inbox", "--json", "--limit", "1")
