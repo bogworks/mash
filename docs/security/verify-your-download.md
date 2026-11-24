@@ -59,7 +59,7 @@ gh attestation verify mashctl-$OS-$ARCH -R bogworks/mash --bundle mash.intoto.js
   --source-ref refs/tags/$MASH_VERSION
 ```
 
-`install.sh` pins the repository, the signer workflow and the tag ref. It does not pin the commit. The only place it could learn the commit is GitHub, at install time, which is the same source as the download, so the pin would add nothing. If you have the commit from somewhere else, for example your own reviewed clone, add it to the checks above:
+`install.sh` pins the repository, the signer workflow, the tag ref and the commit the tag points to. It reads that commit from GitHub at install time (with `gh api`, or the public GitHub API if gh is not logged in), so a release attested from some other commit is refused; if it cannot read the commit it installs nothing. That is the same source as the download, so for a stronger check, take the commit from somewhere else, for example your own reviewed clone, and add it to the checks above:
 
 ```sh
   --source-digest <commit>

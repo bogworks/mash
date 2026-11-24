@@ -501,9 +501,14 @@ func TestInstallSh_aTruncatedScriptInstallsNothing(t *testing.T) {
 // ghStub answers --version with real gh's two lines for GH_VERSION (default 2.105.0), or GH_VERSION_OUT verbatim when
 // set, exiting GH_VERSION_EXIT (default 0), without logging; every other call is logged and exits GH_EXIT (default 0).
 const ghStub = `case "$*" in --version) if [ -n "${GH_VERSION_OUT+x}" ]; then printf '%s\n' "$GH_VERSION_OUT"; else printf 'gh version %s (2026-11-18)\nhttps://github.com/cli/cli/releases/tag/v%s\n' "${GH_VERSION:-2.105.0}" "${GH_VERSION:-2.105.0}"; fi; exit "${GH_VERSION_EXIT:-0}";; esac
+case "$1" in api) echo "$*" >> "$GH_LOG.api"; [ -z "${GH_API_EXIT:-}" ] || exit "$GH_API_EXIT"; printf '%s\n' "${GH_API_SHA-` + fakeCommit + `}"; exit 0;; esac
 echo "$*" >> "$GH_LOG"
+if [ -n "${GH_WANT_DIGEST:-}" ]; then case "$*" in *"--source-digest $GH_WANT_DIGEST") ;; *) exit 1;; esac; fi
 exit "${GH_EXIT:-0}"
 `
+
+// fakeCommit is the commit the fake gh api reports for every tag.
+const fakeCommit = "0123456789abcdef0123456789abcdef01234567"
 
 // curlStub serves https://github.com/<repo>/releases/download/<tag>/<file> from $FAKE_DIR and answers the -I
 // request for releases/latest with $RESOLVED; every call is logged to $CURL_LOG.
@@ -531,7 +536,7 @@ func TestInstallSh_verifiesTheAttestationWithGh(t *testing.T) {
 		t.Fatalf("install failed: %v\n%s", r.err, r.out)
 	}
 	calls, _ := os.ReadFile(log)
-	want := "attestation verify SHA256SUMS -R bogworks/mash --bundle mash.intoto.jsonl --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/v0.5.6"
+	want := "attestation verify SHA256SUMS -R bogworks/mash --bundle mash.intoto.jsonl --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/v0.5.6 --source-digest " + fakeCommit
 	if strings.TrimSpace(string(calls)) != want {
 		t.Errorf("gh was called with\n%s\nwant\n%s", calls, want)
 	}
@@ -585,7 +590,7 @@ func TestInstallSh_latestIsResolvedToATagFirst(t *testing.T) {
 		t.Errorf("first line should name the real version:\n%s", r.out)
 	}
 	calls, _ := os.ReadFile(ghLog)
-	for _, w := range []string{"-R bogworks/mash ", "--source-ref refs/tags/v0.5.6"} {
+	for _, w := range []string{"-R bogworks/mash ", "--source-ref refs/tags/v0.5.6 --source-digest " + fakeCommit} {
 		if !strings.Contains(string(calls), w) {
 			t.Errorf("gh call lacks %q: %s", w, calls)
 		}
@@ -632,6 +637,9 @@ func TestInstallSh_ghBeforeTheMinimumFallsBackToChecksumsWithAnHonestNote(t *tes
 			if b, _ := os.ReadFile(log); len(b) != 0 {
 				t.Errorf("verify must not run with an old gh: %s", b)
 			}
+			if _, err := os.Stat(log + ".api"); err == nil {
+				t.Errorf("no commit lookup with an old gh")
+			}
 			if strings.Contains(r.out, "failed verification") || strings.Contains(r.out, "Verified") {
 				t.Errorf("no verification text wanted:\n%s", r.out)
 			}
@@ -640,7 +648,7 @@ func TestInstallSh_ghBeforeTheMinimumFallsBackToChecksumsWithAnHonestNote(t *tes
 }
 
 func TestInstallSh_ghAtOrAboveTheMinimumVerifiesAndSaysSo(t *testing.T) {
-	const want = "attestation verify SHA256SUMS -R bogworks/mash --bundle mash.intoto.jsonl --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/v0.5.6"
+	const want = "attestation verify SHA256SUMS -R bogworks/mash --bundle mash.intoto.jsonl --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/v0.5.6 --source-digest " + fakeCommit
 	const line = "Verified the release attestation for bogworks/mash v0.5.6\n"
 	for _, v := range []string{"2.102.0", "2.102.1", "2.103.0-rc1", "2.105.0", "2.200.1", "3.0.0"} {
 		t.Run(v, func(t *testing.T) {
@@ -922,5 +930,97 @@ func TestInstallSh_namesAFolderOutsideHomeInFull(t *testing.T) {
 	}
 	if !strings.Contains(r.out, "Installed "+fakeMashVersion+" in "+dest+"\n") {
 		t.Errorf("want the full path:\n%s", r.out)
+	}
+}
+
+func TestInstallSh_theAttestationIsPinnedToTheTagsCommit(t *testing.T) {
+	rel, _, _ := fakeRelease(t)
+	log := filepath.Join(t.TempDir(), "gh.log")
+	tools := installTools(t, map[string]string{"gh": ghStub})
+	other := "fedcba9876543210fedcba9876543210fedcba98"
+
+	// (a) the digest is the commit gh api reports for the tag.
+	r := runInstall(t, rel, tools, "GH_LOG="+log, "MASH_VERSION=v0.5.6", "GH_API_SHA="+other, "GH_WANT_DIGEST="+other)
+	if r.err != nil {
+		t.Fatalf("install failed: %v\n%s", r.err, r.out)
+	}
+	if calls, _ := os.ReadFile(log); !strings.HasSuffix(strings.TrimSpace(string(calls)), "--source-digest "+other) {
+		t.Errorf("verify lacks the tags commit: %s", calls)
+	}
+	if api, _ := os.ReadFile(log + ".api"); strings.TrimSpace(string(api)) != "api repos/bogworks/mash/commits/v0.5.6 --jq .sha" {
+		t.Errorf("gh api was called with %q", api)
+	}
+	if !strings.Contains(r.stdout, "Verified the release attestation for bogworks/mash v0.5.6\n") {
+		t.Errorf("want the Verified line with the commit:\n%s", r.out)
+	}
+
+	// (d) a digest that is not the one the fake verify expects fails verification.
+	r = runInstall(t, rel, tools, "GH_LOG="+log, "MASH_VERSION=v0.5.6", "GH_WANT_DIGEST="+other)
+	if r.err == nil || r.stderr != "error: the release failed verification; nothing was installed\n" {
+		t.Errorf("want a verification failure, got err=%v\n%s", r.err, r.out)
+	}
+	assertNothingInstalled(t, r.dest)
+}
+
+// apiFolder makes a folder that answers the commit lookup of tag v0.5.6 as a file:// MASH_API_BASE, with body.
+func apiFolder(t *testing.T, body string) string {
+	t.Helper()
+	d := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(d, "repos", "bogworks", "mash", "commits"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(d, "repos", "bogworks", "mash", "commits", "v0.5.6"), body)
+	return "file://" + d
+}
+
+func TestInstallSh_withGhNotLoggedInTheCommitComesFromThePublicAPI(t *testing.T) {
+	rel, _, _ := fakeRelease(t)
+	log := filepath.Join(t.TempDir(), "gh.log")
+	tools := installTools(t, map[string]string{"gh": ghStub})
+	api := apiFolder(t, "")
+	sha := "abcdefabcdefabcdefabcdefabcdefabcdefabcd"
+	writeFile(t, strings.TrimPrefix(api, "file://")+"/repos/bogworks/mash/commits/v0.5.6", sha+"\n")
+
+	// (b) gh api fails (not logged in): the fallback still pins the digest.
+	for name, env := range map[string][]string{"gh api fails": {"GH_API_EXIT=4"}, "gh api answers junk": {"GH_API_SHA=not-a-sha"}} {
+		t.Run(name, func(t *testing.T) {
+			r := runInstall(t, rel, tools, append([]string{"GH_LOG=" + log, "MASH_VERSION=v0.5.6", "MASH_API_BASE=" + api, "GH_WANT_DIGEST=" + sha}, env...)...)
+			if r.err != nil {
+				t.Fatalf("install failed: %v\n%s", r.err, r.out)
+			}
+			if !strings.Contains(r.stdout, "Verified the release attestation for bogworks/mash v0.5.6\n") {
+				t.Errorf("want the Verified line with the commit:\n%s", r.out)
+			}
+		})
+	}
+}
+
+func TestInstallSh_refusesWhenTheTagsCommitCannotBeRead(t *testing.T) {
+	const refusal = "error: could not read the commit of bogworks/mash v0.5.6; nothing was installed\n"
+	rel, _, _ := fakeRelease(t)
+	log := filepath.Join(t.TempDir(), "gh.log")
+	tools := installTools(t, map[string]string{"gh": ghStub})
+	missing := "file://" + t.TempDir()
+
+	// (c) both lookups fail, or the API answers something that is not a full sha.
+	for name, api := range map[string]string{"api unreachable": missing, "api answers junk": apiFolder(t, "{\"message\": \"Not Found\"}"), "short sha": apiFolder(t, "0123abc\n")} {
+		t.Run(name, func(t *testing.T) {
+			r := runInstall(t, rel, tools, "GH_LOG="+log, "MASH_VERSION=v0.5.6", "GH_API_EXIT=4", "MASH_API_BASE="+api)
+			if r.err == nil || r.stderr != refusal {
+				t.Errorf("want exactly %q on stderr, got err=%v\nstdout:\n%s\nstderr:\n%s", refusal, r.err, r.stdout, r.stderr)
+			}
+			if b, _ := os.ReadFile(log); len(b) != 0 {
+				t.Errorf("verify must not run without a commit: %s", b)
+			}
+			assertNothingInstalled(t, r.dest)
+		})
+	}
+}
+
+func TestInstallSh_noGhMeansNoCommitLookup(t *testing.T) {
+	rel, _, _ := fakeRelease(t)
+	r := runInstall(t, rel, installTools(t, nil), "MASH_API_BASE=file:///nonexistent")
+	if r.err != nil || strings.Contains(r.out, "commit") {
+		t.Errorf("want a plain checksums-only install, got err=%v\n%s", r.err, r.out)
 	}
 }

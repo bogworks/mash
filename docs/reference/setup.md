@@ -9,14 +9,17 @@ The scripts that install mash and set up a local NATS server.
 Finds the machine's type, downloads mash and mashctl from the same release,
 checks each against the release's checksums, and against the release's signed
 record too when gh 2.102.0 or newer is there to do it, printing one line when
-that check passes: 'Verified the release attestation for bogworks/mash v0.5.6'
-(with no gh, a gh that does not run, a gh whose version it cannot read, or one
-older than 2.102.0, it prints one warning line on stderr that says which, such
-as 'warning: gh not found: checked checksums only, not verified'; if the check
+that check passes: 'Verified the release attestation for bogworks/mash
+v0.5.6', checked against the commit the release tag points to (with no gh, a
+gh that does not run, a gh whose version it cannot read, or one older than
+2.102.0, it prints one warning line on stderr that says which, such as
+'warning: gh not found: checked checksums only, not verified'; if the check
 fails it prints 'error: the release failed verification; nothing was
-installed' on stderr, installs nothing and exits 1), puts them in ~/.local/bin
-unless MASH_INSTALL_DIR names another folder, and prints one line for each,
-with the path it actually used: 'Installed mash v0.5.6 (3f9a41c) in
+installed' on stderr, installs nothing and exits 1; if it cannot read that
+commit it prints 'error: could not read the commit of bogworks/mash v0.5.6;
+nothing was installed' on stderr, installs nothing and exits 1), puts them in
+~/.local/bin unless MASH_INSTALL_DIR names another folder, and prints one line
+for each, with the path it actually used: 'Installed mash v0.5.6 (3f9a41c) in
 ~/.local/bin'. It asks nothing and needs no sudo. If that folder is not on the
 PATH it says so in one line. If the folder, or a folder above it, can be
 written by its group or by other users, it installs nothing and names that

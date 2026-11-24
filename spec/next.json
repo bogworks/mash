@@ -64,6 +64,16 @@
    "note": "One line on stderr; nothing is installed. Stays in spec/next.json until the spec is closed for 0.5.9: the installer has no x-output home."
   },
   {
+   "id": "installer-commit-unread",
+   "where": "install.sh",
+   "case": "The tag's commit cannot be read",
+   "text": "error: could not read the commit of bogworks/mash v0.5.9; nothing was installed",
+   "stream": "stderr",
+   "exit": 1,
+   "issue": "#1352",
+   "note": "gh is there and 2.102.0 or newer, but neither gh api nor the public GitHub API gave the commit the release tag points to, so the attestation cannot be pinned to it; nothing is installed. The repo and tag vary with the release."
+  },
+  {
    "id": "setup-nats-server-sbin",
    "where": "setup script",
    "case": "nats-server found off PATH",
