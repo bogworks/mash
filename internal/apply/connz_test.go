@@ -259,3 +259,44 @@ func TestElideNameCountsCells(t *testing.T) {
 		t.Errorf("24-cell name changed: %q", got)
 	}
 }
+
+// Connections that opened or closed between a server's own page scans are passed up in Changed, each once.
+func TestConnzChangedConnectionsArePassedUp(t *testing.T) {
+	nc, _ := startFakeConnz(t, func(call, offset int) ([]uint64, int) {
+		if offset == 0 {
+			return []uint64{1, 2}, 4
+		}
+		return []uint64{3, uint64(10 + call)}, 4 // a different last connection in every scan
+	})
+	got, err := NATS{Conn: nc}.Connz(context.Background(), "A", nil, 2)
+	if err != nil || len(got) != 1 || got[0].Incomplete == "" {
+		t.Fatalf("%v %+v", err, got)
+	}
+	if len(got[0].Changed) != connzScanTries {
+		t.Fatalf("changed: %+v", got[0].Changed)
+	}
+	for _, c := range got[0].Changed {
+		if c.CID < 10 || c.Key != fmt.Sprintf("U%d", c.CID) {
+			t.Errorf("unexpected change %+v", c)
+		}
+	}
+	// A stable list changes nothing.
+	all := []uint64{1, 2, 3, 4}
+	nc2, _ := startFakeConnz(t, func(call, offset int) ([]uint64, int) { return all[offset : offset+2], 4 })
+	if got, err := (NATS{Conn: nc2}).Connz(context.Background(), "A", nil, 2); err != nil || len(got[0].Changed) != 0 {
+		t.Fatalf("%v %+v", err, got)
+	}
+}
+
+// The wait for a server that never answers stops at the caller's deadline, not connzTotal after it.
+func TestConnzWaitStopsAtTheContextDeadline(t *testing.T) {
+	all := []uint64{1, 2}
+	nc, _ := startFakeConnz(t, func(call, offset int) ([]uint64, int) { return all, 2 })
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err := NATS{Conn: nc}.Connz(ctx, "A", []string{"s1", "s2"}, 0)
+	if el := time.Since(start); el > time.Second || err == nil {
+		t.Fatalf("took %v, err %v", el, err)
+	}
+}

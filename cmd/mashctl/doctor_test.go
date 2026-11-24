@@ -1163,11 +1163,15 @@ func TestDoctorKeysDeadlineAfterOneRead(t *testing.T) {
 	oldScan, oldPause := scanConns, churnPause
 	t.Cleanup(func() { scanConns, churnPause = oldScan, oldPause })
 	churnPause = 0
+	oldDeadline := applyDeadline
+	t.Cleanup(func() { applyDeadline = oldDeadline })
+	applyDeadline = 300 * time.Millisecond
 	calls := 0
 	scanConns = func(ctx context.Context, _ *nats.Conn, _ string, _ int) (connScan, error) {
 		calls++
 		if calls > 1 {
-			return connScan{}, context.DeadlineExceeded
+			<-ctx.Done() // doctor's own deadline ends the read
+			return connScan{}, ctx.Err()
 		}
 		return keyScan(true), nil
 	}
@@ -1322,5 +1326,48 @@ func TestIncompleteLinesCountsCells(t *testing.T) {
 	}
 	if want := strings.ReplaceAll(strings.ReplaceAll(in, " ", ""), "\n", ""); all.String() != want {
 		t.Fatalf("text changed: %q", got)
+	}
+}
+
+// A page request's own timeout is not doctor's deadline: with the doctor context still alive, the error fails the row
+// even after an earlier complete read, with or without --audit-users.
+func TestDoctorKeysPageTimeoutIsNotTheDeadline(t *testing.T) {
+	e := newXYEnv(t)
+	oldScan, oldPause := scanConns, churnPause
+	t.Cleanup(func() { scanConns, churnPause = oldScan, oldPause })
+	churnPause = 0
+	for _, args := range [][]string{{}, {"--audit-users"}} {
+		calls := 0
+		scanConns = func(context.Context, *nats.Conn, string, int) (connScan, error) {
+			calls++
+			if calls > 1 {
+				return connScan{}, fmt.Errorf("server s1: the next CONNZ page: %w", context.DeadlineExceeded)
+			}
+			return keyScan(true), nil
+		}
+		_, by, code := doctorJSON(t, e.run, args...)
+		if c := by["keys"]; code != 1 || c.State != "fail" || !strings.Contains(c.Detail, "the next CONNZ page") {
+			t.Fatalf("%v: %d %+v", args, code, c)
+		}
+	}
+}
+
+// A connection of mashctl's own that changed between a server's inner page scans is churn, though the reads agree.
+func TestDoctorKeysInnerScanChangeOfMashUserWarns(t *testing.T) {
+	e := newXYEnv(t)
+	_, xKey := credsSubject(t, e.credsPath(xy("x").String()))
+	sc := keyScan(true, xKey)
+	sc.Conns[0].Changed = []apply.ConnzConn{{Key: xKey, CID: 7}}
+	scriptScans(t, sc)
+	_, by, code := doctorJSON(t, e.run)
+	if c := by["keys"]; code != 0 || c.State != "warn" || !strings.HasPrefix(c.Detail, "mashctl's users kept connecting and leaving") {
+		t.Fatalf("%d %+v", code, c)
+	}
+	// The same change of a foreign key is not a finding.
+	f := keyScan(true, "UFOREIGN1")
+	f.Conns[0].Changed = []apply.ConnzConn{{Key: "UFOREIGN1", CID: 7}}
+	scriptScans(t, f, f, f)
+	if _, by, code := doctorJSON(t, e.run); code != 0 || by["keys"].State != "ok" {
+		t.Fatalf("%d %+v", code, by["keys"])
 	}
 }
