@@ -181,9 +181,9 @@ The rules every mash command and tool follows.
    environment variable MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1. There is no
    flag and no configuration-file key for it: this is the one setting that
    cannot be given three ways, so that it cannot be left on in a file and
-   forgotten. While it is set, every command of both tools first prints, on
-   stderr: 'warning: encryption to the server is OFF
-   (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set)'. The older names,
+   forgotten. While it is set, every command of both tools, errors included,
+   first prints, on stderr: 'warning: no encryption to the server
+   (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION)'. The older names,
    MASH_INSECURE_PLAINTEXT and the key insecure_plaintext, are refused with an
    error naming the new one.
 

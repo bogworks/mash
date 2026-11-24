@@ -14,7 +14,7 @@ import (
 
 const (
 	skipVar     = "MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION"
-	skipWarning = "warning: encryption to the server is OFF (" + skipVar + " is set)"
+	skipWarning = "warning: no encryption to the server (" + skipVar + ")"
 )
 
 func TestSkipEncryptionWarnsOnceOnStderrForEveryMashctlCommand(t *testing.T) {
@@ -28,14 +28,14 @@ func TestSkipEncryptionWarnsOnceOnStderrForEveryMashctlCommand(t *testing.T) {
 		if n := strings.Count(errb, skipWarning); n != 1 {
 			t.Errorf("%v: %d warnings on stderr, want 1: %q", args, n, errb)
 		}
-		if strings.Contains(out, "encryption to the server is OFF") {
+		if strings.Contains(out, "no encryption to the server") {
 			t.Errorf("%v: the warning is on stdout: %q", args, out)
 		}
 	}
 	e.env[skipVar] = ""
 	for _, args := range [][]string{{"version"}} {
 		out, errb, _ := e.run(args...)
-		if strings.Contains(out+errb, "encryption to the server is OFF") {
+		if strings.Contains(out+errb, "no encryption to the server") {
 			t.Errorf("%v unset: warned: %q %q", args, out, errb)
 		}
 	}
@@ -79,7 +79,7 @@ func TestSkipEncryptionMashctlEntryPoint(t *testing.T) {
 	e.env[skipVar] = "1"
 	for _, args := range [][]string{{"--help"}, {"-h"}, {"help"}, {"version"}, {"version", "--json"}, {"endpoint", "--help"}, {"doctor", "--help"}} {
 		out, errb, code := e.run(args...)
-		if code != 0 || strings.Count(errb, skipWarning) != 1 || strings.Contains(out, "encryption to the server is OFF") {
+		if code != 0 || strings.Count(errb, skipWarning) != 1 || strings.Contains(out, "no encryption to the server") {
 			t.Errorf("%v: exit %d, stderr %q: want 0 and one warning on stderr only", args, code, errb)
 		}
 	}
@@ -163,5 +163,51 @@ func TestSkipEncryptionMashctlWarnsBeforeArgumentHandling(t *testing.T) {
 			}
 		}
 		delete(e.env, tc.key)
+	}
+}
+
+// Errors do not drop the warning: a usage error and a failing command each print it exactly once, first.
+func TestSkipEncryptionMashctlWarnsOnceOnErroringCommands(t *testing.T) {
+	keepSkipWarning = true
+	t.Cleanup(func() { keepSkipWarning = false })
+	e := newApplyEnv(t).withDirectory()
+	e.env[skipVar] = "1"
+	for _, args := range [][]string{{"nosuchcommand"}, {"endpoint", "nosuchverb"}, {"endpoint", "show"}} {
+		out, errb, code := e.run(args...)
+		if code == 0 {
+			t.Errorf("%v: exit 0, want a failure", args)
+		}
+		if n := strings.Count(errb, skipWarning); n != 1 || !strings.HasPrefix(errb, skipWarning+"\n") {
+			t.Errorf("%v: stderr %q, want the warning once, first", args, errb)
+		}
+		if strings.Contains(out, "no encryption to the server") {
+			t.Errorf("%v: the warning is on stdout: %q", args, out)
+		}
+	}
+}
+
+// A command refused for the removed name or key while the override is on still prints the warning, once, first, on
+// stderr: it is on every command, errors included.
+func TestSkipEncryptionMashctlWarnsOnARefusedCommandToo(t *testing.T) {
+	keepSkipWarning = true
+	t.Cleanup(func() { keepSkipWarning = false })
+	e := newApplyEnv(t).withDirectory()
+	e.env[skipVar] = "1"
+	e.env["MASH_INSECURE_PLAINTEXT"] = "1"
+	for _, args := range [][]string{{"version"}, {"help"}, {"endpoint", "list"}} {
+		out, errb, code := e.run(args...)
+		if code != 2 || !strings.HasPrefix(errb, skipWarning+"\n") || strings.Count(errb, skipWarning) != 1 || strings.Contains(out, "no encryption to the server") {
+			t.Errorf("removed name %v: exit %d, stderr %q, stdout %q", args, code, errb, out)
+		}
+	}
+	delete(e.env, "MASH_INSECURE_PLAINTEXT")
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"insecure_plaintext":true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e.env["MASH_CONFIG_DIR"] = dir
+	_, errb, code := e.run("endpoint", "list")
+	if code != 2 || !strings.HasPrefix(errb, skipWarning+"\n") || strings.Count(errb, skipWarning) != 1 {
+		t.Errorf("removed key: exit %d, stderr %q", code, errb)
 	}
 }

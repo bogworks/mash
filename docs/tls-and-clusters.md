@@ -109,7 +109,7 @@ mash: refusing a plain nats:// connection to "HOST": every mash connection requi
 With it set, every command of both tools prints this line on stderr, once, before it does anything else, and nothing extra on stdout:
 
 ```
-warning: encryption to the server is OFF (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set)
+warning: no encryption to the server (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION)
 ```
 
 Use it only for a throwaway server in a test: plain text lets anyone on the network read mail and obtain signatures. It does not turn a `tls://` connection off.

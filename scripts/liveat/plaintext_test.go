@@ -50,7 +50,7 @@ func TestPlainRefusalOK(t *testing.T) {
 }
 
 func TestPlainWarnedOK(t *testing.T) {
-	warn := "warning: encryption to the server is OFF (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set)"
+	warn := "warning: no encryption to the server (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION)"
 	for name, c := range map[string]struct {
 		r        Result
 		connects int64
@@ -68,7 +68,7 @@ func TestPlainWarnedOK(t *testing.T) {
 }
 
 func TestDoctorWarnedOnStderr(t *testing.T) {
-	warn := "warning: encryption to the server is OFF (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set)"
+	warn := "warning: no encryption to the server (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION)"
 	report := "config    ok\ncreds     ok\nserver    FAIL  the server did not answer: nats://127.0.0.1:1\n\n1 problem.\n"
 	for name, c := range map[string]struct {
 		r    Result

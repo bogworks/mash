@@ -53,7 +53,7 @@ func plainRefusalOK(r Result, want int, connects int64) (bool, string) {
 }
 
 // skipWarning is the line every command prints on standard error while MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set.
-const skipWarning = "warning: encryption to the server is OFF (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set)"
+const skipWarning = "warning: no encryption to the server (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION)"
 
 // plainWarnedOK judges one command run with the override: a connection was made (the listener counted one) and the
 // plain-text warning is on standard error, never on standard output.

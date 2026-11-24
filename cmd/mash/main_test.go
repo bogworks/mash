@@ -251,7 +251,7 @@ func (w *world) held(t *testing.T, as string, n uint64) render.Mail {
 // plainWarningLine is the line a command prints on standard error while MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set.
 // REQ-014: these tests are not about TLS; the override is explicit, and the helpers that merge the two streams leave
 // that one line out. The line itself is asserted in plaintext_refusal_test.go.
-var plainWarningLine = regexp.MustCompile(`(?m)^warning: encryption to the server is OFF \(MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set\)\n`)
+var plainWarningLine = regexp.MustCompile(`(?m)^warning: no encryption to the server \(MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION\)\n`)
 
 // quiet wraps w so that the encryption-off line is dropped: the default test environment sets the override, so
 // every command prints the line, and the tests that compare a whole stream are not about it.

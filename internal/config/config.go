@@ -283,7 +283,7 @@ const SkipEncryptionEnv = "MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION"
 
 // SkipEncryptionWarning is the line every command of mash and mashctl prints on standard error, once, at start,
 // while SkipEncryptionEnv is on.
-const SkipEncryptionWarning = "warning: encryption to the server is OFF (" + SkipEncryptionEnv + " is set)"
+const SkipEncryptionWarning = "warning: no encryption to the server (" + SkipEncryptionEnv + ")"
 
 // SkipEncryptionError is a refusal about the encryption override (a removed name, a bad value). It is a command-line
 // or configuration error: the commands exit 2 on it.
@@ -316,7 +316,9 @@ func SkipEncryptionFrom(lookup Lookup) (bool, error) {
 // WarnSkipEncryption prints SkipEncryptionWarning to stderr when SkipEncryptionEnv is on. A command calls it once,
 // first, before it does anything else.
 func WarnSkipEncryption(lookup Lookup, stderr io.Writer) {
-	if on, _ := SkipEncryptionFrom(lookup); on {
+	// Asked of the variable itself, not of SkipEncryptionFrom: a command that is refused (the removed name set beside it)
+	// still says encryption is off, since the warning is first on every command, errors included.
+	if v, _ := lookup(SkipEncryptionEnv); v == "1" {
 		fmt.Fprintln(stderr, SkipEncryptionWarning)
 	}
 }

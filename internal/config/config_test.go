@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/bogworks/mash/internal/store"
 )
@@ -960,5 +961,18 @@ func TestBadWakeCountKeepsAValidWakeAge(t *testing.T) {
 	}
 	if c.WakeAge != 30*time.Minute || c.WakeAgeText != "30m" || c.WakeCount != 15 {
 		t.Errorf("age %v %q count %d", c.WakeAge, c.WakeAgeText, c.WakeCount)
+	}
+}
+
+func TestSkipEncryptionWarningIsOneLineWithin76Columns(t *testing.T) {
+	w := SkipEncryptionWarning
+	if strings.Contains(w, "\n") {
+		t.Errorf("warning is more than one line: %q", w)
+	}
+	if n := utf8.RuneCountInString(w); n > 76 {
+		t.Errorf("warning is %d columns, want at most 76: %q", n, w)
+	}
+	if want := "warning: no encryption to the server (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION)"; w != want {
+		t.Errorf("warning = %q, want %q", w, want)
 	}
 }

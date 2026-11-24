@@ -15,7 +15,7 @@ import (
 // on standard error while it is set.
 const (
 	skipVar     = "MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION"
-	skipWarning = "warning: encryption to the server is OFF (" + skipVar + " is set)"
+	skipWarning = "warning: no encryption to the server (" + skipVar + ")"
 )
 
 func runCapture(env map[string]string, args ...string) (string, string, int) {
@@ -34,7 +34,7 @@ func TestSkipEncryptionWarnsOnceOnStderrForEveryCommand(t *testing.T) {
 		if n := strings.Count(errb, skipWarning); n != 1 {
 			t.Errorf("%v: %d warnings on stderr, want 1: %q", args, n, errb)
 		}
-		if strings.Contains(out, "encryption to the server is OFF") {
+		if strings.Contains(out, "no encryption to the server") {
 			t.Errorf("%v: the warning is on stdout: %q", args, out)
 		}
 		if strings.Contains(errb, "plain-text connection") {
@@ -52,7 +52,7 @@ func TestSkipEncryptionUnsetOrZeroPrintsNothing(t *testing.T) {
 		env[skipVar] = v
 		for _, args := range [][]string{{"version"}, {"doctor"}} {
 			out, errb, _ := runCapture(env, args...)
-			if strings.Contains(out+errb, "encryption to the server is OFF") {
+			if strings.Contains(out+errb, "no encryption to the server") {
 				t.Errorf("value %q %v: warned: %q %q", v, args, out, errb)
 			}
 		}
@@ -119,7 +119,7 @@ func TestSkipEncryptionHelpAndVersionWarn(t *testing.T) {
 	env[skipVar] = "1"
 	for _, args := range [][]string{{"--help"}, {"-h"}, {"help"}, {"help", "send"}, {"send", "--help"}, {"version"}, {"version", "--json"}} {
 		out, errb, code := runCapture(env, args...)
-		if code != 0 || strings.Count(errb, skipWarning) != 1 || strings.Contains(out, "encryption to the server is OFF") {
+		if code != 0 || strings.Count(errb, skipWarning) != 1 || strings.Contains(out, "no encryption to the server") {
 			t.Errorf("%v: exit %d, stderr %q: want 0 and one warning on stderr only", args, code, errb)
 		}
 	}
@@ -283,5 +283,48 @@ func TestSkipEncryptionRemovedKeyFoundWithoutHomeInEnv(t *testing.T) {
 		if _, errb, code := runCapture(map[string]string{}, args...); code != 2 || !strings.Contains(errb, "insecure_plaintext in config.json is no longer read") {
 			t.Errorf("%v: exit %d: %q", args, code, errb)
 		}
+	}
+}
+
+// Errors do not drop the warning: a usage error and a failing command each print it exactly once, first.
+func TestSkipEncryptionWarnsOnceOnErroringCommands(t *testing.T) {
+	env := plainEnv(t, "nats://127.0.0.1:1")
+	env[skipVar] = "1"
+	env["MASH_OPEN_TIMEOUT"] = "300ms"
+	for _, args := range [][]string{{"nosuchcommand"}, {"send"}, {"read", "notanumber"}, {"inbox"}} {
+		out, errb, code := runCapture(env, args...)
+		if code == 0 {
+			t.Errorf("%v: exit 0, want a failure", args)
+		}
+		if n := strings.Count(errb, skipWarning); n != 1 || !strings.HasPrefix(errb, skipWarning+"\n") {
+			t.Errorf("%v: stderr %q, want the warning once, first", args, errb)
+		}
+		if strings.Contains(out, "no encryption to the server") {
+			t.Errorf("%v: the warning is on stdout: %q", args, out)
+		}
+	}
+}
+
+// A command refused for the removed name (MASH_INSECURE_PLAINTEXT, or the config key insecure_plaintext) while the
+// override is on still prints the warning, once, first, on stderr: it is on every command, errors included.
+func TestSkipEncryptionWarnsOnARefusedCommandToo(t *testing.T) {
+	env := plainEnv(t, "tls://127.0.0.1:1")
+	env[skipVar] = "1"
+	env["MASH_INSECURE_PLAINTEXT"] = "1"
+	for _, args := range [][]string{{"version"}, {"status"}, {"doctor"}} {
+		out, errb, code := runCapture(env, args...)
+		if code != 2 || !strings.HasPrefix(errb, skipWarning+"\n") || strings.Count(errb, skipWarning) != 1 || strings.Contains(out, "no encryption to the server") {
+			t.Errorf("removed name %v: exit %d, stderr %q, stdout %q", args, code, errb, out)
+		}
+	}
+	delete(env, "MASH_INSECURE_PLAINTEXT")
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"insecure_plaintext":true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env["MASH_CONFIG_DIR"] = dir
+	_, errb, code := runCapture(env, "version")
+	if code != 2 || !strings.HasPrefix(errb, skipWarning+"\n") || strings.Count(errb, skipWarning) != 1 {
+		t.Errorf("removed key: exit %d, stderr %q", code, errb)
 	}
 }
