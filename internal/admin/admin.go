@@ -144,7 +144,7 @@ func (a *Admin) SetLimits(l store.Limits) error {
 // New returns an Admin for owner, the owner token its issue records carry when they name none.
 func New(nc *nats.Conn, owner string) (*Admin, error) {
 	if _, err := sap.NewAddress(owner, "g", "i"); err != nil {
-		return nil, fmt.Errorf("mash: owner %q is not a valid owner token (lower-case letters, digits and single dashes, 1-32 characters; the value is not shown)", owner)
+		return nil, errors.New("mash: the owner is not a valid owner token (lower-case letters, digits and single dashes, 1-32 characters; the value is not shown)")
 	}
 	js, err := jetstream.New(nc)
 	if err != nil {
