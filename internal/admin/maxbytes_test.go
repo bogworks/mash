@@ -146,3 +146,32 @@ func TestInitRerunChangesNothing(t *testing.T) {
 		t.Fatalf("re-running init changed the buckets:\n%+v\n%+v", before, after)
 	}
 }
+
+func TestBucketCapsReadsLiveCapsAndLeavesMissingOut(t *testing.T) {
+	e := testenv.Start(t)
+	a, js := initOn(t, e)
+	ctx := context.Background()
+	caps, err := a.BucketCaps(ctx)
+	if err != nil || len(caps) != 0 {
+		t.Fatalf("before init: %v, %v", caps, err)
+	}
+	if err := a.Init(ctx); err != nil {
+		t.Fatal(err)
+	}
+	s, err := js.Stream(ctx, "KV_"+store.DirectoryBucket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc := s.CachedInfo().Config
+	sc.MaxBytes = 40 << 20
+	if _, err := js.UpdateStream(ctx, sc); err != nil {
+		t.Fatal(err)
+	}
+	caps, err = a.BucketCaps(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(caps) != store.InitBuckets || caps[store.DirectoryBucket] != 40<<20 || caps[store.LeaseBucket] != 4<<20 {
+		t.Fatalf("caps %v", caps)
+	}
+}

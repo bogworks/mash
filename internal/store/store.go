@@ -42,6 +42,13 @@ func InitBucketsMaxBytes(l Limits) int64 {
 	return l.DirectoryMaxBytes + l.LeaseMaxBytes + RetiredMaxBytes + IssuedMaxBytes + AdoptionMaxBytes
 }
 
+// InitBucketCaps is the configured size cap of each bucket init makes, by bucket name; the values sum to
+// InitBucketsMaxBytes(l).
+func InitBucketCaps(l Limits) map[string]int64 {
+	return map[string]int64{DirectoryBucket: l.DirectoryMaxBytes, LeaseBucket: l.LeaseMaxBytes, RetiredBucket: RetiredMaxBytes,
+		IssuedBucket: IssuedMaxBytes, AdoptionBucket: AdoptionMaxBytes}
+}
+
 // LeaseTombstone is what Deprovision writes to an endpoint's lease key: it fences the name, so a live or
 // starting session cannot take the lease back after its endpoint is gone. It expires with the bucket's TTL
 // (LeaseTTL) like any lease, and Provision clears it.

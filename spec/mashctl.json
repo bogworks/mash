@@ -208,7 +208,7 @@
         "stream": "stderr",
         "exit": 0,
         "text": "(two warning lines before the result, for an account that allows 5 streams and 100 MiB of disk: \"warning: the account allows 5 streams; one endpoint needs 6, one more each\" and \"warning: the account has 100MiB of disk; one endpoint needs 109MiB\"; an account that allows 6 streams and 109 MiB gets neither)",
-        "note": "One endpoint needs the 5 buckets init makes plus its inbox stream, one consumer, and the buckets' caps (93 MiB with the defaults) plus the inbox cap (16 MiB) of disk, the numbers of docs/nats-server.md, Sizing, which also says one more stream and one more inbox cap are needed per further endpoint (the warning lines give only the numbers and keep to 80 columns). The warnings follow the limits in config.json. A case in round brackets is a description: the conformance test skips it. The unit test TestLimitWarnings in cmd/mashctl checks the lines."
+        "note": "One endpoint needs the 5 buckets init makes plus its inbox stream, one consumer, and the buckets' caps (93 MiB with the defaults) plus the inbox cap (16 MiB) of disk, the numbers of docs/nats-server.md, Sizing, which also says one more stream and one more inbox cap are needed per further endpoint (the warning lines give only the numbers and keep to 80 columns). The warnings follow the limits in config.json; on a re-init a bucket whose cap was raised earlier counts at its live cap. A case in round brackets is a description: the conformance test skips it. The unit test TestLimitWarnings in cmd/mashctl checks the lines."
        },
        {
         "case": "A strict operator and no signing_key",
