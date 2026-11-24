@@ -12,6 +12,7 @@
 | Ratified by | Randy Bias, 2026-11-11, in the words quoted at the top of section 1 |
 | Charters and seam pages cited | none exist for the SDK, and none are needed: the SDK's only boundary is the SAP specification |
 | Date | 2026-11-11 (ratified); drafted 2026-11-10 |
+| Amended | 2026-11-24: the REQ-016 mapping lives in mash at `docs/sdk-mapping.md`, not in the SDK repository, and AT-009 exempts no file (REQ-016, AT-009, AT-010; SDK commit dc018aa) |
 | Sources | Card #129 (`cards/mash-sap-go-sdk.md`, its log of 2026-11-10); SAP 0.3.0 `core-protocol.md` in `synadia-ai/synadia-agent-sdk-docs` at `c48cea5f07965cc8fd4054e120459f1833b3ed2b` (cited `SAP:Lnnn`); `synadia-ai/synadia-agents` at `ed9aefb` (the TypeScript and Python SDKs, `test-fixtures/`, `docs/protocol-mapping.md`); `henomis/phero` v2.3.0 `nats/`; `mepuka/effect-nats-jetstream` `docs/conformance/protocol-requirements.json`; `nats-io/nats.go` `CONTRIBUTING.md`; `synadia-io/orbit.go` `CONTRIBUTING.md`; bogworks/mash `internal/sap/` and ADRs 0003, 0004, 0005, 0017 (evidence only) |
 
 ## 1. Intent
@@ -376,8 +377,10 @@ spec obligation is enumerated atomically in the conformance catalog (REQ-010), n
   and lists each mash-only piece (the `mail` verb, the mash signature variants, the stricter token rule) as
   staying in mash for the follow-on rebuild, with the extension point it would use, if any. That
   is the evidence a later consumer can build on it. The mapping is context for the follow-on contract, not a
-  requirement on the SDK's API. It lives in one file, `docs/mash-mapping.md`, the only file AT-009 exempts. That file
-  is not part of the upstream landing (REQ-014, REQ-017): it is left out of the `go/` folder offered to Synadia.
+  requirement on the SDK's API. It lives in mash, not in the SDK repository: `docs/sdk-mapping.md` in bogworks/mash
+  (piece M of the SDK adoption contract). The SDK repository holds no mash mapping, so no tracked file in it is
+  exempt from AT-009 (SDK commit dc018aa), and nothing mash-specific reaches the upstream landing (REQ-014, REQ-017).
+  (Amended 2026-11-24; it was `docs/mash-mapping.md` in the SDK repository.)
 - Acceptance: AT-010.
 
 ### REQ-017: Offered to Synadia
@@ -633,15 +636,15 @@ The contract is accepted on these five lines. The checks below are how each is s
 - A CI check fails on any import of a `github.com/bogworks/` package outside the SDK's own module (its own
   subpackages are allowed), and on the identifiers or subjects named in REQ-001 (`mail`
   verb, `SignInstance`, `SignUrgent`, `SignInReplyTo`, `SignVia`) in code or docs.
-- One file is exempt: `docs/mash-mapping.md`, the REQ-016 mapping that AT-010 requires, which has to name mash's
-  pieces. The check names that exact path and exempts nothing else, and the file is left out of the upstream landing.
+- No tracked file is exempt (SDK commit dc018aa). The REQ-016 mapping, which has to name mash's pieces, lives in
+  mash (`docs/sdk-mapping.md`), not in the SDK repository. (Amended 2026-11-24; `docs/mash-mapping.md` was exempt.)
 - The adversarial review of each release inspects the exported API (`go doc -all` output) for any concept not in SAP
   0.3, under any name. A finding blocks the release.
 
 ### AT-010: Building on it without forking it (demonstrated state)
 - An example program in the SDK's own examples uses every REQ-016 extension point and builds only on the public API.
   It must be unrelated to any one consumer.
-- The REQ-016 mapping document, `docs/mash-mapping.md`, exists. It names the SDK call that replaces each SAP piece of mash's `internal/sap`,
+- The REQ-016 mapping document, `docs/sdk-mapping.md` in bogworks/mash (amended 2026-11-24), exists. It names the SDK call that replaces each SAP piece of mash's `internal/sap`,
   and assigns each mash-only piece to the follow-on rebuild.
 - A spike that rebuilds mash on the SDK is not part of this contract. It belongs to the follow-on rebuild contract
   (Q11).
