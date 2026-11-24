@@ -379,6 +379,15 @@ func eventually(t *testing.T, what string, cond func() bool) {
 	}
 }
 
+// waitLog waits until the log holds at least n copies of sub. The intake logs on its own goroutine, so a one-shot
+// read after another event can run before the line is written on a loaded host.
+func (r *rig) waitLog(sub string, n int) {
+	r.t.Helper()
+	eventually(r.t, fmt.Sprintf("%d log lines containing %q", n, sub), func() bool {
+		return strings.Count(r.logbuf.String(), sub) >= n
+	})
+}
+
 func (r *rig) waitApplied(n int) {
 	r.t.Helper()
 	eventually(r.t, fmt.Sprintf("%d applied", n), func() bool { return len(r.app.applied()) >= n })
@@ -534,7 +543,8 @@ func TestReplayOfAppliedDocIsSkipped(t *testing.T) {
 	}
 	r.start(r.intake()) // a new Intake over the same bucket
 	r.settle(1, 0)
-	if !strings.Contains(r.logbuf.String(), "debug") {
+	r.waitLog("skipped", 1)
+	if !strings.Contains(r.logbuf.String(), "skipped") {
 		t.Error("the skip was not logged")
 	}
 	// A new document after the restart still applies.
@@ -550,6 +560,7 @@ func TestMarkerReadErrorRetriesThenApplies(t *testing.T) {
 	r.put(sign(t, r.submitter, r.doc(1, 0)))
 	r.waitApplied(1)
 	r.settle(1, 0)
+	r.waitLog("reading the adoption marker failed", 3)
 	if n := strings.Count(r.logbuf.String(), "reading the adoption marker failed"); n != 3 {
 		t.Errorf("logged %d attempts, want 3", n)
 	}
@@ -590,6 +601,7 @@ func TestInForceErrorRetries(t *testing.T) {
 	r.put(sign(t, r.submitter, r.doc(1, 0)))
 	r.waitApplied(1)
 	r.settle(1, 0)
+	r.waitLog("reading the document in force failed", 3)
 	if n := strings.Count(r.logbuf.String(), "reading the document in force failed"); n != 3 {
 		t.Errorf("logged %d attempts, want 3", n)
 	}
@@ -615,6 +627,7 @@ func TestApplyErrorReporting(t *testing.T) {
 		r.put(sign(t, r.submitter, r.doc(1, 0)))
 		r.waitApplied(1)
 		r.settle(1, 0)
+		r.waitLog("stale base", 1)
 		if !strings.Contains(r.logbuf.String(), "stale base") {
 			t.Error("not logged")
 		}
@@ -739,6 +752,7 @@ func TestSetNextFailureRetriesUntilItWorks(t *testing.T) {
 		t.Errorf("SetNext called %d times, want 5", calls)
 	}
 	r.settle(1, 0) // the applied status stands: nothing reported
+	r.waitLog("ERROR", 1)
 	if !strings.Contains(r.logbuf.String(), "ERROR") {
 		t.Error("the failure was not logged loudly")
 	}
@@ -797,6 +811,7 @@ func TestDeleteAndPurgeAreIgnored(t *testing.T) {
 		t.Fatal(err)
 	}
 	r.settle(2, 0)
+	r.waitLog("delete or purge", 2)
 	if n := strings.Count(r.logbuf.String(), "delete or purge"); n != 2 {
 		t.Errorf("logged %d, want 2", n)
 	}
@@ -958,6 +973,7 @@ func TestMarkerRevisionRecheckPreventsTheApply(t *testing.T) {
 		t.Fatalf("%+v", rs[0])
 	}
 	r.settle(0, 1)
+	r.waitLog("processing it again", 1)
 	if !strings.Contains(r.logbuf.String(), "processing it again") {
 		t.Error("the reprocess was not logged")
 	}
@@ -1032,6 +1048,7 @@ func TestSetNextAbandonedWhenTheMarkerMovedAfterTheApply(t *testing.T) {
 	if calls != 1 {
 		t.Errorf("SetNext called %d times, want 1 (never retried blindly)", calls)
 	}
+	r.waitLog("ERROR", 1)
 	if !strings.Contains(r.logbuf.String(), "ERROR") {
 		t.Error("not logged loudly")
 	}
@@ -1167,6 +1184,7 @@ func TestBusyLockRetriesAndDoesNotRefuse(t *testing.T) {
 	if attempts != 4 {
 		t.Errorf("%d lock attempts, want 4", attempts)
 	}
+	r.waitLog("an adoption or policy change is in progress", 1)
 	if !strings.Contains(r.logbuf.String(), "an adoption or policy change is in progress") {
 		t.Error("the wait was not logged")
 	}
