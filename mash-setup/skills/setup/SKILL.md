@@ -181,8 +181,8 @@ The NATS script needs `nats-server` 2.10.7 or newer (mash is tested with
 https://github.com/bogworks/mash/blob/main/docs/nats-server.md#requirements)
 and the `nats` command (natscli 0.5.2 is tested), both on the PATH of the user
 who will run mash. It also needs `openssl`, `curl`, `tar`, the port tool
-(`ss` on Linux, `lsof` on macOS), and `unzip` or `python3` for the nats
-zip. If one of those is missing, say so in one line
+(`ss` on Linux, `lsof` on macOS), and `unzip`, `python3` or `dpkg-deb` (Debian)
+for the nats download. If one of those is missing, say so in one line
 and stop and ask: the person decides how to get it.
 
 Ask. If either program is missing or too old (check with
@@ -276,12 +276,23 @@ if command -v sha256sum >/dev/null; then sha() { sha256sum -c -; }; else sha() {
 mkp() { [ -d "$1" ] && return 0; mkp "$(dirname "$1")"; install -d -m 755 "$1"; }
 mkp "$BIN"
 T=$(mktemp -d) && cd "$T"
-curl -fsSLO https://github.com/nats-io/natscli/releases/download/v$V/nats-$V-$OS-$ARCH.zip
+if command -v unzip >/dev/null || command -v python3 >/dev/null; then
+  F=nats-$V-$OS-$ARCH.zip
+elif [ "$OS" = linux ] && command -v dpkg-deb >/dev/null; then
+  F=nats-$V-$ARCH.deb
+else
+  echo "need unzip, python3 or dpkg-deb (Debian) to unpack nats" >&2; false
+fi
+curl -fsSLO https://github.com/nats-io/natscli/releases/download/v$V/$F
 curl -fsSLO https://github.com/nats-io/natscli/releases/download/v$V/SHA256SUMS
-grep " nats-$V-$OS-$ARCH.zip\$" SHA256SUMS | sha
-if command -v unzip >/dev/null; then unzip -q nats-$V-$OS-$ARCH.zip
-else python3 -m zipfile -e nats-$V-$OS-$ARCH.zip .; fi
-install -m 0755 nats-$V-$OS-$ARCH/nats "$BIN/nats"
+grep " $F\$" SHA256SUMS | sha
+case $F in
+*.deb) dpkg-deb -x "$F" deb; install -m 0755 deb/usr/local/bin/nats "$BIN/nats" ;;
+*)
+  if command -v unzip >/dev/null; then unzip -q "$F"
+  else python3 -m zipfile -e "$F" .; fi
+  install -m 0755 nats-$V-$OS-$ARCH/nats "$BIN/nats" ;;
+esac
 cd "$HOME" && rm -r "$T"
 "$BIN/nats" --version
 ```
