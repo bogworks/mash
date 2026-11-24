@@ -24,6 +24,10 @@ var keepGo = map[string]bool{
 	"GONOPROXY": true, "GOPRIVATE": true, "GOINSECURE": true, "GOTMPDIR": true, "GOVCS": true,
 }
 
+// BuildEnv is the environment of a release build for goos/goarch ("" means the host's), for tools that must see what
+// the build sees.
+func BuildEnv(base []string, goos, goarch string) []string { return buildEnv(base, goos, goarch) }
+
 // buildEnv is the environment of a release build: the caller's environment without any Go or cgo setting that
 // could change the output (toolchain, GOROOT, GOFLAGS, GOEXPERIMENT, GOAMD64, CGO_*, a go env file or a
 // workspace), then the pinned settings. Two machines with different ambient Go configuration build the same bytes.
