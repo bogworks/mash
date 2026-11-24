@@ -732,7 +732,7 @@ func doctorKeys(rep *doctorReport, ctx context.Context, adm *admin.Admin, cfg co
 		fails = append(fails, finding{text: fmt.Sprintf("%s still connected", count(n, "revoked key")+" "+plural(n, "is", "are")), fix: fix})
 	}
 	if scan.Incomplete != "" {
-		f := finding{incompleteLines(scan.Incomplete), initFix, strings.Contains(scan.Incomplete, "\n")}
+		f := finding{incompleteLines(scan.Incomplete), initFix, true} // wrapped or not, it is lines of its own
 		if churn && len(fails) == 0 && len(unrecorded)+keyless == 0 {
 			f.fix = "wait a minute, then run mashctl doctor --audit-users again"
 		}
@@ -758,7 +758,7 @@ func doctorKeys(rep *doctorReport, ctx context.Context, adm *admin.Admin, cfg co
 }
 
 // incompleteLines is a scan's Incomplete text, one clean line for each of its lines, each at most detailWidth columns
-// (continued on the next line when longer).
+// (continued on the next line when longer; a word longer than that is split).
 func incompleteLines(s string) string {
 	var out []string
 	for _, l := range strings.Split(s, "\n") {
@@ -767,6 +767,14 @@ func incompleteLines(s string) string {
 			if line != "" && len(line)+1+len(w) > detailWidth {
 				out = append(out, line)
 				line = ""
+			}
+			for len(w) > detailWidth { // a word longer than a line is split
+				if line != "" {
+					out = append(out, line)
+					line = ""
+				}
+				out = append(out, w[:detailWidth])
+				w = w[detailWidth:]
 			}
 			if line != "" {
 				line += " "
