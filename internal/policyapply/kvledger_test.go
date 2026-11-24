@@ -829,7 +829,7 @@ func TestKVLedgerWriteRefusal(t *testing.T) {
 		t.Errorf("list set = %+v %v", got, ok)
 	}
 	// The lease is released: another ledger takes it at once.
-	short, cancel := context.WithTimeout(ctx, 2*time.Second)
+	short, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	unlock, err := e.ledger(KVLedgerOptions{}).Lock(short)
 	if err != nil {

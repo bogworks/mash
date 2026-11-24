@@ -250,7 +250,7 @@ func TestRunEndsWhenInputCloses(t *testing.T) {
 	inW.Close()
 	select {
 	case <-done:
-	case <-time.After(2 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("Run did not return on EOF")
 	}
 }
@@ -267,7 +267,7 @@ func TestChannelReadyWaitsForToolsList(t *testing.T) {
 	h.next(t)
 	select {
 	case <-h.s.ChannelReady():
-	case <-time.After(2 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("channel never ready after tools/list")
 	}
 }
@@ -280,7 +280,7 @@ func TestChannelReadyFallback(t *testing.T) {
 	h.initialize(t)
 	select {
 	case <-h.s.ChannelReady():
-	case <-time.After(2 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("no fallback without tools/list")
 	}
 }

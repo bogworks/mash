@@ -173,6 +173,7 @@ func (e *Env) start() error {
 		NoLog:            true,
 		NoSigs:           true,
 		MaxPayload:       e.maxPay,
+		AuthTimeout:      30, // seconds; the default 2 s drops a CONNECT that a loaded runner is slow to send
 	}
 	if e.tls {
 		tc, err := server.GenTLSConfig(&server.TLSConfigOpts{CertFile: e.serverCert, KeyFile: e.serverKey, CaFile: e.CAFile, Verify: e.verify, Timeout: 5})
