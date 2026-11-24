@@ -189,7 +189,7 @@ find_nats_server() {
         not_others_writable "$(filemode_l "$_d")" || continue
         root_only_path "$_d" || continue
         NATS_SERVER=$_f
-        echo "nats-server: using $_f (that folder is not on your PATH)"
+        echo "Using $_f (not on your PATH)"
         return 0
     done
     return 1

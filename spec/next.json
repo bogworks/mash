@@ -67,7 +67,7 @@
    "id": "setup-nats-server-sbin",
    "where": "setup script",
    "case": "nats-server found off PATH",
-   "text": "nats-server: using /usr/sbin/nats-server (that folder is not on your PATH)",
+   "text": "Using /usr/sbin/nats-server (not on your PATH)",
    "stream": "stdout",
    "exit": 0,
    "issue": "#1151",
