@@ -67,5 +67,7 @@ Chosen option: D. `mashctl doctor`, with or without `--strict`, never fails beca
 ## More Information
 
 * Issue #1300.
+* Requirement: contract 0.5.8 revision 5, REQ-A (mash #1300, as corrected by Randy on 2026-11-23).
+* Approval: Randy Bias's ruling of 2026-11-23, quoted under Context and Problem Statement, recorded in REQ-A of the contract above (decision-makers: Randy Bias).
 * Supersedes [ADR 0165](0165-doctor-takes-keys-issued-elsewhere-from-an-external-keys-allowlist-in-config-json.md).
 * `docs/doctor.md`, section keys.
