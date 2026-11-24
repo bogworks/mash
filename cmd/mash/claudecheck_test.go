@@ -6,8 +6,11 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/bogworks/mash/internal/cmdcore"
 	"github.com/bogworks/mash/internal/cmdcore/cmds"
@@ -190,4 +193,53 @@ func TestDoctorPathChecksClaude(t *testing.T) {
 			t.Errorf("%s: %+v", name, got)
 		}
 	}
+}
+
+// A claude that leaves a child holding stdout open does not hold the doctor past the timeout plus the wait delay.
+func TestClaudeVersionOutputBoundedByHeldStdout(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("needs sh")
+	}
+	script := filepath.Join(t.TempDir(), "claude")
+	// the sleep inherits stdout and ends on its own after 5 s
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nsleep 5 &\necho 2.1.320\nwait\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err := claudeVersionOutput(ctx, script)
+	if d := time.Since(start); d > 3*time.Second {
+		t.Fatalf("returned after %v (err %v), want within the timeout plus the wait delay", d, err)
+	}
+}
+
+func TestClaudeCheckLookupErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		err    error
+		state  string
+		detail string
+	}{
+		{"not found", &exec.Error{Name: "claude", Err: exec.ErrNotFound}, "skip", "no claude command found"},
+		{"found but not executable", &exec.Error{Name: "claude", Err: os.ErrPermission}, "warn", "the version of claude could not be read"},
+		{"found in the current directory", &exec.Error{Name: "claude", Err: exec.ErrDot}, "warn", "the version of claude could not be read"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			injectClaudeSpiesRun(t)
+			claudeLookPath = func() (string, error) { return "", tc.err }
+			c := claudeCheck(context.Background())
+			if c.State != tc.state || c.Detail != tc.detail || c.Fix != "" {
+				t.Fatalf("%+v", c)
+			}
+		})
+	}
+}
+
+// injectClaudeSpiesRun fails the test if claude is run, and restores both variables afterwards.
+func injectClaudeSpiesRun(t *testing.T) {
+	t.Helper()
+	oldLook, oldRun := claudeLookPath, claudeVersionOutput
+	claudeVersionOutput = func(context.Context, string) (string, error) { t.Error("claude was run"); return "", nil }
+	t.Cleanup(func() { claudeLookPath, claudeVersionOutput = oldLook, oldRun })
 }
