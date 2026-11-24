@@ -113,7 +113,7 @@ func endpointLines(line func(left, right string)) {
 	line("endpoint unset ADDRESS key... [--dry-run]", "remove those values")
 	line("endpoint suspend ADDRESS", "refuse new mail to an endpoint; its stored mail and credentials stay")
 	line("endpoint resume ADDRESS", "undo suspend")
-	line("endpoint inbox ADDRESS [--limit n]", "what is in an endpoint's inbox, without any message text")
+	line("endpoint inbox ADDRESS [--after number] [--limit n]", "what is in an endpoint's inbox, without any message text")
 	line("endpoint permissions ADDRESS", "the NATS permissions an endpoint's user needs")
 }
 
