@@ -250,7 +250,7 @@
        },
        {
         "case": "A signing key is set, with --json",
-        "text": "{\"server\":[\"tls://localhost:4222\"],\"owner\":\"acme\",\"changed\":true,\"signing_key\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"}",
+        "text": "{\n  \"server\": [\n    \"tls://localhost:4222\"\n  ],\n  \"owner\": \"acme\",\n  \"changed\": true,\n  \"signing_key\": \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"\n}",
         "stream": "stdout",
         "exit": 0,
         "issue": "#1260 / #1299",
