@@ -16,7 +16,7 @@ mash send <address> [message] [options]
 
 | Option | Argument | Description |
 | --- | --- | --- |
-| `--kind` | `<kind>`: blocker, question, task, result, fyi | What sort of message this is. blocker, question and task wake an idle recipient; result and fyi wait for its next turn. Default: task. One exception: a reply (--reply-to) marked question whose text has no question mark and is at most 280 characters asks nothing, so it is sent as fyi and the output says so. |
+| `--kind` | `<kind>`: blocker, question, task, result, fyi | What sort of message this is. blocker, question and task wake an idle recipient that has mash's wake channel on; otherwise, and for result and fyi, the message arrives with its next turn. Default: task. One exception: a reply (--reply-to) marked question whose text has no question mark and is at most 280 characters asks nothing, so it is sent as fyi and the output says so. |
 | `--urgent` |  | Deliver at once, into a running turn where the agent host allows it. |
 | `--reply-to` | `<number>` | The number of the message in your inbox that this answers. Signed, so the recipient can trust the link. |
 | `--relay` | `<number>` | The number of a message in your inbox that this passes on. Signed, so the recipient can trust the link. |
