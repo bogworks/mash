@@ -1,0 +1,1 @@
+**Dependency security upgrades.** Bump `github.com/klauspost/compress` to v1.20.2 (GO-2026-6865) and `golang.org/x/crypto` to v0.59.0 (GO-2026-5932). Related `golang.org/x/sys` and `golang.org/x/term` move with the crypto module requirement. mash does not call the vulnerable symbols; the bumps clear the module advisories reported by `govulncheck`.
