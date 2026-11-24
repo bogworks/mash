@@ -1252,7 +1252,7 @@ func (w *joinWorld) noJoinLeftovers() {
 	}
 }
 
-const finishedLine = "Joined as acme.demo.bob. An earlier join here stopped part way; this finished it.\n"
+const finishedLine = "Joined as acme.demo.bob (finished an earlier join)\n"
 
 func TestJoinFinishesAHalfDoneJoin(t *testing.T) {
 	for _, tc := range []struct {

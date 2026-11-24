@@ -1441,7 +1441,7 @@
        },
        {
         "case": "Finishing a half-done join",
-        "text": "Joined as acme.demo.bob. An earlier join here stopped part way; this finished it.",
+        "text": "Joined as acme.demo.bob (finished an earlier join)",
         "stream": "stdout",
         "exit": 0
        },

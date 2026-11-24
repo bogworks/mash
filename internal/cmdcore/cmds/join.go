@@ -65,7 +65,7 @@ func (r JoinResult) Text(cmdcore.Opts) string {
 		return "Would join as " + r.Endpoint + "."
 	}
 	if r.finished {
-		return "Joined as " + r.Endpoint + ". An earlier join here stopped part way; this finished it."
+		return "Joined as " + r.Endpoint + " (finished an earlier join)"
 	}
 	return "Joined as " + r.Endpoint + "."
 }

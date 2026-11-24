@@ -77,7 +77,7 @@ hint: mash join acme.demo.bob.join --replace
 Stream: stdout. Exit code: 0.
 
 ```text
-Joined as acme.demo.bob. An earlier join here stopped part way; this finished it.
+Joined as acme.demo.bob (finished an earlier join)
 ```
 
 ### This folder already belongs to another mesh
