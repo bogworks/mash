@@ -144,3 +144,4 @@
 | [0165](0165-doctor-takes-keys-issued-elsewhere-from-an-external-keys-allowlist-in-config-json.md) | Doctor takes keys issued elsewhere from an external_keys allowlist in config.json | superseded by ADR-0166 | 2026-11-23 |
 | [0166](0166-doctor-health-covers-mashs-own-users-account-audit-is-explicit-audit-users.md) | Doctor health covers mash's own users; account audit is explicit (--audit-users) | accepted | 2026-11-23 |
 | [0167](0167-the-installers-unauthenticated-warning-is-one-short-line-and-its-planned-cases-stay-in-spec-next-json.md) | The installer's unauthenticated warning is one short line, and its planned cases stay in spec/next.json | accepted | 2026-11-24 |
+| [0168](0168-a-hint-is-a-command-that-fixes-the-problem-or-there-is-no-hint.md) | A hint is a command that fixes the problem, or there is no hint | accepted | 2026-11-24 |
