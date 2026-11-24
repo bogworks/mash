@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats-server/v2/server"
@@ -799,8 +800,8 @@ func TestLimitWarnings(t *testing.T) {
 	def := store.DefaultLimits()
 	small := limitWarnings(jwt.JetStreamLimits{Streams: 5, Consumer: 1, DiskStorage: 100 << 20}, def)
 	want := []string{
-		"the account allows 5 streams; one endpoint needs 6 (5 buckets and its inbox), one more per endpoint",
-		"the account has 100MiB of disk; one endpoint needs about 109MiB (93MiB of buckets and a 16MiB inbox), 16MiB more per endpoint; see docs/nats-server.md, Sizing",
+		"the account allows 5 streams; one endpoint needs 6, one more each",
+		"the account has 100MiB of disk; one endpoint needs 109MiB",
 	}
 	if !reflect.DeepEqual(small, want) {
 		t.Errorf("5 streams, 100 MiB: got %q, want %q", small, want)
@@ -817,7 +818,26 @@ func TestLimitWarnings(t *testing.T) {
 	// The configured caps count: a 32 MiB inbox cap makes one endpoint need 125 MiB.
 	big := def
 	big.InboxMaxBytes = 32 << 20
-	if got := limitWarnings(jwt.JetStreamLimits{Streams: 6, DiskStorage: 109 << 20}, big); len(got) != 1 || !strings.Contains(got[0], "about 125MiB") {
+	if got := limitWarnings(jwt.JetStreamLimits{Streams: 6, DiskStorage: 109 << 20}, big); len(got) != 1 || !strings.Contains(got[0], "needs 125MiB") {
 		t.Errorf("configured inbox cap: %q", got)
+	}
+	// Every printed line, the "warning: " prefix of init included, keeps to 80 columns, also with 4-digit numbers:
+	// the widest form FormatSize makes is MiB (GiB only for whole GiB, which is shorter).
+	wide := def
+	wide.InboxMaxBytes = 1000 << 20
+	wide.DirectoryMaxBytes = 1000 << 20
+	cases := map[string][]string{
+		"defaults": small,
+		"4 digits": limitWarnings(jwt.JetStreamLimits{Streams: 5, Consumer: 1, DiskStorage: 1000 << 20}, wide),
+	}
+	if got := cases["4 digits"]; len(got) != 2 {
+		t.Fatalf("4-digit case: %q", got)
+	}
+	for name, got := range cases {
+		for _, w := range got {
+			if n := utf8.RuneCountInString("warning: " + w); n > 80 {
+				t.Errorf("%s: %d columns, want at most 80: %q", name, n, w)
+			}
+		}
 	}
 }

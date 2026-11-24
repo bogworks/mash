@@ -78,7 +78,7 @@ hint: mashctl doctor
 Stream: stderr. Exit code: 0.
 
 ```text
-(two warning lines before the result, for an account that allows 5 streams and 100 MiB of disk: "warning: the account allows 5 streams; one endpoint needs 6 (5 buckets and its inbox), one more per endpoint" and "warning: the account has 100MiB of disk; one endpoint needs about 109MiB (93MiB of buckets and a 16MiB inbox), 16MiB more per endpoint; see docs/nats-server.md, Sizing"; an account that allows 6 streams and 109 MiB gets neither)
+(two warning lines before the result, for an account that allows 5 streams and 100 MiB of disk: "warning: the account allows 5 streams; one endpoint needs 6, one more each" and "warning: the account has 100MiB of disk; one endpoint needs 109MiB"; an account that allows 6 streams and 109 MiB gets neither)
 ```
 
 ## JSON

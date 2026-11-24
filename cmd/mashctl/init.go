@@ -51,16 +51,15 @@ const needConsumers = 1
 func limitWarnings(lim jwt.JetStreamLimits, l store.Limits) []string {
 	var warns []string
 	needStreams := store.InitBuckets + 1
-	buckets := store.InitBucketsMaxBytes(l)
-	needDisk := buckets + l.InboxMaxBytes
+	needDisk := store.InitBucketsMaxBytes(l) + l.InboxMaxBytes
 	if lim.Streams > 0 && lim.Streams < int64(needStreams) {
-		warns = append(warns, fmt.Sprintf("the account allows %d streams; one endpoint needs %d (%d buckets and its inbox), one more per endpoint", lim.Streams, needStreams, store.InitBuckets))
+		warns = append(warns, fmt.Sprintf("the account allows %d streams; one endpoint needs %d, one more each", lim.Streams, needStreams))
 	}
 	if lim.Consumer > 0 && lim.Consumer < needConsumers {
 		warns = append(warns, fmt.Sprintf("the account allows %d consumers; mash needs one per endpoint", lim.Consumer))
 	}
 	if lim.DiskStorage > 0 && lim.DiskStorage < needDisk {
-		warns = append(warns, fmt.Sprintf("the account has %s of disk; one endpoint needs about %s (%s of buckets and a %s inbox), %s more per endpoint; see docs/nats-server.md, Sizing", config.FormatSize(lim.DiskStorage), config.FormatSize(needDisk), config.FormatSize(buckets), config.FormatSize(l.InboxMaxBytes), config.FormatSize(l.InboxMaxBytes)))
+		warns = append(warns, fmt.Sprintf("the account has %s of disk; one endpoint needs %s", config.FormatSize(lim.DiskStorage), config.FormatSize(needDisk)))
 	}
 	return warns
 }

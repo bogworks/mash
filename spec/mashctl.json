@@ -207,8 +207,8 @@
         "issue": "#1156",
         "stream": "stderr",
         "exit": 0,
-        "text": "(two warning lines before the result, for an account that allows 5 streams and 100 MiB of disk: \"warning: the account allows 5 streams; one endpoint needs 6 (5 buckets and its inbox), one more per endpoint\" and \"warning: the account has 100MiB of disk; one endpoint needs about 109MiB (93MiB of buckets and a 16MiB inbox), 16MiB more per endpoint; see docs/nats-server.md, Sizing\"; an account that allows 6 streams and 109 MiB gets neither)",
-        "note": "One endpoint needs the 5 buckets init makes plus its inbox stream, one consumer, and the buckets' caps (93 MiB with the defaults) plus the inbox cap (16 MiB) of disk, the numbers of docs/nats-server.md, Sizing. The warnings follow the limits in config.json. A case in round brackets is a description: the conformance test skips it. The unit test TestLimitWarnings in cmd/mashctl checks the lines."
+        "text": "(two warning lines before the result, for an account that allows 5 streams and 100 MiB of disk: \"warning: the account allows 5 streams; one endpoint needs 6, one more each\" and \"warning: the account has 100MiB of disk; one endpoint needs 109MiB\"; an account that allows 6 streams and 109 MiB gets neither)",
+        "note": "One endpoint needs the 5 buckets init makes plus its inbox stream, one consumer, and the buckets' caps (93 MiB with the defaults) plus the inbox cap (16 MiB) of disk, the numbers of docs/nats-server.md, Sizing, which also says one more stream and one more inbox cap are needed per further endpoint (the warning lines give only the numbers and keep to 80 columns). The warnings follow the limits in config.json. A case in round brackets is a description: the conformance test skips it. The unit test TestLimitWarnings in cmd/mashctl checks the lines."
        }
       ]
      },
