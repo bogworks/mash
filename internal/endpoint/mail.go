@@ -995,6 +995,10 @@ type InboxRead struct {
 	// unless the pass stopped at the cap (not when it failed).
 	PartialBy string
 	PartialAt int
+	// AckedOutOfOrder is set when a complete pass found that some message above the acknowledged floor is already
+	// acknowledged (#1399): the urgent count may include mail acknowledged out of order, so it is an upper bound. The
+	// waiting count is the server's own and stays exact. It is not Partial: nothing was cut short.
+	AckedOutOfOrder bool
 
 	dropped      map[uint64]bool // sequences the pass read and left out (sender no longer verified, say)
 	shownWaiting int             // waiting messages the pass read and kept: what the counts are at least
@@ -1032,9 +1036,10 @@ func SetCountCaps(msgs, bytes int) (restore func()) {
 // (see InboxRead). mash serve's backlog wake counts with this same read. An endpoint with no consumer yet has
 // acknowledged nothing: every message is waiting.
 //
-// "New" and "urgent" are counted above the acknowledged floor, which is not the set of unacknowledged messages: urgent
-// mail acknowledged out of order (above the floor, already acked) is still counted in NewUrgent, the same approximation
-// as for the new count.
+// "Urgent" is counted above the acknowledged floor, which is not the set of unacknowledged messages: urgent mail
+// acknowledged out of order (above the floor, already acked) is still counted in NewUrgent. The server says which
+// messages are acknowledged only up to the floor, so the read cannot tell which; it can tell that some are, and then
+// sets AckedOutOfOrder (the urgent count is an upper bound; the waiting count is the server's own and stays exact).
 func (e *Endpoint) ReadInbox(ctx context.Context, q InboxQuery) (InboxRead, error) {
 	r, err := e.readInbox(ctx, q)
 	if err != nil {
@@ -1231,6 +1236,8 @@ func (e *Endpoint) readInbox(ctx context.Context, q InboxQuery) (InboxRead, erro
 		sortMail(out.Mail)
 	}
 	finish()
+	// More shown messages above the floor than the server holds waiting: some are acknowledged out of order.
+	out.AckedOutOfOrder = !out.Partial && out.shownWaiting > out.State.Waiting
 	return out, nil
 }
 

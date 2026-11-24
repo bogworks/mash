@@ -123,6 +123,19 @@ error: acme.dev.bob: this endpoint was deleted; its address cannot be used again
 hint: mash doctor
 ```
 
+### Counts include mail read out of order, with --detail
+
+Stream: stdout. Exit code: 0.
+
+```text
+About 2 messages for acme.demo.alice, about 1 new, about 1 urgent.
+exact: no (mail read out of order may still be counted as urgent)
+
+NUMBER  FROM  WHEN     STATE  URGENT  KIND      MESSAGE
+1       bob   10s ago  new    no      task      lunch at noon?
+2       bob   8s ago   new    yes     question  ready?
+```
+
 ## JSON
 
 With `--json` the result is this shape. The values are an example.

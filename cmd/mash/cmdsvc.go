@@ -298,7 +298,7 @@ func inboxOn(ctx context.Context, ep *endpoint.Endpoint, q cmds.InboxQuery, w wa
 	}
 	st := r.State
 	v := cmds.InboxView{Endpoint: ep.Display(), Total: st.Total, Waiting: st.Waiting, NewUrgent: r.NewUrgent, OldestWaiting: st.OldestWaiting,
-		WakeCount: w.count, WakeAge: w.age, WakeAgeText: w.text, Capped: cappedWhy(r), NoServe: noServe, Messages: make([]cmds.MailItem, 0, len(r.Mail))}
+		WakeCount: w.count, WakeAge: w.age, WakeAgeText: w.text, Capped: cappedWhy(r), NoServe: noServe, OutOfOrder: r.AckedOutOfOrder, Messages: make([]cmds.MailItem, 0, len(r.Mail))}
 	for _, m := range r.Mail {
 		v.Messages = append(v.Messages, mailItem(m, st.AckFloor, st.Waiting > 0))
 	}

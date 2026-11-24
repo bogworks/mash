@@ -1,0 +1,1 @@
+**`mash inbox` no longer calls its counts exact when a message read out of order may still be counted as urgent.** `--detail` now says so ("exact: no (mail read out of order may still be counted as urgent)").

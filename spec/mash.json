@@ -506,6 +506,14 @@
         "text": "error: acme.dev.bob: this endpoint was deleted; its address cannot be used again\nhint: mash doctor",
         "stream": "stderr",
         "exit": 1
+       },
+       {
+        "case": "Counts include mail read out of order, with --detail",
+        "text": "About 2 messages for acme.demo.alice, about 1 new, about 1 urgent.\nexact: no (mail read out of order may still be counted as urgent)\n\nNUMBER  FROM  WHEN     STATE  URGENT  KIND      MESSAGE\n1       bob   10s ago  new    no      task      lunch at noon?\n2       bob   8s ago   new    yes     question  ready?",
+        "stream": "stdout",
+        "exit": 0,
+        "issue": "#1399",
+        "note": "#1399. A message above the oldest new one was read out of order (the read tool acknowledges it while an earlier one is still held); the server says which are acknowledged only up to the floor, so the urgent count may still include it: here message 2 was read, 1 is still new, and 2 is still listed as new and urgent. --json: \"exact\": false. --detail adds: \"exact: no (mail read out of order may still be counted as urgent)\". The values are examples."
        }
       ]
      },
