@@ -1097,7 +1097,7 @@ func TestInboxListingSkipsOnlyMissingSeqs(t *testing.T) {
 	if !errors.Is(err, broken) || seqs(ms) != "[4]" {
 		t.Fatalf("newest-first, a read error is returned: %s %v", seqs(ms), err)
 	}
-	if got := fmt.Sprint(seqsDown(0, 0), seqsUp(5, 4), seqsDown(3, 1), seqsUp(0, 2)); got != "[] [] [3 2 1] [1 2]" {
+	if got := fmt.Sprint(seqsDown(0, 0).all(), seqsUp(5, 4).all(), seqsDown(3, 1).all(), seqsUp(0, 2).all()); got != "[] [] [3 2 1] [1 2]" {
 		t.Fatalf("seq ranges: %s", got)
 	}
 }
