@@ -57,6 +57,8 @@ func leaseCode(cause string) string {
 		return CodeServerUnreachable
 	case cause == CauseCredsRefused:
 		return CodeCredsRefused
+	case cause == ReasonEndpointDeleted:
+		return CodeEndpointDeleted
 	}
 	return CodeEndpointNotTaken
 }

@@ -59,12 +59,13 @@ func TestStatusToolBeforeFirstConnectionIsServerUnreachable(t *testing.T) {
 }
 
 // A session that could not take its endpoint answers by the cause: a server that did not answer is server_unreachable,
-// refused credentials creds_refused, anything else endpoint_not_taken.
+// refused credentials creds_refused, a deleted endpoint endpoint_deleted, anything else endpoint_not_taken.
 func TestStatusSessionLeaseFailedCodeFollowsTheCause(t *testing.T) {
 	w := newWorld(t, "a")
 	for cause, want := range map[string]string{
 		cmds.CauseServerSilent + ": tls://x:4222": "server_unreachable",
 		cmds.CauseCredsRefused:                    "creds_refused",
+		cmds.ReasonEndpointDeleted:                "endpoint_deleted",
 		"":                                        "endpoint_not_taken",
 		"the name is in use":                      "endpoint_not_taken",
 	} {
