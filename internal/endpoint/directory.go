@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"sort"
 	"time"
 
@@ -145,6 +146,10 @@ func (e *Endpoint) OwnLease(ctx context.Context) (LeaseInfo, bool) {
 	}
 	var lv leaseValue
 	if json.Unmarshal(val, &lv) != nil || lv.Host == "" && lv.Version == "" {
+		return LeaseInfo{}, false
+	}
+	// #1327: a crashed serve's lease key stays live until it expires. A holder on this machine that is gone is not up.
+	if lv.Machine != "" && lv.Machine == ourMachine() && lv.PID != fmt.Sprint(os.Getpid()) && holderGone(lv.PID, lv.Start) {
 		return LeaseInfo{}, false
 	}
 	return LeaseInfo{Host: lv.Host, Version: lv.Version}, true
