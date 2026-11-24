@@ -310,6 +310,8 @@ func cappedWhy(r endpoint.InboxRead) string {
 		return fmt.Sprintf("only the oldest %d MiB of message text was checked", r.PartialAt>>20)
 	case r.PartialBy == "bytes":
 		return fmt.Sprintf("only the oldest %d bytes of message text were checked", r.PartialAt)
+	case r.Partial: // the pass stopped part way, with no cap named: the count is still not exact
+		return "the count stopped part way"
 	}
 	return ""
 }
