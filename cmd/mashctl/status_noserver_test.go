@@ -24,3 +24,15 @@ func TestDoctorNoServerConfigured(t *testing.T) {
 		t.Errorf("doctor: %d %q %q", r.code, r.out, r.errs)
 	}
 }
+
+// #1534: with a server and no admin credentials, status says the credentials are not set: no "not ok", no doctor hint.
+func TestStatusNoAdminCreds(t *testing.T) {
+	w := newConfWorld(t, false)
+	w.a.env["MASH_SERVER"] = "tls://x:4222"
+	w.a.env["MASH_ENDPOINT"] = "acme.demo.alice"
+	r := w.run("status")
+	want := "tls://x:4222: admin credentials are not set: set MASH_ADMIN_CREDS, or \"admin_creds\" in config.json\n"
+	if r.out != want || r.errs != "" || r.code != 1 {
+		t.Errorf("status: %d %q %q", r.code, r.out, r.errs)
+	}
+}

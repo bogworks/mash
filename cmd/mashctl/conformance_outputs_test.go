@@ -352,6 +352,12 @@ func init() {
 		return confOutRun{ran: w.run("status"), subs: []string{"tls://localhost:4222", dead}}
 	})
 
+	reg("status No admin credentials", func(t *testing.T) confOutRun {
+		w := newConfWorld(t, false)
+		w.a.env["MASH_SERVER"] = w.url
+		w.a.env["MASH_ENDPOINT"] = "acme.demo.alice"
+		return confOutRun{ran: w.run("status"), subs: urlSub(w)}
+	})
 	reg("status No server is configured", func(t *testing.T) confOutRun {
 		w := newConfWorld(t, false)
 		return confOutRun{ran: w.run("status")}

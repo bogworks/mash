@@ -58,6 +58,14 @@ tls://localhost:4222: not ok: the server did not answer
 hint: mashctl doctor
 ```
 
+### No admin credentials
+
+Stream: stdout. Exit code: 1.
+
+```text
+tls://localhost:4222: admin credentials are not set: set MASH_ADMIN_CREDS, or "admin_creds" in config.json
+```
+
 ### No server is configured
 
 Stream: stderr. Exit code: 1.

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -25,6 +26,8 @@ type statusRow struct {
 	Endpoints *int    `json:"endpoint_count"`
 	Online    *int    `json:"online_count"`
 	Reason    *string `json:"reason"`
+
+	unset bool // the reason is a missing setting: nothing was tried, so doctor cannot help
 }
 
 // statusDeadline bounds the connection and the questions to one server.
@@ -45,6 +48,11 @@ func serverStatus(cfg config.Config, server string) statusRow {
 	cfg.AdminTimeout = statusDeadline // one silent server must not hold the others' rows
 	adm, ctx, closeAdmin, err := ctl.OpenAdminWith("mashctl", cfg, nats.NoReconnect(), nats.IgnoreDiscoveredServers(), nats.Timeout(statusDeadline))
 	if err != nil {
+		var noCreds *ctl.NoAdminCredsError
+		if errors.As(err, &noCreds) {
+			row.unset = true
+			return notOK("admin credentials are not set: set MASH_ADMIN_CREDS, or \"admin_creds\" in config.json")
+		}
 		switch msg := err.Error(); {
 		case isUnreachable(err), strings.Contains(msg, "no servers available"):
 			return notOK(serverSilent)
@@ -127,9 +135,10 @@ func runStatus(args []string, g cliframe.Global, env func(string) string, lookup
 		}
 	}
 	rows := statusRows(cfg, servers, serverStatus)
-	bad := false
+	bad, hint := false, false
 	for _, r := range rows {
 		bad = bad || !r.OK
+		hint = hint || (!r.OK && !r.unset)
 	}
 	switch {
 	case jsonOut && len(rows) == 1:
@@ -142,13 +151,15 @@ func runStatus(args []string, g cliframe.Global, env func(string) string, lookup
 		for _, r := range rows {
 			if r.OK {
 				fmt.Fprintf(stdout, "%s: ok, %s, %d online\n", r.Server, count(*r.Endpoints, "endpoint"), *r.Online)
+			} else if r.unset {
+				fmt.Fprintf(stdout, "%s: %s\n", r.Server, *r.Reason)
 			} else {
 				fmt.Fprintf(stdout, "%s: not ok: %s\n", r.Server, *r.Reason)
 			}
 		}
 	}
 	if bad {
-		if !jsonOut {
+		if !jsonOut && hint {
 			fmt.Fprintln(stderr, "hint: mashctl doctor")
 		}
 		return 1

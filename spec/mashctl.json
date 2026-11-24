@@ -370,6 +370,12 @@
         "exit": 1
        },
        {
+        "case": "No admin credentials",
+        "text": "tls://localhost:4222: admin credentials are not set: set MASH_ADMIN_CREDS, or \"admin_creds\" in config.json",
+        "stream": "stdout",
+        "exit": 1
+       },
+       {
         "case": "No server is configured",
         "text": "error: no server is configured\nhint: mashctl init --config <file>",
         "stream": "stderr",
