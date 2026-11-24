@@ -246,7 +246,7 @@ func TestElideNameCountsCells(t *testing.T) {
 	if a == b {
 		t.Fatalf("both are %q", a)
 	}
-	for _, n := range []string{a, b, elideName(strings.Repeat("🙂", 40)), elideName(strings.Repeat("a", 9) + strings.Repeat("世", 30))} {
+	for _, n := range []string{a, b, elideName(strings.Repeat("🙂", 40)), elideName(strings.Repeat("🚀", 24)), elideName(strings.Repeat("a", 9) + strings.Repeat("世", 30))} {
 		if w := cellwidth.String(n); w > maxShownName {
 			t.Errorf("%q is %d cells", n, w)
 		}
