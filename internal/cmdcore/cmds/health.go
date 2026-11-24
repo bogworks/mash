@@ -46,7 +46,7 @@ const (
 // ReasonEndpointDeleted is the sign-in row's detail (and status's reason) for an endpoint whose directory record is
 // gone, and EndpointDeletedFix is its fix: a deleted address is never reused, so the way on is a new endpoint.
 const (
-	ReasonEndpointDeleted = "this endpoint was deleted; its address cannot be used again"
+	ReasonEndpointDeleted = cmdcore.ReasonEndpointDeleted
 	EndpointDeletedFix    = "ask whoever runs your mesh for a join file to a new endpoint"
 )
 
