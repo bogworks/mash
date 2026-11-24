@@ -192,7 +192,7 @@
    "stream": "stderr",
    "exit": 1,
    "issue": "#1287",
-   "note": "From mash-sdk (lead #833). One wording for one situation. --remove still refuses whenever the port is held, and the error names the holder by pid: \"(pid 12)\" for one, \"(pids 12, 34)\" for several, listed once each and nothing else printed about them; the pid and the port vary. No paths. The hint is the retry: the script has already run --stop before it checks the port, so what holds it is something else (for example a wrapper that runs nats-server); once that is stopped, --remove finishes. v0.5.8 printed a sentence for the hint. The \"removing anyway\" line is dropped: there is no remove-anyway path. The case where no pid is visible is not changed here.",
+   "note": "From mash-sdk (lead #833). One wording for one situation. --remove still refuses whenever the port is held, and the error names the holder by pid: \"(pid 12)\" for one, \"(pids 12, 34)\" for several, listed once each and nothing else printed about them; the pid and the port vary. No paths. The hint is the retry: the script has already run --stop before it checks the port, so what holds it is something else (for example a wrapper that runs nats-server); once that is stopped, --remove finishes. With a folder other than the default (~/mash-nats), the hint adds --dir <folder>. v0.5.8 printed a sentence for the hint. The \"removing anyway\" line is dropped: there is no remove-anyway path. The case where no pid is visible is not changed here.",
    "replaces": "error: something still listens on 127.0.0.1:PORT; nothing was removed"
   },
   {
