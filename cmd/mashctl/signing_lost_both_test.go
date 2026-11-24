@@ -302,7 +302,7 @@ func TestInitWithoutSigningKeyRefusesWhenSigningPubIsGone(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			a.refuses(1, []string{"error: signing.pub is missing from ~/keys", "hint: mashctl init --config <file>"}, map[string]any{"signing_key": nil})
+			a.refuses(1, []string{"error: signing.pub is missing from " + shownFolder(a.env["MASH_KEYS_DIR"], a.env["HOME"]), "hint: mashctl init --config <file>"}, map[string]any{"signing_key": nil})
 		})
 	}
 }
