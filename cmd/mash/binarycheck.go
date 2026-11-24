@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 
 	"github.com/bogworks/mash/internal/cmdcore/cmds"
 	"github.com/bogworks/mash/internal/endpoint"
@@ -16,12 +17,21 @@ var (
 	// binaryPluginData is $CLAUDE_PLUGIN_DATA, the directory the plugin keeps its downloaded mash under.
 	binaryPluginData = func() string { return os.Getenv("CLAUDE_PLUGIN_DATA") }
 	// binaryPluginRoot is $CLAUDE_PLUGIN_ROOT, the plugin's own directory, where scripts/mash.pins names the version.
-	binaryPluginRoot = func() string { return os.Getenv("CLAUDE_PLUGIN_ROOT") }
+	// The MCP server does not get that variable but $MASH_PLUGIN_ROOT, which .mcp.json sets to the same directory.
+	binaryPluginRoot = pluginRootFromEnv
 	// binaryMashBin is $MASH_BIN, the binary the plugin's launcher runs when it is set.
 	binaryMashBin = func() string { return os.Getenv("MASH_BIN") }
 	// binaryOwnVersion is the version of the mash that is running doctor.
 	binaryOwnVersion = endpoint.CurrentVersion
 )
+
+// pluginRootFromEnv is $CLAUDE_PLUGIN_ROOT, else $MASH_PLUGIN_ROOT.
+func pluginRootFromEnv() string {
+	if r := os.Getenv("CLAUDE_PLUGIN_ROOT"); r != "" {
+		return r
+	}
+	return os.Getenv("MASH_PLUGIN_ROOT")
+}
 
 // pinVersionRE is the launcher's rule for the version line of scripts/mash.pins (plugin/scripts/mash): the first match.
 var pinVersionRE = regexp.MustCompile(`(?m)^version=([0-9][0-9A-Za-z.+-]*)$`)
@@ -60,18 +70,21 @@ func binaryCheck(context.Context) cmds.HealthCheck {
 		return skip(none)
 	}
 	pinned := string(m[1])
+	var full string
 	if fi, err := os.Stat(filepath.Join(data, "bin", "mash-"+pinned)); err != nil || !fi.Mode().IsRegular() || fi.Mode().Perm()&0o111 == 0 {
 		return skip(none)
 	}
-	own := ownVersionRE.FindStringSubmatch(binaryOwnVersion())
+	// The whole version is compared, a prerelease or build suffix included: strip a leading v and cut at a space.
+	full, _, _ = strings.Cut(strings.TrimPrefix(binaryOwnVersion(), "v"), " ")
+	own := ownVersionRE.FindStringSubmatch(full)
 	if own == nil || own[1] == "0.0.0" {
 		return skip("this mash has no release version")
 	}
-	if pinned == own[1] {
-		c.State, c.Detail = cmds.CheckOK, own[1]
+	if pinned == full {
+		c.State, c.Detail = cmds.CheckOK, full
 		return c
 	}
 	c.State = cmds.CheckWarn
-	c.Detail = fmt.Sprintf("the plugin runs %s; this mash is %s: install %s, or set MASH_BIN", pinned, own[1], pinned)
+	c.Detail = fmt.Sprintf("the plugin runs %s; this mash is %s: install %s, or set MASH_BIN", pinned, full, pinned)
 	return c
 }

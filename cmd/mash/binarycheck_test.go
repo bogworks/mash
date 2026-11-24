@@ -95,7 +95,12 @@ func TestBinaryCheck(t *testing.T) {
 		{name: "pinned copy missing", pins: pins("0.5.8"), files: map[string]os.FileMode{"mash-0.5.7": x}, own: "0.5.8", state: "skip", detail: none},
 		{name: "pinned copy not executable", pins: pins("0.5.8"), files: map[string]os.FileMode{"mash-0.5.8": nx}, own: "0.5.8", state: "skip", detail: none},
 		{name: "matching", pins: pins("0.5.9"), files: map[string]os.FileMode{"mash-0.5.9": x}, own: "0.5.9", state: "ok", detail: "0.5.9"},
-		{name: "matching with a v and a commit suffix", pins: pins("0.5.9"), files: map[string]os.FileMode{"mash-0.5.9": x}, own: "v0.5.9+abc1234", state: "ok", detail: "0.5.9"},
+		{name: "matching with a v", pins: pins("0.5.9"), files: map[string]os.FileMode{"mash-0.5.9": x}, own: "v0.5.9", state: "ok", detail: "0.5.9"},
+		{name: "matching with a v and a trailing commit", pins: pins("0.5.9"), files: map[string]os.FileMode{"mash-0.5.9": x}, own: "v0.5.9 (abc1234)", state: "ok", detail: "0.5.9"},
+		{name: "prerelease against the release", pins: pins("0.5.9"), files: map[string]os.FileMode{"mash-0.5.9": x}, own: "v0.5.9-rc1", state: "warn",
+			detail: "the plugin runs 0.5.9; this mash is 0.5.9-rc1: install 0.5.9, or set MASH_BIN"},
+		{name: "prerelease against itself", pins: pins("0.5.9-rc1"), files: map[string]os.FileMode{"mash-0.5.9-rc1": x}, own: "0.5.9-rc1", state: "ok", detail: "0.5.9-rc1"},
+		{name: "v0.0.0-dev", pins: pins("0.5.8"), files: map[string]os.FileMode{"mash-0.5.8": x}, own: "v0.0.0-dev", state: "skip", detail: "this mash has no release version"},
 		{name: "differing", pins: pins("0.5.8"), files: map[string]os.FileMode{"mash-0.5.8": x}, own: "0.5.9", state: "warn",
 			detail: "the plugin runs 0.5.8; this mash is 0.5.9: install 0.5.8, or set MASH_BIN"},
 		{name: "stale copy beside the pinned one, matching", pins: pins("0.5.8"), files: map[string]os.FileMode{"mash-0.5.7": x, "mash-0.5.8": x}, own: "0.5.8", state: "ok", detail: "0.5.8"},
@@ -179,6 +184,19 @@ func TestDoctorPathChecksBinary(t *testing.T) {
 	} {
 		if got.Name != "binary" || got.State != "skip" {
 			t.Errorf("%s: %+v", name, got)
+		}
+	}
+}
+
+// The plugin root is $CLAUDE_PLUGIN_ROOT, else $MASH_PLUGIN_ROOT (what .mcp.json gives the MCP server); the first wins.
+func TestBinaryPluginRootEnv(t *testing.T) {
+	for _, tc := range []struct{ claude, mash, want string }{
+		{"/c", "", "/c"}, {"", "/m", "/m"}, {"/c", "/m", "/c"}, {"", "", ""},
+	} {
+		t.Setenv("CLAUDE_PLUGIN_ROOT", tc.claude)
+		t.Setenv("MASH_PLUGIN_ROOT", tc.mash)
+		if got := pluginRootFromEnv(); got != tc.want {
+			t.Errorf("claude %q mash %q: %q, want %q", tc.claude, tc.mash, got, tc.want)
 		}
 	}
 }
