@@ -18,6 +18,7 @@ import (
 
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats-server/v2/server"
+	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nkeys"
 
 	"github.com/bogworks/mash/internal/ctlkeys"
@@ -883,6 +884,18 @@ func TestInitPrintsLimitsWarnings(t *testing.T) {
 	} {
 		if !strings.Contains(errb, w) {
 			t.Errorf("stderr lacks %q:\n%s", w, errb)
+		}
+	}
+}
+
+// nats.go 1.55.0 returns ErrDisconnected, not ErrConnectionClosed, for a request a reconnect interrupted.
+func TestIsUnreachable_aDisconnectedRequestIsUnreachable(t *testing.T) {
+	for name, err := range map[string]error{
+		"bare":    nats.ErrDisconnected,
+		"wrapped": fmt.Errorf("ask the server: %w", nats.ErrDisconnected),
+	} {
+		if !isUnreachable(err) {
+			t.Errorf("%s: isUnreachable(%v) is false, want true", name, err)
 		}
 	}
 }

@@ -237,7 +237,7 @@ type initResult struct {
 // isUnreachable reports whether err is a server that did not answer, as opposed to one that answered and refused.
 func isUnreachable(err error) bool {
 	var ne net.Error
-	return errors.Is(err, nats.ErrNoServers) || errors.Is(err, nats.ErrTimeout) || errors.Is(err, nats.ErrConnectionClosed) ||
+	return errors.Is(err, nats.ErrNoServers) || errors.Is(err, nats.ErrTimeout) || errors.Is(err, nats.ErrConnectionClosed) || errors.Is(err, nats.ErrDisconnected) ||
 		(errors.As(err, &ne) && ne.Timeout()) || strings.Contains(err.Error(), "connection refused") || strings.Contains(err.Error(), "no such host")
 }
 
