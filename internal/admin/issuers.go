@@ -46,7 +46,7 @@ func (e *IssuersNotKeptError) Error() string {
 
 // CheckIssuersKept refuses when the admin user, or any connected exempt user, is signed by a key that is not kept.
 // account is the account's own identity key, which always counts as kept; kept holds the signing keys that stay: every
-// scoped key the key store holds for an owner group of any range, and the list set's (reconcile.KeptSigners). adminIssuer is the `iss` of the admin credentials' user JWT; exemptIssuers maps the public
+// scoped key the key store holds for an owner group of any prefix, and the list set's (reconcile.KeptSigners). adminIssuer is the `iss` of the admin credentials' user JWT; exemptIssuers maps the public
 // key of each connected exempt user to every issuer CONNZ reported for it, one per connection (two connections of one
 // user may carry JWTs signed by different keys, and every one of them must be kept). An empty issuer is not known to be kept, so it
 // is refused. The error is an *IssuersNotKeptError naming every user and key, sorted; nothing is changed.

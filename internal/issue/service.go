@@ -16,8 +16,8 @@ import (
 // ServiceName is the name the issue service registers as a NATS micro service.
 const ServiceName = "mash-issue"
 
-// SubjectPrefix opens the issue subject: agents.issue.<range>.<owner>. Its second token, "issue", is none of the mail,
-// prompt, status or hb verbs (agents.<verb>.<range>.<owner>.<name>), and no permission template mash compiles has a line
+// SubjectPrefix opens the issue subject: agents.issue.<prefix>.<owner>. Its second token, "issue", is none of the mail,
+// prompt, status or hb verbs (agents.<verb>.<prefix>.<owner>.<name>), and no permission template mash compiles has a line
 // that reaches it, so an endpoint cannot publish to it. A requester's permission to publish on it, and to receive the
 // reply, belongs to account setup.
 const SubjectPrefix = "agents.issue"
@@ -28,7 +28,7 @@ const requestTimeout = 15 * time.Second
 // serveFlushWait bounds the wait for the server to confirm the service's subscription.
 const serveFlushWait = 10 * time.Second
 
-// Subject is the subject a requester publishes the issue request of owner group (range, owner) on.
+// Subject is the subject a requester publishes the issue request of owner group (prefix, owner) on.
 func Subject(rng, owner string) string { return SubjectPrefix + "." + rng + "." + owner }
 
 // Serve registers the issue service on nc, listening on agents.issue.<rng>.* in the queue group of the service, and
@@ -66,7 +66,7 @@ func handle(is *Issuer, rng string, req micro.Request) {
 	}
 	r, rf := Parse(req.Data())
 	if rf == nil {
-		// The subject names the group the requester believes it asks for; the address must be in it, in this range.
+		// The subject names the group the requester believes it asks for; the address must be in it, in this prefix.
 		id, _ := r.AddressParts()
 		if id.Owner != rng || req.Subject() != Subject(id.Owner, id.Group) {
 			rf = refuse(CodeSubject, "the address is not in the owner group of the subject")

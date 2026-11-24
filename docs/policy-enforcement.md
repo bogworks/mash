@@ -69,10 +69,10 @@ flowchart LR
 
 | Piece | What it is | Source |
 |---|---|---|
-| Owner group | Every address that shares a range part and an owner part. One scoped signing key per owner group, named `range.owner`. | ADR 0102; `Compile` groups senders by `addr.group()` |
+| Owner group | Every address that shares a prefix part and an owner part. One scoped signing key per owner group, named `prefix.owner`. | ADR 0102; `Compile` groups senders by `addr.group()` |
 | Template | The permission lines on the scoped signing key. `{{name()}}` and `{{tag(allow)}}` in a line are filled in by the server from the user JWT. | `template()` in `internal/listset/compile.go` |
-| Tag | `allow:<owner>.<name>` or `deny:<owner>.<name>`, lower case. The range is a literal in the template, so a tag cannot name another range. One tag covers mail, prompt, status and heartbeat. | `AllowTag`, `DenyTag` in `compile.go`; ADR 0102 |
-| Shared or closed | A switch per owner group and verb. Shared puts the owner line (`agents.<verb>.<range>.<owner>.*`) in the template. Closed leaves it out, so only allow tags reach anyone. | `template()`; `TestAT001TemplateNamesNoPeer` |
+| Tag | `allow:<owner>.<name>` or `deny:<owner>.<name>`, lower case. The prefix is a literal in the template, so a tag cannot name another prefix. One tag covers mail, prompt, status and heartbeat. | `AllowTag`, `DenyTag` in `compile.go`; ADR 0102 |
+| Shared or closed | A switch per owner group and verb. Shared puts the owner line (`agents.<verb>.<prefix>.<owner>.*`) in the template. Closed leaves it out, so only allow tags reach anyone. | `template()`; `TestAT001TemplateNamesNoPeer` |
 | Owner line | The one template line that reaches every address of the group. It is the only line that can name a group of addresses. | ADR 0102 |
 | Fixed lines | Lines that name only the sender or shared plumbing: its own heartbeat, its own inbox stream and consumer, its reply prefix, its own prompt and status subjects, the directory and its own lease key. They need no tag. | `fixedPub()` in `compile.go`; ADR 0102 |
 | Deny lines | Present only in a key where some sender has a deny entry, and only for shared verbs. A deny beats an allow in NATS. | `template()`; ADR 0102 |
@@ -204,13 +204,13 @@ address has. Without a deny tag the server would refuse the connection (section 
 `check.go`, written after `processUserPermissionsTemplate` in the server's `auth.go`). It then compares, for each verb,
 what the expanded permissions reach with what the lists give: the owner line on shared verbs, plus the allow list,
 minus the deny list. It compares over every address the list set names, and over probe addresses in the same group,
-in another owner group and in another range. It refuses a mismatch in either direction (ADR 0102, decision outcome).
+in another owner group and in another prefix. It refuses a mismatch in either direction (ADR 0102, decision outcome).
 A live test, `TestLiveMatchesCheck`, then requires the real server's publish and subscribe outcomes to equal the
 simulation. So the simulation is itself checked against a real server on every `go test` (it is skipped under `-short`).
 
 ### 2.4 What the compile refuses
 
-Wildcards (`*`, `>`), a part that fails the naming grammar, an address in another range, a switch set for one sender,
+Wildcards (`*`, `>`), a part that fails the naming grammar, an address in another prefix, a switch set for one sender,
 an owner group that leaves a verb unstated, a deny entry whose owner group has no shared verb or whose target is
 outside the sender's own owner group, and duplicates. The whole list set is refused and every bad entry is named
 (`TestAT002_BadEntriesRefuseTheWholeSet`, `TestAT002_AllNamedInOneError`, `TestDenyRule`).
@@ -429,7 +429,7 @@ once mash has revoked the key. It never holds a seed or a JWT.
 
 [ADR 0104](decisions/0104-an-issue-service-signs-a-credential-for-a-public-key-a-wrangler-countersigned.md) lets a
 requester on a sender's host ask for a credential for a public key, without any private key leaving the host.
-`mashctl issue serve` answers on `agents.issue.<range>.<owner>`. The request names an address, a public key, a host, a
+`mashctl issue serve` answers on `agents.issue.<prefix>.<owner>`. The request names an address, a public key, a host, a
 nonce and an expiry, and carries the requester's signature over those fields. The service signs only if all of these
 hold:
 
@@ -475,9 +475,9 @@ change that widens or narrows what is reachable fails it, and the maintainer who
 
 | Subject (as the raw client publishes it) | Server | Reaches another address | Why it stays open |
 |---|---|---|---|
-| `_INBOX.<range>.<other flat name>.<id>` | accepted | yes: delivered to the other address, in its own and in another owner group | A reply is a plain publish to the caller's reply prefix; there is no response permission, which allowed deleting another's inbox ([ADR 0007](decisions/0007-one-nats-user-per-endpoint-least-privilege.md)). The receiver accepts only verified callers, and a prompt's reply subject carries 128 random bits (threat model, section 6.4). |
+| `_INBOX.<prefix>.<other flat name>.<id>` | accepted | yes: delivered to the other address, in its own and in another owner group | A reply is a plain publish to the caller's reply prefix; there is no response permission, which allowed deleting another's inbox ([ADR 0007](decisions/0007-one-nats-user-per-endpoint-least-privilege.md)). The receiver accepts only verified callers, and a prompt's reply subject carries 128 random bits (threat model, section 6.4). |
 | `$SRV.INFO.agents`, `$SRV.PING` and the rest of `$SRV.>` | accepted | yes: delivered to every sender (each subscribes to `$SRV.>`) | Discovery and live prompts are service requests to every endpoint ([ADR 0007](decisions/0007-one-nats-user-per-endpoint-least-privilege.md)). |
-| `_INBOX.<range>.<own flat name>.<id>`, its own heartbeat, its own inbox consumer, its own lease key | accepted | no | Fixed lines naming only the sender ([ADR 0009](decisions/0009-one-inbox-stream-and-consumer-per-endpoint.md)). |
+| `_INBOX.<prefix>.<own flat name>.<id>`, its own heartbeat, its own inbox consumer, its own lease key | accepted | no | Fixed lines naming only the sender ([ADR 0009](decisions/0009-one-inbox-stream-and-consumer-per-endpoint.md)). |
 | `$JS.API.INFO`, `$JS.API.STREAM.INFO.KV_mash-directory`, `$JS.API.DIRECT.GET.KV_mash-directory.>`, `$JS.API.STREAM.INFO.KV_mash-leases` | accepted | no: server API reads; the directory is readable by every sender | Needed to resolve names and read the lease bucket state; read only. |
 | Another address's lease key (`$KV.mash-leases.<flat>`), a read of it, and any write to `$KV.mash-directory.>` | refused | no | A sender writes only its own lease and never the directory. |
 | Another address's inbox stream: `STREAM.INFO`, `CONSUMER.INFO`, `CONSUMER.CREATE`, `CONSUMER.DURABLE.CREATE`, `CONSUMER.MSG.NEXT`, `$JS.ACK`, `STREAM.MSG.GET`, `DIRECT.GET`, `STREAM.DELETE`, `STREAM.PURGE` | refused | no | Every JetStream line names the sender's own inbox stream only. |
@@ -511,7 +511,7 @@ line, and each account JWT, against the limit of every server, and it refuses th
 on any server. It never drops, merges or widens an exception to make a credential fit.
 
 An exception is one address on a sender's allow or deny list, counted once across all verbs. The tag value is the
-address without the range, so a tag costs the length of the receiver's owner part and name. The deny sentinel
+address without the prefix, so a tag costs the length of the receiver's owner part and name. The deny sentinel
 `deny:_none` is a tag but not an exception. It costs one tag (13 bytes of JSON) on a sender whose group has a deny entry
 and who has none of its own.
 
@@ -519,13 +519,13 @@ and who has none of its own.
 names. At an owner part of 4 characters, 100 exceptions fit at names of 9 characters or less (102 at 9, 106 at 8, 97 at
 10). At 14-character names the figure is 83 at an owner part of 4, and it falls from there. The tables below are the
 measure: each cell is the largest number of exceptions for which the real `Compile` and `SizeCheck` report no problem at
-the default connect line of 4,096 bytes, with a range of 3 characters. An earlier figure in the contract's first drafts
+the default connect line of 4,096 bytes, with a prefix of 3 characters. An earlier figure in the contract's first drafts
 (151 tags at 7 characters, 105 at 14, 59 at 32) counted bare tag values and does not hold for real credentials.
 
 At the default connect line of 4,096 bytes, the most exceptions one sender can have, measured with the real compile.
 The columns are the length of every name (the sender's and each receiver's); the rows are the length of the receiver's
-owner part; the range is 3 characters. A deny exception names a member of the sender's own owner group, so its owner
-part is the sender's. A range, an owner part and a name total at most 62 characters.
+owner part; the prefix is 3 characters. A deny exception names a member of the sender's own owner group, so its owner
+part is the sender's. A prefix, an owner part and a name total at most 62 characters.
 
 Allow exceptions on a closed verb (no sentinel):
 
@@ -681,8 +681,8 @@ is `pending` in `scripts/releasecheck/policytests.txt` prints a notice and does 
 
 | Term | Meaning |
 |---|---|
-| Address | A three-part name: range part, owner part and name part, as in `agents.mail.foo.c.core` (range `foo`, owner `c`, name `core`). |
-| Owner group | Every address that shares one range part and one owner part. |
+| Address | A three-part name: prefix part, owner part and name part, as in `agents.mail.foo.c.core` (prefix `foo`, owner `c`, name `core`). |
+| Owner group | Every address that shares one prefix part and one owner part. |
 | Verb | One kind of traffic: mail, prompt (a live request to a running session), status (a liveness probe) or heartbeat (the periodic "I am here" signal). |
 | Shared, closed | The switch for one owner group and one verb. Shared: the owner line is on. Closed: a sender reaches only the addresses on its allow list. |
 | List set | The switches and lists for one NATS account, handed over in one piece. |

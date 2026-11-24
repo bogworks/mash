@@ -26,7 +26,7 @@ type ListSetInForce interface {
 	InForce(ctx context.Context) (*listset.Compiled, int, error)
 }
 
-// Signer holds the owner groups' scoped signing keys. GroupKey returns the key of "range.owner"; the caller wipes it.
+// Signer holds the owner groups' scoped signing keys. GroupKey returns the key of "prefix.owner"; the caller wipes it.
 type Signer interface {
 	GroupKey(group string) (nkeys.KeyPair, error)
 }
