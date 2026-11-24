@@ -257,6 +257,18 @@ func (e *Endpoint) recordRefusalNew(seq uint64) (n int, added bool, err error) {
 	// Every pruned and every recorded sequence was counted, so the count is never below their number. A kill between
 	// the sequence write and the count write leaves it below: the redelivery repairs it here, before it returns.
 	have, rerr := e.repairRefusedCountLocked(dir, pruned, seqs)
+	// A legacy file (written by a mash before the marker) may already have been pruned: its count is above its recorded
+	// sequences and it has no marker, so pruned reads 0. Persist the difference as the marker before this call changes
+	// the file, so a kill after the append or prune and before the count write leaves pruned+recorded at or above the
+	// old count, and the repair above is exact. A file whose marker is current has base == pruned and is not rewritten.
+	if fid == id {
+		if base := have - len(seqs); base > pruned {
+			if err := writeRefusedSeqs(p, id, base, seqs); err != nil {
+				return 0, false, err
+			}
+			pruned = base
+		}
+	}
 	if slices.Contains(seqs, seq) {
 		return have, false, rerr
 	}

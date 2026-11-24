@@ -197,3 +197,113 @@ func TestRefusedOldFormatFile(t *testing.T) {
 		t.Fatalf("count %d, want 5", n)
 	}
 }
+
+func setCount(t *testing.T, cfg config.Config, n int) {
+	t.Helper()
+	dir, err := SpoolDir(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, RefusedFile), []byte(strconv.Itoa(n)+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A legacy file already pruned by an older mash has no marker and a count above its recorded sequences. The next
+// refusal persists the difference as the marker before it appends, and the count stays pruned + recorded.
+func TestRefusedLegacyPrunedFileGetsMarker(t *testing.T) {
+	first := uint64(1)
+	e, cfg, id, p := prunedEndpoint(t, &first)
+	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte("stream "+id+"\n1\n2\n3\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	setCount(t, cfg, 8) // 3 recorded + 5 pruned by an older mash
+	if n, added, err := e.recordRefusalNew(4); err != nil || !added || n != 9 {
+		t.Fatalf("record: n=%d added=%v err=%v", n, added, err)
+	}
+	if got, want := readText(t, p), "stream "+id+"\npruned 5\n1\n2\n3\n4\n"; got != want {
+		t.Fatalf("file %q, want %q", got, want)
+	}
+	if n := RefusedCount(cfg); n != 9 {
+		t.Fatalf("count %d, want 9", n)
+	}
+}
+
+// A kill after the append on a legacy file leaves the marker (written first), the new sequence and the old count; the
+// redelivery and reconcileRefusedCount both repair the count to include the new refusal.
+func TestRefusedCountRepairedAfterKillInAppendOnLegacyFile(t *testing.T) {
+	first := uint64(1)
+	e, cfg, id, p := prunedEndpoint(t, &first)
+	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte("stream "+id+"\npruned 5\n1\n2\n3\n4\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	setCount(t, cfg, 8)
+	if n, added, err := e.recordRefusalNew(4); err != nil || added || n != 9 {
+		t.Fatalf("redelivery: n=%d added=%v err=%v", n, added, err)
+	}
+	if n := RefusedCount(cfg); n != 9 {
+		t.Fatalf("count after redelivery = %d, want 9", n)
+	}
+	setCount(t, cfg, 8)
+	if err := e.reconcileRefusedCount(id); err != nil {
+		t.Fatal(err)
+	}
+	if n := RefusedCount(cfg); n != 9 {
+		t.Fatalf("count after reconcile = %d, want 9", n)
+	}
+}
+
+// A kill after a prune of a legacy file (dropping 2 sequences) leaves pruned 5+2 and the old count; repair is exact.
+func TestRefusedCountRepairedAfterKillInPruneOnLegacyFile(t *testing.T) {
+	first := uint64(3)
+	e, cfg, id, p := prunedEndpoint(t, &first)
+	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte("stream "+id+"\npruned 7\n3\n4\n5\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	setCount(t, cfg, 9) // the old count: 4 recorded + 5 pruned
+	if n, added, err := e.recordRefusalNew(5); err != nil || added || n != 10 {
+		t.Fatalf("redelivery: n=%d added=%v err=%v", n, added, err)
+	}
+	if n := RefusedCount(cfg); n != 10 {
+		t.Fatalf("count after redelivery = %d, want 10", n)
+	}
+	setCount(t, cfg, 9)
+	if err := e.reconcileRefusedCount(id); err != nil {
+		t.Fatal(err)
+	}
+	if n := RefusedCount(cfg); n != 10 {
+		t.Fatalf("count after reconcile = %d, want 10", n)
+	}
+}
+
+// The whole prune of a legacy file, uninterrupted: the baseline marker, then the prune adds what it drops.
+func TestRefusedPruneOfLegacyPrunedFile(t *testing.T) {
+	first := uint64(3)
+	e, cfg, id, p := prunedEndpoint(t, &first)
+	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte("stream "+id+"\n1\n2\n3\n4\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	setCount(t, cfg, 9)
+	record(t, e, 5)
+	if got, want := readText(t, p), "stream "+id+"\npruned 7\n3\n4\n5\n"; got != want {
+		t.Fatalf("file %q, want %q", got, want)
+	}
+	if n := RefusedCount(cfg); n != 10 {
+		t.Fatalf("count %d, want 10", n)
+	}
+}
