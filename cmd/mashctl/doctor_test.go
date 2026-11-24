@@ -791,22 +791,64 @@ func TestDoctorKeysFailsWhenTheIssueRecordIsMissing(t *testing.T) {
 // or "(no key reported, N connections)", first among the key lines (within the cap of three lines); "and N more" counts
 // the users not shown.
 func TestDoctorKeysCountsAConnectionWithNoKey(t *testing.T) {
-	conns := []apply.ConnzServer{{Conns: []apply.ConnzConn{{Key: ""}, {Key: "UAAA"}, {Key: ""}}}}
+	ka, kb, kc, kd := testUserKey(t), testUserKey(t), testUserKey(t), testUserKey(t)
+	conns := []apply.ConnzServer{{Conns: []apply.ConnzConn{{Key: ""}, {Key: ka}, {Key: ""}}}}
 	un, kl, rv := connectedFindings(conns, nil)
-	if len(rv) != 0 || kl != 2 || !slices.Equal(un, []string{"UAAA"}) {
+	if len(rv) != 0 || kl != 2 || !slices.Equal(un, []string{ka}) {
 		t.Fatalf("%q %d %q", un, kl, rv)
 	}
-	if got := keyLines(un, kl); got != "\n(no key reported, 2 connections)\nUAAA" {
+	if got := keyLines(un, kl); got != "\n(no key reported, 2 connections)\n"+ka {
 		t.Fatalf("%q", got)
 	}
 	if got := keyLines(nil, 1); got != "\n(no key reported)" {
 		t.Fatalf("%q", got)
 	}
-	if got := keyLines([]string{"UA", "UB", "UC", "UD"}, 2); got != "\n(no key reported, 2 connections)\nUA\nUB\nand 2 more" {
+	if got := keyLines([]string{ka, kb, kc, kd}, 2); got != "\n(no key reported, 2 connections)\n"+ka+"\n"+kb+"\nand 2 more" {
 		t.Fatalf("%q", got)
 	}
-	if got := keyLines([]string{"UA", "UB", "UC", "UD"}, 0); got != "\nUA\nUB\nUC\nand 1 more" {
+	if got := keyLines([]string{ka, kb, kc, kd}, 0); got != "\n"+ka+"\n"+kb+"\n"+kc+"\nand 1 more" {
 		t.Fatalf("%q", got)
+	}
+}
+
+// testUserKey is a fresh nkeys public user key.
+func testUserKey(t *testing.T) string {
+	t.Helper()
+	kp, err := nkeys.CreateUser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub, err := kp.PublicKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return pub
+}
+
+// A connected user's key is the server's value: it prints as given only when it is a public user key; anything else
+// prints a placeholder and the raw text appears nowhere in the output.
+func TestDoctorKeysShowsOnlyUserKeys(t *testing.T) {
+	good := testUserKey(t)
+	if got := keyLines([]string{good}, 0); got != "\n"+good {
+		t.Fatalf("%q", got)
+	}
+	for _, junk := range []string{"UFOREIGN", "not a key at all", "\x1b[2J\x1b]0;pwned\x07", "U\nhint: rm -rf", good + "\x1b[31m"} {
+		got := keyLines([]string{junk}, 0)
+		if got != "\n"+notUserKey {
+			t.Errorf("%q: %q", junk, got)
+		}
+		if strings.Contains(got, junk) || strings.ContainsAny(got[1:], "\x1b\x07\r") {
+			t.Errorf("%q reached the output: %q", junk, got)
+		}
+	}
+	// through the report as well
+	rep := doctorReport{}
+	rep.add("keys", stateFail, "1 connected user was not issued by mashctl:"+keyLines([]string{"\x1b[2Jevil"}, 0), "x")
+	rep.complete()
+	var out, errb bytes.Buffer
+	rep.writeText(&out, &errb)
+	if strings.Contains(out.String()+errb.String(), "evil") || strings.Contains(out.String(), "\x1b") || !strings.Contains(out.String(), notUserKey) {
+		t.Fatalf("%q", out.String())
 	}
 }
 

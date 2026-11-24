@@ -35,7 +35,7 @@ mashctl doctor
 | --- | --- |
 | 0 | It worked. |
 | 1 | A problem was found; the report on stdout says which. |
-| 2 | The command line was wrong; nothing was attempted. |
+| 2 | The command line was wrong, or the server URL is a plain nats:// one that is refused for TLS; nothing was attempted. The server row says so (rows after it are skipped), and the report is still printed on stdout. |
 
 ## Output
 
@@ -194,9 +194,39 @@ With `--json` the result is this shape. The values are an example.
   "warnings": 0,
   "checks": [
     {
+      "name": "config",
+      "state": "ok",
+      "detail": "",
+      "fix": null
+    },
+    {
       "name": "server",
       "state": "ok",
       "detail": "tls://localhost:4222",
+      "fix": null
+    },
+    {
+      "name": "sign-in",
+      "state": "ok",
+      "detail": "",
+      "fix": null
+    },
+    {
+      "name": "storage",
+      "state": "ok",
+      "detail": "",
+      "fix": null
+    },
+    {
+      "name": "endpoints",
+      "state": "ok",
+      "detail": "3 records, 3 inboxes",
+      "fix": null
+    },
+    {
+      "name": "keys",
+      "state": "ok",
+      "detail": "every connected user was issued by mashctl",
       "fix": null
     }
   ]
@@ -211,10 +241,12 @@ None. Administration. There are no MCP tools for mashctl.
 
 What is a warning and what is a problem. Warnings: a lease with no endpoint, a
 retired name seen in use, and a missing record store (issued, adoption or
-retired); the fix for a missing store is to run mashctl init --config
-&lt;file&gt; again, which is safe. A problem: an endpoint whose credentials
-were being cancelled and never finished; the fix is to run that mashctl
-endpoint delete again.
+retired) on the storage row; the fix for a missing store is to run mashctl
+init --config &lt;file&gt; again, which is safe. A missing issue store also
+fails the keys row (no issue record; mashctl cannot tell its users from
+others), with or without --audit-users. A problem: an endpoint whose
+credentials were being cancelled and never finished; the fix is to run that
+mashctl endpoint delete again.
 
 ## What it replaces
 
