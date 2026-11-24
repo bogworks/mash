@@ -209,6 +209,9 @@ func (s *cliSvc) Health(ctx context.Context) (cmds.HealthReport, error) {
 // ClaudeCheck is doctor's claude row; status does not ask for it.
 func (s *cliSvc) ClaudeCheck(ctx context.Context) cmds.HealthCheck { return claudeCheck(ctx) }
 
+// BinaryCheck is doctor's binary row; status does not ask for it.
+func (s *cliSvc) BinaryCheck(ctx context.Context) cmds.HealthCheck { return binaryCheck(ctx) }
+
 func (s *cliSvc) Send(ctx context.Context, to, text string, o cmds.SendOptions) (cmds.SendReceipt, error) {
 	cfg := s.cfg
 	if err := checkSend(o); err != nil { // before the endpoint: a bad key is a usage error with or without one

@@ -163,7 +163,7 @@ func TestDoctorOneHintACommandThatFixesIt(t *testing.T) {
 			}
 			names := []string{}
 			for _, c := range got.Checks {
-				if c.Name != "claude" { // the claude row is the command's: a session test's report here has none
+				if c.Name != "claude" && c.Name != "binary" { // the claude and binary rows are the command's: a session test's report here has none
 					names = append(names, c.Name)
 				}
 			}

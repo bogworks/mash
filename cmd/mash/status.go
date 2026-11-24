@@ -106,6 +106,9 @@ func (s sessionSvc) Health(ctx context.Context) (cmds.HealthReport, error) {
 // ClaudeCheck is doctor's claude row; status does not ask for it.
 func (s sessionSvc) ClaudeCheck(ctx context.Context) cmds.HealthCheck { return claudeCheck(ctx) }
 
+// BinaryCheck is doctor's binary row; status does not ask for it.
+func (s sessionSvc) BinaryCheck(ctx context.Context) cmds.HealthCheck { return binaryCheck(ctx) }
+
 // sessionNow is what status --detail says about this session: whether it holds its endpoint, whether the agent host's hooks have delivered mail in it, and whether its mail folder works.
 func (s *statusSource) sessionNow(noLease bool) *cmds.SessionState {
 	st := &cmds.SessionState{HoldsEndpoint: false, Hooks: cmds.HooksNotRun, Storage: cmds.StorageOK}

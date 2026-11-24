@@ -124,6 +124,9 @@ const (
 	CheckConfig = "config"
 	// CheckClaude is the Claude Code version against the tested range. It stands alone: no other row decides it.
 	CheckClaude = "claude"
+	// CheckBinary is the mash the plugin runs against the mash running doctor. It sits right after claude and stands
+	// alone: no other row decides it, and it only ever warns.
+	CheckBinary = "binary"
 	CheckCreds  = "creds"
 	CheckServer = "server"
 	CheckSignIn = "sign-in"
@@ -213,6 +216,12 @@ type Health interface {
 // range. Status never asks for it, so status never looks for claude (ADR 0169).
 type ClaudeChecker interface {
 	ClaudeCheck(ctx context.Context) HealthCheck
+}
+
+// BinaryChecker is the optional service only doctor uses: the binary row, the mash the plugin runs against this one.
+// It runs nothing; status never asks for it.
+type BinaryChecker interface {
+	BinaryCheck(ctx context.Context) HealthCheck
 }
 
 func healthOf(ctx context.Context, env *cmdcore.Env, name string) (HealthReport, error) {
@@ -441,6 +450,9 @@ func (r DoctorResult) Text(cmdcore.Opts) string {
 			if w, ok := hookRowWraps[detail]; ok && c.Name == CheckDelivery {
 				detail, extra = w[0], "\n"+strings.Repeat(" ", 16)+w[1]
 			}
+			if c.Name == CheckBinary { // its details are sentences: break them at a space to fit 80 columns
+				detail, extra = wrapDetail(len(line), detail)
+			}
 			line += detail
 		}
 		b.WriteString(strings.TrimRight(line, " ") + extra + "\n")
@@ -459,6 +471,31 @@ func (r DoctorResult) Text(cmdcore.Opts) string {
 		b.WriteString(strings.Join(parts, ", ") + ".")
 	}
 	return b.String()
+}
+
+// wrapDetail breaks detail at spaces so the first line, after a prefix of n columns, and each following line, indented
+// to the detail column, are at most 80 columns. It returns the first line's text and the rest, each rest line starting
+// with a newline.
+func wrapDetail(n int, detail string) (first, rest string) {
+	const width, indent = 80, 16
+	var lines []string
+	cur, room := "", width-n
+	for _, w := range strings.Fields(detail) {
+		switch {
+		case cur == "":
+			cur = w
+		case len(cur)+1+len(w) <= room:
+			cur += " " + w
+		default:
+			lines = append(lines, cur)
+			cur, room = w, width-indent
+		}
+	}
+	lines = append(lines, cur)
+	for _, l := range lines[1:] {
+		rest += "\n" + strings.Repeat(" ", indent) + l
+	}
+	return lines[0], rest
 }
 
 func plural(n int, word string) string {
@@ -496,6 +533,16 @@ var Doctor = cmdcore.Command[DoctorParams, DoctorResult]{
 			at := 0
 			if len(checks) > 0 && checks[0].Name == CheckConfig {
 				at = 1
+			}
+			checks = append(append(append([]HealthCheck{}, checks[:at]...), row), checks[at:]...)
+		}
+		if bc, ok := env.Svc.(BinaryChecker); ok && bc != nil { // the binary row sits right after claude, or after config when there is none
+			row := bc.BinaryCheck(ctx)
+			at := 0
+			for i, c := range checks {
+				if c.Name == CheckClaude || (at == 0 && c.Name == CheckConfig) {
+					at = i + 1
+				}
 			}
 			checks = append(append(append([]HealthCheck{}, checks[:at]...), row), checks[at:]...)
 		}

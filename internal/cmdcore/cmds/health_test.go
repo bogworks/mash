@@ -297,9 +297,11 @@ func TestStatusAndDoctorErrors(t *testing.T) {
 	}
 }
 
-// withClaude puts the claude row right after config: every doctor report has it (the command adds it) and the spec shows it.
+// withClaude puts the claude row, then the binary row as a shell shows it, right after config: every doctor report has
+// them (the command adds them) and the spec shows them.
 func withClaude(f *fakeHealth, row cmds.HealthCheck) *fakeHealth {
-	f.rep.Checks = append(f.rep.Checks[:1:1], append([]cmds.HealthCheck{row}, f.rep.Checks[1:]...)...)
+	binary := cmds.HealthCheck{Name: cmds.CheckBinary, State: cmds.CheckSkip, Detail: "not run by the plugin: CLAUDE_PLUGIN_DATA is not set, so the plugin's binary cannot be found from a shell"}
+	f.rep.Checks = append(f.rep.Checks[:1:1], append([]cmds.HealthCheck{row, binary}, f.rep.Checks[1:]...)...)
 	return f
 }
 
@@ -312,6 +314,10 @@ func reportOfSpecText(t *testing.T, text string) *fakeHealth {
 	states := map[string]string{"ok": cmds.CheckOK, "warn": cmds.CheckWarn, "FAIL": cmds.CheckFail, "skip": cmds.CheckSkip}
 	var rows []cmds.HealthCheck
 	for _, l := range strings.Split(body, "\n") {
+		if strings.HasPrefix(l, strings.Repeat(" ", 16)) && len(rows) > 0 { // a detail broken to 80 columns
+			rows[len(rows)-1].Detail += " " + strings.TrimSpace(l)
+			continue
+		}
 		if len(l) < 16 {
 			l += strings.Repeat(" ", 16-len(l))
 		}
@@ -431,7 +437,8 @@ func TestDoctorMatchesSpec(t *testing.T) {
 			if mcp != oc["text"] {
 				t.Errorf("%s: mcp spec text %q, cli spec text %q", oc["case"], mcp, oc["text"])
 			}
-		case "Claude Code is recent enough", "Claude Code is too old", "Claude Code is newer than tested", "No claude command", "The version of claude is unreadable":
+		case "Claude Code is recent enough", "Claude Code is too old", "Claude Code is newer than tested", "No claude command", "The version of claude is unreadable",
+			"The plugin runs this mash", "The plugin runs another mash", "The plugin has no downloaded mash", "MASH_BIN is set", "This mash has no release version":
 			// the claude row is made by the command (cmd/mash/claudecheck_test.go), not by the report this package renders
 			continue
 		default:
@@ -765,6 +772,42 @@ func TestOnlyDoctorAsksForTheClaudeRow(t *testing.T) {
 		t.Fatalf("doctor asked for the claude row %d times, want 1", svc.calls)
 	}
 	if !strings.Contains(out, "config    ok\nclaude    warn  9.0.0 is above the tested 2.1\ncreds     ok\n") {
+		t.Fatalf("doctor:\n%s", out)
+	}
+}
+
+// binaryHealth is a health service that can check claude and the binary; the binary row sits right after claude.
+type binaryHealth struct {
+	*claudeHealth
+	bcalls int
+}
+
+func (b *binaryHealth) BinaryCheck(context.Context) cmds.HealthCheck {
+	b.bcalls++
+	return cmds.HealthCheck{Name: cmds.CheckBinary, State: cmds.CheckWarn, Detail: "the plugin runs 0.5.8 (p); this mash is 0.5.9"}
+}
+
+// Only doctor asks for the binary row, and it sits right after claude; with no claude row it sits after config.
+func TestOnlyDoctorAsksForTheBinaryRowAndItFollowsClaude(t *testing.T) {
+	svc := &binaryHealth{claudeHealth: &claudeHealth{fakeHealth: allWell()}}
+	runStatus(svc, cliframe.Global{})
+	if svc.bcalls != 0 {
+		t.Fatalf("status asked for the binary row %d times", svc.bcalls)
+	}
+	_, out, _ := runDoctor(svc, cliframe.Global{})
+	if svc.bcalls != 1 {
+		t.Fatalf("doctor asked for the binary row %d times, want 1", svc.bcalls)
+	}
+	if !strings.Contains(out, "config    ok\nclaude    warn  9.0.0 is above the tested 2.1\nbinary    warn  the plugin runs 0.5.8 (p); this mash is 0.5.9\ncreds     ok\n") {
+		t.Fatalf("doctor:\n%s", out)
+	}
+	// without a claude checker the row follows config
+	only := struct {
+		*fakeHealth
+		cmds.BinaryChecker
+	}{allWell(), svc}
+	_, out, _ = runDoctor(only, cliframe.Global{})
+	if !strings.Contains(out, "config    ok\nbinary    warn  ") {
 		t.Fatalf("doctor:\n%s", out)
 	}
 }

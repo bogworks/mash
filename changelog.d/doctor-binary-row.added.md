@@ -1,0 +1,1 @@
+**`mash doctor` warns when the plugin runs a different mash than the one you are running (#1535).** A new `binary` row, after `claude`, compares the copy the plugin downloaded (`mash-<version>` under `$CLAUDE_PLUGIN_DATA/bin`) with the mash running doctor, and warns when the versions differ; it covers a doctor run by the plugin only, and from a shell the row is skipped.

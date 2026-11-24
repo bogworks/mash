@@ -112,7 +112,7 @@ func TestDoctorClaudeRow(t *testing.T) {
 			env := claudeDoctorEnv(t)
 			injectClaude(t, tc.out, nil)
 			r := runMash(env, "doctor")
-			if r.code != tc.code || r.errs != "" || !strings.Contains(r.out, "config    ok\n"+tc.row+"creds     ok\n") || !strings.HasSuffix(r.out, "\n\n"+tc.summary+"\n") {
+			if r.code != tc.code || r.errs != "" || !strings.Contains(r.out, "config    ok\n"+tc.row+binaryShellRow+"creds     ok\n") || !strings.HasSuffix(r.out, "\n\n"+tc.summary+"\n") {
 				t.Fatalf("doctor: %+v", r)
 			}
 			if s := runMash(env, "doctor", "--strict"); s.code != tc.strict {

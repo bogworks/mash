@@ -45,6 +45,8 @@ Stream: stdout. Exit code: 0.
 ```text
 config    ok
 claude    ok    2.1.320
+binary    skip  not run by the plugin: CLAUDE_PLUGIN_DATA is not set, so the
+                plugin's binary cannot be found from a shell
 creds     ok
 server    ok    tls://myserver:4222
 sign-in   ok
@@ -61,6 +63,8 @@ Stream: stdout, then the hint on stderr. Exit code: 1.
 ```text
 config    ok
 claude    skip  no claude command found
+binary    skip  not run by the plugin: CLAUDE_PLUGIN_DATA is not set, so the
+                plugin's binary cannot be found from a shell
 creds     ok
 server    ok    tls://myserver:4222
 sign-in   FAIL  the server refused these credentials
@@ -78,6 +82,8 @@ Stream: stdout. Exit code: 1.
 ```text
 config    ok
 claude    skip  no claude command found
+binary    skip  not run by the plugin: CLAUDE_PLUGIN_DATA is not set, so the
+                plugin's binary cannot be found from a shell
 creds     ok
 server    FAIL  the server did not answer: tls://myserver:4222
 sign-in   skip  needs the server
@@ -127,6 +133,51 @@ Stream: stdout. Exit code: 0.
 claude    warn  the version of claude could not be read
 ```
 
+### The plugin runs this mash
+
+Stream: stdout. Exit code: 0.
+
+```text
+binary    ok    0.5.9
+```
+
+### The plugin runs another mash
+
+Stream: stdout. Exit code: 0.
+
+```text
+binary    warn  the plugin runs 0.5.8
+                (/home/alice/.claude/plugins/data/mash/bin/mash-0.5.8); this
+                mash is 0.5.9: install the matching release, or set MASH_BIN to
+                the one you want
+```
+
+### The plugin has no downloaded mash
+
+Stream: stdout. Exit code: 0.
+
+```text
+binary    skip  the plugin has no downloaded mash in
+                /home/alice/.claude/plugins/data/mash/bin (unpinned, or it uses
+                MASH_BIN or the one on PATH)
+```
+
+### MASH_BIN is set
+
+Stream: stdout. Exit code: 0.
+
+```text
+binary    skip  MASH_BIN is set; the plugin runs it
+```
+
+### This mash has no release version
+
+Stream: stdout. Exit code: 0.
+
+```text
+binary    skip  this mash has no release version to compare
+```
+
 ### Arriving mail cannot be stored here
 
 Stream: stdout. Exit code: 1.
@@ -134,6 +185,8 @@ Stream: stdout. Exit code: 1.
 ```text
 config    ok
 claude    skip  no claude command found
+binary    skip  not run by the plugin: CLAUDE_PLUGIN_DATA is not set, so the
+                plugin's binary cannot be found from a shell
 creds     ok
 server    ok    tls://myserver:4222
 sign-in   ok
@@ -158,6 +211,8 @@ Stream: stdout. Exit code: 1.
 ```text
 config    ok
 claude    skip  no claude command found
+binary    skip  not run by the plugin: CLAUDE_PLUGIN_DATA is not set, so the
+                plugin's binary cannot be found from a shell
 creds     ok
 server    ok    tls://myserver:4222
 sign-in   ok
@@ -195,6 +250,8 @@ Stream: stdout. Exit code: 1.
 ```text
 config    ok
 claude    skip  no claude command found
+binary    skip  not run by the plugin: CLAUDE_PLUGIN_DATA is not set, so the
+                plugin's binary cannot be found from a shell
 creds     ok
 server    ok    tls://myserver:4222
 sign-in   ok
@@ -211,6 +268,8 @@ Stream: stdout, then the hint on stderr. Exit code: 1.
 ```text
 config    ok
 claude    skip  no claude command found
+binary    skip  not run by the plugin: CLAUDE_PLUGIN_DATA is not set, so the
+                plugin's binary cannot be found from a shell
 creds     ok
 server    ok    tls://myserver:4222
 sign-in   FAIL  this endpoint was deleted; its address cannot be used again
@@ -228,6 +287,8 @@ Stream: stdout, then the hint on stderr. Exit code: 1.
 ```text
 config    ok
 claude    skip  no claude command found
+binary    skip  not run by the plugin: CLAUDE_PLUGIN_DATA is not set, so the
+                plugin's binary cannot be found from a shell
 creds     FAIL  this endpoint was deleted; its address cannot be used again
 server    ok    tls://myserver:4222
 sign-in   skip  needs the creds
@@ -245,6 +306,8 @@ Stream: stdout. Exit code: 1.
 ```text
 config    ok
 claude    skip  no claude command found
+binary    skip  not run by the plugin: CLAUDE_PLUGIN_DATA is not set, so the
+                plugin's binary cannot be found from a shell
 creds     ok
 server    FAIL  the server's certificate is not trusted: tls://myserver:4222
 sign-in   skip  needs the server
@@ -261,6 +324,8 @@ Stream: stdout. Exit code: 1.
 ```text
 config    ok
 claude    skip  no claude command found
+binary    skip  not run by the plugin: CLAUDE_PLUGIN_DATA is not set, so the
+                plugin's binary cannot be found from a shell
 creds     ok
 server    FAIL  the server did not offer TLS: tls://myserver:4222
 sign-in   skip  needs the server
@@ -277,6 +342,8 @@ Stream: stdout, then the hint on stderr. Exit code: 1.
 ```text
 config    ok
 claude    skip  no claude command found
+binary    skip  not run by the plugin: CLAUDE_PLUGIN_DATA is not set, so the
+                plugin's binary cannot be found from a shell
 creds     FAIL  ~/.config/mash/acme.demo.bob.creds is missing
 server    ok    tls://myserver:4222
 sign-in   skip  needs the creds
@@ -294,6 +361,8 @@ Stream: stdout, then the hint on stderr. Exit code: 1.
 ```text
 config    ok
 claude    skip  no claude command found
+binary    skip  not run by the plugin: CLAUDE_PLUGIN_DATA is not set, so the
+                plugin's binary cannot be found from a shell
 creds     ok
 server    ok    tls://myserver:4222
 sign-in   FAIL  the server refused these credentials
@@ -311,6 +380,8 @@ Stream: stdout, then the hint on stderr. Exit code: 1.
 ```text
 config    ok
 claude    skip  no claude command found
+binary    skip  not run by the plugin: CLAUDE_PLUGIN_DATA is not set, so the
+                plugin's binary cannot be found from a shell
 creds     FAIL  ~/.config/mash/acme.demo.bob.creds is not a creds file
 server    ok    tls://myserver:4222
 sign-in   skip  needs the creds
@@ -328,6 +399,8 @@ Stream: stdout. Exit code: 1.
 ```text
 config    ok
 claude    skip  no claude command found
+binary    skip  not run by the plugin: CLAUDE_PLUGIN_DATA is not set, so the
+                plugin's binary cannot be found from a shell
 creds     FAIL  ~/.config/mash/acme.demo.bob.creds can be read by others
 server    ok    tls://myserver:4222
 sign-in   skip  needs the creds
@@ -344,6 +417,8 @@ Stream: stdout. Exit code: 1.
 ```text
 config    ok
 claude    skip  no claude command found
+binary    skip  not run by the plugin: CLAUDE_PLUGIN_DATA is not set, so the
+                plugin's binary cannot be found from a shell
 creds     ok
 server    FAIL  the server address is not tls://: nats://myserver:4222
 sign-in   skip  needs the server
@@ -381,6 +456,12 @@ Stream: stdout. Exit code: 1.
    "name": "claude",
    "state": "ok",
    "detail": "2.1.320",
+   "fix": null
+  },
+  {
+   "name": "binary",
+   "state": "skip",
+   "detail": "not run by the plugin: CLAUDE_PLUGIN_DATA is not set, so the plugin's binary cannot be found from a shell",
    "fix": null
   },
   {
@@ -441,6 +522,12 @@ With `--json` the result is this shape. The values are an example.
       "fix": null
     },
     {
+      "name": "binary",
+      "state": "skip",
+      "detail": "not run by the plugin: CLAUDE_PLUGIN_DATA is not set, so the plugin's binary cannot be found from a shell",
+      "fix": null
+    },
+    {
       "name": "creds",
       "state": "ok",
       "detail": null,
@@ -494,6 +581,9 @@ check. The 'hooks not run yet' warning has no hint, because no command fixes
 it. Whether storage is failing is decided by whoever asks, by trying the
 folder, not from a record kept in it. An agent host that has no hooks would
 warn for as long as it runs; only Claude Code is in scope for 0.5.6. The
+binary row compares the mash the plugin runs (its own copy under
+$CLAUDE_PLUGIN_DATA/bin) with the mash running doctor; it warns when they
+differ and is skipped at a shell, where CLAUDE_PLUGIN_DATA is not set. The
 refused count is kept on this machine, so its row shows even when the server
 is down. The 'refused' row counts unverified mail that was refused on arrival
 (see mash serve). Mail that was verified on arrival and whose sender was
