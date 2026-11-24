@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"regexp"
@@ -15,13 +16,19 @@ import (
 // claudeVersionTimeout bounds `claude --version`.
 const claudeVersionTimeout = 3 * time.Second
 
+// claudeVersionWaitDelay is how long after the timeout kills claude that Output still waits for its output pipe: a
+// child that outlives claude and holds stdout open would otherwise keep the doctor waiting past the timeout.
+const claudeVersionWaitDelay = 1 * time.Second
+
 // The lookup and the run are variables so tests inject fakes: a test never depends on a claude on PATH.
 var (
 	// claudeLookPath is the path of the claude command, or an error when none is on PATH.
 	claudeLookPath = func() (string, error) { return exec.LookPath("claude") }
 	// claudeVersionOutput is what `claude --version` prints.
 	claudeVersionOutput = func(ctx context.Context, path string) (string, error) {
-		out, err := exec.CommandContext(ctx, path, "--version").Output()
+		cmd := exec.CommandContext(ctx, path, "--version")
+		cmd.WaitDelay = claudeVersionWaitDelay
+		out, err := cmd.Output()
 		return string(out), err
 	}
 )
@@ -49,8 +56,12 @@ func parseVersion(s string) (v [3]int, ok bool) {
 func claudeCheck(ctx context.Context) cmds.HealthCheck {
 	c := cmds.HealthCheck{Name: cmds.CheckClaude}
 	path, err := claudeLookPath()
-	if err != nil {
+	if errors.Is(err, exec.ErrNotFound) {
 		c.State, c.Detail = cmds.CheckSkip, "no claude command found"
+		return c
+	}
+	if err != nil {
+		c.State, c.Detail = cmds.CheckWarn, "the version of claude could not be read"
 		return c
 	}
 	rctx, cancel := context.WithTimeout(ctx, claudeVersionTimeout)

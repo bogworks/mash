@@ -372,6 +372,7 @@ func TestForeignCallsGuardInClaudeCheckFile(t *testing.T) {
 		bad              int
 	}{
 		{"the lookup and the version run", `exec.LookPath("claude"); exec.CommandContext(ctx, path, "--version")`, claudeCheckFile, 0},
+		{"the WaitDelay form", `exec.LookPath("claude"); cmd := exec.CommandContext(ctx, path, "--version"); cmd.WaitDelay = 1; cmd.Output()`, claudeCheckFile, 0},
 		{"the plain Command form", `exec.Command(path, "--version")`, claudeCheckFile, 0},
 		{"git as a literal", `exec.CommandContext(ctx, "git", "--version")`, claudeCheckFile, 1},
 		{"a different variable", `exec.CommandContext(ctx, other, "--version")`, claudeCheckFile, 1},
