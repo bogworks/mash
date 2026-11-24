@@ -420,3 +420,148 @@ func TestRetireDirectoryReadFailureSaysNothingWasRevoked(t *testing.T) {
 		t.Errorf("does not end with the not-revoked line: %q", errb)
 	}
 }
+
+func TestArchiveNoReplaceRaceReplacementSurvives(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "n.creds")
+	dest := src + ".deleted"
+	os.WriteFile(src, []byte(markerCreds("eyJold")), 0o600)
+	archiveHook = func() { os.WriteFile(src, []byte(markerCreds("eyJreplacement")), 0o600) }
+	defer func() { archiveHook = nil }()
+	got, err := archiveNoReplace(src, dest)
+	if err != nil || got != dest {
+		t.Fatalf("%q %v", got, err)
+	}
+	if b, _ := os.ReadFile(src); string(b) != markerCreds("eyJreplacement") {
+		t.Errorf("replacement lost or changed: %q", b)
+	}
+	if b, _ := os.ReadFile(got); !strings.Contains(string(b), "eyJold") || strings.Contains(string(b), "eyJreplacement") {
+		t.Errorf("marker %q", b)
+	}
+	if _, err := os.Lstat(src + ".deleting"); !os.IsNotExist(err) {
+		t.Error(".deleting remains")
+	}
+}
+
+func TestArchiveNoReplaceFailureRestoresSource(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "n.creds")
+	dest := src + ".deleted"
+	os.WriteFile(src, []byte(markerCreds("eyJnew")), 0o600)
+	for i := 0; i <= 100; i++ {
+		d := dest
+		if i > 0 {
+			d += "." + strconv.Itoa(i)
+		}
+		os.WriteFile(d, []byte("old"), 0o600)
+	}
+	if _, err := archiveNoReplace(src, dest); err == nil || !strings.Contains(err.Error(), "nothing was moved") {
+		t.Fatalf("err %v", err)
+	}
+	if b, _ := os.ReadFile(src); string(b) != markerCreds("eyJnew") {
+		t.Error("source not restored")
+	}
+	if _, err := os.Lstat(src + ".deleting"); !os.IsNotExist(err) {
+		t.Error(".deleting remains")
+	}
+
+	// A sync failure leaves no marker either.
+	os.Remove(dest)
+	old := syncFile
+	syncFile = func(*os.File) error { return errors.New("disk on fire") }
+	defer func() { syncFile = old }()
+	if _, err := archiveNoReplace(src, dest); err == nil {
+		t.Fatal("expected error")
+	}
+	if _, err := os.Lstat(dest); !os.IsNotExist(err) {
+		t.Error("half marker remains")
+	}
+	if b, _ := os.ReadFile(src); string(b) != markerCreds("eyJnew") {
+		t.Error("source not restored")
+	}
+	if _, err := os.Lstat(src + ".deleting"); !os.IsNotExist(err) {
+		t.Error(".deleting remains")
+	}
+}
+
+func TestArchiveNoReplaceFailureKeepsAReplacementAndDeleting(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "n.creds")
+	dest := src + ".deleted"
+	os.WriteFile(src, []byte(markerCreds("eyJold")), 0o600)
+	archiveHook = func() { os.WriteFile(src, []byte(markerCreds("eyJreplacement")), 0o600) }
+	old := syncFile
+	syncFile = func(*os.File) error { return errors.New("disk on fire") }
+	defer func() { archiveHook = nil; syncFile = old }()
+	if _, err := archiveNoReplace(src, dest); err == nil {
+		t.Fatal("expected error")
+	}
+	if b, _ := os.ReadFile(src); string(b) != markerCreds("eyJreplacement") {
+		t.Errorf("replacement clobbered: %q", b)
+	}
+	if b, _ := os.ReadFile(src + ".deleting"); string(b) != markerCreds("eyJold") {
+		t.Errorf(".deleting lost: %q", b)
+	}
+	if _, err := os.Lstat(dest); !os.IsNotExist(err) {
+		t.Error("half marker remains")
+	}
+}
+
+func TestArchiveNoReplaceArchivesALeftoverDeleting(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "n.creds")
+	dest := src + ".deleted"
+	own := src + ".deleting"
+	os.WriteFile(own, []byte(markerCreds("eyJleft")), 0o600)
+	got, err := archiveNoReplace(src, dest)
+	if err != nil || got != dest {
+		t.Fatalf("%q %v", got, err)
+	}
+	if b, _ := os.ReadFile(got); !strings.Contains(string(b), "eyJleft") {
+		t.Errorf("marker %q", b)
+	}
+	if _, err := os.Lstat(own); !os.IsNotExist(err) {
+		t.Error(".deleting remains")
+	}
+
+	// With src present too: both are archived and src's marker is returned.
+	os.WriteFile(own, []byte(markerCreds("eyJleft2")), 0o600)
+	os.WriteFile(src, []byte(markerCreds("eyJsrc")), 0o600)
+	got, err = archiveNoReplace(src, dest)
+	if err != nil || got != dest+".2" {
+		t.Fatalf("%q %v", got, err)
+	}
+	if b, _ := os.ReadFile(dest + ".1"); !strings.Contains(string(b), "eyJleft2") {
+		t.Errorf("leftover marker %q", b)
+	}
+	if b, _ := os.ReadFile(got); !strings.Contains(string(b), "eyJsrc") {
+		t.Errorf("src marker %q", b)
+	}
+	for _, p := range []string{src, own} {
+		if _, err := os.Lstat(p); !os.IsNotExist(err) {
+			t.Errorf("%s remains", p)
+		}
+	}
+}
+
+func TestArchiveNoReplaceRefusesASymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target")
+	os.WriteFile(target, []byte(markerCreds("eyJt")), 0o600)
+	src := filepath.Join(dir, "n.creds")
+	if err := os.Symlink(target, src); err != nil {
+		t.Skip(err)
+	}
+	if _, err := archiveNoReplace(src, src+".deleted"); err == nil {
+		t.Fatal("expected error")
+	}
+	if fi, err := os.Lstat(src); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("symlink not left in place: %v", err)
+	}
+	if _, err := os.Lstat(src + ".deleting"); !os.IsNotExist(err) {
+		t.Error(".deleting made")
+	}
+	if _, err := os.Lstat(src + ".deleted"); !os.IsNotExist(err) {
+		t.Error("marker made")
+	}
+}

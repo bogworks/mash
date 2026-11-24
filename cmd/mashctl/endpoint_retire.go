@@ -255,16 +255,84 @@ func retireAddress(addr sap.Address, opts retireOpts, env func(string) string, l
 	return res, nil
 }
 
+// archiveHook is a test seam: called by archiveNoReplace right after it has taken ownership of src (renamed it to
+// src+".deleting") and before it reads it, so a test can replace src at that moment. Nil in production.
+var archiveHook func()
+
 // archiveNoReplace sets src aside at dest as a marker that keeps the endpoint's name and its JWT block and no key:
 // a new file, never replacing an existing one (dest, then dest.1 to dest.100), with src's mode bits, written, synced
-// and its directory synced before src is removed. It returns the marker's path. If every name is taken, or the
-// marker cannot be made durable, src is left in place. The seed may remain in disk blocks after src is removed.
+// and its directory synced before the creds file is removed. It returns the marker's path.
+//
+// It first takes ownership of src with an atomic rename to src+".deleting", and reads, stats and removes only that
+// file, never src again, so a creds file put at src meanwhile is neither read nor removed. A ".deleting" file left
+// by an interrupted run is archived first; if src is then missing, that marker's path is returned, otherwise src is
+// archived too and its marker's path is returned (the leftover's marker stays on disk). If every name is taken, or
+// the marker cannot be made durable, the half marker is deleted and src is restored, or left as src+".deleting" if
+// the name src was taken meanwhile (a retry finds it). The seed may remain in disk blocks after removal.
 func archiveNoReplace(src, dest string) (string, error) {
-	fi, err := os.Stat(src)
+	own := src + ".deleting"
+	left := ""
+	if fi, err := os.Lstat(own); err == nil {
+		if !fi.Mode().IsRegular() {
+			return "", fmt.Errorf("%s is not a file", own)
+		}
+		m, err := archiveOwned(src, own, dest)
+		if err != nil {
+			return "", err
+		}
+		left = m
+	}
+	fi, err := os.Lstat(src)
+	if err != nil {
+		if left != "" && errors.Is(err, os.ErrNotExist) {
+			return left, nil
+		}
+		return "", err
+	}
+	if !fi.Mode().IsRegular() {
+		return "", fmt.Errorf("%s is not a regular file", src)
+	}
+	if err := os.Rename(src, own); err != nil {
+		return "", err
+	}
+	if fi, err := os.Lstat(own); err != nil || !fi.Mode().IsRegular() {
+		restoreOwnership(own, src)
+		if err == nil {
+			err = fmt.Errorf("%s is not a regular file", src)
+		}
+		return "", err
+	}
+	if archiveHook != nil {
+		archiveHook()
+	}
+	m, err := archiveOwned(src, own, dest)
+	if err != nil {
+		restoreOwnership(own, src)
+		return "", err
+	}
+	return m, nil
+}
+
+// restoreOwnership puts own back at src, only if src does not exist: a hard link fails if src is taken, so a
+// replacement is never clobbered. If src is taken own stays, for a retry to find.
+func restoreOwnership(own, src string) {
+	if err := os.Link(own, src); err == nil {
+		os.Remove(own)
+	} else if errors.Is(err, os.ErrExist) {
+		return
+	} else if _, err := os.Lstat(src); errors.Is(err, os.ErrNotExist) {
+		os.Rename(own, src)
+	}
+}
+
+// archiveOwned writes the marker for the creds file own (named src in errors) at the first free name of dest, dest.1
+// to dest.100, and removes own once the marker is durable. On failure own is left where it is.
+func archiveOwned(src, own, dest string) (string, error) {
+	fi, err := os.Stat(own)
 	if err != nil {
 		return "", err
 	}
-	raw, err := os.ReadFile(src)
+	raw, err := os.ReadFile(own)
 	if err != nil {
 		return "", err
 	}
@@ -281,7 +349,7 @@ func archiveNoReplace(src, dest string) (string, error) {
 			}
 			return "", err
 		}
-		if err := writeMarkerAndRemove(src, out, marker, fi.Mode().Perm()); err != nil {
+		if err := writeMarkerAndRemove(own, out, marker, fi.Mode().Perm()); err != nil {
 			return "", err
 		}
 		return d, nil
@@ -335,8 +403,9 @@ func syncDir(dir string) error {
 }
 
 // writeMarkerAndRemove writes marker into out, makes it durable (file, then its directory), and only then removes
-// src. On any failure before removal the half-written marker is deleted and src is left in place.
-func writeMarkerAndRemove(src string, out *os.File, marker []byte, mode os.FileMode) error {
+// own, the creds file archiveNoReplace took ownership of. On any failure before removal the half-written marker is
+// deleted and own is left in place.
+func writeMarkerAndRemove(own string, out *os.File, marker []byte, mode os.FileMode) error {
 	fail := func(err error) error {
 		out.Close()
 		os.Remove(out.Name())
@@ -360,7 +429,7 @@ func writeMarkerAndRemove(src string, out *os.File, marker []byte, mode os.FileM
 		os.Remove(out.Name())
 		return err
 	}
-	if err := os.Remove(src); err != nil {
+	if err := os.Remove(own); err != nil {
 		return err
 	}
 	// Best effort: the marker is already durable, and failing here must not make the caller delete it.
