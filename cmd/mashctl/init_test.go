@@ -471,7 +471,7 @@ func TestInitSetupFileErrors(t *testing.T) {
 	}
 	a.vals["frobnicate"] = "x"
 	path := a.setupPath()
-	if out, errb, code := a.run("init", "--config", path); code != 1 || out != "" || errb != "error: "+path+": unknown key frobnicate\n" {
+	if out, errb, code := a.run("init", "--config", path); code != 1 || out != "" || errb != "error: "+path+": 1 key is not one of the setup keys (the name is not shown): the setup keys are servers, ca, owner, admin_creds, system_creds, operator_key, account_key, signing_key\n" || strings.Contains(errb, "frobnicate") {
 		t.Errorf("unknown key: %d %q %q", code, out, errb)
 	}
 	delete(a.vals, "frobnicate")

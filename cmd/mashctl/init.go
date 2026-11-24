@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"sort"
 	"strings"
 	"time"
 
@@ -101,8 +100,9 @@ func loadSetup(path, home string) (setupFile, error) {
 		}
 	}
 	if len(unknown) > 0 {
-		sort.Strings(unknown)
-		return sf, cliframe.Failf("%s: unknown key %s", shown, config.Clean(unknown[0]))
+		// The name is not echoed: a value put where a key belongs could be a secret (#1065).
+		return sf, cliframe.Failf("%s: %s not one of the setup keys (the name is not shown): the setup keys are %s",
+			shown, count(len(unknown), "key")+" "+plural(len(unknown), "is", "are"), strings.Join(setupKeys, ", "))
 	}
 	for _, k := range setupKeys {
 		if _, ok := doc[k]; !ok && !setupOptional[k] {

@@ -1,0 +1,1 @@
+**`mashctl init` no longer prints an unknown key from the setup file.** A secret put by mistake where a key belongs used to be echoed in the error. The error now says how many keys are not setup keys, does not show them, and lists the setup keys.
