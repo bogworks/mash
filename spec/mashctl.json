@@ -496,6 +496,15 @@
         "exit": 1,
         "issue": "#1099",
         "note": "Exit 1. The server row shows the address; the rule \"Both doctors work the same way\" says: \"A server row shows the address as configured.\" (today the row has no address). No hint: the one command that starts a local server is a script that is not on the PATH, and a hint is a command of ours (planner ruling on REQ-006). Wording as mash doctor's row. Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors."
+       },
+       {
+        "case": "--audit-users finds a user mashctl did not issue",
+        "text": "config     ok\nserver     ok    tls://localhost:4222\nsign-in    ok\nstorage    ok\nendpoints  ok    3 records, 3 inboxes\nkeys       FAIL  1 connected user was not issued by mashctl:\n                 UDXU4RCSJNZOIQHZNWXHXORDPRTGNJAHAHFRGZNEEJCPQTT2M7NLCNF4\n\n1 problem.",
+        "stream": "stdout",
+        "exit": 1,
+        "issue": "#1393",
+        "note": "ADR 0168 (REQ-006, Gate 1 ruling): a hint is a command that fixes the problem, or there is no hint. mashctl has no command that revokes a user it did not issue, so there is no hint; the keys FAIL row says what is wrong. v0.5.8 printed 'hint: revoke it with the tool that issued it (mashctl revokes only its own)' on stderr.",
+        "replaces": "--audit-users finds a user mashctl did not issue"
        }
       ]
      }
