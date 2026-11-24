@@ -278,7 +278,7 @@
         "stream": "stderr",
         "exit": 0,
         "text": "(no warning line; the result line is as in \"A signing key is set\")",
-        "note": "PROPOSED, not yet in the specification (REQ-038 acceptance: the case with signing_key prints no warning). A case in round brackets is a description: the conformance test skips it. It is a test, not output; kept because the REQ asks for it."
+        "note": "PROPOSED, not yet in the specification (REQ-038 acceptance: the case with signing_key prints no warning). A case in round brackets is a description: the conformance test skips it. The code PR for #1255 adds the executable check (init with a signing_key writes nothing to stderr) when this case lands."
        },
        {
         "case": "An unknown key in the setup file",
