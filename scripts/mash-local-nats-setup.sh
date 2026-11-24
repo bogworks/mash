@@ -375,6 +375,77 @@ port_holders() {
     if [ "$_n" = 1 ]; then printf 'pid %s' "$_hs"; else printf 'pids %s' "$_hs"; fi
 }
 
+# proc_census PID: every path the process has open or mapped, one per line: its
+# cwd, its fds and the files in its maps (macOS: lsof). Fails when that cannot be
+# read (another user's process) or it shows nothing: unreadable means refuse.
+proc_census() {
+    if [ "$BSD" = 1 ]; then
+        _cen=$(lsof -nP -p "$1" -Fn 2>/dev/null </dev/null) || return 1
+        [ -n "$_cen" ] || return 1
+        printf '%s\n' "$_cen" | sed -n 's/^n\(\/.*\)$/\1/p'
+        return 0
+    fi
+    ls "/proc/$1/fd" >/dev/null 2>&1 || return 1
+    _cwd=$(readlink "/proc/$1/cwd" 2>/dev/null) || return 1
+    [ -n "$_cwd" ] || return 1
+    _maps=$(cat "/proc/$1/maps" 2>/dev/null) || return 1
+    {
+        printf '%s\n' "$_cwd"
+        for _fd in "/proc/$1/fd"/*; do readlink "$_fd" 2>/dev/null || true; done
+        printf '%s\n' "$_maps" | sed -n 's|^[^ ]* [^ ]* [^ ]* [^ ]* [^ ]* *\(/.*\)$|\1|p'
+    } | sed -n 's/ (deleted)$//; /^\//p'
+}
+
+# census_in_dir CENSUS DIR: some path in CENSUS is DIR or under it
+census_in_dir() {
+    while IFS= read -r _cp; do
+        case $_cp in "$2" | "$2"/*) return 0 ;; esac
+    done <<<"$1"
+    return 1
+}
+
+# census_instance PID CENSUS APHYS: the folder of another instance of this script
+# whose server PID is: a folder that is, or is above, a census path and holds
+# mash-setup.json and a server.pid whose first line is PID. Not APHYS, and not
+# above it. Prints it; fails when there is none.
+census_instance() {
+    while IFS= read -r _cp; do
+        _cd=$_cp
+        while [ -n "$_cd" ]; do
+            if [ -f "$_cd/mash-setup.json" ] && [ -f "$_cd/server.pid" ] &&
+                [ "$(head -n 1 "$_cd/server.pid" 2>/dev/null)" = "$1" ] &&
+                [ "$_cd" != "$3" ]; then
+                case $3 in "$_cd"/*) ;; *) printf '%s' "$_cd"; return 0 ;; esac
+            fi
+            _cd=${_cd%/*}
+        done
+    done <<<"$2"
+    return 1
+}
+
+# other_instances: succeeds only when every pid listening on 127.0.0.1:$PORT is a
+# live nats-server whose open files can be read, none of them in or under DIR,
+# and each is the recorded server of another instance's folder. Prints
+# "pid N in FOLDER" for each, joined with ", ". The census is physical, so DIR
+# is made physical to match. Anything else fails: the caller then refuses.
+other_instances() {
+    _aphys=$(cd -P "$DIR" 2>/dev/null && pwd -P) || return 1
+    [ -n "$_aphys" ] || return 1
+    _seen=' '; _out=''
+    for _op in $(listener_pids); do
+        case $_seen in *" $_op "*) continue ;; esac
+        _seen="$_seen$_op "
+        proc_alive "$_op" && proc_is_nats "$_op" || return 1
+        _census=$(proc_census "$_op") || return 1
+        [ -n "$_census" ] || return 1
+        ! census_in_dir "$_census" "$_aphys" || return 1
+        _ob=$(census_instance "$_op" "$_census" "$_aphys") || return 1
+        _out="${_out:+$_out, }pid $_op in $_ob"
+    done
+    [ -n "$_out" ] || return 1
+    printf '%s' "$_out"
+}
+
 port_taken() { # PORT
     listen_addrs "$1" | grep -Eq "[:.]$1\$"
 }
@@ -646,7 +717,10 @@ mode_remove() {
     do_stop
     # a wrapper script around nats-server keeps the port after the recorded pid
     # is gone; deleting DIR then would pull its store out from under it
-    if listening; then
+    # unless every listener is the server of another instance of this script,
+    # shown by its open files (other_instances), never by its arguments
+    _left=''
+    if listening && ! _left=$(other_instances); then
         _who=$(port_holders)
         if [ -n "$_who" ]; then
             _hint="$SELF --remove"
@@ -658,6 +732,7 @@ mode_remove() {
     fi
     rm -rf "$DIR"
     echo "removed $DIR"
+    [ -z "$_left" ] || echo "left running: $_left, port $PORT"
     # mashctl keeps its own folder; this script never touches it. Name the one
     # mashctl uses: $MASH_CONFIG_DIR, else an absolute $XDG_CONFIG_HOME/mash,
     # else $HOME/.config/mash

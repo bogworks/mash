@@ -24,7 +24,7 @@
 #
 # Environment:
 #   MLNT_IMAGES   space-separated image tags (default: debian:stable ubuntu:24.04 ubuntu:26.04)
-#   MLNT_CASES    space-separated case numbers (default: 1 2 ... 27)
+#   MLNT_CASES    space-separated case numbers (default: 1 2 ... 30)
 #   MLNT_MODES    space-separated modes (default: linux darwin)
 #   MLNT_REPORT   receipt file (markdown; default: receipt-<run id>.md in the scratch
 #                 directory, or in ${TMPDIR:-/tmp} when the scratch directory is made here)
@@ -300,7 +300,7 @@ exec ${REALSHA:-/usr/bin/sha256sum} "\$@"
 SH
     cat >"$SHIMS/lsof" <<SH
 #!/bin/sh
-# BSD-ish lsof on top of ss: -n -P -iTCP[:PORT] -sTCP:LISTEN [-a -p PID] [-Fn]
+# BSD-ish lsof on top of ss: -n -P -iTCP[:PORT] -sTCP:LISTEN [-a -p PID] [-Fn]; and -nP -p PID -Fn (census)
 port=''; pid=''; fn=0; and=0; tcp=0; lis=0
 while [ \$# -gt 0 ]; do
     case \$1 in
@@ -315,6 +315,20 @@ while [ \$# -gt 0 ]; do
     esac
     shift
 done
+if [ -n "\$pid" ] && [ \$tcp = 0 ] && [ \$lis = 0 ] && [ \$and = 0 ] && [ \$fn = 1 ]; then
+    # the open-file census: cwd, fds and mapped files from /proc; MLNT_CENSUS=deny fails, =empty prints nothing
+    echo "lsof OK census pid=\$pid" >>"$SHIMLOG"
+    [ "\${MLNT_CENSUS:-}" != deny ] || exit 1
+    [ "\${MLNT_CENSUS:-}" != empty ] || exit 0
+    ls "/proc/\$pid/fd" >/dev/null 2>&1 || exit 1
+    printf 'p%s\nfcwd\nn%s\n' "\$pid" "\$($REALREADLINK "/proc/\$pid/cwd")"
+    for f in /proc/\$pid/fd/*; do
+        l=\$($REALREADLINK "\$f" 2>/dev/null) || continue
+        case \$l in /*) printf 'f0\nn%s\n' "\$l" ;; esac
+    done
+    sed -n 's|^[^ ]* [^ ]* [^ ]* [^ ]* [^ ]* *\(/.*\)\$|fmem\nn\1|p' "/proc/\$pid/maps"
+    exit 0
+fi
 if [ \$tcp = 0 ] || [ \$lis = 0 ] || { [ -n "\$pid" ] && [ \$and = 0 ]; }; then
     echo "lsof REJECT (needs -iTCP -sTCP:LISTEN, and -a with -p)" >>"$SHIMLOG"; exit 1
 fi
@@ -1517,11 +1531,170 @@ print(json.loads(base64.urlsafe_b64decode(p + "=" * (-len(p) % 4)))["sub"])' "$d
     stopdir "$d"
 }
 
+# two_instances A B: make A, stop it, then make B, which takes A's port; sets PA,
+# PB (the port), BPID
+two_instances() {
+    local a=$1 b=$2
+    ROUTE="file"
+    run --owner acme --dir "$a"
+    chk "setup of A ran" rc_is 0
+    PA=$(port_of "$a")
+    stopdir "$a"
+    run --owner acme --dir "$b"
+    chk "setup of B ran" rc_is 0
+    PB=$(port_of "$b")
+    BPID=$(pid_of "$b")
+    chk "control: B took A's port $PA" [ "$PA" = "$PB" ]
+    chk "control: B's server holds the port" waitlisten "$PB"
+}
+
+case28() { # --remove while another instance of this script holds the port (#1305)
+    local a=$H/i28a b=$H/i28b s0 sa
+    two_instances "$a" "$b"
+    s0=$(snap "$b")
+    sa=$(snap "$a")
+    # no server.pid in B: no positive signal, so the old refusal stays
+    mv "$b/server.pid" "$W/b.pid"
+    ptyrun "$a" bash "$SCRIPT" --remove --dir "$a"
+    chk "no server.pid in B: exit 1" rc_is 1
+    chk "no server.pid in B: the old refusal" has "$W/out" "error: port $PA is in use (pid $BPID); nothing was removed"
+    chk "no server.pid in B: A is still there, unchanged" [ "$sa" = "$(snap "$a")" ]
+    # a server.pid naming another pid: still no positive signal
+    echo 1 >"$b/server.pid"
+    ptyrun "$a" bash "$SCRIPT" --remove --dir "$a"
+    chk "server.pid in B names another pid: exit 1" rc_is 1
+    chk "server.pid in B names another pid: nothing removed" has "$W/out" "nothing was removed"
+    chk "server.pid in B names another pid: A is still there" [ "$sa" = "$(snap "$a")" ]
+    cp "$W/b.pid" "$b/server.pid"
+    # the real thing
+    ptyrun "$a" bash "$SCRIPT" --remove --dir "$a"
+    chk "--remove A: exit 0" rc_is 0
+    chk "--remove A: says removed" has "$W/out" "removed $a"
+    chk "--remove A: names the instance left running" has "$W/out" "left running: pid $BPID in $b, port $PA"
+    chk "--remove A: A is gone" absent "$a"
+    chk "B is untouched: server alive" alive "$BPID"
+    chk "B is untouched: still listening" listening "$PA"
+    chk "B is untouched: every file unchanged" [ "$s0" = "$(snap "$b")" ]
+    chk "B still serves" nn "$b" "$PB" pub x y
+    stopdir "$b"
+    chk "B stopped by its recorded pid" gone "$BPID"
+}
+
+# probe_server NAME DIR_A ARGS...: a nats-server started by hand (not by the script),
+# from a folder that is not A, on A's port; PP is its pid
+probe_server() {
+    local n=$1
+    shift
+    mkdir -p "$W/pr"
+    (cd "$W/pr" && exec nats-server "$@" >"$W/pr/$n.log" 2>&1 </dev/null) &
+    PP=$!
+}
+
+probe_refused() { # NAME A: the remove run refused and left A whole
+    local n=$1 a=$2 s0=$3
+    if ! waitlisten "$PA"; then # a probe that did not start proves nothing: stop before --remove
+        bad "[$n] control: the probe is up on $PA"
+        sed 's/^/  > /' "$W/pr/$n.log" 2>/dev/null | head -n 6
+        kill "$PP" 2>/dev/null; wait "$PP" 2>/dev/null
+        return 0
+    fi
+    ok "[$n] control: the probe is up on $PA"
+    chk "[$n] control: it is a nats-server" bash -c '[ "$(readlink /proc/$1/exe | sed "s/ (deleted)//; s|.*/||")" = nats-server ]' _ "$PP"
+    ptyrun "$a" bash "$SCRIPT" --remove --dir "$a"
+    chk "[$n] --remove: exit 1" rc_is 1
+    chk "[$n] --remove: nothing was removed" has "$W/out" "nothing was removed"
+    chk "[$n] --remove: not reported as removed" lacks "$W/out" "removed $a"
+    chk "[$n] --remove: A is there" [ -f "$a/mash-setup.json" ]
+    chk "[$n] --remove: A's files unchanged" [ "$s0" = "$(snap "$a")" ]
+    chk "[$n] --remove: the probe is still alive" alive "$PP"
+    kill "$PP"; wait "$PP" 2>/dev/null
+    chk "[$n] the probe is stopped by its recorded pid" gone "$PP"
+}
+
+case29() { # the four probes from #1287 and a forged signal: a server using A is never an "other instance"
+    local a=$H/i29 n s0 y=$W/pr/Y
+    ROUTE="file"
+    run --owner acme --dir "$a"
+    chk "setup of A ran" rc_is 0
+    PA=$(port_of "$a")
+    stopdir "$a"
+    s0=$(snap "$a")
+    printf 'listen: 127.0.0.1:%s\n' "$PA" >"$W/pr.conf"
+    # 1: double dash options
+    probe_server dd --config "$W/pr.conf" --jetstream --store_dir "$a/jetstream"
+    probe_refused "double dash --config/--store_dir" "$a" "$s0"
+    # 2: a single-quoted key
+    printf "listen: 127.0.0.1:%s\njetstream { 'store_dir': \"%s/jetstream\" }\n" "$PA" "$a" >"$W/pr2.conf"
+    probe_server sq -c "$W/pr2.conf"
+    probe_refused "single-quoted store_dir" "$a" "$s0"
+    # 3: two jetstream blocks on one line
+    printf 'listen: 127.0.0.1:%s\njetstream { store_dir: "%s/x" }, jetstream { store_dir: "%s/jetstream" }\n' "$PA" "$W/pr" "$a" >"$W/pr3.conf"
+    probe_server two -c "$W/pr3.conf"
+    probe_refused "two jetstream blocks on one line" "$a" "$s0"
+    # 4: the store reached through a symlink Y/jetstream -> A
+    mkdir -p "$y"
+    ln -s "$a" "$y/jetstream"
+    probe_server sl --jetstream --store_dir "$y" -a 127.0.0.1 -p "$PA"
+    probe_refused "store through a symlink into A" "$a" "$s0"
+    # 5: the same, with the pid file of another instance forged in its cwd and a stream
+    # so that the server holds files in A open: the open-file check alone must refuse
+    mkdir -p "$W/forge" "$W/pr"
+    cp "$a/mash-setup.json" "$W/forge/mash-setup.json"
+    (cd "$W/forge" && exec nats-server --jetstream --store_dir "$y" -a 127.0.0.1 -p "$PA" >"$W/pr/forge.log" 2>&1 </dev/null) &
+    PP=$!
+    echo "$PP" >"$W/forge/server.pid"
+    waitlisten "$PA"
+    XDG_CONFIG_HOME="$W/xdgc" nats --server "nats://127.0.0.1:$PA" --timeout 5s stream add F --subjects 'f.>' --storage file --defaults >"$W/stadd" 2>&1 || true
+    XDG_CONFIG_HOME="$W/xdgc" nats --server "nats://127.0.0.1:$PA" --timeout 5s pub f.a hello >/dev/null 2>&1 || true
+    chk "control: the forged server has a file open in A" bash -c 'for f in /proc/$1/fd/*; do case $(readlink "$f") in "$2"/*) exit 0;; esac; done; exit 1' _ "$PP" "$a"
+    s0=$(snap "$a")
+    probe_refused "forged signal, files open in A" "$a" "$s0"
+}
+
+case30() { # an unreadable census refuses (another user's process, or no permission)
+    local a=$H/i30a b=$H/i30b d=$W/cen mode s0
+    two_instances "$a" "$b"
+    mkdir -p "$d"
+    s0=$(snap "$a")
+    refuse_with() { # LABEL ENV...: run --remove with these env settings; it must refuse
+        local l=$1
+        shift
+        ptyrun "$a" env "$@" bash "$SCRIPT" --remove --dir "$a"
+        chk "[$l] --remove: exit 1" rc_is 1
+        chk "[$l] --remove: the old refusal, naming the pid" has "$W/out" "error: port $PA is in use (pid $BPID); nothing was removed"
+        chk "[$l] --remove: A is there, unchanged" [ "$s0" = "$(snap "$a")" ]
+        chk "[$l] --remove: B is alive" alive "$BPID"
+    }
+    if [ "$SIM" = darwin ]; then # the census is lsof -nP -p PID -Fn
+        refuse_with "lsof fails" MLNT_CENSUS=deny
+        refuse_with "lsof prints nothing" MLNT_CENSUS=empty
+    else
+        local real_ls real_rl
+        real_ls=$(command -v ls); real_rl=$(command -v readlink)
+        # ls of /proc/PID/fd fails, as for another user's process
+        printf '#!/bin/sh\ncase "$*" in /proc/*/fd) echo "ls: cannot open directory: Permission denied" >&2; exit 2;; esac\nexec %s "$@"\n' "$real_ls" >"$d/ls"
+        # readlink of /proc/PID/cwd fails
+        printf '#!/bin/sh\ncase "$*" in /proc/*/cwd) echo "readlink: Permission denied" >&2; exit 1;; esac\nexec %s "$@"\n' "$real_rl" >"$d/readlink"
+        chmod 755 "$d/ls" "$d/readlink"
+        mkdir -p "$d/p1" "$d/p2"
+        ln -s "$d/ls" "$d/p1/ls"
+        ln -s "$d/readlink" "$d/p2/readlink"
+        refuse_with "fd list unreadable" "PATH=$d/p1:$PATH"
+        refuse_with "cwd unreadable" "PATH=$d/p2:$PATH"
+    fi
+    # control: with the census readable the same run removes A
+    ptyrun "$a" bash "$SCRIPT" --remove --dir "$a"
+    chk "control: census readable: exit 0" rc_is 0
+    chk "control: census readable: A removed" absent "$a"
+    chk "control: B alive" alive "$BPID"
+    stopdir "$b"
+}
+
 run_case() {
     case $CASE in
     15) case15 ;; 16) case16 ;; 17) case17 ;; 18) case18 ;; 19) case19 ;; 20) case20 ;; 21) case21 ;;
     1) case1 ;; 2) case2 ;; 3) case3 ;; 4) case4 ;; 5) case5 ;; 6) case6 ;; 7) case7 ;;
-    8) case8 ;; 9) case9 ;; 10) case10 ;; 11) case11 ;; 12) case12 ;; 13) case13 ;; 14) case14 ;; 22) case22 ;; 23) case23 ;; 24) case24 ;; 25) case25 ;; 26) case26 ;; 27) case27 ;;
+    8) case8 ;; 9) case9 ;; 10) case10 ;; 11) case11 ;; 12) case12 ;; 13) case13 ;; 14) case14 ;; 22) case22 ;; 23) case23 ;; 24) case24 ;; 25) case25 ;; 26) case26 ;; 27) case27 ;; 28) case28 ;; 29) case29 ;; 30) case30 ;;
     *) echo "FAIL: c$CASE: no such case" ;;
     esac
 }
@@ -1556,7 +1729,7 @@ else
     MADE_SCRATCH=1
 fi
 IMAGES=${MLNT_IMAGES:-"debian:stable ubuntu:24.04 ubuntu:26.04"}
-CASES=${MLNT_CASES:-"1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27"}
+CASES=${MLNT_CASES:-"1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30"}
 MODES=${MLNT_MODES:-"linux darwin"}
 NCV=${MLNT_NATSCLI:-0.5.2}
 # sha256 of https://github.com/nats-io/natscli/releases/download/v0.5.2/nats-0.5.2-linux-amd64.zip,
