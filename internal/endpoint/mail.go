@@ -421,13 +421,6 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 			}
 			return
 		}
-		if trust != sap.TrustVerified && e.cfg.AcceptUnverified {
-			// Delivered unverified: recorded before it is queued or acked, so a shell shows it with its label whatever
-			// its own setting. A failure to record leaves the shell on its own setting.
-			if err := e.recordDelivered(ref.Seq); err != nil {
-				e.log.Printf("#%s: delivery of unverified mail not recorded: %v", FormatMsgRef(ref), err)
-			}
-		}
 		var key string
 		if trust == sap.TrustVerified || trust == sap.TrustUnknownSigner || trust == sap.TrustStale {
 			key = h.User + "\x00" + h.Nonce
@@ -512,6 +505,7 @@ func (e *Endpoint) deliverLoop(deliver Deliverer, queue <-chan pending, quit <-c
 		if batch = e.dropUnleased(batch); len(batch) == 0 {
 			continue
 		}
+		e.recordDeliveredBatch(batch) // before anything is shown or acked, and only for mail this serve still holds the lease for
 		if e.noChannel && e.spool == nil {
 			hold(batch) // no spool and no channel: mail stays in the inbox, unacked
 			continue
