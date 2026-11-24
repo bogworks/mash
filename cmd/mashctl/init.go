@@ -646,11 +646,11 @@ func finishInit(stdout io.Writer, jsonOut, dry, changed bool, sf setupFile, firs
 	case dry:
 		fmt.Fprintf(stdout, "Would initialize mash on %s for owner %s\n", first, sf.owner)
 	default:
-		line := fmt.Sprintf("Initialized mash on %s for owner %s", first, sf.owner)
+		fmt.Fprintf(stdout, "Initialized mash on %s for owner %s\n", first, sf.owner)
 		if signPub != "" {
-			line += "; endpoint users are signed with signing key " + signPub
+			// Its own line: the 56-character public key would take the first past 80 columns.
+			fmt.Fprintln(stdout, "Signing key: "+signPub)
 		}
-		fmt.Fprintln(stdout, line)
 	}
 	if dry {
 		fmt.Fprintln(stdout, "Nothing was changed.")

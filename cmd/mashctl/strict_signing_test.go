@@ -216,8 +216,16 @@ func TestInitSigningKeyImport(t *testing.T) {
 	a.vals["signing_key"] = seedFile(t, filepath.Join(a.root, "in"), "signing.seed", sk)
 	if out, errb, code := a.init(); code != 0 {
 		t.Fatalf("init: %d\n%s\n%s", code, out, errb)
-	} else if !strings.Contains(out, "; endpoint users are signed with signing key "+skPub) {
-		t.Fatalf("init line does not name the signing key: %q", out)
+	} else if !strings.Contains(out, "\nSigning key: "+skPub+"\n") {
+		t.Fatalf("init output does not name the signing key on its own line: %q", out)
+	} else if strings.Contains(out, "signed with signing key") {
+		t.Fatalf("init still puts the key on the first line: %q", out)
+	} else {
+		for _, l := range strings.Split(out, "\n") {
+			if strings.HasPrefix(l, "Signing key: ") && len(l) > 80 {
+				t.Fatalf("the signing key line is %d columns: %q", len(l), l)
+			}
+		}
 	}
 	stored := filepath.Join(a.env["MASH_KEYS_DIR"], "signing.nk")
 	if mustPub(t, stored) != skPub {

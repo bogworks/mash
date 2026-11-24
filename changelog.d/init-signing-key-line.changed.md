@@ -1,0 +1,1 @@
+**`mashctl init` prints the signing key on a line of its own.** When you set `signing_key`, the result used to put the key's 56-character public key on the first line, which ran past 80 columns. It is now a second line, `Signing key: <public key>`.
