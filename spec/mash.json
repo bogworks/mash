@@ -385,14 +385,6 @@
         "exit": 1,
         "issue": "#1142",
         "note": "Contract 0.6.0 SDK adoption r8, TO-8: the form for any refusal by the SDK that mash cannot tell apart. The SDK's own text is never printed. Promoted with W."
-       },
-       {
-        "case": "No subject can be built for the address (TO-9)",
-        "text": "error: not sent: no subject can be built for acme.demo.bob",
-        "stream": "stderr",
-        "exit": 1,
-        "issue": "#1142",
-        "note": "Contract 0.6.0 SDK adoption r8, TO-9 (REQ-004, S3). The SDK builder refuses an address after mash's own parser accepted it; reachable only where the two disagree. No hint: no command shows more. A typed bad address never reaches it: it is refused first as a usage error (the `An address in another form` case). The MCP `send` tool returns the same words as its error. Promoted with S3."
        }
       ]
      },
@@ -2070,19 +2062,6 @@
         "text": "error: mash serve is started by an agent host, not by hand\nhint: mash serve --help",
         "stream": "stderr",
         "exit": 2
-       }
-      ]
-     },
-     {
-      "name": "x-output-next",
-      "value": [
-       {
-        "case": "No subject can be built for the endpoint's own address (TO-9)",
-        "text": "error: the endpoint could not start: no subject can be built for acme.demo.alice",
-        "stream": "stderr",
-        "exit": 1,
-        "issue": "#1142",
-        "note": "Contract 0.6.0 SDK adoption r8, TO-9 (REQ-004, S3): the endpoint start, naming its own address. No hint. Reachable only where mash's parser and the SDK builder disagree. Promoted with S3."
        }
       ]
      },
