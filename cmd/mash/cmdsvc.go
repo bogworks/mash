@@ -442,10 +442,18 @@ type mcpSvc struct {
 }
 
 // frame words a service error as the shell does (framedIn): a refused sign-in is "cannot sign in", or the deleted-endpoint
-// sentence once the creds file was set aside, and reaches the client as a tool error. Other errors pass through.
+// sentence once the creds file was set aside, and reaches the client as a tool error. Other errors pass through, except
+// that any failing call on an endpoint deleted during the session (the creds file gone and set aside, so no reuse of
+// the path) says it was deleted: the revoked connection's reconnect gives no auth error, only timeouts (#1396).
 func (s *mcpSvc) frame(ep *endpoint.Endpoint, err error) error {
+	if err == nil {
+		return nil
+	}
 	if f := framedIn(s.cfg, ep.Address().String(), err); f != err {
 		return cmdcore.ToolError(f)
+	}
+	if creds := credsPath(s.cfg); creds != "" && credsAbsent(creds) && setAsideDeleted(creds) {
+		return cmdcore.ToolError(cmdcore.EndpointDeleted(ep.Address().String()))
 	}
 	return err
 }
