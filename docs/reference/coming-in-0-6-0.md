@@ -7,7 +7,6 @@ What changes in 0.6.0. None of it is in 0.5.8.
 ## Changes
 
 - mash prompt becomes mash sap prompt. And the MCP tool reply moves with it.
-  0.5.6 prints a note on every use.
 - A mesh holds many owners. mashctl owner create, list and delete arrive. Mail
   between owners becomes a designed case, under policy.
 - Policy. Who may send to whom. mash ships open; narrowing is a choice.

@@ -46,19 +46,11 @@ Stream: stdout. Exit code: 0.
 (what it prints today; unchanged in 0.5.6)
 ```
 
-### Added: every use, on stderr
-
-Stream: stderr. Exit code: 0.
-
-```text
-note: 'mash prompt' moves to 'mash sap prompt' in 0.6.0
-```
-
 ## MCP tool
 
 [`reply`](mcp-reply.md)
 
 ## What it replaces
 
-Unchanged from 0.5.5, except for the note on stderr about the move to mash sap
-prompt. Only a verified sender that is a known endpoint is accepted.
+Unchanged from 0.5.5. Only a verified sender that is a known endpoint is
+accepted.
