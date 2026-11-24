@@ -1,7 +1,7 @@
 ---
 status: accepted
 date: 2026-11-24
-decision-makers: Randy Bias (mash maintainer; contract 0.5.9 REQ-014), mash-lead (the refusal when the commit cannot be read)
+decision-makers: Randy Bias (mash maintainer; contract 0.5.9 REQ-014)
 ---
 
 # install.sh pins the attestation to the tag's commit, and installs nothing when it cannot read it
@@ -38,6 +38,19 @@ The manual checks in `docs/install.md` and `docs/security/verify-your-download.m
 * Good, because a failed read installs nothing, as a failed check does.
 * Bad, because an install with a `gh` that is not logged in also depends on the public API's rate limit; the hint names the command that lifts it.
 
+## Pros and Cons of the Options
+
+### Verify without the commit pin and say so
+
+* Good, because an install still completes when GitHub's API cannot be read.
+* Bad, because it accepts an attestation from any commit at the tag ref, which is the gap REQ-014 closes.
+* Bad, because a failed read would pass silently in a script that pipes the output away.
+
+### Install nothing and exit 1
+
+* Good, because the installer never installs on a weaker check than the one it documents.
+* Bad, because a rate-limited or offline API stops an install that would have passed; the hint, or a later retry, clears it.
+
 ## More Information
 
-Issue #1352; contract 0.5.9 revision 6, REQ-014. This extends ADR 0150's step on the installer's check; the rest of ADR 0150 stands.
+Issue #1352; contract 0.5.9 revision 6, REQ-014. The refusal when the commit cannot be read was ruled in the review of pull request #1454. This extends ADR 0150's step on the installer's check; the rest of ADR 0150 stands.
