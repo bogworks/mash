@@ -220,8 +220,12 @@ main() {
                         -H 'Accept: application/vnd.github.sha' \
                         "${MASH_API_BASE:-https://api.github.com}/repos/$REPO/commits/$tag" 2>/dev/null) || commit=
                 fi
-                [[ $commit =~ ^[0-9a-f]{40}$ ]] ||
-                    die "could not read the commit of $REPO $tag; nothing was installed"
+                if ! [[ $commit =~ ^[0-9a-f]{40}$ ]]; then
+                    # A gh that is not logged in falls back to the public API (60 an hour per address).
+                    echo "error: could not read the commit of $REPO $tag; nothing was installed" >&2
+                    echo "hint: gh auth login, then run the install again" >&2
+                    exit 1
+                fi
                 (cd "$WORKDIR" && gh attestation verify "$sumsname" -R "$REPO" --bundle mash.intoto.jsonl \
                     --signer-workflow "$REPO/.github/workflows/release.yml" --source-ref "refs/tags/$tag" \
                     --source-digest "$commit" >/dev/null) ||

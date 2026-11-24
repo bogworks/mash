@@ -67,7 +67,7 @@
    "id": "installer-commit-unread",
    "where": "install.sh",
    "case": "The tag's commit cannot be read",
-   "text": "error: could not read the commit of bogworks/mash v0.5.9; nothing was installed",
+   "text": "error: could not read the commit of bogworks/mash v0.5.9; nothing was installed\nhint: gh auth login, then run the install again",
    "stream": "stderr",
    "exit": 1,
    "issue": "#1352",

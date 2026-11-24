@@ -996,7 +996,7 @@ func TestInstallSh_withGhNotLoggedInTheCommitComesFromThePublicAPI(t *testing.T)
 }
 
 func TestInstallSh_refusesWhenTheTagsCommitCannotBeRead(t *testing.T) {
-	const refusal = "error: could not read the commit of bogworks/mash v0.5.6; nothing was installed\n"
+	const refusal = "error: could not read the commit of bogworks/mash v0.5.6; nothing was installed\nhint: gh auth login, then run the install again\n"
 	rel, _, _ := fakeRelease(t)
 	log := filepath.Join(t.TempDir(), "gh.log")
 	tools := installTools(t, map[string]string{"gh": ghStub})
