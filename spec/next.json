@@ -4,6 +4,66 @@
  },
  "items": [
   {
+   "id": "installer-unauth-gh-not-found",
+   "where": "install.sh",
+   "case": "Not authenticated: gh not found",
+   "text": "warning: gh not found: checked checksums only, not verified",
+   "stream": "stderr",
+   "exit": 0,
+   "issue": "#1274",
+   "note": "The installer still installs (checksums only); one line on stderr. Stays in spec/next.json until the spec is closed for 0.5.9: the installer has no x-output home."
+  },
+  {
+   "id": "installer-unauth-gh-did-not-run",
+   "where": "install.sh",
+   "case": "Not authenticated: gh did not run",
+   "text": "warning: gh did not run: checked checksums only, not verified",
+   "stream": "stderr",
+   "exit": 0,
+   "issue": "#1274",
+   "note": "The installer still installs (checksums only); one line on stderr. Stays in spec/next.json until the spec is closed for 0.5.9: the installer has no x-output home."
+  },
+  {
+   "id": "installer-unauth-gh-version-unreadable",
+   "where": "install.sh",
+   "case": "Not authenticated: gh's version could not be read",
+   "text": "warning: gh version unreadable: checked checksums only, not verified",
+   "stream": "stderr",
+   "exit": 0,
+   "issue": "#1274",
+   "note": "The installer still installs (checksums only); one line on stderr. Stays in spec/next.json until the spec is closed for 0.5.9: the installer has no x-output home."
+  },
+  {
+   "id": "installer-unauth-gh-too-old",
+   "where": "install.sh",
+   "case": "Not authenticated: gh is below 2.102.0",
+   "text": "warning: gh is below 2.102.0: checked checksums only, not verified",
+   "stream": "stderr",
+   "exit": 0,
+   "issue": "#1274",
+   "note": "The installer still installs (checksums only); one line on stderr. Stays in spec/next.json until the spec is closed for 0.5.9: the installer has no x-output home."
+  },
+  {
+   "id": "installer-verified",
+   "where": "install.sh",
+   "case": "Verified",
+   "text": "Verified the release attestation for bogworks/mash v0.5.9",
+   "stream": "stdout",
+   "exit": 0,
+   "issue": "#1152",
+   "note": "One line on stdout. The repo (MASH_REPO, default bogworks/mash) and the tag vary with the release installed. Stays in spec/next.json until the spec is closed for 0.5.9: the installer has no x-output home."
+  },
+  {
+   "id": "installer-verify-failed",
+   "where": "install.sh",
+   "case": "A failed verification",
+   "text": "error: the release failed verification; nothing was installed",
+   "stream": "stderr",
+   "exit": 1,
+   "issue": "#1274",
+   "note": "One line on stderr; nothing is installed. Stays in spec/next.json until the spec is closed for 0.5.9: the installer has no x-output home."
+  },
+  {
    "id": "setup-nats-server-sbin",
    "where": "setup script",
    "case": "nats-server found off PATH",

@@ -170,7 +170,7 @@ func TestRealSpec(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, w := range []string{"setup-nats-server-sbin [setup script]", "rule: Both doctors work the same way", "Both doctors work the same way"} {
+	for _, w := range []string{"installer-verified [install.sh]", "rule: Both doctors work the same way", "Both doctors work the same way"} {
 		if !strings.Contains(out, w) {
 			t.Errorf("missing %q in\n%s", w, out)
 		}
