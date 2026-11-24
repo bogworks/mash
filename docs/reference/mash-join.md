@@ -4,7 +4,7 @@ Generated from spec/*.json by go run ./scripts/refgen. Do not edit.
 
 Install an endpoint's credentials on this machine from a join file.
 
-Release: 0.5.8. Group: Setup.
+Release: 0.5.9. Group: Setup.
 
 ## Usage
 

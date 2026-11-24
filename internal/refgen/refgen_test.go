@@ -547,3 +547,26 @@ func TestMCPStructuredDetailRendered(t *testing.T) {
 		t.Errorf("mcp-send.md has a detail section though its structured_detail is null")
 	}
 }
+
+// A command at the close release is documented beside the current ones, and a
+// release that is neither current, close nor next is refused.
+func TestCloseReleaseRendersAndUnknownFails(t *testing.T) {
+	dir := patchedFixture(t, "mash.json", `{"name":"x-release","value":"0.6.0"}`, `{"name":"x-release","value":"`+closeRelease+`"}`)
+	pages, err := Generate(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p := string(pages["mash-future.md"]); !strings.Contains(p, "Release: "+closeRelease+".") {
+		t.Errorf("mash-future.md lacks its release:\n%s", p)
+	}
+	if strings.Contains(string(pages["coming-in-0-6-0.md"]), "`mash future`") {
+		t.Error("a close-release command is listed as coming")
+	}
+	if !strings.Contains(string(pages["mash.md"]), "[`mash future`]") {
+		t.Error("the index lacks a close-release command")
+	}
+	bad := patchedFixture(t, "mash.json", `{"name":"x-release","value":"0.6.0"}`, `{"name":"x-release","value":"0.5.10"}`)
+	if _, err := Generate(bad); err == nil || !strings.Contains(err.Error(), `release "0.5.10"`) {
+		t.Errorf("unknown release: err = %v", err)
+	}
+}

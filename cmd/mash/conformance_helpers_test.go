@@ -126,8 +126,11 @@ func confWalk(root confCmd, f func(path string, c confCmd)) {
 	}
 }
 
-// confTrack names the releases the conformance test holds the build to: the commands of 0.5.8. sap is 0.6.0.
-func confTrack(c confCmd) bool { return c.meta("x-release") == "0.5.8" }
+// confTrack names the releases the conformance test holds the build to: the commands of 0.5.8, and the ones that closed in 0.5.9 (join, inbox). sap is 0.6.0.
+func confTrack(c confCmd) bool {
+	r := c.meta("x-release")
+	return r == "0.5.8" || r == "0.5.9"
+}
 
 func confFlat(s string) string { return strings.Join(strings.Fields(s), " ") }
 

@@ -13,8 +13,12 @@ import (
 const (
 	banner      = "Generated from spec/*.json by go run ./scripts/refgen. Do not edit."
 	nextRelease = "0.6.0"
-	comingPage  = "coming-in-0-6-0.md"
-	width       = 78
+	// closeRelease is the one release after the current one that a command may
+	// already carry: a command whose behaviour closed in it is documented with
+	// the rest, and its page says "Release: 0.5.9".
+	closeRelease = "0.5.9"
+	comingPage   = "coming-in-0-6-0.md"
+	width        = 78
 )
 
 type metaSpec struct {
@@ -270,12 +274,12 @@ func (g *gen) run() (map[string][]byte, error) {
 	g.mcpHas = map[string]bool{}
 	for _, t := range g.mcp.Tools {
 		switch t.Release {
-		case g.current:
+		case g.current, closeRelease:
 			g.mcpHas[t.Name] = true
 		case nextRelease:
 			g.comingT = append(g.comingT, t)
 		default:
-			return nil, fmt.Errorf("mcp tool %s: release %q is neither %s nor %s", t.Name, t.Release, g.current, nextRelease)
+			return nil, fmt.Errorf("mcp tool %s: release %q is neither %s, %s nor %s", t.Name, t.Release, g.current, closeRelease, nextRelease)
 		}
 	}
 	for _, root := range g.tools {
@@ -300,7 +304,7 @@ func (g *gen) run() (map[string][]byte, error) {
 // the commands that are planned for the next one.
 func (g *gen) tree(n *node) error {
 	switch n.release {
-	case g.current:
+	case g.current, closeRelease:
 		if !n.root {
 			g.cmdPage(n)
 		}
@@ -312,7 +316,7 @@ func (g *gen) tree(n *node) error {
 	case nextRelease:
 		g.coming = append(g.coming, n)
 	default:
-		return fmt.Errorf("%s: release %q is neither %s nor %s", n.full(), n.release, g.current, nextRelease)
+		return fmt.Errorf("%s: release %q is neither %s, %s nor %s", n.full(), n.release, g.current, closeRelease, nextRelease)
 	}
 	return nil
 }
@@ -748,16 +752,20 @@ func (g *gen) cmdPage(n *node) {
 	g.body(b, n, 2)
 	if len(n.subs) > 0 {
 		b.heading(2, "Commands")
-		g.subList(b, n, g.current)
+		g.subList(b, n)
 	}
 	g.put(n.page(), b)
 }
 
-// subList lists the subcommands of n that belong to release rel.
-func (g *gen) subList(b *bld, n *node, rel string) {
+// released reports whether release r is documented: the current release, or
+// closeRelease.
+func (g *gen) released(r string) bool { return r == g.current || r == closeRelease }
+
+// subList lists the subcommands of n that are released.
+func (g *gen) subList(b *bld, n *node) {
 	var rows [][]string
 	for _, s := range n.subs {
-		if s.release != rel {
+		if !g.released(s.release) {
 			continue
 		}
 		rows = append(rows, []string{"[" + code(s.full()) + "](" + s.page() + ")", esc(s.Description)})
@@ -801,7 +809,7 @@ func (g *gen) toolIndex(n *node) {
 	var groups []string
 	byGroup := map[string][]*node{}
 	for _, s := range n.subs {
-		if s.release != g.current {
+		if !g.released(s.release) {
 			continue
 		}
 		grp := g.metaStr(s, "x-group")
@@ -865,7 +873,7 @@ func (g *gen) mcpPages() {
 	rows = append(rows, []string{"[server](mcp-server.md)", "How the MCP server is started and which protocol revisions it speaks."})
 	var tools []mcpTool
 	for _, t := range g.mcp.Tools {
-		if t.Release == g.current {
+		if g.released(t.Release) {
 			tools = append(tools, t)
 		}
 	}
@@ -1056,7 +1064,7 @@ func (g *gen) readme() {
 
 func (g *gen) readmeTree(b *bld, n *node, depth int) {
 	for _, s := range n.subs {
-		if s.release != g.current {
+		if !g.released(s.release) {
 			continue
 		}
 		ind := strings.Repeat("  ", depth)

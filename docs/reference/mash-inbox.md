@@ -4,7 +4,7 @@ Generated from spec/*.json by go run ./scripts/refgen. Do not edit.
 
 List the messages this endpoint has received.
 
-Release: 0.5.8. Group: Everyday.
+Release: 0.5.9. Group: Everyday.
 
 ## Usage
 
