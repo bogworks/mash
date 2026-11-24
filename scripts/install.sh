@@ -7,7 +7,8 @@
 # mash and mashctl and the release's SHA256SUMS, checks each binary against
 # them, and puts the two binaries in ~/.local/bin (MASH_INSTALL_DIR names
 # another folder). It asks nothing and needs no sudo. If gh is installed it
-# first verifies SHA256SUMS against the release's attestation.
+# first verifies SHA256SUMS against the release's attestation, checked against
+# the commit the release tag points to.
 #
 # Environment:
 #   MASH_INSTALL_DIR   the folder to install into (default ~/.local/bin)
@@ -17,6 +18,8 @@
 #   MASH_REPO          the GitHub repository (default bogworks/mash): used for
 #                      the download address, the tag lookup and the attestation
 #                      check (-R and the release workflow's signer)
+#   MASH_API_BASE      where the tag's commit is looked up when gh cannot
+#                      (default https://api.github.com)
 #   MASH_RELEASE_BASE  where the release files are (an https:// address, a
 #                      mirror); needs MASH_VERSION, which names the tag the
 #                      attestation is checked against
@@ -111,7 +114,7 @@ unsafe_path() {
 }
 
 main() {
-    local os arch uname_s uname_m dir real tag sumsname name want got tmp line shown resolved ghout ghline ghver ghmajor ghminor ghpatch ghpre
+    local os arch uname_s uname_m dir real tag sumsname name want got tmp line shown resolved ghout ghline ghver ghmajor ghminor ghpatch ghpre commit
     local -a names staged_new
 
     [[ $REPO =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || die "MASH_REPO $REPO is not owner/name"
@@ -208,8 +211,26 @@ main() {
                 echo "warning: gh is below 2.102.0: checked checksums only, not verified" >&2
             else
                 fetch mash.intoto.jsonl
+                # The commit the tag points to (gh resolves an annotated tag too), so
+                # a release attested from another commit is refused. gh may not be
+                # logged in: then ask the public API with curl.
+                commit=$(gh api "repos/$REPO/commits/$tag" --jq .sha 2>/dev/null) || commit=
+                if ! [[ $commit =~ ^[0-9a-f]{40}$ ]]; then
+                    commit=$(curl -fsSL --proto "$PROTO" --proto-redir '=https' --tlsv1.2 \
+                        -H 'Accept: application/vnd.github.sha' \
+                        "${MASH_API_BASE:-https://api.github.com}/repos/$REPO/commits/$tag" 2>/dev/null) || commit=
+                fi
+                if ! [[ $commit =~ ^[0-9a-f]{40}$ ]]; then
+                    # A gh that is not logged in falls back to the public API (60 an hour per address).
+                    echo "error: could not read the commit of $REPO $tag; nothing was installed" >&2
+                    if ! gh auth status >/dev/null 2>&1; then
+                        echo "hint: gh auth login, then run the install again" >&2
+                    fi
+                    exit 1
+                fi
                 (cd "$WORKDIR" && gh attestation verify "$sumsname" -R "$REPO" --bundle mash.intoto.jsonl \
-                    --signer-workflow "$REPO/.github/workflows/release.yml" --source-ref "refs/tags/$tag" >/dev/null) ||
+                    --signer-workflow "$REPO/.github/workflows/release.yml" --source-ref "refs/tags/$tag" \
+                    --source-digest "$commit" >/dev/null) ||
                     die "the release failed verification; nothing was installed"
                 echo "Verified the release attestation for $REPO $tag"
             fi
