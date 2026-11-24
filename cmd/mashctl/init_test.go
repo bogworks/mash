@@ -479,6 +479,11 @@ func TestInitSetupFileErrors(t *testing.T) {
 	if _, errb, code := a.init(); code != 1 || !strings.Contains(errb, "owner is not a valid name") {
 		t.Errorf("bad owner: %d %q", code, errb)
 	}
+	// 32 characters is the longest owner the admin connection takes (ADR 0145); 33 is refused here, not later (#1172)
+	a.vals["owner"] = strings.Repeat("a", 33)
+	if _, errb, code := a.init(); code != 1 || !strings.Contains(errb, "owner is not a valid name") || !strings.Contains(errb, "up to 32 characters") {
+		t.Errorf("33-character owner: %d %q", code, errb)
+	}
 	a.vals["owner"] = "alice"
 	if _, errb, code := a.run("init", "--config", filepath.Join(a.root, "in", "nope.yaml")); code != 1 || !strings.HasPrefix(errb, "error: cannot read ") {
 		t.Errorf("no file: %d %q", code, errb)
