@@ -79,4 +79,9 @@
 // fresh, seen or refused-full (the SDK caps are 100,000 entries in all and 10,000 for one sender), which sap.NonceSet's
 // bool cannot; a correctly signed sender past a cap is OverNonceCap with its own reason, ReasonNonceCap, and is never
 // told that a signed header is required.
+//
+// The set's window is at least 2*LiveSkew (60 s), not LiveSkew. A header verifies from ts-LiveSkew to ts+LiveSkew, and
+// the nonce is recorded at receipt, which can be as early as ts-LiveSkew; the pair must be held until the header can no
+// longer verify, 2*LiveSkew after the first receipt. With a window of LiveSkew a header 29 s in the future is admitted,
+// forgotten 30 s later while its ts is still good, and admitted again. NewNonceSet raises a smaller window to the floor.
 package sapsdk

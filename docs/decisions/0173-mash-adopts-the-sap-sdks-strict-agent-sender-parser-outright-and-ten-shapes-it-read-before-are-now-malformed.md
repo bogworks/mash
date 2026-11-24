@@ -48,13 +48,23 @@ Chosen: adopt the strict parser outright. The SDK `identity` package parses `Age
 * A live prompt with a malformed header is refused with `400` and today's text, `malformed Agent-Sender header`. A live prompt past the nonce caps is refused with `401` and its own reason text, `too many recent prompts: try again shortly`; the status code does not change, and the reply no longer says a signed header is required to a sender that was correctly signed.
 * The doctor refused-mail row changes its wording from "no unverified mail was refused" to "no mail was refused", and its state is `ok` whatever it counts. This is a spec change under [ADR 0164](0164-planned-output-is-written-in-x-output-next-and-spec-next-json-and-rendered-as-the-gate-1-demo.md): the new wording is written in `x-output-next` and `spec/next.json` first, and the old strings are replaced only when the switch-on release's code lands (stage W).
 
-An eleventh shape is a contract amendment, not an ADR choice. A shape outside the ten is added by amending REQ-005, and then this record is superseded or amended; it is not added by editing a list in a pull request.
+* The SDK's verdicts on the following inputs are accepted as they are. The planner ruled this: it is a contract amendment after the ten shapes (REQ-005, r8), and it is a decision here, not a drift to be tested away.
+  * `"v":1.0` and `"v":1e0` now verify; mash's parser read them as an unknown `v`, which is absent.
+  * Invalid UTF-8 in the header value is malformed, class `unreadable sender header`; mash read it as verified.
+  * A `sub` with an empty token or a control character is malformed, class `unreadable sender header`; mash read it as verified.
+  * An unsigned claim with a bad `ts`, a bad `nonce` or an empty `sub` is malformed; mash read it as claimed.
+  * An unsigned claim with any of the ten shapes' defects is malformed with that shape's class.
+
+  The condition on this ruling: the stored-mail proof must show that none of these shapes exists in real mail. If one does, it goes back to the planner. `TestEleventhShapeCandidates` is the acceptance test for these verdicts.
+
+An eleventh shape is a contract amendment, not an ADR choice. The inputs listed just above are the one amendment made so far, by the planner's ruling; any other input outside the ten is not accepted by a test's tolerance. A shape outside the ten is added by amending REQ-005, and then this record is superseded or amended; it is not added by editing a list in a pull request.
 
 ### Consequences
 
 * Good, because mash and the other SAP implementations read every header the same way, and the repeated-member and second-header differentials are closed.
 * Good, because there is one code path on each side and no setting to test or explain.
 * Bad, because stored mail in these shapes that read verified, forged or absent before the switch-on release reads malformed after it. Mail in shapes 1 to 7 and 10 was shown with its label; shape 8 was dropped and logged; shape 9 was shown as `absent`. A validly signed message from a foreign or hand-made header is no longer delivered. A header mash wrote is not affected.
+* Bad, because the accepted differences above also change verdicts: two numeric spellings of `v` now verify, and mail with invalid UTF-8, a bad `sub` token or an unsigned claim with a bad field reads malformed where it read verified, claimed or absent. The stored-mail proof is the check that no real mail is in these shapes.
 * Neutral, because malformed mail is hidden from sessions, as mail mash already reads as malformed is hidden today. The stream keeps it for its retention window.
 * Neutral, because the switch-on release counts and lists these messages (stage W, REQ-006): in `inbox`, `status --detail`, `doctor` and `mashctl endpoint inbox`, each with its class and no body or header text.
 * Neutral, because the 0.5.x binaries do not change. Nothing here takes effect before the switch-on release, and the release notes say first that the ten shapes are now refused.

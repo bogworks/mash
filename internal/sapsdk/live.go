@@ -37,13 +37,15 @@ type SDKNonceSet struct {
 	now atomic.Int64 // unix nanoseconds of the last clock a caller passed in
 }
 
-// NewNonceSet returns a set that forgets pairs after window (at least LiveSkew), with the SDK's default caps.
+// NewNonceSet returns a set that forgets pairs after window (at least 2*LiveSkew), with the SDK's default caps.
 func NewNonceSet(window time.Duration) *SDKNonceSet { return NewNonceSetCaps(window, 0, 0) }
 
 // NewNonceSetCaps is NewNonceSet with the caps given (zero is the SDK's default).
 func NewNonceSetCaps(window time.Duration, maxEntries, maxPerSender int) *SDKNonceSet {
-	if window < LiveSkew {
-		window = LiveSkew // the SDK needs the set's window to cover the replay window
+	// A header verifies from ts-LiveSkew to ts+LiveSkew, and the nonce is recorded at receipt, which can be as early
+	// as ts-LiveSkew. The pair must be held for the whole span, 2*LiveSkew, or a replay at the late edge is admitted.
+	if window < 2*LiveSkew {
+		window = 2 * LiveSkew
 	}
 	s := &SDKNonceSet{}
 	s.set = identity.NewNonceSet(identity.NonceSetOptions{Window: window, MaxEntries: maxEntries, MaxPerSender: maxPerSender,

@@ -853,8 +853,8 @@ func TestSDKNonceSetCaps(t *testing.T) {
 	if st := s.Seen("UA", "over", now.Add(2*time.Minute)); st != NonceFresh {
 		t.Fatalf("after the window: %v", st)
 	}
-	if NewNonceSet(time.Second).set.Window() != LiveSkew {
-		t.Fatal("the window is at least the replay window")
+	if NewNonceSet(time.Second).set.Window() != 2*LiveSkew {
+		t.Fatal("the window is at least twice the replay window")
 	}
 }
 
