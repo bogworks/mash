@@ -15,10 +15,10 @@ import (
 )
 
 // connectTimeout bounds the connection to the server; applyDeadline bounds a whole apply.
-const (
-	connectTimeout = 5 * time.Second
-	applyDeadline  = 25 * time.Second
-)
+const connectTimeout = 5 * time.Second
+
+// applyDeadline is a variable so tests can shorten it.
+var applyDeadline = 25 * time.Second
 
 // sysCredsPath is config.json "system_creds" (the flag and environment parameters are kept for the callers and
 // are not read). With none set it refuses and points at `mashctl init --config`.
