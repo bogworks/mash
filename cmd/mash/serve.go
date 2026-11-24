@@ -104,6 +104,15 @@ type sessionState struct {
 	lost *endpoint.LeaseLostError
 }
 
+// startFailed is the error a serve that could not start keeps: the shared deleted-endpoint sentence when the endpoint's
+// creds file was set aside by mashctl endpoint delete (deletedHere), otherwise err itself.
+func startFailed(cfg config.Config, err error) error {
+	if d := deletedHere(cfg.DisplayName(), credsPath(cfg), err); d != nil {
+		return d
+	}
+	return err
+}
+
 // supersededText is what a superseded serve says: the newer serve of the same session handles the mail.
 func supersededText(name string, l *endpoint.LeaseLostError) string {
 	return fmt.Sprintf("mash: this server was superseded by a newer mash serve of the same session (pid %s, host %s); "+
@@ -117,6 +126,10 @@ func (s *sessionState) usable(name string) (*endpoint.Endpoint, error) {
 	case s.ep != nil:
 		return s.ep, nil
 	case s.failed != nil:
+		var d *cliframe.Error
+		if errors.As(s.failed, &d) { // startFailed: a deleted endpoint, in the shell's sentence
+			return nil, cmdcore.ToolError(d)
+		}
 		return nil, errors.New(endpoint.ErrorInstructions(name, s.failed))
 	case s.retrying != nil:
 		return nil, fmt.Errorf("mash could not reach the server for endpoint %s (%v) and is retrying; mail is off until it connects",
@@ -273,6 +286,7 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 	}
 	if err != nil && !errors.As(err, &held) {
 		if !transient(err) {
+			err = startFailed(cfg, err)
 			fmt.Fprintln(stderr, err)
 			src.state = &atomic.Pointer[sessionState]{}
 			src.state.Store(&sessionState{failed: err})
@@ -571,6 +585,7 @@ func acquire(ctx context.Context, cfg config.Config, srv *mcp.Server, state *ato
 			backoff = min(backoff*2, transientMax)
 			timer.Reset(backoff)
 		default: // a permanent failure, or transient ones past transientBudget, ends the wait: terminal for this session
+			r.err = startFailed(cfg, r.err)
 			fmt.Fprintln(stderr, r.err)
 			failed = r.err
 			state.Store(&sessionState{failed: r.err})
@@ -662,13 +677,13 @@ func tools(state *atomic.Pointer[sessionState], src *statusSource) []mcp.Tool {
 			ctx, cancel := context.WithTimeout(ctx, callTimeout)
 			defer cancel()
 			out, err := f(ctx, ep, args)
-			if f := framed(ep.Address().String(), err); f != err {
+			if f := framedIn(src.cfg, ep.Address().String(), err); f != err {
 				return out, cmdcore.ToolError(f)
 			}
 			return out, err
 		}
 	}
-	svc := &mcpSvc{buildVersion: buildVersion{pluginRoot: src.pluginRoot}, state: state, name: name, callTimeout: callTimeout, wake: wakeOf(src.cfg)}
+	svc := &mcpSvc{buildVersion: buildVersion{pluginRoot: src.pluginRoot}, state: state, name: name, callTimeout: callTimeout, wake: wakeOf(src.cfg), cfg: src.cfg}
 	table := newCommands(func(context.Context) (*cmdcore.Env, error) { return &cmdcore.Env{Svc: svc}, nil })
 	send, _ := table.Lookup("send")
 	who, _ := table.Lookup("who")

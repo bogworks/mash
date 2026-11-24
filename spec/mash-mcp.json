@@ -99,6 +99,12 @@
      "exit": 1
     },
     {
+     "case": "A deleted endpoint here",
+     "text": "error: acme.demo.bob: this endpoint was deleted; its address cannot be used again\nhint: mash doctor",
+     "stream": "stderr",
+     "exit": 1
+    },
+    {
      "case": "Not signed in",
      "text": "error: acme.demo.bob cannot sign in: the server refused its credentials\nhint: mash doctor",
      "stream": "stderr",
@@ -170,7 +176,14 @@
      "exit": 0
     }
    ],
-   "errors": []
+   "errors": [
+    {
+     "case": "A deleted endpoint here",
+     "text": "error: acme.demo.bob: this endpoint was deleted; its address cannot be used again\nhint: mash doctor",
+     "stream": "stderr",
+     "exit": 1
+    }
+   ]
   },
   {
    "name": "read",
@@ -215,6 +228,12 @@
     {
      "case": "A message that was refused",
      "text": "error: message 12 was refused: it was not verified\nhint: mash doctor",
+     "stream": "stderr",
+     "exit": 1
+    },
+    {
+     "case": "A deleted endpoint here",
+     "text": "error: acme.demo.bob: this endpoint was deleted; its address cannot be used again\nhint: mash doctor",
      "stream": "stderr",
      "exit": 1
     }
@@ -301,6 +320,12 @@
      "text": "error: Acme.Demo is not an owner, an owner.group or an address\nhint: mash who --help",
      "stream": "stderr",
      "exit": 2
+    },
+    {
+     "case": "A deleted endpoint here",
+     "text": "error: acme.demo.bob: this endpoint was deleted; its address cannot be used again\nhint: mash doctor",
+     "stream": "stderr",
+     "exit": 1
     }
    ]
   },

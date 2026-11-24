@@ -66,3 +66,12 @@ The call returns this text with `isError` set.
 error: message 12 was refused: it was not verified
 hint: mash doctor
 ```
+
+### A deleted endpoint here
+
+The call returns this text with `isError` set.
+
+```text
+error: acme.demo.bob: this endpoint was deleted; its address cannot be used again
+hint: mash doctor
+```

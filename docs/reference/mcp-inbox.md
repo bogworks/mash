@@ -59,3 +59,14 @@ NUMBER  FROM  WHEN     STATE  URGENT  KIND      MESSAGE
 1       bob   10s ago  new    no      task      lunch at noon?
 2       bob   8s ago   new    yes     question  ready?
 ```
+
+## Errors
+
+### A deleted endpoint here
+
+The call returns this text with `isError` set.
+
+```text
+error: acme.demo.bob: this endpoint was deleted; its address cannot be used again
+hint: mash doctor
+```

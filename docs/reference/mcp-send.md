@@ -90,6 +90,15 @@ error: acme.demo.bob has no credentials here: ~/.config/mash/acme.demo.bob.creds
 hint: mash doctor
 ```
 
+### A deleted endpoint here
+
+The call returns this text with `isError` set.
+
+```text
+error: acme.demo.bob: this endpoint was deleted; its address cannot be used again
+hint: mash doctor
+```
+
 ### Not signed in
 
 The call returns this text with `isError` set.

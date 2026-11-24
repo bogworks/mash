@@ -64,3 +64,12 @@ The call returns this text with `isError` set.
 error: Acme.Demo is not an owner, an owner.group or an address
 hint: mash who --help
 ```
+
+### A deleted endpoint here
+
+The call returns this text with `isError` set.
+
+```text
+error: acme.demo.bob: this endpoint was deleted; its address cannot be used again
+hint: mash doctor
+```

@@ -129,16 +129,42 @@ func openFailure(cfg config.Config, err error) error {
 	var cm *endpoint.CredsMissingError
 	switch {
 	case errors.As(err, &cm):
-		if setAsideDeleted(cm.Path) {
-			return cmdcore.EndpointDeleted(cfg.DisplayName())
+		if d := deletedHere(cfg.DisplayName(), "", err); d != nil {
+			return d
 		}
 		return cmdcore.NoCredentials(cfg.DisplayName(), config.TildeIn(cm.Path, cfg.Home))
 	case endpoint.IsAuthFailure(err):
-		return framed(cfg.DisplayName(), err)
+		return framedIn(cfg, cfg.DisplayName(), err)
 	case transient(err) || strings.Contains(err.Error(), "no servers available"):
 		return cmdcore.ServerNotAnswering(config.RedactURL(cfg.URL))
 	}
 	return err
+}
+
+// deletedHere is the one place that decides an endpoint was deleted on this machine, for the shell and the MCP tools: the
+// creds file is missing and was set aside by mashctl endpoint delete (creds is where the error says it looked), or
+// the server refused a sign-in and the configured creds file (creds, "" when unknown) has been set aside since. It
+// returns the shared sentence (cmdcore.EndpointDeleted) for addr, or nil.
+func deletedHere(addr, creds string, err error) *cliframe.Error {
+	var cm *endpoint.CredsMissingError
+	switch {
+	case errors.As(err, &cm):
+		if setAsideDeleted(cm.Path) {
+			return cmdcore.EndpointDeleted(addr)
+		}
+	case err != nil && creds != "" && endpoint.IsAuthFailure(err) && setAsideDeleted(creds):
+		return cmdcore.EndpointDeleted(addr)
+	}
+	return nil
+}
+
+// framedIn is framed for a command or tool with a configuration: a refused sign-in on a deleted endpoint is worded as
+// the deleted endpoint (deletedHere), not as a refused sign-in. addr is the endpoint's own address.
+func framedIn(cfg config.Config, addr string, err error) error {
+	if d := deletedHere(addr, credsPath(cfg), err); d != nil {
+		return d
+	}
+	return framed(addr, err)
 }
 
 // framed words err the way the rules do when it is a refused sign-in: error ADDRESS cannot sign in, hint mash doctor.
@@ -397,6 +423,16 @@ type mcpSvc struct {
 	name        string
 	callTimeout time.Duration
 	wake        wakeSettings
+	cfg         config.Config
+}
+
+// frame words a service error as the shell does (framedIn): a refused sign-in is "cannot sign in", or the deleted-endpoint
+// sentence once the creds file was set aside, and reaches the client as a tool error. Other errors pass through.
+func (s *mcpSvc) frame(ep *endpoint.Endpoint, err error) error {
+	if f := framedIn(s.cfg, ep.Address().String(), err); f != err {
+		return cmdcore.ToolError(f)
+	}
+	return err
 }
 
 func (s *mcpSvc) Inbox(ctx context.Context, q cmds.InboxQuery) (cmds.InboxView, error) {
@@ -406,7 +442,8 @@ func (s *mcpSvc) Inbox(ctx context.Context, q cmds.InboxQuery) (cmds.InboxView, 
 	}
 	ctx, cancel := context.WithTimeout(ctx, s.callTimeout)
 	defer cancel()
-	return inboxOn(ctx, ep, q, s.wake, false) // the MCP door is serve
+	v, err := inboxOn(ctx, ep, q, s.wake, false) // the MCP door is serve
+	return v, s.frame(ep, err)
 }
 
 // Message reads one message. The tool's AfterWrite (see readAck) acknowledges it once the result is written.
@@ -417,7 +454,8 @@ func (s *mcpSvc) Message(ctx context.Context, number int) (cmds.ReadView, error)
 	}
 	ctx, cancel := context.WithTimeout(ctx, s.callTimeout)
 	defer cancel()
-	return messageOn(ctx, ep, number)
+	v, err := messageOn(ctx, ep, number)
+	return v, s.frame(ep, err)
 }
 
 // readAck is the read tool's AfterWrite: only after the result is written to the client does the model have the body,
@@ -442,7 +480,8 @@ func (s *mcpSvc) Send(ctx context.Context, to, text string, o cmds.SendOptions) 
 	}
 	ctx, cancel := context.WithTimeout(ctx, s.callTimeout)
 	defer cancel()
-	return sendOn(ctx, ep, to, text, o)
+	v, err := sendOn(ctx, ep, to, text, o)
+	return v, s.frame(ep, err)
 }
 
 // Who asks every endpoint now whether it is there (the answer is reused for 30 seconds), then reads the directory.
@@ -455,7 +494,7 @@ func (s *mcpSvc) Who(ctx context.Context) ([]cmds.WhoEntry, error) {
 	defer cancel()
 	ps, err := ep.WhoFresh(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("who: asking who is online: %w", err)
+		return nil, s.frame(ep, fmt.Errorf("who: asking who is online: %w", err))
 	}
 	return whoEntries(ps, ep.Address().Owner), nil
 }
