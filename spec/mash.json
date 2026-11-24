@@ -912,22 +912,6 @@
         "issue": "#1042",
         "note": "--json is shown as it prints at a terminal (indented); piped it is one compact line (rule \"--json prints one object\"). The key stays capability, as today: ADR 0049 says who JSON fields are added, never renamed or removed (the one exception to plural list keys). Unset fields stay null. The same in the MCP tool's structured result, which is the same object.",
         "verbatim": true
-       },
-       {
-        "case": "One discovery answer could not be verified: the table",
-        "text": "ADDRESS          STATE\nacme.demo.alice  online\nacme.demo.bob    online\nacme.demo.carol  offline",
-        "stream": "stdout",
-        "exit": 0,
-        "issue": "0.6.0 sdk adoption contract, TO-12",
-        "note": "The unverified answer is left out of the table; the warning below goes to stderr."
-       },
-       {
-        "case": "One discovery answer could not be verified: the warning",
-        "text": "warning: 1 discovery answer could not be verified",
-        "stream": "stderr",
-        "exit": 0,
-        "issue": "0.6.0 sdk adoption contract, TO-12",
-        "note": "Printed with the table above; the exit stays 0."
        }
       ]
      }
@@ -2030,27 +2014,6 @@
      {
       "name": "x-today",
       "value": "Unchanged from 0.5.5. Only a verified sender that is a known endpoint is accepted."
-     },
-     {
-      "name": "x-output-next",
-      "value": [
-       {
-        "case": "A malformed Agent-Sender header is refused",
-        "text": "error: prompt refused: 400 malformed Agent-Sender header",
-        "stream": "stderr",
-        "exit": 1,
-        "issue": "0.6.0 sdk adoption contract, TO-10",
-        "note": "Today: \"mash: prompt refused: 400 malformed Agent-Sender header\". The same refusal, in the error: form."
-       },
-       {
-        "case": "Too many recent prompts",
-        "text": "error: prompt refused: 401 too many recent prompts: try again shortly",
-        "stream": "stderr",
-        "exit": 1,
-        "issue": "0.6.0 sdk adoption contract, TO-11",
-        "note": "The refusal when the nonce or rate guard turns a prompt away, in the error: form."
-       }
-      ]
      }
     ]
    },
