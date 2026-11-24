@@ -209,6 +209,22 @@
         "exit": 0,
         "text": "(two warning lines before the result, for an account that allows 5 streams and 100 MiB of disk: \"warning: the account allows 5 streams; one endpoint needs 6, one more each\" and \"warning: the account has 100MiB of disk; one endpoint needs 109MiB\"; an account that allows 6 streams and 109 MiB gets neither)",
         "note": "One endpoint needs the 5 buckets init makes plus its inbox stream, one consumer, and the buckets' caps (93 MiB with the defaults) plus the inbox cap (16 MiB) of disk, the numbers of docs/nats-server.md, Sizing, which also says one more stream and one more inbox cap are needed per further endpoint (the warning lines give only the numbers and keep to 80 columns). The warnings follow the limits in config.json. A case in round brackets is a description: the conformance test skips it. The unit test TestLimitWarnings in cmd/mashctl checks the lines."
+       },
+       {
+        "case": "A strict operator and no signing_key",
+        "issue": "#1255",
+        "stream": "stderr",
+        "exit": 0,
+        "text": "warning: no signing_key in mash-setup.yaml, but the account lists signing keys",
+        "note": "The warning appears when the account JWT lists signing keys and the setup file has no signing_key (and no signing key is already stored). One line before the result; exit stays 0 and the setup goes on; printed once. init does not read the operator's JWT, so it cannot see strict_signing_key_usage: listed signing keys are the only sign it has that the operator will require one. Applies to init only."
+       },
+       {
+        "case": "A strict operator with a signing_key",
+        "issue": "#1255",
+        "stream": "stderr",
+        "exit": 0,
+        "text": "(no warning line; the result line is as in \"A signing key is set\")",
+        "note": "With a signing_key set, init writes nothing to stderr. A case in round brackets is a description: the conformance test skips it; init_signing_warn_test.go checks it."
        }
       ]
      },
@@ -265,28 +281,12 @@
         "note": "signing_key_pub is the signing key's public key, never the seed; it is left out when no signing key is set."
        },
        {
-        "case": "A strict operator and no signing_key",
-        "text": "warning: no signing_key in mash-setup.yaml; the account requires one",
-        "stream": "stderr",
-        "exit": 0,
-        "issue": "#1255",
-        "note": "PROPOSED. One warning line before the result; exit stays 0; printed once; not with signing_key set. Applies to init only. Condition: the account lists signing keys. Words to confirm with ctl (draft 3 read \"the account lists signing keys\", which is NATS jargon)."
-       },
-       {
         "case": "The owner is too long",
         "text": "error: mash-setup.yaml: owner is longer than 32 characters",
         "stream": "stderr",
         "exit": 1,
         "issue": "#1172",
         "note": "Today the text says 48 and the server refuses over 32. One line, no hint (a config value is not a command). The other owner faults read the same way, for example \"error: mash-setup.yaml: owner must start with a letter\"."
-       },
-       {
-        "case": "A strict operator with a signing_key",
-        "issue": "#1255",
-        "stream": "stderr",
-        "exit": 0,
-        "text": "(no warning line; the result line is as in \"A signing key is set\")",
-        "note": "PROPOSED, not yet in the specification (REQ-038 acceptance: the case with signing_key prints no warning). A case in round brackets is a description: the conformance test skips it. The code PR for #1255 adds the executable check (init with a signing_key writes nothing to stderr) when this case lands."
        },
        {
         "case": "An unknown key in the setup file",
