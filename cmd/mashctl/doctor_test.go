@@ -900,6 +900,52 @@ func TestDoctorAuditUsersChurnOfTwoServersLinesFit80Columns(t *testing.T) {
 	}
 }
 
+// An incomplete reason that wraps, or holds a word longer than a line, still fits 80 columns beside a revoked key.
+func TestDoctorKeysLongIncompleteReasonWithRevokedKeyFits80Columns(t *testing.T) {
+	word := ""
+	for i := 0; i < 100; i++ {
+		word += string(rune('a' + i%26))
+	}
+	for name, reason := range map[string]string{
+		"wraps":    "2 server(s) replied, and they name different clusters (first seen: " + strings.Repeat("c", 30) + "): membership cannot be verified",
+		"longword": "server " + word + " did not reply",
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newXYEnv(t)
+			_, xKey := credsSubject(t, e.credsPath(xy("x").String()))
+			adm, ctx, closeAdm := e.admin()
+			defer closeAdm()
+			if err := adm.MarkRevoked(ctx, xKey, time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)); err != nil {
+				t.Fatal(err)
+			}
+			sc := keyScan(false, xKey)
+			sc.Incomplete = reason
+			scriptScans(t, sc)
+			out, errb, _ := e.run("doctor", "--audit-users")
+			text := cleanText(e, out)
+			if n, l := maxLine(text + errb); n > 80 {
+				t.Fatalf("%d columns: %q", n, l)
+			}
+			if !strings.Contains(text, "1 revoked key is still connected") {
+				t.Fatalf("%q", text)
+			}
+			if name == "longword" {
+				var got strings.Builder
+				for _, l := range strings.Split(text, "\n") {
+					for _, c := range strings.Fields(l) {
+						if len(c) > 0 && strings.Contains(word, c) {
+							got.WriteString(c)
+						}
+					}
+				}
+				if !strings.Contains(got.String(), word) {
+					t.Fatalf("word lost: %q", text)
+				}
+			}
+		})
+	}
+}
+
 // scriptScans makes the keys check read the scripted scans in order (the last one repeats) and returns the number of
 // reads made. churnPause is 0 for the test.
 func scriptScans(t *testing.T, scans ...connScan) *int {
