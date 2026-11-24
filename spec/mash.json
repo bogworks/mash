@@ -1555,6 +1555,14 @@
         "exit": 2
        },
        {
+        "case": "The join file's user JWT is named for another address",
+        "text": "error: bob.join names acme.demo.bob but is for acme.demo.carol\nhint: mashctl endpoint reissue acme.demo.bob --out acme.demo.bob.new.join",
+        "stream": "stderr",
+        "exit": 1,
+        "issue": "#1303",
+        "note": "\"names\" is the address in the file; \"is for\" is the address its credentials were made for. When the credentials carry no name: `error: bob.join has no name but names acme.demo.bob`, same hint. The old line `error: mix.join is not a join file this mash can read` stays for every other join-file problem. The hint is run by whoever made the file."
+       },
+       {
         "case": "The join file can be read by others",
         "text": "error: acme.demo.bob.join can be read by others; a join file that holds a seed must be readable by you alone\nhint: chmod 600 acme.demo.bob.join",
         "stream": "stderr",

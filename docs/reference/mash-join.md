@@ -126,6 +126,15 @@ error: this join file holds no seed; it was made for your own key
 hint: mash join acme.demo.bob.join --key <your seed file>
 ```
 
+### The join file's user JWT is named for another address
+
+Stream: stderr. Exit code: 1.
+
+```text
+error: bob.join names acme.demo.bob but is for acme.demo.carol
+hint: mashctl endpoint reissue acme.demo.bob --out acme.demo.bob.new.join
+```
+
 ### The join file can be read by others
 
 Stream: stderr. Exit code: 1.

@@ -154,17 +154,6 @@
    "note": "From ctl #1390. The signing refusals print in the specification's error rule: `error: <what>` then `hint: <command>`, on stderr, exit 1. <dir> is the key folder as the error carries it (the plain path). The public keys the earlier text printed are not in default output. They are left out of --json too: the error object has only `error` and `hint`, and cliframe has no detail slot for errors. Printed by every mashctl command that signs (endpoint create, reissue, delete) and by init for the first two cases. Its mode, owner or type is refused, or reading it failed."
   },
   {
-   "id": "join-user-jwt-name-differs",
-   "where": "mash join",
-   "case": "The join file's user JWT is named for another address",
-   "text": "error: bob.join names acme.demo.bob but is for acme.demo.carol\nhint: mashctl endpoint reissue acme.demo.bob --out acme.demo.bob.new.join",
-   "stream": "stderr",
-   "exit": 1,
-   "issue": "#1303",
-   "note": "From ctl (final text, head f1c8b74; replaces ctl's earlier #1303 text). \"names\" is the address in the file; \"is for\" is the address its credentials were made for. When the credentials carry no name: `error: bob.join has no name but names acme.demo.bob`, same hint. The old line `error: mix.join is not a join file this mash can read` stays for every other join-file problem. The hint is run by whoever made the file.",
-   "replaces": "error: mix.join is not a join file this mash can read"
-  },
-  {
    "id": "setup-remove-port-held",
    "where": "mash-local-nats-setup.sh --remove",
    "case": "The port is held",

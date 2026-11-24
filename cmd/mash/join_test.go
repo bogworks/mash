@@ -248,6 +248,16 @@ func TestJoinMatchesSpec(t *testing.T) {
 			t.Error("the configuration folder was made")
 		}
 	})
+	do("The join file's user JWT is named for another address", func(w *joinWorld, c specCase) {
+		// the file is named bob.join, as the spec text shows; its address is bob and its user JWT is carol's
+		other := newJoinMaterial(t, "acme.demo.carol")
+		writeJoin(t, "bob.join", joinfile.File{MashJoin: 1, Address: "acme.demo.bob", Servers: []string{"tls://myserver:4222"}, UserJWT: other.token})
+		os.WriteFile("carol.seed", other.seed, 0o600)
+		c.check(t, w.run("join", "bob.join", "--key", "carol.seed"))
+		if _, err := os.Stat(w.cfg); err == nil {
+			t.Error("a refused join made the configuration folder")
+		}
+	})
 	do("The folder cannot be written", func(w *joinWorld, c specCase) {
 		if os.Geteuid() == 0 {
 			t.Skip("root can write into a read-only folder")
