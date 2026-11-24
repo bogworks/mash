@@ -1193,9 +1193,9 @@ case20() { # --remove refuses while something still listens on the recorded port
     s0=$(snap "$d")
     ptyrun "$d" bash "$SCRIPT" --remove
     chk "--remove with a listener on the port: exit 1" rc_is 1
-    chk "--remove: says something still listens, nothing removed" \
-        has "$W/out" "error: something still listens on 127.0.0.1:$p (pid $DP); nothing was removed"
-    chk "--remove: hint says to stop it" hasre "$W/out" 'hint: stop the program'
+    chk "--remove: says the port is in use by the pid, nothing removed" \
+        has "$W/out" "error: port $p is in use (pid $DP); nothing was removed"
+    chk "--remove: hint is the retry" has "$W/out" "hint: mash-local-nats-setup.sh --remove"
     chk "--remove: not reported as removed" lacks "$W/out" "removed $d"
     chk "--remove: the dir is still there" [ -d "$d" ]
     s1=$(snap "$d")

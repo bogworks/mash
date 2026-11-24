@@ -13,9 +13,8 @@ import (
 )
 
 // Issue #995: `mash-local-nats-setup.sh --remove` keeps refusing while anything listens on the stopped folder's port,
-// but the refusal names who holds it: every pid, and for a pid that is a nats-server run with exactly one
-// `-c X/server.conf` (or `--config X/server.conf`) whose X holds a mash-setup.json, that folder. The folder is
-// informational only: every case ends with exit 1, the folder unchanged and the exact error line. The script cannot
+// and the refusal names the pids that hold it (no folder or path), with the retry as the hint. Every case ends
+// with exit 1, the folder unchanged and the exact two lines. The script cannot
 // be sourced without running main, so these run the real script under a pseudo-terminal (util-linux `script`, for
 // --remove's /dev/tty prompt) with ss and lsof stubs on PATH that report listeners with pids the test chooses. A
 // listener is either a "nats" stand-in (a copy of this test binary named nats-server, which only sleeps when
@@ -214,89 +213,46 @@ func snapshot(t *testing.T, d string) string {
 	return sb.String()
 }
 
-// wantRefusal: exit 1, the folder unchanged, and one output line equal to the error line with who in it.
-func wantRefusal(t *testing.T, rc int, out string, e env, before, who string) {
+// wantRefusal: exit 1, the folder unchanged, and the exact stderr lines: the error line then the hint line.
+func wantRefusal(t *testing.T, rc int, out string, e env, before, wantErr, wantHint string) {
 	t.Helper()
-	want := fmt.Sprintf("error: something still listens on 127.0.0.1:%d%s; nothing was removed", testPort, who)
-	found := false
+	var lines []string
 	for _, l := range strings.Split(out, "\n") {
-		if strings.TrimRight(l, "\r") == want {
-			found = true
+		l = strings.TrimRight(l, "\r")
+		if strings.HasPrefix(l, "error:") || strings.HasPrefix(l, "hint:") {
+			lines = append(lines, l)
 		}
 	}
-	if rc != 1 || !found || strings.Contains(out, "removed "+e.dir) {
-		t.Fatalf("rc=%d out=%q; want rc 1 and the line %q", rc, out, want)
+	if rc != 1 || len(lines) != 2 || lines[0] != wantErr || lines[1] != wantHint || strings.Contains(out, "removed "+e.dir) {
+		t.Fatalf("rc=%d out=%q; want rc 1 and the lines %q, %q", rc, out, wantErr, wantHint)
 	}
-	if !strings.Contains(out, "hint: stop the program that holds the port (a wrapper script that runs nats-server?), then run ") {
-		t.Fatalf("the hint changed: %q", out)
+	if strings.Contains(out, e.other) || strings.Contains(out, "local server") {
+		t.Fatalf("the refusal names a folder: %q", out)
 	}
 	if after := snapshot(t, e.dir); after != before {
 		t.Fatalf("the folder was changed:\nbefore=%q\nafter=%q", before, after)
 	}
-	t.Logf("refusal line: %s", want)
+	t.Logf("refusal: %s | %s", wantErr, wantHint)
 }
 
-func pid(p int) string { return fmt.Sprintf(" (pid %d)", p) }
-func pidIn(p int, x string) string {
-	return fmt.Sprintf(" (pid %d, the local server in %s)", p, x)
+const inUseHint = "hint: mash-local-nats-setup.sh --remove"
+
+func inUse(who string) string {
+	return fmt.Sprintf("error: port %d is in use (%s); nothing was removed", testPort, who)
 }
 
-// another real instance, folder other
-func TestRemoveNamesTheOtherInstanceAndItsFolder(t *testing.T) {
+// one pid: the pid alone, whatever the holder's argv (no folder is named)
+func TestRemoveNamesTheOnePid(t *testing.T) {
 	rc, out, e, p, b := runRemove(t, scenario{listeners: []listener{
 		natsWith(func(e env) []string { return []string{"-c", e.other + "/server.conf"} })}})
-	wantRefusal(t, rc, out, e, b, pidIn(p[0], e.other))
+	wantRefusal(t, rc, out, e, b, inUse(fmt.Sprintf("pid %d", p[0])), inUseHint)
 }
 
-func TestRemoveNamesTheOtherInstanceWithLongConfigFlag(t *testing.T) {
-	rc, out, e, p, b := runRemove(t, scenario{listeners: []listener{
-		natsWith(func(e env) []string { return []string{"--config", e.other + "/server.conf"} })}})
-	wantRefusal(t, rc, out, e, b, pidIn(p[0], e.other))
-}
-
-// --store_dir with no -c: a pid, no folder
-func TestRemoveNamesOnlyThePidForStoreDir(t *testing.T) {
-	rc, out, e, p, b := runRemove(t, scenario{listeners: []listener{
-		natsWith(func(e env) []string { return []string{"--store_dir", e.dir} })}})
-	wantRefusal(t, rc, out, e, b, pid(p[0]))
-}
-
-// the double-dash spellings --c and --sd are not -c or --config: a pid, no folder
-func TestRemoveNamesOnlyThePidForDoubleDashSpellings(t *testing.T) {
-	rc, out, e, p, b := runRemove(t, scenario{listeners: []listener{
-		natsWith(func(e env) []string { return []string{"--c", e.other + "/server.conf", "--sd", e.dir} })}})
-	wantRefusal(t, rc, out, e, b, pid(p[0]))
-}
-
-// a relative -c is resolved against the process cwd
-func TestRemoveResolvesARelativeConfigAgainstTheCwd(t *testing.T) {
-	rc, out, e, p, b := runRemove(t, scenario{listeners: []listener{{
-		nats: true, args: func(env) []string { return []string{"-c", "other/server.conf"} },
-		cwd: func(e env) string { return e.root }}}})
-	wantRefusal(t, rc, out, e, b, pidIn(p[0], e.other))
-}
-
-// X has no mash-setup.json
-func TestRemoveNamesNoFolderWithoutAMarker(t *testing.T) {
-	rc, out, e, p, b := runRemove(t, scenario{listeners: []listener{
-		natsWith(func(e env) []string { return []string{"-c", e.bare + "/server.conf"} })}})
-	wantRefusal(t, rc, out, e, b, pid(p[0]))
-}
-
-// more than one -c: no folder
-func TestRemoveNamesNoFolderForTwoConfigFlags(t *testing.T) {
-	rc, out, e, p, b := runRemove(t, scenario{listeners: []listener{
-		natsWith(func(e env) []string {
-			return []string{"-c", e.other + "/server.conf", "--config", e.other + "/server.conf"}
-		})}})
-	wantRefusal(t, rc, out, e, b, pid(p[0]))
-}
-
-// not a nats-server: its argv looks like one, its executable is sleep
-func TestRemoveNamesNoFolderWhenNotANatsServer(t *testing.T) {
+// not a nats-server: the pid alone as well
+func TestRemoveNamesTheOnePidWhenNotANatsServer(t *testing.T) {
 	rc, out, e, p, b := runRemove(t, scenario{listeners: []listener{
 		plain(func(e env) []string { return []string{"nats-server", "-c", e.other + "/server.conf"} })}})
-	wantRefusal(t, rc, out, e, b, pid(p[0]))
+	wantRefusal(t, rc, out, e, b, inUse(fmt.Sprintf("pid %d", p[0])), inUseHint)
 }
 
 // a shared socket: ss shows two pids on one line, both named, in order
@@ -304,12 +260,22 @@ func TestRemoveNamesEverySharedSocketPid(t *testing.T) {
 	rc, out, e, p, b := runRemove(t, scenario{shared: true, listeners: []listener{
 		natsWith(func(e env) []string { return []string{"-c", e.other + "/server.conf"} }),
 		natsWith(func(e env) []string { return []string{"--store_dir", e.dir} })}})
-	wantRefusal(t, rc, out, e, b, fmt.Sprintf(" (pid %d, the local server in %s; pid %d)", p[0], e.other, p[1]))
+	wantRefusal(t, rc, out, e, b, inUse(fmt.Sprintf("pids %d, %d", p[0], p[1])), inUseHint)
 }
 
-// no pid visible (another user's process): main's line exactly
-func TestRemoveKeepsTheOldLineWhenNoPidIsShown(t *testing.T) {
+// two listener lines, two pids, in tool order
+func TestRemoveNamesSeveralPidsFromSeveralLines(t *testing.T) {
+	rc, out, e, p, b := runRemove(t, scenario{listeners: []listener{
+		natsWith(func(e env) []string { return []string{"--store_dir", e.dir} }),
+		natsWith(func(e env) []string { return []string{"--store_dir", e.dir} })}})
+	wantRefusal(t, rc, out, e, b, inUse(fmt.Sprintf("pids %d, %d", p[0], p[1])), inUseHint)
+}
+
+// no pid visible (another user's process): main's two lines exactly
+func TestRemoveKeepsTheOldLinesWhenNoPidIsShown(t *testing.T) {
 	rc, out, e, _, b := runRemove(t, scenario{noPid: true, listeners: []listener{
 		natsWith(func(e env) []string { return []string{"-c", e.other + "/server.conf"} })}})
-	wantRefusal(t, rc, out, e, b, "")
+	wantRefusal(t, rc, out, e, b,
+		fmt.Sprintf("error: something still listens on 127.0.0.1:%d; nothing was removed", testPort),
+		"hint: stop the program that holds the port (a wrapper script that runs nats-server?), then run mash-local-nats-setup.sh --remove again")
 }

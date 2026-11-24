@@ -264,37 +264,6 @@ proc_ours() {
     proc_is_nats "$1" || return 1
     proc_argv "$1" | grep -Fxq -- "$DIR/server.conf"
 }
-# proc_cwd PID: the process's working folder (best effort on macOS)
-proc_cwd() {
-    if [ "$BSD" = 1 ]; then
-        lsof -nP -a -p "$1" -d cwd -Fn 2>/dev/null </dev/null | sed -n 's/^n//p' | head -n 1
-    else
-        readlink "/proc/$1/cwd" 2>/dev/null
-    fi
-}
-# proc_server_dir PID: print the mash local server folder X of a nats-server run
-# with exactly one -c X/server.conf (or --config X/server.conf), where
-# X/mash-setup.json is a regular file; print nothing otherwise. Informational only.
-proc_server_dir() {
-    proc_is_nats "$1" || return 0
-    _conf=$(proc_argv "$1" | awk '
-        $0 == "-c" || $0 == "--config" { n++; want = 1; next }
-        want { v = $0; want = 0 }
-        END { if (n == 1 && v != "") print v }')
-    case $_conf in
-        server.conf) _x=. ;;
-        */server.conf) _x=${_conf%/server.conf}; [ -n "$_x" ] || _x=/ ;;
-        *) return 0 ;;
-    esac
-    case $_x in
-        /*) ;;
-        *) _cwd=$(proc_cwd "$1")
-           case $_cwd in /*) ;; *) return 0 ;; esac
-           if [ "$_x" = . ]; then _x=$_cwd; else _x=${_cwd%/}/${_x#./}; fi ;;
-    esac
-    [ -f "$_x/mash-setup.json" ] && [ ! -L "$_x/mash-setup.json" ] || return 0
-    printf '%s' "$_x"
-}
 recorded_pid() {
     [ -f "$DIR/server.pid" ] || return 1
     _pid=$(head -n 1 "$DIR/server.pid" 2>/dev/null || true)
@@ -343,19 +312,18 @@ listener_pids() {
             while (match(s, /pid=[0-9]+/)) { print substr(s, RSTART + 4, RLENGTH - 4); s = substr(s, RSTART + RLENGTH) } }' || true
     fi
 }
-# port_holders: " (pid N, the local server in X; pid M)" for the listeners on
-# 127.0.0.1:$PORT, in tool order without duplicates; nothing when no pid is shown
+# port_holders: the pids listening on 127.0.0.1:$PORT as "12" or "12, 34", in tool
+# order, each once; nothing when no pid is shown
 port_holders() {
-    _hs=''; _seen=' '
+    _hs=''; _seen=' '; _n=0
     for _hp in $(listener_pids); do
         case $_seen in *" $_hp "*) continue ;; esac
         _seen="$_seen$_hp "
-        _hx=$(proc_server_dir "$_hp")
-        _h="pid $_hp"
-        [ -z "$_hx" ] || _h="$_h, the local server in $_hx"
-        _hs="${_hs:+$_hs; }$_h"
+        _n=$((_n + 1))
+        _hs="${_hs:+$_hs, }$_hp"
     done
-    [ -z "$_hs" ] || printf ' (%s)' "$_hs"
+    [ -z "$_hs" ] && return 0
+    if [ "$_n" = 1 ]; then printf 'pid %s' "$_hs"; else printf 'pids %s' "$_hs"; fi
 }
 
 port_taken() { # PORT
@@ -627,7 +595,11 @@ mode_remove() {
     # a wrapper script around nats-server keeps the port after the recorded pid
     # is gone; deleting DIR then would pull its store out from under it
     if listening; then
-        die 1 "something still listens on 127.0.0.1:$PORT$(port_holders); nothing was removed" \
+        _who=$(port_holders)
+        if [ -n "$_who" ]; then
+            die 1 "port $PORT is in use ($_who); nothing was removed" "$SELF --remove"
+        fi
+        die 1 "something still listens on 127.0.0.1:$PORT; nothing was removed" \
             "stop the program that holds the port (a wrapper script that runs nats-server?), then run $SELF --remove again"
     fi
     rm -rf "$DIR"
