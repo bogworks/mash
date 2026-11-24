@@ -25,7 +25,7 @@ const (
 func installTools(t *testing.T, extra map[string]string) string {
 	t.Helper()
 	bin := t.TempDir()
-	for _, tool := range []string{"bash", "curl", "awk", "sha256sum", "mktemp", "tr", "head", "ls", "dirname", "mkdir", "cp", "chmod", "mv", "rm", "rmdir", "cat", "uname", "id"} {
+	for _, tool := range []string{"bash", "curl", "awk", "sha256sum", "mktemp", "tr", "head", "ls", "dirname", "mkdir", "cp", "chmod", "mv", "rm", "rmdir", "cat", "uname", "id", "env"} {
 		if _, ok := extra[tool]; ok {
 			continue
 		}
@@ -1164,6 +1164,43 @@ func TestInstallSh_refusesAProgramThatExitsNonZero(t *testing.T) {
 			writeFile(t, filepath.Join(rel, "SHA256SUMS"), strings.Join(out, "\n")+"\n")
 			refuseStagedPair(t, rel, "error: the downloaded "+which+" did not report its version: nothing was installed\n")
 		})
+	}
+}
+
+// The staged version checks run in an isolated environment: a user's 0.5.5 configuration, in HOME or named by
+// MASH_CONFIG_DIR, must not make the new programs refuse to report their version.
+func TestInstallSh_stagedVersionChecksIgnoreTheUsersConfiguration(t *testing.T) {
+	rel, mashName, ctlName := fakeRelease(t)
+	var sums strings.Builder
+	for _, n := range []string{mashName, ctlName} {
+		line := fakeMashVersion
+		if n == ctlName {
+			line = fakeCtlVersion
+		}
+		// Only the staged copies (dot-named, as install.sh stages them) refuse; the post-install "Installed" lines
+		// still run with the user's configuration and are out of scope here.
+		body := "#!/bin/sh\ncase \"${0##*/}\" in .*) ;; *) [ \"$1\" = version ] && echo '" + line + "'; exit 0 ;; esac\nif [ -e \"$HOME/.config/mash/config.json\" ] || [ -n \"${MASH_CONFIG_DIR:-}\" ]; then\n" +
+			"  echo 'refusing 0.5.5 config' >&2\n  exit 1\nfi\n[ \"$1\" = version ] && echo '" + line + "'\nexit 0\n"
+		writeFile(t, filepath.Join(rel, n), body)
+		h := sha256.Sum256([]byte(body))
+		fmt.Fprintf(&sums, "%s  %s\n", hex.EncodeToString(h[:]), n)
+	}
+	writeFile(t, filepath.Join(rel, "SHA256SUMS"), sums.String())
+	home := tempHome(t)
+	cfg := filepath.Join(home, ".config", "mash")
+	if err := os.MkdirAll(cfg, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(cfg, "config.json"), "{}\n")
+	dest := filepath.Join(home, "bin")
+	r := runInstallIn(t, rel, installTools(t, nil), home, dest, "install.sh", "MASH_CONFIG_DIR="+cfg)
+	if r.err != nil {
+		t.Fatalf("install failed with a 0.5.5 configuration present: %v\n%s", r.err, r.out)
+	}
+	for _, n := range []string{"mash", "mashctl"} {
+		if _, err := os.Stat(filepath.Join(dest, n)); err != nil {
+			t.Errorf("%s not installed: %v", n, err)
+		}
 	}
 }
 

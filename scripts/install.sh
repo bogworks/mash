@@ -34,6 +34,7 @@ WORKDIR=""
 BASE=""
 STAGED=()  # temporary files made in the install folder
 FETCHED=() # files downloaded into WORKDIR
+VHOME=""   # the empty home the staged version checks run in, inside WORKDIR
 
 cleanup() {
     local f
@@ -44,6 +45,7 @@ cleanup() {
         for f in "${FETCHED[@]+"${FETCHED[@]}"}"; do
             rm -f -- "$f"
         done
+        [ -n "$VHOME" ] && rm -rf -- "$VHOME"
         rmdir -- "$WORKDIR" 2>/dev/null || true
     fi
 }
@@ -55,10 +57,16 @@ die() {
 
 # version_of PROGRAM: the version PROGRAM reports, without its name or a leading v
 # ("mash v0.5.6 (3f9a41c)" and "mashctl 0.5.6" both give 0.5.6); empty if it does not run
-# or exits non-zero.
+# or exits non-zero. PROGRAM runs in an isolated environment (an empty temporary home, no MASH_*
+# variables, PATH only), so the user's own configuration cannot make it refuse to report.
 version_of() {
     local out
-    out=$("$1" version 2>/dev/null) || return 0
+    if [ -z "$VHOME" ]; then
+        VHOME="$WORKDIR/home"
+        mkdir -p -- "$VHOME" || return 0
+    fi
+    out=$(env -i HOME="$VHOME" PATH="$PATH" XDG_CONFIG_HOME="$VHOME/config" \
+        XDG_STATE_HOME="$VHOME/state" XDG_DATA_HOME="$VHOME/data" "$1" version 2>/dev/null) || return 0
     printf '%s\n' "$out" | awk 'NR == 1 { sub(/^v/, "", $2); print $2 }'
 }
 
