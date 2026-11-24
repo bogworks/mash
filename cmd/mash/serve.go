@@ -683,7 +683,7 @@ func tools(state *atomic.Pointer[sessionState], src *statusSource) []mcp.Tool {
 			return out, err
 		}
 	}
-	svc := &mcpSvc{buildVersion: buildVersion{pluginRoot: src.pluginRoot}, state: state, name: name, callTimeout: callTimeout, wake: wakeOf(src.cfg)}
+	svc := &mcpSvc{buildVersion: buildVersion{pluginRoot: src.pluginRoot}, state: state, name: name, callTimeout: callTimeout, wake: wakeOf(src.cfg), cfg: src.cfg}
 	table := newCommands(func(context.Context) (*cmdcore.Env, error) { return &cmdcore.Env{Svc: svc}, nil })
 	send, _ := table.Lookup("send")
 	who, _ := table.Lookup("who")

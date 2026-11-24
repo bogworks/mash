@@ -1,12 +1,17 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"github.com/bogworks/mash/internal/cmdcore/cmds"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/bogworks/mash/internal/cmdcore"
 	"github.com/bogworks/mash/internal/config"
@@ -59,7 +64,8 @@ func TestServeKeepsTheMissingCredsWordingWithoutTheSetAsideFile(t *testing.T) {
 	}
 }
 
-// The spec's send tool has the case, word for word (the spec's example address standing for the world's endpoint a).
+// The spec's send, inbox, read and who tools have the case, word for word (the spec's example address standing for
+// the world's endpoint a).
 func TestMCPDeletedEndpointMatchesSpec(t *testing.T) {
 	b, err := os.ReadFile(filepath.Join("..", "..", "spec", "mash-mcp.json"))
 	if err != nil {
@@ -74,20 +80,84 @@ func TestMCPDeletedEndpointMatchesSpec(t *testing.T) {
 	if err := json.Unmarshal(b, &doc); err != nil {
 		t.Fatal(err)
 	}
-	for _, tl := range doc.Tools {
-		if tl.Name != "send" {
-			continue
-		}
-		for _, c := range tl.Errors {
-			if c.Case == "A deleted endpoint here" {
-				if got := strings.Replace(c.Text, "acme.demo.bob", tTo("a"), 1); got != deletedSentence() {
-					t.Errorf("spec %q, tools %q", got, deletedSentence())
+	for _, name := range []string{"send", "inbox", "read", "who"} {
+		found := false
+		for _, tl := range doc.Tools {
+			if tl.Name != name {
+				continue
+			}
+			for _, c := range tl.Errors {
+				if c.Case == "A deleted endpoint here" {
+					found = true
+					if got := strings.Replace(c.Text, "acme.demo.bob", tTo("a"), 1); got != deletedSentence() {
+						t.Errorf("%s: spec %q, tools %q", name, got, deletedSentence())
+					}
 				}
-				return
+			}
+		}
+		if !found {
+			t.Errorf(`spec/mash-mcp.json %s has no case "A deleted endpoint here"`, name)
+		}
+	}
+}
+
+// authFailingSvc is the mcpSvc with the failure the server's refusal of a sign-in would be injected at the one place
+// each method frames its error (mcpSvc.frame): a refused sign-in cannot be produced mid-call against the test server.
+type authFailingSvc struct {
+	*mcpSvc
+	ep *endpoint.Endpoint
+}
+
+var errAuth = errors.New("nats: Authorization Violation")
+
+func (f authFailingSvc) Inbox(context.Context, cmds.InboxQuery) (cmds.InboxView, error) {
+	return cmds.InboxView{}, f.frame(f.ep, errAuth)
+}
+func (f authFailingSvc) Message(context.Context, int) (cmds.ReadView, error) {
+	return cmds.ReadView{}, f.frame(f.ep, errAuth)
+}
+func (f authFailingSvc) Send(context.Context, string, string, cmds.SendOptions) (cmds.SendReceipt, error) {
+	return cmds.SendReceipt{}, f.frame(f.ep, errAuth)
+}
+func (f authFailingSvc) Who(context.Context) ([]cmds.WhoEntry, error) {
+	return nil, f.frame(f.ep, fmt.Errorf("who: asking who is online: %w", errAuth))
+}
+
+// The four table tools word a refused sign-in as the shell does: the deleted sentence once the creds file was set
+// aside, "cannot sign in" before, through the tool table's own tool.
+func TestTableToolsFrameADeletedEndpoint(t *testing.T) {
+	w := newWorld(t, "a")
+	ep := w.openEP(t, "a")
+	env := w.env["a"]
+	cfg, err := config.Load(config.LookupFromFunc(envFrom(env)), env["HOME"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var st atomic.Pointer[sessionState]
+	st.Store(&sessionState{ep: ep})
+	svc := &mcpSvc{state: &st, name: cfg.DisplayName(), callTimeout: time.Second, cfg: cfg}
+	f := authFailingSvc{svc, ep}
+	table := newCommands(func(context.Context) (*cmdcore.Env, error) { return &cmdcore.Env{Svc: f}, nil })
+	signIn := "error: " + tTo("a") + " cannot sign in: the server refused its credentials\nhint: mash doctor"
+	args := map[string]string{"send": `{"address":"` + tTo("b") + `","message":"hi"}`, "inbox": `{}`, "read": `{"number":1}`, "who": `{}`}
+	for _, phase := range []string{"before", "after"} {
+		if phase == "after" {
+			if err := os.WriteFile(cfg.Creds+".deleted", nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for _, name := range []string{"send", "inbox", "read", "who"} {
+			c, _ := table.Lookup(name)
+			_, _, err := c.Tool(table.Env).MCP().CallStructured(context.Background(), json.RawMessage(args[name]))
+			want := signIn
+			if phase == "after" {
+				want = deletedSentence()
+			}
+			if err == nil || err.Error() != want {
+				t.Errorf("%s %s: %v, want %q", name, phase, err, want)
 			}
 		}
 	}
-	t.Fatal(`spec/mash-mcp.json send has no case "A deleted endpoint here"`)
 }
 
 // Path 2: the endpoint was deleted while serve runs, so the server refuses the sign-in. When the configured creds

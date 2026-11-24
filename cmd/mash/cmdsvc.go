@@ -423,6 +423,16 @@ type mcpSvc struct {
 	name        string
 	callTimeout time.Duration
 	wake        wakeSettings
+	cfg         config.Config
+}
+
+// frame words a service error as the shell does (framedIn): a refused sign-in is "cannot sign in", or the deleted-endpoint
+// sentence once the creds file was set aside, and reaches the client as a tool error. Other errors pass through.
+func (s *mcpSvc) frame(ep *endpoint.Endpoint, err error) error {
+	if f := framedIn(s.cfg, ep.Address().String(), err); f != err {
+		return cmdcore.ToolError(f)
+	}
+	return err
 }
 
 func (s *mcpSvc) Inbox(ctx context.Context, q cmds.InboxQuery) (cmds.InboxView, error) {
@@ -432,7 +442,8 @@ func (s *mcpSvc) Inbox(ctx context.Context, q cmds.InboxQuery) (cmds.InboxView, 
 	}
 	ctx, cancel := context.WithTimeout(ctx, s.callTimeout)
 	defer cancel()
-	return inboxOn(ctx, ep, q, s.wake, false) // the MCP door is serve
+	v, err := inboxOn(ctx, ep, q, s.wake, false) // the MCP door is serve
+	return v, s.frame(ep, err)
 }
 
 // Message reads one message. The tool's AfterWrite (see readAck) acknowledges it once the result is written.
@@ -443,7 +454,8 @@ func (s *mcpSvc) Message(ctx context.Context, number int) (cmds.ReadView, error)
 	}
 	ctx, cancel := context.WithTimeout(ctx, s.callTimeout)
 	defer cancel()
-	return messageOn(ctx, ep, number)
+	v, err := messageOn(ctx, ep, number)
+	return v, s.frame(ep, err)
 }
 
 // readAck is the read tool's AfterWrite: only after the result is written to the client does the model have the body,
@@ -468,7 +480,8 @@ func (s *mcpSvc) Send(ctx context.Context, to, text string, o cmds.SendOptions) 
 	}
 	ctx, cancel := context.WithTimeout(ctx, s.callTimeout)
 	defer cancel()
-	return sendOn(ctx, ep, to, text, o)
+	v, err := sendOn(ctx, ep, to, text, o)
+	return v, s.frame(ep, err)
 }
 
 // Who asks every endpoint now whether it is there (the answer is reused for 30 seconds), then reads the directory.
@@ -481,7 +494,7 @@ func (s *mcpSvc) Who(ctx context.Context) ([]cmds.WhoEntry, error) {
 	defer cancel()
 	ps, err := ep.WhoFresh(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("who: asking who is online: %w", err)
+		return nil, s.frame(ep, fmt.Errorf("who: asking who is online: %w", err))
 	}
 	return whoEntries(ps, ep.Address().Owner), nil
 }
