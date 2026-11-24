@@ -50,6 +50,7 @@ type Env struct {
 	port                  int
 	dir                   string
 	acctSK                nkeys.KeyPair
+	opKP                  nkeys.KeyPair
 	operator              *jwt.OperatorClaims
 	resolver              *server.MemAccResolver
 }
@@ -141,7 +142,7 @@ func launch(dir string, o Options) (*Env, error) {
 		return nil, err
 	}
 
-	e := &Env{Owner: Owner, Account: mashPub, AccountSeed: seedPath, dir: dir, acctSK: mashSK, operator: op, resolver: resolver, maxPay: o.MaxPayload, tls: o.TLS, verify: o.RequireClientCert}
+	e := &Env{Owner: Owner, Account: mashPub, AccountSeed: seedPath, dir: dir, acctSK: mashSK, operator: op, opKP: opKP, resolver: resolver, maxPay: o.MaxPayload, tls: o.TLS, verify: o.RequireClientCert}
 	if o.TLS {
 		if err := e.setupTLS(dir, o); err != nil {
 			return nil, err
@@ -205,6 +206,33 @@ func (e *Env) Restart(t *testing.T) {
 	if err := e.start(); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// Revoke revokes a user key in the MASH account the way mashctl's revocation does: the account claims gain a
+// revocation for the key dated now, and the server drops that user's connections and refuses it from then on.
+func (e *Env) Revoke(t *testing.T, userPub string) {
+	t.Helper()
+	cur, err := e.resolver.Fetch(e.Account)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ac, err := jwt.DecodeAccountClaims(cur)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ac.Revoke(userPub)
+	tok, err := ac.Encode(e.opKP)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.resolver.Store(e.Account, tok); err != nil {
+		t.Fatal(err)
+	}
+	acc, err := e.srv.LookupAccount(e.Account)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.srv.UpdateAccountClaims(acc, ac)
 }
 
 // Shutdown stops the server without restarting it.

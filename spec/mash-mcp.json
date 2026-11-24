@@ -100,6 +100,7 @@
     },
     {
      "case": "A deleted endpoint here",
+     "note": "This case applies to an endpoint deleted during a session (#1396): the tool call fails once the creds file has been set aside by mashctl endpoint delete. A serve started after the delete registers only version, status and doctor, by design, so there is no send tool to fail.",
      "text": "error: acme.demo.bob: this endpoint was deleted; its address cannot be used again\nhint: mash doctor",
      "stream": "stderr",
      "exit": 1
@@ -179,6 +180,7 @@
    "errors": [
     {
      "case": "A deleted endpoint here",
+     "note": "This case applies to an endpoint deleted during a session (#1396): the tool call fails once the creds file has been set aside by mashctl endpoint delete. A serve started after the delete registers only version, status and doctor, by design, so there is no inbox tool to fail.",
      "text": "error: acme.demo.bob: this endpoint was deleted; its address cannot be used again\nhint: mash doctor",
      "stream": "stderr",
      "exit": 1
@@ -233,6 +235,7 @@
     },
     {
      "case": "A deleted endpoint here",
+     "note": "This case applies to an endpoint deleted during a session (#1396): the tool call fails once the creds file has been set aside by mashctl endpoint delete. A serve started after the delete registers only version, status and doctor, by design, so there is no read tool to fail.",
      "text": "error: acme.demo.bob: this endpoint was deleted; its address cannot be used again\nhint: mash doctor",
      "stream": "stderr",
      "exit": 1
@@ -323,6 +326,7 @@
     },
     {
      "case": "A deleted endpoint here",
+     "note": "This case applies to an endpoint deleted during a session (#1396): the tool call fails once the creds file has been set aside by mashctl endpoint delete. A serve started after the delete registers only version, status and doctor, by design, so there is no who tool to fail. A who within 30 seconds of an earlier who in the session reuses that presence answer and succeeds, listing the directory with every endpoint offline; it is not an error.",
      "text": "error: acme.demo.bob: this endpoint was deleted; its address cannot be used again\nhint: mash doctor",
      "stream": "stderr",
      "exit": 1
