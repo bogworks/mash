@@ -561,7 +561,7 @@ func TestBuiltBinaryPrintsTheReleaseVersion(t *testing.T) {
 	}
 	// An unstamped build says dev, never a number that is not the source's.
 	plain := filepath.Join(t.TempDir(), "mash")
-	if out, err := exec.Command("go", "build", "-o", plain, ".").CombinedOutput(); err != nil {
+	if out, err := exec.Command("go", "build", "-buildvcs=false", "-o", plain, ".").CombinedOutput(); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	if out, _ := exec.Command(plain, "version").Output(); !strings.HasPrefix(string(out), "mash v0.0.0-dev (") {
