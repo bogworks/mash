@@ -534,7 +534,7 @@ mash's live receipts use persistent `claude -p` stream-json sessions. Other head
 
 ## Live prompt size
 
-A live prompt carries at most 32768 bytes of text (`endpoint.MaxPromptBytes`). The receiving endpoint refuses a longer one before it acknowledges it: the caller gets the error `413 prompt_too_large: a live prompt is at most 32768 bytes; send the longer text as mail`, the session is never told, and no request id is opened, so nobody answers a cut-off request. `mash prompt` checks the size first and prints the same text without sending. The session's notice shows the text whole, with control characters escaped; send anything longer as mail.
+A live prompt carries at most 32768 bytes of text (`endpoint.MaxPromptBytes`). The receiving endpoint refuses a longer one before it acknowledges it: the caller gets the error `413 prompt_too_large: a live prompt is at most 32768 bytes; send the longer text as mail`, the session is never told, and no request id is opened, so nobody answers a cut-off request. `mash prompt` checks the size first and prints the same text without sending. The endpoint advertises this as its SAP `max_payload`, `33KB`: the text plus 1 KiB for the request's headers. The session's notice shows the text whole, with control characters escaped; send anything longer as mail.
 
 ## Refused sends
 

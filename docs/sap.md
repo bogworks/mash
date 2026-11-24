@@ -68,7 +68,7 @@ mash registers these keys on the `agents` service:
 | `id_sig` | A signature over the user key, account, agent, owner and prompt subject, which readers use to check that the record is the endpoint's own. |
 | `mail_subject` | The endpoint's mail subject. |
 
-The `prompt` endpoint adds its own metadata: `max_payload`, `attachments_ok` and `min_sender_trust`.
+The `prompt` endpoint adds its own metadata: `max_payload`, `attachments_ok` and `min_sender_trust`. Its `max_payload` is `33KB` (33792 bytes): the 32768 bytes of text the endpoint accepts plus 1024 bytes for the request's headers.
 
 ## The reply-inbox prefix
 

@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -68,7 +70,7 @@ func TestRegistrationMetadata(t *testing.T) {
 	}
 	p, s := eps["prompt"], eps["status"]
 	if p.Subject != taddr("a").Subjects().Prompt || p.QueueGroup != "agents" || p.Metadata["min_sender_trust"] != "signed" ||
-		p.Metadata["max_payload"] != "1MB" || p.Metadata["attachments_ok"] != "false" {
+		p.Metadata["max_payload"] != PromptMaxPayload() || p.Metadata["attachments_ok"] != "false" {
 		t.Fatalf("prompt endpoint %+v", p)
 	}
 	if s.Subject != taddr("a").Subjects().Status || s.QueueGroup != "agents" {
@@ -406,5 +408,67 @@ func TestPromptLimit(t *testing.T) {
 	svc.mu.Unlock()
 	if open != 0 {
 		t.Fatalf("%d request ids are open after refused prompts", open)
+	}
+}
+
+// parseMaxPayload reads SAP's max_payload grammar: a count and B, KB, MB or GB, base 1024.
+func parseMaxPayload(t *testing.T, s string) int {
+	t.Helper()
+	m := regexp.MustCompile(`^(\d+)(B|KB|MB|GB)$`).FindStringSubmatch(s)
+	if m == nil {
+		t.Fatalf("max_payload %q is not SAP's \\d+(B|KB|MB|GB)", s)
+	}
+	n, _ := strconv.Atoi(m[1])
+	return n * map[string]int{"B": 1, "KB": 1 << 10, "MB": 1 << 20, "GB": 1 << 30}[m[2]]
+}
+
+// The advertised max_payload and the enforced prompt limit are one number: a caller that trusts the advertisement
+// is never refused for a prompt within it, and a prompt over MaxPromptBytes is still refused.
+func TestPromptAdvertisedMaxPayloadMatchesTheLimit(t *testing.T) {
+	f := newFixture(t, "a", "b")
+	a := f.serve(t, "a", func(ep *Endpoint, p PromptEvent) { _ = ep.Reply(p.RequestID, "ok", true) })
+	b := f.client(t, "b")
+
+	nc := f.e.ConnAs(t, f.creds["b"], tkey("b"))
+	m, err := nc.Request("$SRV.INFO.agents", nil, 15*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var info micro.Info
+	if err := json.Unmarshal(m.Data, &info); err != nil {
+		t.Fatal(err)
+	}
+	var advertised string
+	for _, e := range info.Endpoints {
+		if e.Name == "prompt" {
+			advertised = e.Metadata["max_payload"]
+		}
+	}
+	got := parseMaxPayload(t, advertised)
+	if want := MaxPromptBytes + PromptEnvelopeHeadroom; got != want {
+		t.Fatalf("advertised max_payload %q is %d bytes, want MaxPromptBytes %d + headroom %d = %d",
+			advertised, got, MaxPromptBytes, PromptEnvelopeHeadroom, want)
+	}
+	if parseMaxPayload(t, a.promptMetadata()["max_payload"]) != got {
+		t.Fatalf("registered and built metadata differ")
+	}
+
+	// The largest accepted request, built as mash prompt builds it, is on the wire within the advertisement
+	// (Msg.Size counts the subject, the reply and the headers as well as the payload).
+	req, err := promptMsg(b.Identity(), tkey("b"), taddr("a").Subjects().Prompt, secretInbox(b.Conn()), strings.Repeat("x", MaxPromptBytes))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(req.Header.Get(sap.HeaderName)) == 0 {
+		t.Fatal("the request is not signed")
+	}
+	if size := req.Size(); size > got {
+		t.Fatalf("the largest accepted prompt is %d bytes on the wire, over the advertised %d", size, got)
+	}
+
+	// One byte more is still refused.
+	over := strings.Repeat("x", MaxPromptBytes+1)
+	if r := promptRaw(t, b, taddr("a").Subjects().Prompt, []byte(over), true); strings.Join(r, "|") != "ERR 413|END" {
+		t.Fatalf("MaxPromptBytes+1: %q", r)
 	}
 }
