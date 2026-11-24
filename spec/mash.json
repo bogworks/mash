@@ -1098,7 +1098,7 @@
       "value": [
        {
         "case": "All well",
-        "text": "config    ok\nclaude    ok    2.1.320\nbinary    skip  not run by the plugin: CLAUDE_PLUGIN_DATA is not set, so the\n                plugin's binary cannot be found from a shell\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   ok\ndelivery  ok\nrefused   ok    no unverified mail was refused\n\nNo problems.",
+        "text": "config    ok\nclaude    ok    2.1.320\nbinary    skip  the plugin's mash is not visible from a shell\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   ok\ndelivery  ok\nrefused   ok    no unverified mail was refused\n\nNo problems.",
         "stream": "stdout",
         "exit": 0
        },
@@ -1107,12 +1107,12 @@
         "issue": "#1099",
         "stream": "stdout, then the hint on stderr",
         "exit": 1,
-        "text": "config    ok\nclaude    skip  no claude command found\nbinary    skip  not run by the plugin: CLAUDE_PLUGIN_DATA is not set, so the\n                plugin's binary cannot be found from a shell\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   FAIL  the server refused these credentials\ndelivery  skip  needs sign-in\nrefused   warn  3 unverified messages were refused\n\n1 problem, 1 warning.\nhint: mash join <file> --replace",
+        "text": "config    ok\nclaude    skip  no claude command found\nbinary    skip  the plugin's mash is not visible from a shell\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   FAIL  the server refused these credentials\ndelivery  skip  needs sign-in\nrefused   warn  3 unverified messages were refused\n\n1 problem, 1 warning.\nhint: mash join <file> --replace",
         "note": "REQ-006, core #1403. The hint is a command of ours that fixes the first problem: a new join file brings new credentials, and --replace because creds for this address are installed (mash join refuses them otherwise). v0.5.8 printed a sentence ('ask whoever runs your mesh to run: mashctl endpoint reissue ...'); ADR 0168 says a hint is a command or there is none."
        },
        {
         "case": "Server not answering",
-        "text": "config    ok\nclaude    skip  no claude command found\nbinary    skip  not run by the plugin: CLAUDE_PLUGIN_DATA is not set, so the\n                plugin's binary cannot be found from a shell\ncreds     ok\nserver    FAIL  the server did not answer: tls://myserver:4222\nsign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no unverified mail was refused\n\n1 problem.",
+        "text": "config    ok\nclaude    skip  no claude command found\nbinary    skip  the plugin's mash is not visible from a shell\ncreds     ok\nserver    FAIL  the server did not answer: tls://myserver:4222\nsign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no unverified mail was refused\n\n1 problem.",
         "stream": "stdout",
         "exit": 1,
         "issue": "#1099",
@@ -1164,23 +1164,23 @@
         "stream": "stdout",
         "exit": 0,
         "issue": "#1535",
-        "note": "Issue #1535 (linked #1497): new row after claude. Doctors report, never refuse. Reads $CLAUDE_PLUGIN_DATA/bin and runs nothing. The plugin's own copy, mash-<version> under $CLAUDE_PLUGIN_DATA/bin, is the same version as the mash running doctor."
+        "note": "Issue #1535 (linked #1497): new row after claude. Doctors report, never refuse. Reads $CLAUDE_PLUGIN_ROOT/scripts/mash.pins and stats one file, and runs nothing. The copy the plugin's launcher runs, $CLAUDE_PLUGIN_DATA/bin/mash-<pinned version>, is the same version as the mash running doctor."
        },
        {
         "case": "The plugin runs another mash",
-        "text": "binary    warn  the plugin runs 0.5.8\n                (/home/alice/.claude/plugins/data/mash/bin/mash-0.5.8); this\n                mash is 0.5.9: install the matching release, or set MASH_BIN to\n                the one you want",
+        "text": "binary    warn  the plugin runs 0.5.8; this mash is 0.5.9: install 0.5.8, or set\n                MASH_BIN",
         "stream": "stdout",
         "exit": 0,
         "issue": "#1535",
-        "note": "Issue #1535 (linked #1497): new row after claude. Doctors report, never refuse. Reads $CLAUDE_PLUGIN_DATA/bin and runs nothing. Warn, never FAIL. No hint: no command of ours installs a release or sets MASH_BIN (a hint is a command that fixes the problem or there is none), so the row's own text says how to make them agree. With several copies, any one that differs warns and each differing copy is named. Only copies named mash-<N.N.N> that are regular executable files count."
+        "note": "Issue #1535 (linked #1497): new row after claude. Doctors report, never refuse. Reads $CLAUDE_PLUGIN_ROOT/scripts/mash.pins and stats one file, and runs nothing. Warn, never FAIL. No hint: no command of ours installs a release or sets MASH_BIN (a hint is a command that fixes the problem or there is none), so the row's own text says how to make them agree. The row judges only the copy the pin file names; an older mash-<other> beside it is ignored. The warn names no path, so it fits 80 columns whatever the plugin's data path."
        },
        {
-        "case": "The plugin has no downloaded mash",
-        "text": "binary    skip  the plugin has no downloaded mash in\n                /home/alice/.claude/plugins/data/mash/bin (unpinned, or it uses\n                MASH_BIN or the one on PATH)",
+        "case": "The plugin runs no downloaded mash",
+        "text": "binary    skip  the plugin runs no downloaded mash",
         "stream": "stdout",
         "exit": 0,
         "issue": "#1535",
-        "note": "Issue #1535 (linked #1497): new row after claude. Doctors report, never refuse. Reads $CLAUDE_PLUGIN_DATA/bin and runs nothing. Also the answer when the directory is missing. A directory that cannot be read is skip with the reason."
+        "note": "Issue #1535 (linked #1497): new row after claude. Doctors report, never refuse. Reads $CLAUDE_PLUGIN_ROOT/scripts/mash.pins and stats one file, and runs nothing. Also the answer when the plugin is unpinned (no pin file or no version line) or the pinned copy is not there. A pin file that cannot be read is skip: \"the plugin's mash could not be read\"."
        },
        {
         "case": "MASH_BIN is set",
@@ -1188,22 +1188,22 @@
         "stream": "stdout",
         "exit": 0,
         "issue": "#1535",
-        "note": "Issue #1535 (linked #1497): new row after claude. Doctors report, never refuse. Reads $CLAUDE_PLUGIN_DATA/bin and runs nothing. The plugin's launcher runs MASH_BIN when it is set, so there is no downloaded copy to compare."
+        "note": "Issue #1535 (linked #1497): new row after claude. Doctors report, never refuse. Reads nothing. The plugin's launcher runs MASH_BIN when it is set, so there is no downloaded copy to compare."
        },
        {
         "case": "This mash has no release version",
-        "text": "binary    skip  this mash has no release version to compare",
+        "text": "binary    skip  this mash has no release version",
         "stream": "stdout",
         "exit": 0,
         "issue": "#1535",
-        "note": "Issue #1535 (linked #1497): new row after claude. Doctors report, never refuse. Reads $CLAUDE_PLUGIN_DATA/bin and runs nothing. A development build (0.0.0-dev) matches no release."
+        "note": "Issue #1535 (linked #1497): new row after claude. Doctors report, never refuse. Reads $CLAUDE_PLUGIN_ROOT/scripts/mash.pins and stats one file, and runs nothing. A development build (0.0.0-dev) matches no release."
        },
        {
         "case": "Arriving mail cannot be stored here",
         "issue": "#1099",
         "stream": "stdout",
         "exit": 1,
-        "text": "config    ok\nclaude    skip  no claude command found\nbinary    skip  not run by the plugin: CLAUDE_PLUGIN_DATA is not set, so the\n                plugin's binary cannot be found from a shell\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   ok\ndelivery  FAIL  cannot write ~/.local/state/mash/acme.demo.bob\nrefused   ok    no unverified mail was refused\n\n1 problem.",
+        "text": "config    ok\nclaude    skip  no claude command found\nbinary    skip  the plugin's mash is not visible from a shell\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   ok\ndelivery  FAIL  cannot write ~/.local/state/mash/acme.demo.bob\nrefused   ok    no unverified mail was refused\n\n1 problem.",
         "note": "REQ-006. The count line follows the rows and any hint goes to stderr. Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors. No hint: no command of ours fixes a folder that cannot be written, and the row names the folder. Today the row wraps and reads \"mail is held: its folder cannot be written\"."
        },
        {
@@ -1217,7 +1217,7 @@
         "issue": "#1099",
         "stream": "stdout",
         "exit": 1,
-        "text": "config    ok\nclaude    skip  no claude command found\nbinary    skip  not run by the plugin: CLAUDE_PLUGIN_DATA is not set, so the\n                plugin's binary cannot be found from a shell\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   ok\ndelivery  FAIL  another session holds this endpoint\nrefused   ok    no unverified mail was refused\n\n1 problem.",
+        "text": "config    ok\nclaude    skip  no claude command found\nbinary    skip  the plugin's mash is not visible from a shell\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   ok\ndelivery  FAIL  another session holds this endpoint\nrefused   ok    no unverified mail was refused\n\n1 problem.",
         "note": "REQ-006. The count line follows the rows and any hint goes to stderr. Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors. No hint: the row says what is wrong, and closing the other session is not a command of ours."
        },
        {
@@ -1237,7 +1237,7 @@
         "issue": "#1099",
         "stream": "stdout",
         "exit": 1,
-        "text": "config    ok\nclaude    skip  no claude command found\nbinary    skip  not run by the plugin: CLAUDE_PLUGIN_DATA is not set, so the\n                plugin's binary cannot be found from a shell\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   ok\ndelivery  FAIL  this session lost this endpoint to a newer one\nrefused   ok    no unverified mail was refused\n\n1 problem.",
+        "text": "config    ok\nclaude    skip  no claude command found\nbinary    skip  the plugin's mash is not visible from a shell\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   ok\ndelivery  FAIL  this session lost this endpoint to a newer one\nrefused   ok    no unverified mail was refused\n\n1 problem.",
         "note": "REQ-006. The count line follows the rows and any hint goes to stderr. Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors. No hint: the row says what is wrong."
        },
        {
@@ -1245,7 +1245,7 @@
         "issue": "#1099",
         "stream": "stdout, then the hint on stderr",
         "exit": 1,
-        "text": "config    ok\nclaude    skip  no claude command found\nbinary    skip  not run by the plugin: CLAUDE_PLUGIN_DATA is not set, so the\n                plugin's binary cannot be found from a shell\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   FAIL  this endpoint was deleted; its address cannot be used again\ndelivery  skip  needs sign-in\nrefused   ok    no unverified mail was refused\n\n1 problem.\nhint: mash join <file>",
+        "text": "config    ok\nclaude    skip  no claude command found\nbinary    skip  the plugin's mash is not visible from a shell\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   FAIL  this endpoint was deleted; its address cannot be used again\ndelivery  skip  needs sign-in\nrefused   ok    no unverified mail was refused\n\n1 problem.\nhint: mash join <file>",
         "note": "REQ-006, core #1403. The hint is a command: a join file to a new endpoint. v0.5.8 printed the sentence 'ask whoever runs your mesh for a join file to a new endpoint'."
        },
        {
@@ -1253,7 +1253,7 @@
         "issue": "#1099",
         "stream": "stdout, then the hint on stderr",
         "exit": 1,
-        "text": "config    ok\nclaude    skip  no claude command found\nbinary    skip  not run by the plugin: CLAUDE_PLUGIN_DATA is not set, so the\n                plugin's binary cannot be found from a shell\ncreds     FAIL  this endpoint was deleted; its address cannot be used again\nserver    ok    tls://myserver:4222\nsign-in   skip  needs the creds\ndelivery  skip  needs sign-in\nrefused   ok    no unverified mail was refused\n\n1 problem.\nhint: mash join <file>",
+        "text": "config    ok\nclaude    skip  no claude command found\nbinary    skip  the plugin's mash is not visible from a shell\ncreds     FAIL  this endpoint was deleted; its address cannot be used again\nserver    ok    tls://myserver:4222\nsign-in   skip  needs the creds\ndelivery  skip  needs sign-in\nrefused   ok    no unverified mail was refused\n\n1 problem.\nhint: mash join <file>",
         "note": "REQ-006, core #1403. As on another machine: the hint is a join file to a new endpoint."
        },
        {
@@ -1261,7 +1261,7 @@
         "issue": "#1099",
         "stream": "stdout",
         "exit": 1,
-        "text": "config    ok\nclaude    skip  no claude command found\nbinary    skip  not run by the plugin: CLAUDE_PLUGIN_DATA is not set, so the\n                plugin's binary cannot be found from a shell\ncreds     ok\nserver    FAIL  the server's certificate is not trusted: tls://myserver:4222\nsign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no unverified mail was refused\n\n1 problem.",
+        "text": "config    ok\nclaude    skip  no claude command found\nbinary    skip  the plugin's mash is not visible from a shell\ncreds     ok\nserver    FAIL  the server's certificate is not trusted: tls://myserver:4222\nsign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no unverified mail was refused\n\n1 problem.",
         "note": "REQ-006. The count line follows the rows and any hint goes to stderr. Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors. No hint: mash join cannot change the folder's certificate authority, even with --replace, and no other command of ours does. The server row is fixed wording (rule: \"The server not answering reads the same everywhere\"), so its 76 columns stay; it is under the 80 limit."
        },
        {
@@ -1269,7 +1269,7 @@
         "issue": "#1099",
         "stream": "stdout",
         "exit": 1,
-        "text": "config    ok\nclaude    skip  no claude command found\nbinary    skip  not run by the plugin: CLAUDE_PLUGIN_DATA is not set, so the\n                plugin's binary cannot be found from a shell\ncreds     ok\nserver    FAIL  the server did not offer TLS: tls://myserver:4222\nsign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no unverified mail was refused\n\n1 problem.",
+        "text": "config    ok\nclaude    skip  no claude command found\nbinary    skip  the plugin's mash is not visible from a shell\ncreds     ok\nserver    FAIL  the server did not offer TLS: tls://myserver:4222\nsign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no unverified mail was refused\n\n1 problem.",
         "note": "REQ-006. The count line follows the rows and any hint goes to stderr. Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors. No hint: nothing the reader can run fixes a server that offers no TLS."
        },
        {
@@ -1277,7 +1277,7 @@
         "issue": "#1099",
         "stream": "stdout, then the hint on stderr",
         "exit": 1,
-        "text": "config    ok\nclaude    skip  no claude command found\nbinary    skip  not run by the plugin: CLAUDE_PLUGIN_DATA is not set, so the\n                plugin's binary cannot be found from a shell\ncreds     FAIL  ~/.config/mash/acme.demo.bob.creds is missing\nserver    ok    tls://myserver:4222\nsign-in   skip  needs the creds\ndelivery  skip  needs sign-in\nrefused   ok    no unverified mail was refused\n\n1 problem.\nhint: mash join <file>",
+        "text": "config    ok\nclaude    skip  no claude command found\nbinary    skip  the plugin's mash is not visible from a shell\ncreds     FAIL  ~/.config/mash/acme.demo.bob.creds is missing\nserver    ok    tls://myserver:4222\nsign-in   skip  needs the creds\ndelivery  skip  needs sign-in\nrefused   ok    no unverified mail was refused\n\n1 problem.\nhint: mash join <file>",
         "note": "REQ-006. The count line follows the rows and any hint goes to stderr. Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors. The hint is the command that installs new creds (<file> is the join file the person is given)."
        },
        {
@@ -1285,7 +1285,7 @@
         "issue": "#1099",
         "stream": "stdout, then the hint on stderr",
         "exit": 1,
-        "text": "config    ok\nclaude    skip  no claude command found\nbinary    skip  not run by the plugin: CLAUDE_PLUGIN_DATA is not set, so the\n                plugin's binary cannot be found from a shell\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   FAIL  the server refused these credentials\ndelivery  skip  needs sign-in\nrefused   ok    no unverified mail was refused\n\n1 problem.\nhint: mash join <file> --replace",
+        "text": "config    ok\nclaude    skip  no claude command found\nbinary    skip  the plugin's mash is not visible from a shell\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   FAIL  the server refused these credentials\ndelivery  skip  needs sign-in\nrefused   ok    no unverified mail was refused\n\n1 problem.\nhint: mash join <file> --replace",
         "note": "REQ-006, core #1403. Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors. Also the hint for a creds file that belongs to another endpoint. The person needs a new join file from whoever runs the mesh; --replace, because creds for this address are installed."
        },
        {
@@ -1293,7 +1293,7 @@
         "issue": "#1099",
         "stream": "stdout, then the hint on stderr",
         "exit": 1,
-        "text": "config    ok\nclaude    skip  no claude command found\nbinary    skip  not run by the plugin: CLAUDE_PLUGIN_DATA is not set, so the\n                plugin's binary cannot be found from a shell\ncreds     FAIL  ~/.config/mash/acme.demo.bob.creds is not a creds file\nserver    ok    tls://myserver:4222\nsign-in   skip  needs the creds\ndelivery  skip  needs sign-in\nrefused   ok    no unverified mail was refused\n\n1 problem.\nhint: mash join <file> --replace",
+        "text": "config    ok\nclaude    skip  no claude command found\nbinary    skip  the plugin's mash is not visible from a shell\ncreds     FAIL  ~/.config/mash/acme.demo.bob.creds is not a creds file\nserver    ok    tls://myserver:4222\nsign-in   skip  needs the creds\ndelivery  skip  needs sign-in\nrefused   ok    no unverified mail was refused\n\n1 problem.\nhint: mash join <file> --replace",
         "note": "REQ-006, core #1403. Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors. The file's content is never printed. Same shape as 'A creds file is missing' (the file, with ~, then what is wrong), so the row fits in 80 columns; status keeps its longer sentence as the reason. --replace, because a file is installed at the creds path."
        },
        {
@@ -1301,7 +1301,7 @@
         "issue": "#1099",
         "stream": "stdout",
         "exit": 1,
-        "text": "config    ok\nclaude    skip  no claude command found\nbinary    skip  not run by the plugin: CLAUDE_PLUGIN_DATA is not set, so the\n                plugin's binary cannot be found from a shell\ncreds     FAIL  ~/.config/mash/acme.demo.bob.creds can be read by others\nserver    ok    tls://myserver:4222\nsign-in   skip  needs the creds\ndelivery  skip  needs sign-in\nrefused   ok    no unverified mail was refused\n\n1 problem.",
+        "text": "config    ok\nclaude    skip  no claude command found\nbinary    skip  the plugin's mash is not visible from a shell\ncreds     FAIL  ~/.config/mash/acme.demo.bob.creds can be read by others\nserver    ok    tls://myserver:4222\nsign-in   skip  needs the creds\ndelivery  skip  needs sign-in\nrefused   ok    no unverified mail was refused\n\n1 problem.",
         "note": "REQ-006, core #1403. Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors. No hint: no command of ours changes a file's permissions (v0.5.8 printed 'hint: chmod 600 <file>'). Same shape as 'A creds file is missing', so the row fits in 80 columns."
        },
        {
@@ -1309,7 +1309,7 @@
         "issue": "#1099",
         "stream": "stdout",
         "exit": 1,
-        "text": "config    ok\nclaude    skip  no claude command found\nbinary    skip  not run by the plugin: CLAUDE_PLUGIN_DATA is not set, so the\n                plugin's binary cannot be found from a shell\ncreds     ok\nserver    FAIL  the server address is not tls://: nats://myserver:4222\nsign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no unverified mail was refused\n\n1 problem.",
+        "text": "config    ok\nclaude    skip  no claude command found\nbinary    skip  the plugin's mash is not visible from a shell\ncreds     ok\nserver    FAIL  the server address is not tls://: nats://myserver:4222\nsign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no unverified mail was refused\n\n1 problem.",
         "note": "REQ-006, core #1403. Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors. A plain nats:// address without MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1. One short row; no hint, since no command of ours changes the address (v0.5.8 printed the whole refusal and a sentence hint). mash status keeps the whole refusal as its reason."
        },
        {
@@ -1325,7 +1325,7 @@
         "issue": "#1099",
         "stream": "stdout",
         "exit": 1,
-        "text": "{\n \"endpoint\": \"acme.demo.bob\",\n \"problems\": 1,\n \"warnings\": 1,\n \"checks\": [\n  {\n   \"name\": \"config\",\n   \"state\": \"ok\",\n   \"detail\": null,\n   \"fix\": null\n  },\n  {\n   \"name\": \"claude\",\n   \"state\": \"ok\",\n   \"detail\": \"2.1.320\",\n   \"fix\": null\n  },\n  {\n   \"name\": \"binary\",\n   \"state\": \"skip\",\n   \"detail\": \"not run by the plugin: CLAUDE_PLUGIN_DATA is not set, so the plugin's binary cannot be found from a shell\",\n   \"fix\": null\n  },\n  {\n   \"name\": \"creds\",\n   \"state\": \"ok\",\n   \"detail\": null,\n   \"fix\": null\n  },\n  {\n   \"name\": \"server\",\n   \"state\": \"ok\",\n   \"detail\": \"tls://myserver:4222\",\n   \"fix\": null\n  },\n  {\n   \"name\": \"sign-in\",\n   \"state\": \"fail\",\n   \"detail\": \"the server refused these credentials\",\n   \"fix\": \"mash join <file> --replace\"\n  },\n  {\n   \"name\": \"delivery\",\n   \"state\": \"skip\",\n   \"detail\": \"needs sign-in\",\n   \"fix\": null\n  },\n  {\n   \"name\": \"refused\",\n   \"state\": \"warn\",\n   \"detail\": \"3 unverified messages were refused\",\n   \"fix\": null\n  }\n ],\n \"hint\": \"mash join <file> --replace\"\n}",
+        "text": "{\n \"endpoint\": \"acme.demo.bob\",\n \"problems\": 1,\n \"warnings\": 1,\n \"checks\": [\n  {\n   \"name\": \"config\",\n   \"state\": \"ok\",\n   \"detail\": null,\n   \"fix\": null\n  },\n  {\n   \"name\": \"claude\",\n   \"state\": \"ok\",\n   \"detail\": \"2.1.320\",\n   \"fix\": null\n  },\n  {\n   \"name\": \"binary\",\n   \"state\": \"skip\",\n   \"detail\": \"the plugin's mash is not visible from a shell\",\n   \"fix\": null\n  },\n  {\n   \"name\": \"creds\",\n   \"state\": \"ok\",\n   \"detail\": null,\n   \"fix\": null\n  },\n  {\n   \"name\": \"server\",\n   \"state\": \"ok\",\n   \"detail\": \"tls://myserver:4222\",\n   \"fix\": null\n  },\n  {\n   \"name\": \"sign-in\",\n   \"state\": \"fail\",\n   \"detail\": \"the server refused these credentials\",\n   \"fix\": \"mash join <file> --replace\"\n  },\n  {\n   \"name\": \"delivery\",\n   \"state\": \"skip\",\n   \"detail\": \"needs sign-in\",\n   \"fix\": null\n  },\n  {\n   \"name\": \"refused\",\n   \"state\": \"warn\",\n   \"detail\": \"3 unverified messages were refused\",\n   \"fix\": null\n  }\n ],\n \"hint\": \"mash join <file> --replace\"\n}",
         "note": "REQ-006, core #1403. The example above with the sign-in fix 'mash join <file> --replace' and a top-level \"hint\": the one hint the text prints, null when there is none. Each row's \"fix\" stays."
        }
       ]
@@ -1352,7 +1352,7 @@
         {
          "name": "binary",
          "state": "skip",
-         "detail": "not run by the plugin: CLAUDE_PLUGIN_DATA is not set, so the plugin's binary cannot be found from a shell",
+         "detail": "the plugin's mash is not visible from a shell",
          "fix": null
         },
         {
@@ -1402,7 +1402,7 @@
      },
      {
       "name": "x-notes",
-      "value": "doctor is the one everyday command that prints many lines, as brew doctor and flutter doctor do. It reports on stdout and exits 1 when it found a problem. Every row is always printed, and 'checks' in the JSON always lists every row, each with a state of ok, warn, fail or skip; a row is skipped when an earlier failure means it cannot be run. The delivery row says whether mail that arrives can be stored on this machine for the session; it is checked only inside a session and skipped at a shell. In a session that has just started, the row is 'warn' until the first prompt or tool call, so 'doctor --strict' exits 1 until then: a program that waits for a session to be ready repeats the check. The 'hooks not run yet' warning has no hint, because no command fixes it. Whether storage is failing is decided by whoever asks, by trying the folder, not from a record kept in it. An agent host that has no hooks would warn for as long as it runs; only Claude Code is in scope for 0.5.6. The binary row compares the mash the plugin runs (its own copy under $CLAUDE_PLUGIN_DATA/bin) with the mash running doctor; it warns when they differ and is skipped at a shell, where CLAUDE_PLUGIN_DATA is not set. The refused count is kept on this machine, so its row shows even when the server is down. The 'refused' row counts unverified mail that was refused on arrival (see mash serve). Mail that was verified on arrival and whose sender was deleted afterwards is not counted: mash read shows it as refused, and that is where it is seen."
+      "value": "doctor is the one everyday command that prints many lines, as brew doctor and flutter doctor do. It reports on stdout and exits 1 when it found a problem. Every row is always printed, and 'checks' in the JSON always lists every row, each with a state of ok, warn, fail or skip; a row is skipped when an earlier failure means it cannot be run. The delivery row says whether mail that arrives can be stored on this machine for the session; it is checked only inside a session and skipped at a shell. In a session that has just started, the row is 'warn' until the first prompt or tool call, so 'doctor --strict' exits 1 until then: a program that waits for a session to be ready repeats the check. The 'hooks not run yet' warning has no hint, because no command fixes it. Whether storage is failing is decided by whoever asks, by trying the folder, not from a record kept in it. An agent host that has no hooks would warn for as long as it runs; only Claude Code is in scope for 0.5.6. The binary row compares the mash the plugin runs (the copy $CLAUDE_PLUGIN_DATA/bin/mash-<version>, where <version> is the one in $CLAUDE_PLUGIN_ROOT/scripts/mash.pins) with the mash running doctor; it warns when they differ and is skipped at a shell, where CLAUDE_PLUGIN_DATA is not set. Every skip is one short line, and the warn names no path. The refused count is kept on this machine, so its row shows even when the server is down. The 'refused' row counts unverified mail that was refused on arrival (see mash serve). Mail that was verified on arrival and whose sender was deleted afterwards is not counted: mash read shows it as refused, and that is where it is seen."
      }
     ]
    },

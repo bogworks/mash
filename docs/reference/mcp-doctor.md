@@ -38,7 +38,7 @@ The structured content of a successful result. The values are an example.
     {
       "name": "binary",
       "state": "skip",
-      "detail": "not run by the plugin: CLAUDE_PLUGIN_DATA is not set, so the plugin's binary cannot be found from a shell",
+      "detail": "the plugin's mash is not visible from a shell",
       "fix": null
     },
     {
@@ -85,8 +85,7 @@ The call returns this text.
 ```text
 config    ok
 claude    ok    2.1.320
-binary    skip  not run by the plugin: CLAUDE_PLUGIN_DATA is not set, so the
-                plugin's binary cannot be found from a shell
+binary    skip  the plugin's mash is not visible from a shell
 creds     ok
 server    ok    tls://myserver:4222
 sign-in   ok
@@ -105,8 +104,7 @@ The call returns this text with `isError` set.
 ```text
 config    ok
 claude    skip  no claude command found
-binary    skip  not run by the plugin: CLAUDE_PLUGIN_DATA is not set, so the
-                plugin's binary cannot be found from a shell
+binary    skip  the plugin's mash is not visible from a shell
 creds     ok
 server    ok    tls://myserver:4222
 sign-in   FAIL  the server refused these credentials
@@ -124,8 +122,7 @@ The call returns this text with `isError` set.
 ```text
 config    ok
 claude    skip  no claude command found
-binary    skip  not run by the plugin: CLAUDE_PLUGIN_DATA is not set, so the
-                plugin's binary cannot be found from a shell
+binary    skip  the plugin's mash is not visible from a shell
 creds     ok
 server    FAIL  the server did not answer: tls://myserver:4222
 sign-in   skip  needs the server
@@ -154,8 +151,7 @@ The call returns this text with `isError` set.
 ```text
 config    ok
 claude    skip  no claude command found
-binary    skip  not run by the plugin: CLAUDE_PLUGIN_DATA is not set, so the
-                plugin's binary cannot be found from a shell
+binary    skip  the plugin's mash is not visible from a shell
 creds     ok
 server    ok    tls://myserver:4222
 sign-in   FAIL  this endpoint was deleted; its address cannot be used again
@@ -173,8 +169,7 @@ The call returns this text with `isError` set.
 ```text
 config    ok
 claude    skip  no claude command found
-binary    skip  not run by the plugin: CLAUDE_PLUGIN_DATA is not set, so the
-                plugin's binary cannot be found from a shell
+binary    skip  the plugin's mash is not visible from a shell
 creds     FAIL  this endpoint was deleted; its address cannot be used again
 server    ok    tls://myserver:4222
 sign-in   skip  needs the creds

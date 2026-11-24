@@ -457,7 +457,7 @@
      {
       "name": "binary",
       "state": "skip",
-      "detail": "not run by the plugin: CLAUDE_PLUGIN_DATA is not set, so the plugin's binary cannot be found from a shell",
+      "detail": "the plugin's mash is not visible from a shell",
       "fix": null
      },
      {
@@ -496,7 +496,7 @@
    "text": [
     {
      "case": "All well",
-     "text": "config    ok\nclaude    ok    2.1.320\nbinary    skip  not run by the plugin: CLAUDE_PLUGIN_DATA is not set, so the\n                plugin's binary cannot be found from a shell\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   ok\ndelivery  ok\nrefused   ok    no unverified mail was refused\n\nNo problems.",
+     "text": "config    ok\nclaude    ok    2.1.320\nbinary    skip  the plugin's mash is not visible from a shell\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   ok\ndelivery  ok\nrefused   ok    no unverified mail was refused\n\nNo problems.",
      "stream": "stdout",
      "exit": 0
     }
@@ -504,13 +504,13 @@
    "errors": [
     {
      "case": "A problem and a warning, with one hint",
-     "text": "config    ok\nclaude    skip  no claude command found\nbinary    skip  not run by the plugin: CLAUDE_PLUGIN_DATA is not set, so the\n                plugin's binary cannot be found from a shell\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   FAIL  the server refused these credentials\ndelivery  skip  needs sign-in\nrefused   warn  3 unverified messages were refused\n\n1 problem, 1 warning.\nhint: mash join <file> --replace",
+     "text": "config    ok\nclaude    skip  no claude command found\nbinary    skip  the plugin's mash is not visible from a shell\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   FAIL  the server refused these credentials\ndelivery  skip  needs sign-in\nrefused   warn  3 unverified messages were refused\n\n1 problem, 1 warning.\nhint: mash join <file> --replace",
      "stream": "stdout",
      "exit": 1
     },
     {
      "case": "Server not answering",
-     "text": "config    ok\nclaude    skip  no claude command found\nbinary    skip  not run by the plugin: CLAUDE_PLUGIN_DATA is not set, so the\n                plugin's binary cannot be found from a shell\ncreds     ok\nserver    FAIL  the server did not answer: tls://myserver:4222\nsign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no unverified mail was refused\n\n1 problem.",
+     "text": "config    ok\nclaude    skip  no claude command found\nbinary    skip  the plugin's mash is not visible from a shell\ncreds     ok\nserver    FAIL  the server did not answer: tls://myserver:4222\nsign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no unverified mail was refused\n\n1 problem.",
      "stream": "stdout",
      "exit": 1
     },
@@ -522,13 +522,13 @@
     },
     {
      "case": "The endpoint was deleted, seen from another machine, with one hint",
-     "text": "config    ok\nclaude    skip  no claude command found\nbinary    skip  not run by the plugin: CLAUDE_PLUGIN_DATA is not set, so the\n                plugin's binary cannot be found from a shell\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   FAIL  this endpoint was deleted; its address cannot be used again\ndelivery  skip  needs sign-in\nrefused   ok    no unverified mail was refused\n\n1 problem.\nhint: mash join <file>",
+     "text": "config    ok\nclaude    skip  no claude command found\nbinary    skip  the plugin's mash is not visible from a shell\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   FAIL  this endpoint was deleted; its address cannot be used again\ndelivery  skip  needs sign-in\nrefused   ok    no unverified mail was refused\n\n1 problem.\nhint: mash join <file>",
      "stream": "stdout",
      "exit": 1
     },
     {
      "case": "The endpoint was deleted, on the machine that deleted it, with one hint",
-     "text": "config    ok\nclaude    skip  no claude command found\nbinary    skip  not run by the plugin: CLAUDE_PLUGIN_DATA is not set, so the\n                plugin's binary cannot be found from a shell\ncreds     FAIL  this endpoint was deleted; its address cannot be used again\nserver    ok    tls://myserver:4222\nsign-in   skip  needs the creds\ndelivery  skip  needs sign-in\nrefused   ok    no unverified mail was refused\n\n1 problem.\nhint: mash join <file>",
+     "text": "config    ok\nclaude    skip  no claude command found\nbinary    skip  the plugin's mash is not visible from a shell\ncreds     FAIL  this endpoint was deleted; its address cannot be used again\nserver    ok    tls://myserver:4222\nsign-in   skip  needs the creds\ndelivery  skip  needs sign-in\nrefused   ok    no unverified mail was refused\n\n1 problem.\nhint: mash join <file>",
      "stream": "stdout",
      "exit": 1
     },

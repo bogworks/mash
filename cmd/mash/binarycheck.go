@@ -6,8 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
-	"strings"
 
 	"github.com/bogworks/mash/internal/cmdcore/cmds"
 	"github.com/bogworks/mash/internal/endpoint"
@@ -17,72 +15,63 @@ import (
 var (
 	// binaryPluginData is $CLAUDE_PLUGIN_DATA, the directory the plugin keeps its downloaded mash under.
 	binaryPluginData = func() string { return os.Getenv("CLAUDE_PLUGIN_DATA") }
+	// binaryPluginRoot is $CLAUDE_PLUGIN_ROOT, the plugin's own directory, where scripts/mash.pins names the version.
+	binaryPluginRoot = func() string { return os.Getenv("CLAUDE_PLUGIN_ROOT") }
 	// binaryMashBin is $MASH_BIN, the binary the plugin's launcher runs when it is set.
 	binaryMashBin = func() string { return os.Getenv("MASH_BIN") }
 	// binaryOwnVersion is the version of the mash that is running doctor.
 	binaryOwnVersion = endpoint.CurrentVersion
 )
 
-// managedName is the file name of a copy the plugin's launcher downloads: mash-<N.N.N>, nothing else.
-var managedName = regexp.MustCompile(`^mash-(\d+\.\d+\.\d+)$`)
+// pinVersionRE is the launcher's rule for the version line of scripts/mash.pins (plugin/scripts/mash): the first match.
+var pinVersionRE = regexp.MustCompile(`(?m)^version=([0-9][0-9A-Za-z.+-]*)$`)
 
 // ownVersionRE is a release version of this build: vN.N.N, with any -dev, -rc or +commit suffix.
 var ownVersionRE = regexp.MustCompile(`^v?(\d+\.\d+\.\d+)([-+].*)?$`)
 
-// binaryCheck is the binary row: the mash the plugin runs (its own copy under $CLAUDE_PLUGIN_DATA/bin) against the
-// mash running doctor. It reads one directory and runs nothing. It never fails and gives no fix: none is a command of
-// ours, so the detail says how to make the two agree.
+// binaryCheck is the binary row: the mash the plugin's launcher runs, the copy $CLAUDE_PLUGIN_DATA/bin/mash-<version>
+// where <version> is the one in $CLAUDE_PLUGIN_ROOT/scripts/mash.pins, against the mash running doctor. It reads the pin
+// file and stats the copy, and runs nothing. It never fails and gives no fix: none is a command of ours, so the detail
+// says how to make the two agree. Every skip is one short line and the warn names no path.
 func binaryCheck(context.Context) cmds.HealthCheck {
 	c := cmds.HealthCheck{Name: cmds.CheckBinary}
-	dir := binaryPluginData()
-	if dir == "" {
-		c.State, c.Detail = cmds.CheckSkip, "not run by the plugin: CLAUDE_PLUGIN_DATA is not set, so the plugin's binary cannot be found from a shell"
-		return c
+	skip := func(why string) cmds.HealthCheck { c.State, c.Detail = cmds.CheckSkip, why; return c }
+	data := binaryPluginData()
+	if data == "" {
+		return skip("the plugin's mash is not visible from a shell")
 	}
 	if binaryMashBin() != "" {
-		c.State, c.Detail = cmds.CheckSkip, "MASH_BIN is set; the plugin runs it"
-		return c
+		return skip("MASH_BIN is set; the plugin runs it")
 	}
-	bin := filepath.Join(dir, "bin")
-	entries, err := os.ReadDir(bin)
-	if err != nil && !os.IsNotExist(err) {
-		c.State, c.Detail = cmds.CheckSkip, fmt.Sprintf("%s could not be read: %v", bin, err)
-		return c
+	const none = "the plugin runs no downloaded mash"
+	root := binaryPluginRoot()
+	if root == "" {
+		return skip(none)
 	}
-	type copyOf struct{ version, path string }
-	var found []copyOf
-	for _, e := range entries {
-		m := managedName.FindStringSubmatch(e.Name())
-		if m == nil {
-			continue
+	pins, err := os.ReadFile(filepath.Join(root, "scripts", "mash.pins"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return skip(none)
 		}
-		p := filepath.Join(bin, e.Name())
-		if fi, err := os.Stat(p); err != nil || !fi.Mode().IsRegular() || fi.Mode().Perm()&0o111 == 0 {
-			continue
-		}
-		found = append(found, copyOf{m[1], p})
+		return skip("the plugin's mash could not be read")
 	}
-	if len(found) == 0 {
-		c.State, c.Detail = cmds.CheckSkip, fmt.Sprintf("the plugin has no downloaded mash in %s (unpinned, or it uses MASH_BIN or the one on PATH)", bin)
-		return c
+	m := pinVersionRE.FindSubmatch(pins)
+	if m == nil {
+		return skip(none)
+	}
+	pinned := string(m[1])
+	if fi, err := os.Stat(filepath.Join(data, "bin", "mash-"+pinned)); err != nil || !fi.Mode().IsRegular() || fi.Mode().Perm()&0o111 == 0 {
+		return skip(none)
 	}
 	own := ownVersionRE.FindStringSubmatch(binaryOwnVersion())
 	if own == nil || own[1] == "0.0.0" {
-		c.State, c.Detail = cmds.CheckSkip, "this mash has no release version to compare"
-		return c
+		return skip("this mash has no release version")
 	}
-	sort.Slice(found, func(i, j int) bool { return found[i].path < found[j].path })
-	var differ []string
-	for _, f := range found {
-		if f.version != own[1] {
-			differ = append(differ, fmt.Sprintf("%s (%s)", f.version, f.path))
-		}
-	}
-	if len(differ) == 0 {
+	if pinned == own[1] {
 		c.State, c.Detail = cmds.CheckOK, own[1]
 		return c
 	}
 	c.State = cmds.CheckWarn
-	c.Detail = fmt.Sprintf("the plugin runs %s; this mash is %s: install the matching release, or set MASH_BIN to the one you want", strings.Join(differ, ", "), own[1])
+	c.Detail = fmt.Sprintf("the plugin runs %s; this mash is %s: install %s, or set MASH_BIN", pinned, own[1], pinned)
 	return c
 }

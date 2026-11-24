@@ -300,7 +300,7 @@ func TestStatusAndDoctorErrors(t *testing.T) {
 // withClaude puts the claude row, then the binary row as a shell shows it, right after config: every doctor report has
 // them (the command adds them) and the spec shows them.
 func withClaude(f *fakeHealth, row cmds.HealthCheck) *fakeHealth {
-	binary := cmds.HealthCheck{Name: cmds.CheckBinary, State: cmds.CheckSkip, Detail: "not run by the plugin: CLAUDE_PLUGIN_DATA is not set, so the plugin's binary cannot be found from a shell"}
+	binary := cmds.HealthCheck{Name: cmds.CheckBinary, State: cmds.CheckSkip, Detail: "the plugin's mash is not visible from a shell"}
 	f.rep.Checks = append(f.rep.Checks[:1:1], append([]cmds.HealthCheck{row, binary}, f.rep.Checks[1:]...)...)
 	return f
 }
@@ -438,7 +438,7 @@ func TestDoctorMatchesSpec(t *testing.T) {
 				t.Errorf("%s: mcp spec text %q, cli spec text %q", oc["case"], mcp, oc["text"])
 			}
 		case "Claude Code is recent enough", "Claude Code is too old", "Claude Code is newer than tested", "No claude command", "The version of claude is unreadable",
-			"The plugin runs this mash", "The plugin runs another mash", "The plugin has no downloaded mash", "MASH_BIN is set", "This mash has no release version":
+			"The plugin runs this mash", "The plugin runs another mash", "The plugin runs no downloaded mash", "MASH_BIN is set", "This mash has no release version":
 			// the claude row is made by the command (cmd/mash/claudecheck_test.go), not by the report this package renders
 			continue
 		default:
