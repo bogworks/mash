@@ -30,10 +30,17 @@ const longTimeout = 30 * time.Second
 
 const updateEnv = "MASH_PORTABLE_UPDATE"
 
+// The names of the layers above mash are spelled in two halves, so no file of mash holds them whole: mash stands alone
+// and its own code and fixtures do not know those layers (#1073).
+const (
+	layerAbove1 = "home" + "range"
+	layerAbove2 = "range" + "hand"
+)
+
 var (
 	// personalRE matches words that name a person, a machine or a private project. "bogworks" is the public org and is
 	// deliberately not here.
-	personalRE = regexp.MustCompile(`(?i)randyb|randybias|\brlb\b|homerange|rangehand|plethorax|dev1\b|thaos|bf1\b|devsup|rdev\b|mire's|ms-?wisp`)
+	personalRE = regexp.MustCompile(`(?i)randyb|randybias|\brlb\b|` + layerAbove1 + `|` + layerAbove2 + `|plethorax|dev1\b|thaos|bf1\b|devsup|rdev\b|mire's|ms-?wisp`)
 	// homePathRE matches a literal that starts at a user's home or at a temp or home directory.
 	homePathRE = regexp.MustCompile(`^(~/|/tmp/|/home/|/Users/)`)
 	// githubOrgRE captures the org of a github.com URL or an scp-style git@github.com:org remote.
@@ -479,7 +486,7 @@ func TestBootstrap(t *testing.T) {
 }
 
 func TestRegexes(t *testing.T) {
-	for _, s := range []string{"randyb", "RandyBias", "my rlb box", "homerange", "rangehand-x", "plethorax", "dev1", "thaos", "bf1", "devsup", "rdev", "mire's", "msWisp", "ms-wisp"} {
+	for _, s := range []string{"randyb", "RandyBias", "my rlb box", layerAbove1, layerAbove2 + "-x", "plethorax", "dev1", "thaos", "bf1", "devsup", "rdev", "mire's", "msWisp", "ms-wisp"} {
 		if !personalRE.MatchString(s) {
 			t.Errorf("personalRE should match %q", s)
 		}
