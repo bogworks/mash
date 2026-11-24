@@ -257,11 +257,13 @@ func TestReadInboxCountingPassStopsAtTheCap(t *testing.T) {
 		msgs, bytes int
 		partial     bool
 		urgent      int
+		by          string // PartialBy
+		at          int    // PartialAt
 	}{
-		{"message cap", 10, 1 << 30, true, 2},
-		{"byte cap", 1000, 1, true, 1},
-		{"exactly the backlog", 27, 1 << 30, false, 3}, // 30 less the 3 listed
-		{"above", 1000, 1 << 30, false, 3},
+		{"message cap", 10, 1 << 30, true, 2, "messages", 10},
+		{"byte cap", 1000, 1, true, 1, "bytes", 1},
+		{"exactly the backlog", 27, 1 << 30, false, 3, "", 0}, // 30 less the 3 listed
+		{"above", 1000, 1 << 30, false, 3, "", 0},
 	} {
 		setCaps(t, c.msgs, c.bytes)
 		r, err := a.ReadInbox(ctx, InboxQuery{Limit: 3})
@@ -271,6 +273,9 @@ func TestReadInboxCountingPassStopsAtTheCap(t *testing.T) {
 		if r.Partial != c.partial || r.NewUrgent != c.urgent || r.State.Total != 30 || r.State.Waiting != 30 || len(r.Mail) != 3 {
 			t.Fatalf("%s: partial %v urgent %d total %d waiting %d listed %d: want %v, %d, 30, 30, 3",
 				c.name, r.Partial, r.NewUrgent, r.State.Total, r.State.Waiting, len(r.Mail), c.partial, c.urgent)
+		}
+		if r.PartialBy != c.by || r.PartialAt != c.at {
+			t.Fatalf("%s: stopped by %q at %d, want %q at %d (#958: the count says why it is not exact)", c.name, r.PartialBy, r.PartialAt, c.by, c.at)
 		}
 		if !r.State.OldestWaiting.Equal(first.At) {
 			t.Fatalf("%s: oldest %v, want #1's %v", c.name, r.State.OldestWaiting, first.At)

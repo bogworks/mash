@@ -468,6 +468,11 @@ func TestInboxReadMatchSpec(t *testing.T) {
 			json.Unmarshal([]byte(sx), &spec)
 			msgs := got["messages"].([]any)
 			got["messages"] = msgs[:1]
+			// #958: "exact" is new in 0.5.9 and the committed spec example does not have it yet (the spec lane adds it).
+			if got["exact"] != true {
+				t.Errorf("inbox object exact = %v, want true", got["exact"])
+			}
+			delete(got, "exact")
 			if !reflect.DeepEqual(got, spec) {
 				t.Errorf("inbox object %v, spec x-json %v", got, spec)
 			}
@@ -577,5 +582,59 @@ func TestReadQuotesEveryLineWithASpace(t *testing.T) {
 	_, body, _ := strings.Cut(out, "\n\n")
 	if want := "> one\n> \n> three"; body != want {
 		t.Fatalf("body %q, want %q", body, want)
+	}
+}
+
+// #958, REQ-011: a count that is not exact says so in the count itself, "about", with no separate line. --detail gives the
+// reason, --json carries "exact". An exact count prints what it always did.
+func TestInboxCountExactness(t *testing.T) {
+	const capped = "only the oldest 1000 messages were checked"
+	const noServe = "mash serve is not running, so mail it has not verified is still counted"
+	table := "\n\nNUMBER  FROM  WHEN     STATE  URGENT  KIND      MESSAGE\n" +
+		"1       bob   10s ago  new    no      task      lunch at noon?\n" +
+		"2       bob   8s ago   new    yes     question  ready?\n"
+	for _, c := range []struct {
+		name        string
+		capped      string
+		noServe     bool
+		summary     string
+		exact       bool
+		detailExtra string
+	}{
+		{"exact", "", false, "2 messages for acme.demo.alice, 2 new, 1 urgent.", true, ""},
+		{"capped", capped, false, "About 2 messages for acme.demo.alice, about 2 new, about 1 urgent.", false, "exact: no (" + capped + ")"},
+		{"serve not running", "", true, "About 2 messages for acme.demo.alice, about 2 new, about 1 urgent.", false, "exact: no (" + noServe + ")"},
+		{"both, said once, the cap first", capped, true, "About 2 messages for acme.demo.alice, about 2 new, about 1 urgent.", false, "exact: no (" + capped + "; " + noServe + ")"},
+	} {
+		b := specBox()
+		b.view.Capped, b.view.NoServe = c.capped, c.noServe
+		code, out, errs := runInbox(b, cliframe.Global{})
+		if code != 0 || out != c.summary+table || errs != "" {
+			t.Errorf("%s: text %d %q %q", c.name, code, out, errs)
+		}
+		if strings.Contains(out, "approximate") || strings.Contains(out, "partial") {
+			t.Errorf("%s: a separate line about the count: %q", c.name, out)
+		}
+		_, out, _ = runInbox(b, cliframe.Global{Detail: true})
+		want := c.summary + table
+		if c.detailExtra != "" {
+			want += c.detailExtra + "\n"
+		}
+		if out != want {
+			t.Errorf("%s: --detail %q, want %q", c.name, out, want)
+		}
+		_, out, _ = runInbox(b, cliframe.Global{JSON: true})
+		var got map[string]any
+		if err := json.Unmarshal([]byte(out), &got); err != nil || got["exact"] != c.exact {
+			t.Errorf("%s: --json exact = %v (%v) in %s", c.name, got["exact"], err, out)
+		}
+	}
+	// no mail: nothing to verify, nothing capped; "No messages" is exact whether or not serve runs
+	b := &fakeBox{view: cmds.InboxView{Endpoint: "acme.demo.alice", NoServe: true}}
+	if _, out, _ := runInbox(b, cliframe.Global{}); out != "No messages for acme.demo.alice.\n" {
+		t.Errorf("empty inbox: %q", out)
+	}
+	if _, out, _ := runInbox(b, cliframe.Global{JSON: true}); !strings.Contains(out, `"exact":true`) && !strings.Contains(out, `"exact": true`) {
+		t.Errorf("empty inbox json: %s", out)
 	}
 }

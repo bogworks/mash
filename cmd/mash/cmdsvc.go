@@ -285,18 +285,33 @@ func mailItem(m render.Mail, floor uint64, waiting bool) cmds.MailItem {
 // inboxOn is the inbox command's read of ep. The counts come from the server's consumer (what has not reached the
 // session), not from the messages listed: a listing is only a window. A message is new when it is above the consumer's
 // acknowledged floor. How many waiting messages are urgent is counted over all of them, in the same pass as the totals.
-func inboxOn(ctx context.Context, ep *endpoint.Endpoint, q cmds.InboxQuery, w wakeSettings) (cmds.InboxView, error) {
+func inboxOn(ctx context.Context, ep *endpoint.Endpoint, q cmds.InboxQuery, w wakeSettings, noServe bool) (cmds.InboxView, error) {
 	r, err := ep.ReadInbox(ctx, endpoint.InboxQuery{OnlyNew: q.OnlyNew, After: uint64(q.After), Limit: q.Limit})
 	if err != nil {
 		return cmds.InboxView{}, plainFail(err)
 	}
 	st := r.State
 	v := cmds.InboxView{Endpoint: ep.Display(), Total: st.Total, Waiting: st.Waiting, NewUrgent: r.NewUrgent, OldestWaiting: st.OldestWaiting,
-		WakeCount: w.count, WakeAge: w.age, WakeAgeText: w.text, Messages: make([]cmds.MailItem, 0, len(r.Mail))}
+		WakeCount: w.count, WakeAge: w.age, WakeAgeText: w.text, Capped: cappedWhy(r), NoServe: noServe, Messages: make([]cmds.MailItem, 0, len(r.Mail))}
 	for _, m := range r.Mail {
 		v.Messages = append(v.Messages, mailItem(m, st.AckFloor, st.Waiting > 0))
 	}
 	return v, nil
+}
+
+// cappedWhy is why the count is not exact when the counting pass stopped at its cap (#955), "" when it did not.
+func cappedWhy(r endpoint.InboxRead) string {
+	switch {
+	case r.PartialBy == "messages" && r.PartialAt == 1:
+		return "only the oldest message was checked"
+	case r.PartialBy == "messages":
+		return fmt.Sprintf("only the oldest %d messages were checked", r.PartialAt)
+	case r.PartialBy == "bytes" && r.PartialAt%(1<<20) == 0:
+		return fmt.Sprintf("only the oldest %d MiB of message text was checked", r.PartialAt>>20)
+	case r.PartialBy == "bytes":
+		return fmt.Sprintf("only the oldest %d bytes of message text were checked", r.PartialAt)
+	}
+	return ""
 }
 
 // messageOn is the read command's read of ep: the message, or none when the inbox has no such one.
@@ -319,14 +334,14 @@ func messageOn(ctx context.Context, ep *endpoint.Endpoint, number int) (cmds.Rea
 
 // openMailbox opens the endpoint for a command that reads its inbox, within the command's deadline, and words a refusal
 // the way the rules do. The caller closes the endpoint and cancels the returned context.
-func (s *cliSvc) openMailbox(ctx context.Context) (context.Context, *endpoint.Endpoint, func(), error) {
+func (s *cliSvc) openMailbox(ctx context.Context, lease bool) (context.Context, *endpoint.Endpoint, func(), error) {
 	cfg := s.cfg
 	if cfg.Inert() {
 		return nil, nil, nil, cmdcore.NoEndpoint(cmdcore.NoneInstalled, "inbox", nil)
 	}
 	ctx, cancel := context.WithTimeout(ctx, cliDeadline(cfg))
 	openCtx, openCancel := context.WithTimeout(ctx, cfg.OpenTimeout)
-	ep, err := endpoint.OpenClientWith(openCtx, cfg, endpoint.ClientOptions{Inbox: true})
+	ep, err := endpoint.OpenClientWith(openCtx, cfg, endpoint.ClientOptions{Inbox: true, Lease: lease})
 	openCancel()
 	if err != nil {
 		cancel()
@@ -342,19 +357,22 @@ func (s *cliSvc) openMailbox(ctx context.Context) (context.Context, *endpoint.En
 
 // Inbox lists the inbox of the endpoint, in one open: the first wave of reads also fetches the inbox stream.
 func (s *cliSvc) Inbox(ctx context.Context, q cmds.InboxQuery) (cmds.InboxView, error) {
-	ctx, ep, done, err := s.openMailbox(ctx)
+	ctx, ep, done, err := s.openMailbox(ctx, true)
 	if err != nil {
 		return cmds.InboxView{}, err
 	}
 	defer done()
 	c, cc := context.WithTimeout(ctx, s.cfg.CallTimeout)
 	defer cc()
-	return inboxOn(c, ep, q, wakeOf(s.cfg))
+	// Without a live lease mash serve is not running: it is the part that verifies and refuses mail, so what is counted
+	// here may include mail it has not yet refused (#958). A failed read of the lease counts as not running.
+	_, up := ep.OwnLease(c)
+	return inboxOn(c, ep, q, wakeOf(s.cfg), !up)
 }
 
 // Message reads one message. With no session online nothing can mark it read: at a shell it stays new (see mcpSvc).
 func (s *cliSvc) Message(ctx context.Context, number int) (cmds.ReadView, error) {
-	ctx, ep, done, err := s.openMailbox(ctx)
+	ctx, ep, done, err := s.openMailbox(ctx, false)
 	if err != nil {
 		return cmds.ReadView{}, err
 	}
@@ -380,7 +398,7 @@ func (s *mcpSvc) Inbox(ctx context.Context, q cmds.InboxQuery) (cmds.InboxView, 
 	}
 	ctx, cancel := context.WithTimeout(ctx, s.callTimeout)
 	defer cancel()
-	return inboxOn(ctx, ep, q, s.wake)
+	return inboxOn(ctx, ep, q, s.wake, false) // the MCP door is serve
 }
 
 // Message reads one message. The tool's AfterWrite (see readAck) acknowledges it once the result is written.

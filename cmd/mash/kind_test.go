@@ -28,7 +28,7 @@ func TestSendKindFromTheCLI(t *testing.T) {
 	if out, code := w.cli(t, "b", "send", tTo("a"), "--kind"); code != 2 {
 		t.Fatalf("--kind without a value: %d %s", code, out)
 	}
-	if out, _ := w.cli(t, "a", "inbox"); !strings.HasPrefix(out, "2 messages for ") || strings.Contains(out, " x\n") {
+	if out, _ := w.cli(t, "a", "inbox"); !strings.HasPrefix(out, "About 2 messages for ") || strings.Contains(out, " x\n") {
 		t.Fatalf("a refused send was delivered:\n%s", out)
 	}
 }
@@ -76,7 +76,7 @@ func TestSendKindFromTheMCPTool(t *testing.T) {
 			t.Fatalf("#%s is not %s:\n%s", seq, want, out)
 		}
 	}
-	if out, _ := w.cli(t, "a", "inbox"); !strings.HasPrefix(out, "4 messages for ") || strings.HasSuffix(strings.TrimRight(out, "\n"), " hi") { // the text column
+	if out, _ := w.cli(t, "a", "inbox"); !strings.HasPrefix(out, "About 4 messages for ") || strings.HasSuffix(strings.TrimRight(out, "\n"), " hi") { // the text column
 		t.Fatalf("a refused send was delivered:\n%s", out)
 	}
 }

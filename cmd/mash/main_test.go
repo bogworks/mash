@@ -780,7 +780,7 @@ func TestCLIInboxAfter(t *testing.T) {
 		t.Fatalf("inbox --limit 2 --after 3: %d %q", code, out)
 	}
 	out, code = w.cli(t, "a", "inbox", "--after", "4")
-	if !strings.HasPrefix(out, "4 messages for ") || strings.Contains(out, "NUMBER") || code != 0 {
+	if !strings.HasPrefix(out, "About 4 messages for ") || strings.Contains(out, "NUMBER") || code != 0 {
 		t.Fatalf("inbox --after 4: %d %q", code, out)
 	}
 	for _, bad := range [][]string{{"inbox", "--after", "x"}, {"inbox", "--limit"}, {"inbox", "--bogus", "1"}, {"inbox", "--limit", "two"}} {
