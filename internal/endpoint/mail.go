@@ -505,7 +505,6 @@ func (e *Endpoint) deliverLoop(deliver Deliverer, queue <-chan pending, quit <-c
 		if batch = e.dropUnleased(batch); len(batch) == 0 {
 			continue
 		}
-		e.recordDeliveredBatch(batch) // before anything is shown or acked, and only for mail this serve still holds the lease for
 		if e.noChannel && e.spool == nil {
 			hold(batch) // no spool and no channel: mail stays in the inbox, unacked
 			continue
@@ -527,6 +526,7 @@ func (e *Endpoint) deliverLoop(deliver Deliverer, queue <-chan pending, quit <-c
 		if len(show) == 0 {
 			continue
 		}
+		e.recordDeliveredBatch(show) // the mail this serve is about to show or spool: past the lease, the hold and the duplicates
 		if e.hooked() {
 			e.spoolBatch(deliver, show, h, seen)
 			continue

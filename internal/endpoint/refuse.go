@@ -450,9 +450,9 @@ func (e *Endpoint) deliveredEarlier(seq uint64) bool {
 	return err == nil && e.deliveredSeq(seq, id)
 }
 
-// recordDeliveredBatch records the unverified messages of a batch serve is about to deliver under accept_unverified, so
-// a shell shows them with their label whatever its own setting. It runs after the lease check: a message the worker
-// naks unseen is never recorded. A failure to record is logged and leaves the shell on its own setting.
+// recordDeliveredBatch records the unverified messages serve is about to show or spool under accept_unverified, so a
+// shell shows them with their label whatever its own setting. It runs after the lease check, the no-channel hold and
+// the duplicate check: a message the worker naks unseen or holds unacknowledged is never recorded. A failure to record is logged and leaves the shell on its own setting.
 func (e *Endpoint) recordDeliveredBatch(batch []pending) {
 	if !e.cfg.AcceptUnverified {
 		return
