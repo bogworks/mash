@@ -683,7 +683,7 @@ func doctorKeys(rep *doctorReport, ctx context.Context, adm *admin.Admin, cfg co
 		}
 		sc, err := scanConns(ctx, nc, account, serverCount(cfg))
 		if err != nil {
-			if len(attempts) > 0 && (ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)) {
+			if len(attempts) > 0 && ctx.Err() != nil { // doctor's own deadline or a cancel; a page request's own timeout is a failure
 				stopped = true
 				break
 			}
@@ -811,12 +811,22 @@ const detailWidth = 63
 // mashctl's users cannot be ruled out (the deadline stopped the reads), so it reports true. With several reads that
 // differ in nothing, it reports false.
 func churnIsMashs(attempts []connScan, recs []store.Issued) bool {
-	if len(attempts) < 2 {
-		return true
-	}
 	recorded := map[string]bool{}
 	for _, r := range recs {
 		recorded[r.PublicKey] = true
+	}
+	// A connection that came or went between a server's own page scans, one of mashctl's users, is churn.
+	for _, a := range attempts {
+		for _, s := range a.Conns {
+			for _, c := range s.Changed {
+				if recorded[c.Key] {
+					return true
+				}
+			}
+		}
+	}
+	if len(attempts) < 2 {
+		return true
 	}
 	sets := func(a connScan) map[string]map[string]bool {
 		m := map[string]map[string]bool{}
