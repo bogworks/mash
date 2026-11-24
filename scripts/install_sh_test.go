@@ -76,13 +76,19 @@ func hostPlatform(t *testing.T) (string, string) {
 // fakeRelease makes a release directory: fake mash and mashctl for the host, a real SHA256SUMS, and a bundle file.
 func fakeRelease(t *testing.T) (dir, mashName, ctlName string) {
 	t.Helper()
+	return fakeReleaseVersions(t, fakeMashVersion, fakeCtlVersion)
+}
+
+// fakeReleaseVersions is fakeRelease with the version line each program prints.
+func fakeReleaseVersions(t *testing.T, mashVersion, ctlVersion string) (dir, mashName, ctlName string) {
+	t.Helper()
 	goos, goarch := hostPlatform(t)
 	dir = t.TempDir()
 	mashName = "mash-" + goos + "-" + goarch
 	ctlName = "mashctl-" + goos + "-" + goarch
 	files := map[string]string{
-		mashName: "#!/bin/sh\n[ \"$1\" = version ] && echo '" + fakeMashVersion + "'\nexit 0\n",
-		ctlName:  "#!/bin/sh\n[ \"$1\" = version ] && echo '" + fakeCtlVersion + "'\nexit 0\n",
+		mashName: "#!/bin/sh\n[ \"$1\" = version ] && echo '" + mashVersion + "'\nexit 0\n",
+		ctlName:  "#!/bin/sh\n[ \"$1\" = version ] && echo '" + ctlVersion + "'\nexit 0\n",
 	}
 	var sums strings.Builder
 	for _, n := range []string{mashName, ctlName} {
@@ -1072,5 +1078,64 @@ func TestInstallSh_noGhMeansNoCommitLookup(t *testing.T) {
 	r := runInstall(t, rel, installTools(t, nil), "MASH_API_BASE=file:///nonexistent")
 	if r.err != nil || strings.Contains(r.out, "commit") {
 		t.Errorf("want a plain checksums-only install, got err=%v\n%s", r.err, r.out)
+	}
+}
+
+// A hard kill between the two renames leaves mash and mashctl at different versions. A rerun says so and
+// installs the requested pair over both.
+func TestInstallSh_aSplitPairIsRepairedOnRerun(t *testing.T) {
+	rel, _, _ := fakeRelease(t)
+	home := tempHome(t)
+	dest := filepath.Join(home, "bin")
+	if err := os.Mkdir(dest, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for n, v := range map[string]string{"mash": "mash v0.5.5 (aaaaaaa)", "mashctl": "mashctl 0.5.6"} {
+		if err := os.WriteFile(filepath.Join(dest, n), []byte("#!/bin/sh\necho '"+v+"'\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := runInstallIn(t, rel, installTools(t, nil), home, dest, "install.sh")
+	if r.err != nil {
+		t.Fatalf("rerun failed: %v\n%s", r.err, r.out)
+	}
+	if !strings.Contains(r.out, "mash 0.5.5 and mashctl 0.5.6 in ") || !strings.Contains(r.out, "differ: installing v0.5.6 of both\n") {
+		t.Errorf("no split note:\n%s", r.out)
+	}
+	for _, want := range []string{"Installed " + fakeMashVersion + " in ~/bin", "Installed " + fakeCtlVersion + " in ~/bin"} {
+		if !strings.Contains(r.out, want+"\n") {
+			t.Errorf("output lacks %q:\n%s", want, r.out)
+		}
+	}
+	// One program missing is a split too.
+	if err := os.Remove(filepath.Join(dest, "mashctl")); err != nil {
+		t.Fatal(err)
+	}
+	r = runInstallIn(t, rel, installTools(t, nil), home, dest, "install.sh")
+	if r.err != nil || !strings.Contains(r.out, "only one of mash and mashctl is in ") {
+		t.Fatalf("missing-program rerun: err=%v\n%s", r.err, r.out)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "mashctl")); err != nil {
+		t.Errorf("mashctl not repaired: %v", err)
+	}
+	// A pair at one version says nothing.
+	r = runInstallIn(t, rel, installTools(t, nil), home, dest, "install.sh")
+	if r.err != nil || strings.Contains(r.out, "differ") || strings.Contains(r.out, "only one") {
+		t.Errorf("a whole pair was called split: err=%v\n%s", r.err, r.out)
+	}
+}
+
+// A release whose two programs report different versions is refused after the install, naming both.
+func TestInstallSh_refusesAPairAtDifferentVersions(t *testing.T) {
+	rel, _, _ := fakeReleaseVersions(t, fakeMashVersion, "mashctl 0.5.7")
+	r := runInstall(t, rel, installTools(t, nil))
+	if r.err == nil {
+		t.Fatalf("want a refusal:\n%s", r.out)
+	}
+	if !strings.Contains(r.out, "error: mash is 0.5.6 but mashctl is 0.5.7: reinstall to fix\n") {
+		t.Errorf("refusal does not name both versions:\n%s", r.out)
+	}
+	if strings.Contains(r.out, "Installed ") {
+		t.Errorf("success was reported:\n%s", r.out)
 	}
 }

@@ -53,6 +53,12 @@ die() {
     exit 1
 }
 
+# version_of PROGRAM: the version PROGRAM reports, without its name or a leading v
+# ("mash v0.5.6 (3f9a41c)" and "mashctl 0.5.6" both give 0.5.6); empty if it does not run.
+version_of() {
+    "$1" version 2>/dev/null | head -n 1 | awk 'NR == 1 { sub(/^v/, "", $2); print $2 }' || true
+}
+
 # sha256_of FILE: the hex SHA-256 of FILE, with sha256sum or shasum.
 sha256_of() {
     if command -v sha256sum >/dev/null 2>&1; then
@@ -131,7 +137,7 @@ unsafe_path() {
 }
 
 main() {
-    local os arch uname_s uname_m dir real tag sumsname name want got tmp line shown resolved ghout ghline ghver ghmajor ghminor ghpatch ghpre commit
+    local old_a old_b new_a new_b os arch uname_s uname_m dir real tag sumsname name want got tmp line shown resolved ghout ghline ghver ghmajor ghminor ghpatch ghpre commit
     local -a names staged_new
 
     [[ $REPO =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || die "MASH_REPO $REPO is not owner/name"
@@ -264,6 +270,20 @@ main() {
         [ "$got" = "$want" ] || die "$name does not match SHA256SUMS: nothing was installed"
     done
 
+    # A split pair left by a hard kill between the two renames (one program
+    # missing, or two versions) is not "installed": the install below replaces
+    # both, which repairs it.
+    if [ -f "$real/mash" ] || [ -f "$real/mashctl" ]; then
+        if [ -f "$real/mash" ] && [ -f "$real/mashctl" ]; then
+            old_a=$(version_of "$real/mash")
+            old_b=$(version_of "$real/mashctl")
+            [ -z "$old_a" ] || [ -z "$old_b" ] || [ "$old_a" = "$old_b" ] ||
+                echo "mash $old_a and mashctl $old_b in $real differ: installing $tag of both"
+        else
+            echo "only one of mash and mashctl is in $real: installing $tag of both"
+        fi
+    fi
+
     # Stage both binaries (and a copy of what they replace) in the folder, then
     # rename them back to back; if the second rename fails the first is undone.
     staged_new=()
@@ -295,6 +315,12 @@ main() {
     eval "$old_traps"
     STAGED=()
     [ -z "$backup" ] || rm -f -- "$backup"
+
+    new_a=$(version_of "$real/mash")
+    new_b=$(version_of "$real/mashctl")
+    [ -n "$new_a" ] || die "the installed mash did not report its version"
+    [ -n "$new_b" ] || die "the installed mashctl did not report its version"
+    [ "$new_a" = "$new_b" ] || die "mash is $new_a but mashctl is $new_b: reinstall to fix"
 
     shown=$(tilde "$dir")
     for name in mash mashctl; do
