@@ -185,16 +185,6 @@
    "issue": "#990",
    "replaces": "A refused message is invisible at a shell too",
    "note": "The text is policy's proposed text (spec/next.json at a827f3d2), in round brackets. REQ-013. A description, not output: the whole text is in round brackets, which the rules reserve for a description, so the conformance test skips it. A message serve recorded as refused stays refused at a shell, whatever the shell's accept-unverified setting. A message serve delivered under --accept-unverified shows at a shell with its trust label, whatever the shell's setting. A message no serve has judged yet is judged by the shell's own setting, as today. The existing \"A message that was refused\" case and the inbox listing are unchanged."
-  },
-  {
-   "id": "join-ca-into-folder-with-no-endpoint",
-   "where": "mash join",
-   "case": "A folder with servers and no endpoint",
-   "issue": "#1062",
-   "stream": "stderr",
-   "exit": 1,
-   "text": "error: this folder has a server but no endpoint\nhint: mash join <file> --config-dir <folder>",
-   "note": "PROPOSED, not yet in the specification (REQ-015, #1062: join refuses to add a certificate authority to a folder with servers but no endpoint, and nothing is added). <file> is the join file and <folder> a new folder; both vary. The lead states the real condition."
   }
  ],
  "rules_next": []

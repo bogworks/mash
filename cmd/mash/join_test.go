@@ -200,6 +200,17 @@ func TestJoinMatchesSpec(t *testing.T) {
 		writeJoin(t, "acme.demo.bob.join", joinfile.File{MashJoin: 1, Address: "acme.demo.carol", Servers: []string{"tls://myserver:4222"}, CA: &ca, Creds: string(m.creds)})
 		c.check(t, w.run("join", "acme.demo.bob.join"))
 	})
+	do("A folder with servers and no endpoint", func(w *joinWorld, c specCase) {
+		// <file> varies: the join file as given; <folder> stays as written
+		os.MkdirAll(w.cfg, 0o700)
+		os.WriteFile(filepath.Join(w.cfg, "config.json"), []byte(`{"servers":["tls://myserver:4222"]}`), 0o600)
+		before := treeSnapshot(t, w.cfg)
+		c.Text = strings.ReplaceAll(c.Text, "<file>", "acme.demo.bob.join")
+		c.check(t, w.run("join", "acme.demo.bob.join"))
+		if treeSnapshot(t, w.cfg) != before {
+			t.Error("a refused join changed the folder")
+		}
+	})
 	do("The join file can be read by others", func(w *joinWorld, c specCase) {
 		if err := os.Chmod("acme.demo.bob.join", 0o644); err != nil {
 			t.Fatal(err)
@@ -1433,7 +1444,7 @@ func TestJoinFinishRollsBackOnlyWhatItWrote(t *testing.T) {
 }
 
 // A folder whose config.json already names servers was set up before: a join file that brings a ca is refused with the
-// same line as for a folder that holds an endpoint, and nothing is changed. An empty folder, or a config.json with no
+// line of its own (the Gate 1 text of #1062), not the different-ca line a folder that holds an endpoint gets, and nothing is changed. An empty folder, or a config.json with no
 // servers, still takes it.
 func TestJoinCARefusedWhereTheFolderNamesServersAndHasNoCA(t *testing.T) {
 	w := newJoinWorld(t)
@@ -1447,7 +1458,7 @@ func TestJoinCARefusedWhereTheFolderNamesServersAndHasNoCA(t *testing.T) {
 	}
 	for _, args := range [][]string{{"join", "acme.demo.bob.join"}, {"join", "acme.demo.bob.join", "--replace"}} {
 		r := w.run(args...)
-		if r.code != 1 || !strings.Contains(r.errs, " was set up with a different ca;\n       nothing was changed\n") {
+		if r.code != 1 || r.out != "" || r.errs != "error: this folder has a server but no endpoint\nhint: mash join acme.demo.bob.join --config-dir <folder>\n" {
 			t.Errorf("%v: %+v", args, r)
 		}
 	}

@@ -100,6 +100,15 @@ error: ~/.config/mash was set up with a different ca;
 hint: mash join acme.demo.bob.join --config-dir <another folder>
 ```
 
+### A folder with servers and no endpoint
+
+Stream: stderr. Exit code: 1.
+
+```text
+error: this folder has a server but no endpoint
+hint: mash join <file> --config-dir <folder>
+```
+
 ### With --dry-run
 
 Stream: stdout. Exit code: 0.
@@ -204,12 +213,13 @@ endpoint in the folder trusts it; a join file that brings a different one, or
 none where the folder has one, or one where the folder has none and already
 holds an endpoint or names servers in config.json, is refused, with or without
 --replace. The first join into an empty folder sets it; a folder that already
-holds an endpoint, or whose config.json already names servers, and has no
-ca.pem refuses a join file that brings one, with the same 'different ca' line.
-A JOIN FILE THAT HOLDS A SEED IS A SECRET FILE, and so is the file --key
-names: the file --key names is checked before it is read, and a join file is
-opened to see whether it holds a seed and then checked before anything is
-installed: it must be a plain file, owned by you, readable by you alone, or
+holds an endpoint and has no ca.pem refuses a join file that brings one, with
+the same 'different ca' line, and a folder whose config.json already names
+servers but holds no endpoint refuses it with 'this folder has a server but no
+endpoint'. A JOIN FILE THAT HOLDS A SEED IS A SECRET FILE, and so is the file
+--key names: the file --key names is checked before it is read, and a join
+file is opened to see whether it holds a seed and then checked before anything
+is installed: it must be a plain file, owned by you, readable by you alone, or
 join refuses with the two cases above. A join file that holds only a user JWT
 is not checked for owner or mode, but any join file that is not a plain file
 (a directory, a FIFO, a device) gets the 'not a plain file of your own' line.
