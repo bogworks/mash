@@ -208,7 +208,7 @@ Two `mashctl` machines must not reissue the same endpoint at the same moment. Th
 mashctl endpoint delete ADDRESS [--yes] [--dry-run] [--json]
 ```
 
-Deletes an endpoint, its inbox and its credentials. The address can never be used again. Without `--yes` it prints `This deletes <address> and the <N> messages in its inbox. It cannot be undone.` and asks you to type the address; any other text deletes nothing and exits 1. That needs a terminal: with no terminal and no `--yes` it prints `error: deleting needs a terminal to confirm, or --yes` and exits 2. The question comes after the endpoint is found and its messages counted, and before anything changes. In order, it:
+Deletes an endpoint, its inbox and its credentials. The address can never be used again. Without `--yes` it prints `This deletes <address> and the <N> messages in its inbox. It cannot be undone.` and asks you to type the address; any other text deletes nothing and exits 1. That needs a terminal: with no terminal and no `--yes` it prints `error: mashctl endpoint delete needs a terminal to type the address` and exits 2; `--yes` skips the question for a script. The question comes after the endpoint is found and its messages counted, and before anything changes. In order, it:
 
 1. revokes the endpoint's user key in the account JWT, on every server (see [Revocation](#revocation)); a revocation that some server did not confirm stops the command with nothing removed (`error: ADDRESS was not deleted: K of N servers did not confirm its key was cancelled`, with the same command as the hint);
 2. removes the directory record and the inbox, so unread mail is lost;
