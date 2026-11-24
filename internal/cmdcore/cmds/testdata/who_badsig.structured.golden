@@ -1,0 +1,1 @@
+{"endpoints":[{"address":"o.dev.alice","online":true,"role":null,"host":null,"description":null,"capability":[],"labels":{}},{"address":"o.dev.bob","online":true,"role":null,"host":null,"description":null,"capability":[],"labels":{}},{"address":"o.dev.mallory","online":false,"role":null,"host":null,"description":null,"capability":[],"labels":{}}]}

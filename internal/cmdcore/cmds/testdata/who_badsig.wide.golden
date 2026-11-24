@@ -1,0 +1,4 @@
+ADDRESS        STATE    ROLE  HOST  DESCRIPTION
+o.dev.alice    online   -     -     -
+o.dev.bob      online   -     -     -
+o.dev.mallory  offline  -     -     -

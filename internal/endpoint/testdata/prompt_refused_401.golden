@@ -1,0 +1,1 @@
+mash: prompt refused: 401 a signed Agent-Sender header is required (min_sender_trust=signed)
