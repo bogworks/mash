@@ -15,3 +15,6 @@ func procStart(pid int) (string, error) {
 	t := k.Proc.P_starttime
 	return fmt.Sprintf("%d.%06d", t.Sec, t.Usec), nil
 }
+
+// procZombie is unknown on this OS: no process is judged a zombie.
+func procZombie(pid int) bool { return false }
