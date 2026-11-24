@@ -841,3 +841,48 @@ func TestLimitWarnings(t *testing.T) {
 		}
 	}
 }
+
+// TestInitPrintsLimitsWarnings runs the real init against a server whose MASH account allows 5 streams and 100 MiB
+// of disk: init still succeeds, and prints both warnings on stderr (limitWarnings is unit-tested; this proves doInit
+// prints them).
+func TestInitPrintsLimitsWarnings(t *testing.T) {
+	e := newApplyEnvTweak(t, func(e *applyEnv) {
+		opKP, _, err := e.ks.Operator()
+		if err != nil {
+			t.Fatal(err)
+		}
+		conf := e.pl.ConfPath()
+		cb := string(mustRead(t, conf))
+		m := regexp.MustCompile(`(?m)^  ` + e.acctPub + `: "([^"]+)"$`).FindStringSubmatch(cb)
+		if m == nil {
+			t.Fatal("JWT of the MASH account not found in server.conf")
+		}
+		ac, err := jwt.DecodeAccountClaims(m[1])
+		if err != nil {
+			t.Fatal(err)
+		}
+		lim := ac.Limits.JetStreamLimits
+		lim.Streams, lim.DiskStorage, lim.Consumer = 5, 100<<20, -1
+		ac.Limits.JetStreamLimits = lim
+		tok, err := ac.Encode(opKP)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(conf, []byte(strings.Replace(cb, m[1], tok, 1)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	})
+	a := newIniter(t, e)
+	_, errb, code := a.init()
+	if code != 0 {
+		t.Fatalf("init: %d\n%s", code, errb)
+	}
+	for _, w := range []string{
+		"warning: the account allows 5 streams; one endpoint needs 6, one more each\n",
+		"warning: the account has 100MiB of disk; one endpoint needs 109MiB\n",
+	} {
+		if !strings.Contains(errb, w) {
+			t.Errorf("stderr lacks %q:\n%s", w, errb)
+		}
+	}
+}
