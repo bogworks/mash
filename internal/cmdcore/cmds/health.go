@@ -90,6 +90,8 @@ var ErrNoEndpointInstalled = errors.New(cmdcore.NoEndpoint(cmdcore.NoneInstalled
 // The checks of doctor, in the order it reports them.
 const (
 	CheckConfig = "config"
+	// CheckClaude is the Claude Code version against the tested range. It stands alone: no other row decides it.
+	CheckClaude = "claude"
 	CheckCreds  = "creds"
 	CheckServer = "server"
 	CheckSignIn = "sign-in"

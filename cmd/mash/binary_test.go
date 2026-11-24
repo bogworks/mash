@@ -43,6 +43,8 @@ func TestMain(m *testing.M) {
 	}
 	// In-process serves share a parent and a session id: without this each would take the lease from the one before as
 	// an earlier serve of the same session (ADR 0092). A test that wants that calls asSession.
+	// No test depends on a claude on PATH: the claude row skips unless a test injects its own (see claudecheck_test.go).
+	claudeLookPath = func() (string, error) { return "", exec.ErrNotFound }
 	endpoint.OurSession = func() endpoint.SessionIdent { return endpoint.SessionIdent{} }
 	code := m.Run()
 	if binDir != "" {

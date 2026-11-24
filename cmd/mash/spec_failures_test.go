@@ -119,7 +119,7 @@ func TestDoctorDeletedEndpointMatchesSpec(t *testing.T) {
 		t.Fatal(err)
 	}
 	// the spec's example shows the server as tls://myserver:4222: here it is the test server's address
-	text := strings.Replace(specText(c), "tls://myserver:4222", w.e.URL, 1)
+	text := withClaudeRow(strings.Replace(specText(c), "tls://myserver:4222", w.e.URL, 1))
 	stdout, hint, _ := strings.Cut(text, "\nhint: ")
 	r := runMash(strictEnv(w, "a", nil), "doctor")
 	if r.code != c.Exit || r.out != stdout+"\n" || r.errs != "hint: "+hint+"\n" {
@@ -151,7 +151,7 @@ func TestDoctorDeletedOnThisMachineMatchesSpec(t *testing.T) {
 	if err := os.Rename(creds, creds+".deleted"); err != nil {
 		t.Fatal(err)
 	}
-	text := strings.Replace(specText(c), "tls://myserver:4222", w.e.URL, 1)
+	text := withClaudeRow(strings.Replace(specText(c), "tls://myserver:4222", w.e.URL, 1))
 	stdout, hint, _ := strings.Cut(text, "\nhint: ")
 	r := runMash(strictEnv(w, "a", nil), "doctor", "--endpoint", tTo("a"))
 	if r.code != c.Exit || r.out != stdout+"\n" || r.errs != "hint: "+hint+"\n" {
@@ -232,4 +232,13 @@ func TestStatusDeletedEndpointMatchesSpec(t *testing.T) {
 	if got := reportText(t, s, 91, "status"); got != text {
 		t.Errorf("status tool: %q, want %q", got, text)
 	}
+}
+
+// withClaudeRow adds the claude row (no claude on PATH in tests) after the config row of a doctor example from the
+// specification, until the specification's examples carry it.
+func withClaudeRow(text string) string {
+	if strings.Contains(text, "\nclaude ") {
+		return text
+	}
+	return strings.Replace(text, "config    ok\n", "config    ok\nclaude    skip  no claude command found\n", 1)
 }

@@ -314,7 +314,7 @@ func (h *healthSvc) Health(ctx context.Context) (cmds.HealthReport, error) {
 		rep.Endpoint = h.cfg.DisplayName()
 	}
 	cfgc := h.configCheck()
-	rep.Checks = append(rep.Checks, cfgc)
+	rep.Checks = append(rep.Checks, cfgc, claudeCheck(ctx)) // claude waits on nothing, not even a failed config
 	if cfgc.State == cmds.CheckFail {
 		for _, n := range []string{cmds.CheckCreds, cmds.CheckServer, cmds.CheckSignIn, cmds.CheckDelivery, cmds.CheckRefused} {
 			rep.Checks = append(rep.Checks, skipped(n, "config"))

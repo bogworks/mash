@@ -254,3 +254,7 @@ func Utf16Len(s string) int { return utf16Len(s) }
 // MinClaudeCode is the oldest Claude Code a live receipt passed on; raise it with each receipt, never lower it.
 // mash does not refuse older versions; `status` warns below it.
 const MinClaudeCode = "2.1.312"
+
+// TestedClaudeSeries is the newest Claude Code major.minor series the release was tested with: any 2.1.x is within
+// it, 2.2.0 is above it. `mash doctor` warns above it and fails below MinClaudeCode; docs/compatibility.md states both.
+const TestedClaudeSeries = "2.1"

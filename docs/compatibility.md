@@ -8,7 +8,7 @@ One thing to know first. The upgrade runs below used test builds made from sourc
 
 | Component | Tested | Minimum | Expected to work (untested) |
 |---|---|---|---|
-| Claude Code | Untested. No 0.5.8 run on a live Claude Code session is recorded. The automated checks use a stand-in for Claude Code. The last live runs were on earlier releases, on 2.1.312 and 2.1.316. | 2.1.312 or newer is what the README and install guide ask for. mash does not refuse older versions. | Later versions than 2.1.316. Versions between 2.1.312 and 2.1.316. |
+| Claude Code | Untested. No 0.5.8 run on a live Claude Code session is recorded. The automated checks use a stand-in for Claude Code. The last live runs were on earlier releases, on 2.1.312 and 2.1.316. | 2.1.312 or newer is what the README and install guide ask for. mash does not refuse older versions. `mash doctor` fails below 2.1.312 and warns above the 2.1 series. | Later versions than 2.1.316. Versions between 2.1.312 and 2.1.316. |
 | `mash` and `mashctl` together | Both built from one commit, in the automated checks and in every upgrade run below. | Not stated. The install guide says the plugin and the `mash` binary should be the same release (for example 0.5.8). | Using the same release for both. |
 | `mash` 0.5.7 next to a 0.5.8 candidate | Tested on Linux and macOS (see "Upgrading from 0.5.7"): one endpoint ran the 0.5.7 `mash`, another the candidate `mash`, against a server the 0.5.7 setup script made. Mail went both ways. This does not make mixing versions supported. | Not stated. | Nothing beyond that run. |
 | `mashctl` 0.5.7 with `mash` 0.5.8, or the other way round | Untested. | Not stated. | Not expected to work; use the same release for both. The upgrade is one-way; see the release notes. |

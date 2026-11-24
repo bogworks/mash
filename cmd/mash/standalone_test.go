@@ -256,6 +256,10 @@ func TestNoForeignToolInSource(t *testing.T) {
 				if !ok {
 					return true
 				}
+				// doctor's claude row looks up claude to read its version (REQ-017); nothing else may
+				if filepath.ToSlash(p) == "../../cmd/mash/claudecheck.go" {
+					return true
+				}
 				switch sel.Sel.Name {
 				case "Command", "CommandContext", "LookPath", "StartProcess":
 					for _, a := range call.Args {
