@@ -185,3 +185,29 @@ func TestSkipEncryptionMashctlWarnsOnceOnErroringCommands(t *testing.T) {
 		}
 	}
 }
+
+// A command refused for the removed name or key while the override is on still prints the warning, once, first, on
+// stderr: it is on every command, errors included.
+func TestSkipEncryptionMashctlWarnsOnARefusedCommandToo(t *testing.T) {
+	keepSkipWarning = true
+	t.Cleanup(func() { keepSkipWarning = false })
+	e := newApplyEnv(t).withDirectory()
+	e.env[skipVar] = "1"
+	e.env["MASH_INSECURE_PLAINTEXT"] = "1"
+	for _, args := range [][]string{{"version"}, {"help"}, {"endpoint", "list"}} {
+		out, errb, code := e.run(args...)
+		if code != 2 || !strings.HasPrefix(errb, skipWarning+"\n") || strings.Count(errb, skipWarning) != 1 || strings.Contains(out, "no encryption to the server") {
+			t.Errorf("removed name %v: exit %d, stderr %q, stdout %q", args, code, errb, out)
+		}
+	}
+	delete(e.env, "MASH_INSECURE_PLAINTEXT")
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"insecure_plaintext":true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e.env["MASH_CONFIG_DIR"] = dir
+	_, errb, code := e.run("endpoint", "list")
+	if code != 2 || !strings.HasPrefix(errb, skipWarning+"\n") || strings.Count(errb, skipWarning) != 1 {
+		t.Errorf("removed key: exit %d, stderr %q", code, errb)
+	}
+}

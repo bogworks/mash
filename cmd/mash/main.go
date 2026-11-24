@@ -214,6 +214,7 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 	// help and version included): a removed name or a bad value is refused (exit 2), and while the override is on
 	// every invocation prints the warning on stderr, once. A hook never blocks the session: it says the refusal on
 	// stderr, exits 0, and reads and writes nothing.
+	config.WarnSkipEncryption(lookup, stderr)
 	if skipErr := config.CheckSkipEncryption(lookup, config.HomeDir(env)); skipErr != nil {
 		if len(args) > 0 && args[0] == "hook" {
 			fmt.Fprintf(stderr, "mash hook: %s\n", skipErr.Msg())
@@ -221,7 +222,6 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 		}
 		return cliframe.Report(stdout, stderr, cliframe.Usagef("%s", skipErr.Msg()).WithHint(skipErr.Hint()), slices.Contains(args, "--json"))
 	}
-	config.WarnSkipEncryption(lookup, stderr)
 	// An error before a command runs is one framed error (cliframe.Report): "error: MSG" and a hint on stderr, or with
 	// --json {"error","hint"} on stdout and nothing on stderr. The code is the error's own (1 failure, 2 usage).
 	if len(args) == 0 {

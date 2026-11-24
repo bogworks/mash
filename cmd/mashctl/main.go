@@ -55,10 +55,10 @@ func runVerbs(args []string, env func(string) string, lookup config.Lookup, stdo
 	// The encryption override is the very first thing checked, before any argument is read (bare `mashctl`, a removed
 	// command, a bad flag): a removed name or a bad value is refused (exit 2), and while the override is on every
 	// invocation prints the warning on stderr, once.
+	config.WarnSkipEncryption(lookup, stderr)
 	if skipErr := config.CheckSkipEncryption(lookup, config.HomeDir(env)); skipErr != nil {
 		return cliframe.Report(stdout, stderr, cliframe.Usagef("%s", skipErr.Msg()).WithHint(skipErr.Hint()), slices.Contains(args, "--json"))
 	}
-	config.WarnSkipEncryption(lookup, stderr)
 	if len(args) == 0 {
 		fmt.Fprint(stderr, ctl.Usage("mashctl"))
 		return 2

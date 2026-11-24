@@ -304,3 +304,27 @@ func TestSkipEncryptionWarnsOnceOnErroringCommands(t *testing.T) {
 		}
 	}
 }
+
+// A command refused for the removed name (MASH_INSECURE_PLAINTEXT, or the config key insecure_plaintext) while the
+// override is on still prints the warning, once, first, on stderr: it is on every command, errors included.
+func TestSkipEncryptionWarnsOnARefusedCommandToo(t *testing.T) {
+	env := plainEnv(t, "tls://127.0.0.1:1")
+	env[skipVar] = "1"
+	env["MASH_INSECURE_PLAINTEXT"] = "1"
+	for _, args := range [][]string{{"version"}, {"status"}, {"doctor"}} {
+		out, errb, code := runCapture(env, args...)
+		if code != 2 || !strings.HasPrefix(errb, skipWarning+"\n") || strings.Count(errb, skipWarning) != 1 || strings.Contains(out, "no encryption to the server") {
+			t.Errorf("removed name %v: exit %d, stderr %q, stdout %q", args, code, errb, out)
+		}
+	}
+	delete(env, "MASH_INSECURE_PLAINTEXT")
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"insecure_plaintext":true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env["MASH_CONFIG_DIR"] = dir
+	_, errb, code := runCapture(env, "version")
+	if code != 2 || !strings.HasPrefix(errb, skipWarning+"\n") || strings.Count(errb, skipWarning) != 1 {
+		t.Errorf("removed key: exit %d, stderr %q", code, errb)
+	}
+}
