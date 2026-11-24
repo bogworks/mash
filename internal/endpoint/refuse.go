@@ -314,7 +314,8 @@ func replaceFile(path string, data []byte) error {
 }
 
 // readRefusedSeqs reads the sequences file: the stream identity of its header line ("" when there is none) and the
-// sequences.
+// distinct sequences, in file order. A sequence written twice (two processes appending across a handover) is one
+// refusal, so every count derived from the list is of distinct sequences.
 func readRefusedSeqs(path string) (string, []uint64) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -322,6 +323,7 @@ func readRefusedSeqs(path string) (string, []uint64) {
 	}
 	defer f.Close()
 	var out []uint64
+	seen := map[uint64]bool{}
 	id := ""
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
@@ -329,7 +331,8 @@ func readRefusedSeqs(path string) (string, []uint64) {
 			id = strings.TrimSpace(rest)
 			continue
 		}
-		if n, err := strconv.ParseUint(strings.TrimSpace(sc.Text()), 10, 64); err == nil {
+		if n, err := strconv.ParseUint(strings.TrimSpace(sc.Text()), 10, 64); err == nil && !seen[n] {
+			seen[n] = true
 			out = append(out, n)
 		}
 	}
