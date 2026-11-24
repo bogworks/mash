@@ -28,6 +28,16 @@ func NoCredentials(addr, path string) *cliframe.Error {
 	return cliframe.Failf("%s has no credentials here: %s is missing", addr, path).WithHint("mash doctor")
 }
 
+// ReasonEndpointDeleted is the one sentence for an endpoint that was deleted on this machine (mashctl endpoint delete
+// set its creds file aside). mash status and doctor print it as their reason, and send, inbox, read and who fail with it
+// (EndpointDeleted), so the five cannot drift.
+const ReasonEndpointDeleted = "this endpoint was deleted; its address cannot be used again"
+
+// EndpointDeleted is the failure of an everyday command run as an endpoint deleted on this machine (exit 1).
+func EndpointDeleted() *cliframe.Error {
+	return cliframe.Failf("%s", ReasonEndpointDeleted).WithHint("mash doctor")
+}
+
 // NotSignedIn is the failure for an endpoint whose credentials the server refused (exit 1).
 func NotSignedIn(addr string) *cliframe.Error {
 	return cliframe.Failf("%s cannot sign in: the server refused its credentials", addr).WithHint("mash doctor")
