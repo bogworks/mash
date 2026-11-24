@@ -14,7 +14,8 @@ import (
 
 // The unlinked step (standing order 16): no policy-engine package is linked into the released programs. internal/policy,
 // the size constants, is allowed; every other package of the engine is refused wherever it appears in the dependencies
-// of cmd/mash or cmd/mashctl.
+// of cmd/mash or cmd/mashctl. The same step refuses the synadia-agents.go identity, caller and host packages and mash's
+// internal/sapsdk (with subpackages) in 0.5.x; the SDK root package is allowed.
 
 // policyPrefix: every package whose path starts with it and is longer than it is refused (internal/policydoc,
 // internal/policyfoo, internal/policy/sub). internal/policy itself is allowed.
@@ -30,36 +31,74 @@ var policyNamedElsewhere = []string{
 	"internal/listset",
 }
 
-// linkedPolicyPackages returns, sorted and without duplicates, the engine packages of module named in `go list -deps`
-// output. module is the candidate's own module path, without a trailing slash.
+// sdkRefused lists, by whole import path, the synadia-agents.go packages no 0.5.x release links. The SDK root package
+// is allowed. Each entry matches the package and its subpackages, by whole path: .../identity/x is refused, while
+// .../identityx and .../synadia-agents.go itself are not.
+var sdkRefused = []string{
+	"github.com/bogworks/synadia-agents.go/identity",
+	"github.com/bogworks/synadia-agents.go/caller",
+	"github.com/bogworks/synadia-agents.go/host",
+}
+
+// moduleRefused lists, relative to the candidate's module, the new SDK adapter package (S4) no 0.5.x release links.
+// It matches the package and its subpackages.
+var moduleRefused = []string{
+	"internal/sapsdk",
+}
+
+// linkedPolicyPackages returns, sorted and without duplicates, the refused packages named in `go list -deps` output:
+// engine and SDK-adapter packages of module as module-relative paths, SDK packages as full import paths. module is the
+// candidate's own module path, without a trailing slash.
 func linkedPolicyPackages(module, listOutput string) []string {
 	prefix := module + "/"
 	seen := map[string]bool{}
 	var out []string
 	for _, line := range strings.Split(listOutput, "\n") {
-		rel, ok := strings.CutPrefix(strings.TrimSpace(line), prefix)
-		if !ok || seen[rel] {
+		path := strings.TrimSpace(line)
+		name := path
+		if rel, ok := strings.CutPrefix(path, prefix); ok {
+			name = rel
+			if !isPolicyPackage(rel) && !matchesAny(rel, moduleRefused) {
+				continue
+			}
+		} else if !matchesAny(path, sdkRefused) {
 			continue
 		}
-		if isPolicyPackage(rel) {
-			seen[rel] = true
-			out = append(out, rel)
+		if !seen[name] {
+			seen[name] = true
+			out = append(out, name)
 		}
 	}
 	sort.Strings(out)
 	return out
 }
 
-func isPolicyPackage(rel string) bool {
-	if strings.HasPrefix(rel, policyPrefix) && len(rel) > len(policyPrefix) {
-		return true
-	}
-	for _, p := range policyNamedElsewhere {
-		if rel == p || strings.HasPrefix(rel, p+"/") {
+// matchesAny reports whether path is one of list or a subpackage of one, by whole path.
+func matchesAny(path string, list []string) bool {
+	for _, p := range list {
+		if path == p || strings.HasPrefix(path, p+"/") {
 			return true
 		}
 	}
 	return false
+}
+
+// refusalReason says why a refused package may not be linked.
+func refusalReason(pkg string) string {
+	switch {
+	case matchesAny(pkg, sdkRefused):
+		return "the SDK identity, caller and host packages are not part of any 0.5.x release"
+	case matchesAny(pkg, moduleRefused):
+		return "the SAP SDK adapter is not part of any 0.5.x release"
+	}
+	return "the policy engine is not part of any 0.5.x release"
+}
+
+func isPolicyPackage(rel string) bool {
+	if strings.HasPrefix(rel, policyPrefix) && len(rel) > len(policyPrefix) {
+		return true
+	}
+	return matchesAny(rel, policyNamedElsewhere)
 }
 
 // targetLinks is the engine packages one release target links.
@@ -89,6 +128,22 @@ func describeLinked(links []targetLinks) string {
 		parts[i] = p + " (" + strings.Join(byPkg[p], ", ") + ")"
 	}
 	return strings.Join(parts, ", ")
+}
+
+// describeReasons is the distinct reasons for the packages linked, in a fixed order.
+func describeReasons(links []targetLinks) string {
+	seen := map[string]bool{}
+	var out []string
+	for _, l := range links {
+		for _, p := range l.pkgs {
+			if r := refusalReason(p); !seen[r] {
+				seen[r] = true
+				out = append(out, r)
+			}
+		}
+	}
+	sort.Strings(out)
+	return strings.Join(out, "; ")
 }
 
 // modulePath is the candidate's module path, from `go list -m` under dir.
@@ -146,7 +201,7 @@ func policyUnlinkedStep(ctx context.Context, o Options, x string) error {
 		links = append(links, targetLinks{t.GOOS + "/" + t.GOARCH, linkedPolicyPackages(module, out)})
 	}
 	if s := describeLinked(links); s != "" {
-		return fmt.Errorf("policy packages are linked into the released programs (standing order 16): %s", s)
+		return fmt.Errorf("refused packages are linked into the released programs (standing order 16): %s; %s", s, describeReasons(links))
 	}
 	return nil
 }
