@@ -36,3 +36,14 @@ func TestStatusNoAdminCreds(t *testing.T) {
 		t.Errorf("status: %d %q %q", r.code, r.out, r.errs)
 	}
 }
+
+// A missing admin credential is reported even with no owner and no endpoint configured.
+func TestStatusNoAdminCredsServerOnly(t *testing.T) {
+	w := newConfWorld(t, false)
+	w.a.env["MASH_SERVER"] = "tls://x:4222"
+	r := w.run("status")
+	want := "tls://x:4222: admin credentials are not set: set MASH_ADMIN_CREDS, or \"admin_creds\" in config.json\n"
+	if r.out != want || r.errs != "" || r.code != 1 {
+		t.Errorf("status: %d %q %q", r.code, r.out, r.errs)
+	}
+}

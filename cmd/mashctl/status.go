@@ -46,6 +46,10 @@ func serverStatus(cfg config.Config, server string) statusRow {
 	}
 	cfg.URL = server
 	cfg.AdminTimeout = statusDeadline // one silent server must not hold the others' rows
+	if cfg.AdminCreds == "" { // OpenAdminWith checks the owner first; a missing credential is reported either way
+		row.unset = true
+		return notOK("admin credentials are not set: set MASH_ADMIN_CREDS, or \"admin_creds\" in config.json")
+	}
 	adm, ctx, closeAdmin, err := ctl.OpenAdminWith("mashctl", cfg, nats.NoReconnect(), nats.IgnoreDiscoveredServers(), nats.Timeout(statusDeadline))
 	if err != nil {
 		var noCreds *ctl.NoAdminCredsError
