@@ -33,7 +33,7 @@ func deletedHereWorld(t *testing.T, aside bool) (map[string]string, *world) {
 
 func TestEverydayCommandsSayTheEndpointWasDeletedHere(t *testing.T) {
 	env, _ := deletedHereWorld(t, true)
-	sentence := cmdcore.ReasonEndpointDeleted
+	sentence := tTo("a") + ": " + cmdcore.ReasonEndpointDeleted
 	for _, args := range deletedHereCommands {
 		r := runMash(env, append(args, "--endpoint", tTo("a"))...)
 		if r.code != 1 || r.out != "" || r.errs != "error: "+sentence+"\nhint: mash doctor\n" {
@@ -48,6 +48,26 @@ func TestEverydayCommandsSayTheEndpointWasDeletedHere(t *testing.T) {
 		if j.code != 1 || j.errs != "" || j.out != `{"error":"`+sentence+`","hint":"mash doctor"}`+"\n" {
 			t.Errorf("%v --json: %+v", args, j)
 		}
+	}
+}
+
+// Each of the four commands prints the specification's "A deleted endpoint here" case (x-output of send, inbox, read and
+// who, read from spec/mash.json) word for word, with the spec's example address standing for the world's endpoint a.
+func TestEverydayCommandsDeletedHereMatchSpec(t *testing.T) {
+	env, _ := deletedHereWorld(t, true)
+	for _, args := range deletedHereCommands {
+		t.Run(args[0], func(t *testing.T) {
+			c, ok := specCases(t, args[0])["A deleted endpoint here"]
+			if !ok {
+				t.Fatalf("spec/mash.json no longer has the %s case \"A deleted endpoint here\"", args[0])
+			}
+			text := strings.Replace(c.Text, "acme.dev.bob", tTo("a"), 1)
+			if !strings.Contains(text, tTo("a")+": "+cmdcore.ReasonEndpointDeleted) {
+				t.Fatalf("the spec text has changed shape: %q", c.Text)
+			}
+			r := runMash(env, append(args, "--endpoint", tTo("a"))...)
+			checkCase(t, c, text, r.code, r.out, r.errs)
+		})
 	}
 }
 

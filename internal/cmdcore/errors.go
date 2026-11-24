@@ -34,8 +34,8 @@ func NoCredentials(addr, path string) *cliframe.Error {
 const ReasonEndpointDeleted = "this endpoint was deleted; its address cannot be used again"
 
 // EndpointDeleted is the failure of an everyday command run as an endpoint deleted on this machine (exit 1).
-func EndpointDeleted() *cliframe.Error {
-	return cliframe.Failf("%s", ReasonEndpointDeleted).WithHint("mash doctor")
+func EndpointDeleted(addr string) *cliframe.Error {
+	return cliframe.Failf("%s: %s", addr, ReasonEndpointDeleted).WithHint("mash doctor")
 }
 
 // NotSignedIn is the failure for an endpoint whose credentials the server refused (exit 1).

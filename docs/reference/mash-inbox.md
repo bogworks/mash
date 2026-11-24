@@ -114,6 +114,15 @@ NUMBER  FROM            WHEN    STATE  URGENT  KIND  MESSAGE
 3       acme.ops.carol  2m ago  new    no      fyi   deploy finished
 ```
 
+### A deleted endpoint here
+
+Stream: stderr. Exit code: 1.
+
+```text
+error: acme.dev.bob: this endpoint was deleted; its address cannot be used again
+hint: mash doctor
+```
+
 ## JSON
 
 With `--json` the result is this shape. The values are an example.

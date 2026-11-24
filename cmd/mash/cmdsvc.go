@@ -130,7 +130,7 @@ func openFailure(cfg config.Config, err error) error {
 	switch {
 	case errors.As(err, &cm):
 		if setAsideDeleted(cm.Path) {
-			return cmdcore.EndpointDeleted()
+			return cmdcore.EndpointDeleted(cfg.DisplayName())
 		}
 		return cmdcore.NoCredentials(cfg.DisplayName(), config.TildeIn(cm.Path, cfg.Home))
 	case endpoint.IsAuthFailure(err):
