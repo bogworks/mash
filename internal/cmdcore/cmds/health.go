@@ -90,6 +90,8 @@ var ErrNoEndpointInstalled = errors.New(cmdcore.NoEndpoint(cmdcore.NoneInstalled
 // The checks of doctor, in the order it reports them.
 const (
 	CheckConfig = "config"
+	// CheckClaude is the Claude Code version against the tested range. It stands alone: no other row decides it.
+	CheckClaude = "claude"
 	CheckCreds  = "creds"
 	CheckServer = "server"
 	CheckSignIn = "sign-in"
@@ -173,6 +175,12 @@ const (
 // installed (a session that names no endpoint is a report instead, see ReasonNoSessionEndpoint).
 type Health interface {
 	Health(ctx context.Context) (HealthReport, error)
+}
+
+// ClaudeChecker is the optional service only doctor uses: the claude row, the installed Claude Code against the tested
+// range. Status never asks for it, so status never looks for claude (ADR 0169).
+type ClaudeChecker interface {
+	ClaudeCheck(ctx context.Context) HealthCheck
 }
 
 func healthOf(ctx context.Context, env *cmdcore.Env, name string) (HealthReport, error) {
@@ -465,7 +473,16 @@ var Doctor = cmdcore.Command[DoctorParams, DoctorResult]{
 			return DoctorResult{}, err
 		}
 		r := DoctorResult{Endpoint: strPtr(rep.Endpoint), Checks: []DoctorCheck{}, strict: p.Strict}
-		for _, c := range rep.Checks {
+		checks := rep.Checks
+		if cc, ok := env.Svc.(ClaudeChecker); ok && cc != nil { // the claude row sits right after config and waits on nothing
+			row := cc.ClaudeCheck(ctx)
+			at := 0
+			if len(checks) > 0 && checks[0].Name == CheckConfig {
+				at = 1
+			}
+			checks = append(append(append([]HealthCheck{}, checks[:at]...), row), checks[at:]...)
+		}
+		for _, c := range checks {
 			switch c.State {
 			case CheckFail:
 				r.Problems++

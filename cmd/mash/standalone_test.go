@@ -247,27 +247,9 @@ func TestNoForeignToolInSource(t *testing.T) {
 					t.Errorf("%s imports %s", p, path)
 				}
 			}
-			ast.Inspect(f, func(n ast.Node) bool {
-				call, ok := n.(*ast.CallExpr)
-				if !ok {
-					return true
-				}
-				sel, ok := call.Fun.(*ast.SelectorExpr)
-				if !ok {
-					return true
-				}
-				switch sel.Sel.Name {
-				case "Command", "CommandContext", "LookPath", "StartProcess":
-					for _, a := range call.Args {
-						if lit, ok := a.(*ast.BasicLit); ok && lit.Kind == token.STRING {
-							if s, _ := strconv.Unquote(lit.Value); hasForeign(filepath.Base(s)) {
-								t.Errorf("%s: %s(%s) names a foreign tool", p, sel.Sel.Name, lit.Value)
-							}
-						}
-					}
-				}
-				return true
-			})
+			for _, msg := range foreignCalls(p, f) {
+				t.Error(msg)
+			}
 			return nil
 		})
 		if err != nil {
@@ -276,6 +258,141 @@ func TestNoForeignToolInSource(t *testing.T) {
 	}
 	if checked < 20 {
 		t.Fatalf("only %d source files checked: wrong root?", checked)
+	}
+}
+
+// claudeCheckFile is the one file that may look up claude and run 2.1.330 (Claude Code) (REQ-017, doctor's claude row).
+const claudeCheckFile = "../../cmd/mash/claudecheck.go"
+
+// foreignCalls lists the calls in f that run or look up a foreign tool. In claudeCheckFile only the lookup of
+// "claude" (one LookPath) and one Command/CommandContext(ctx, path, "--version") pass, where path is a string parameter
+// of the enclosing function (the path the claude lookup returned, handed in); a second of either, a literal or any
+// other variable as the command, or any other process call there, is listed.
+func foreignCalls(p string, f *ast.File) (bad []string) {
+	inClaude := filepath.ToSlash(p) == claudeCheckFile
+	lookups, runs := 0, 0
+	var stack []ast.Node // the path from the file to the node being visited
+	ast.Inspect(f, func(n ast.Node) bool {
+		if n == nil {
+			stack = stack[:len(stack)-1]
+			return true
+		}
+		stack = append(stack, n)
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		switch sel.Sel.Name {
+		case "Command", "CommandContext", "LookPath", "StartProcess":
+		default:
+			return true
+		}
+		lit := func(e ast.Expr) string {
+			if b, ok := e.(*ast.BasicLit); ok && b.Kind == token.STRING {
+				s, _ := strconv.Unquote(b.Value)
+				return s
+			}
+			return ""
+		}
+		// isPathParam: e is an identifier that is a string parameter of the innermost enclosing function.
+		isPathParam := func(e ast.Expr) bool {
+			id, ok := e.(*ast.Ident)
+			if !ok {
+				return false
+			}
+			var ft *ast.FuncType
+			for i := len(stack) - 1; i >= 0 && ft == nil; i-- {
+				switch fn := stack[i].(type) {
+				case *ast.FuncDecl:
+					ft = fn.Type
+				case *ast.FuncLit:
+					ft = fn.Type
+				}
+			}
+			if ft == nil {
+				return false
+			}
+			for _, fld := range ft.Params.List {
+				if t, ok := fld.Type.(*ast.Ident); !ok || t.Name != "string" {
+					continue
+				}
+				for _, name := range fld.Names {
+					if name.Name == id.Name {
+						return true
+					}
+				}
+			}
+			return false
+		}
+		if inClaude {
+			last := ""
+			if len(call.Args) > 0 {
+				last = lit(call.Args[len(call.Args)-1])
+			}
+			switch {
+			case sel.Sel.Name == "LookPath" && len(call.Args) == 1 && last == "claude":
+				if lookups++; lookups == 1 {
+					return true
+				}
+			case (sel.Sel.Name == "Command" || sel.Sel.Name == "CommandContext") && last == "--version" && isRun(sel.Sel.Name, call.Args, isPathParam):
+				if runs++; runs == 1 {
+					return true
+				}
+			}
+			bad = append(bad, p+": "+sel.Sel.Name+" is not the one lookup of claude or the one claude --version")
+			return true
+		}
+		for _, a := range call.Args {
+			if s := lit(a); s != "" && hasForeign(filepath.Base(s)) {
+				bad = append(bad, p+": "+sel.Sel.Name+"("+strconv.Quote(s)+") names a foreign tool")
+			}
+		}
+		return true
+	})
+	return bad
+}
+
+// isRun reports whether args are (ctx, path, "--version") for CommandContext or (path, "--version") for Command.
+func isRun(name string, args []ast.Expr, isPath func(ast.Expr) bool) bool {
+	if name == "CommandContext" {
+		return len(args) == 3 && isPath(args[1])
+	}
+	return len(args) == 2 && isPath(args[0])
+}
+
+func TestForeignCallsGuardInClaudeCheckFile(t *testing.T) {
+	const head = "package main\nimport \"os/exec\"\nfunc f(ctx context.Context, path string, n int) {\n"
+	const other = "../../cmd/mash/other.go"
+	for _, tc := range []struct {
+		name, body, file string
+		bad              int
+	}{
+		{"the lookup and the version run", `exec.LookPath("claude"); exec.CommandContext(ctx, path, "--version")`, claudeCheckFile, 0},
+		{"the plain Command form", `exec.Command(path, "--version")`, claudeCheckFile, 0},
+		{"git as a literal", `exec.CommandContext(ctx, "git", "--version")`, claudeCheckFile, 1},
+		{"a different variable", `exec.CommandContext(ctx, other, "--version")`, claudeCheckFile, 1},
+		{"a non-string parameter", `exec.CommandContext(ctx, n, "--version")`, claudeCheckFile, 1},
+		{"a computed command", `exec.CommandContext(ctx, path+"x", "--version")`, claudeCheckFile, 1},
+		{"a second run", `exec.LookPath("claude"); exec.CommandContext(ctx, path, "--version"); exec.CommandContext(ctx, path, "--version")`, claudeCheckFile, 1},
+		{"another tool", `exec.LookPath("claude"); exec.Command("ssh", "host")`, claudeCheckFile, 1},
+		{"another argument", `exec.CommandContext(ctx, path, "mcp", "list")`, claudeCheckFile, 1},
+		{"a lookup of another name", `exec.LookPath("git")`, claudeCheckFile, 1},
+		{"a start", `os.StartProcess(path, nil, nil)`, claudeCheckFile, 1},
+		{"elsewhere claude is refused", `exec.LookPath("claude")`, other, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, err := parser.ParseFile(token.NewFileSet(), tc.file, head+tc.body+"\n}\n", 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := foreignCalls(tc.file, f); len(got) != tc.bad {
+				t.Fatalf("%d calls refused, want %d: %v", len(got), tc.bad, got)
+			}
+		})
 	}
 }
 

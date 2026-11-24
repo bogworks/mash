@@ -44,6 +44,7 @@ Stream: stdout. Exit code: 0.
 
 ```text
 config    ok
+claude    ok    2.1.320
 creds     ok
 server    ok    tls://myserver:4222
 sign-in   ok
@@ -59,6 +60,7 @@ Stream: stdout. Exit code: 1.
 
 ```text
 config    ok
+claude    ok    2.1.320
 creds     ok
 server    ok    tls://myserver:4222
 sign-in   FAIL  the server refused these credentials
@@ -75,6 +77,7 @@ Stream: stdout. Exit code: 1.
 
 ```text
 config    ok
+claude    ok    2.1.320
 creds     ok
 server    FAIL  the server did not answer: tls://myserver:4222
 sign-in   skip  needs the server
@@ -82,6 +85,46 @@ delivery  skip  needs the server
 refused   ok    no unverified mail was refused
 
 1 problem.
+```
+
+### Claude Code is recent enough
+
+Stream: stdout. Exit code: 0.
+
+```text
+claude    ok    2.1.320
+```
+
+### Claude Code is too old
+
+Stream: stdout. Exit code: 1.
+
+```text
+claude    FAIL  2.1.300 is below the tested 2.1.312
+```
+
+### Claude Code is newer than tested
+
+Stream: stdout. Exit code: 0.
+
+```text
+claude    warn  2.9.0 is above the tested 2.1
+```
+
+### No claude command
+
+Stream: stdout. Exit code: 0.
+
+```text
+claude    skip  no claude command found
+```
+
+### The version of claude is unreadable
+
+Stream: stdout. Exit code: 0.
+
+```text
+claude    warn  the version of claude could not be read
 ```
 
 ### Arriving mail cannot be stored on this machine
@@ -144,6 +187,7 @@ Stream: stdout. Exit code: 1.
 
 ```text
 config    ok
+claude    skip  no claude command found
 creds     ok
 server    ok    tls://myserver:4222
 sign-in   FAIL  this endpoint was deleted; its address cannot be used again
@@ -160,6 +204,7 @@ Stream: stdout. Exit code: 1.
 
 ```text
 config    ok
+claude    skip  no claude command found
 creds     FAIL  this endpoint was deleted; its address cannot be used again
 server    ok    tls://myserver:4222
 sign-in   skip  needs the creds
@@ -200,6 +245,12 @@ With `--json` the result is this shape. The values are an example.
       "name": "config",
       "state": "ok",
       "detail": null,
+      "fix": null
+    },
+    {
+      "name": "claude",
+      "state": "ok",
+      "detail": "2.1.320",
       "fix": null
     },
     {
