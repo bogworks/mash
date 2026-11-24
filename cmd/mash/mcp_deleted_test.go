@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bogworks/mash/internal/cliframe"
 	"github.com/bogworks/mash/internal/cmdcore"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/endpoint"
@@ -142,7 +143,7 @@ func TestTableToolsFrameADeletedEndpoint(t *testing.T) {
 	args := map[string]string{"send": `{"address":"` + tTo("b") + `","message":"hi"}`, "inbox": `{}`, "read": `{"number":1}`, "who": `{}`}
 	for _, phase := range []string{"before", "after"} {
 		if phase == "after" {
-			if err := os.WriteFile(cfg.Creds+".deleted", nil, 0o600); err != nil {
+			if err := os.Rename(cfg.Creds, cfg.Creds+".deleted"); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -172,7 +173,7 @@ func TestRefusedSignInOnADeletedEndpointSaysDeleted(t *testing.T) {
 	if r := runMash(env, "inbox"); r.errs != signIn {
 		t.Fatalf("before: %+v", r)
 	}
-	if err := os.WriteFile(creds+".deleted", nil, 0o600); err != nil {
+	if err := os.Rename(creds, creds+".deleted"); err != nil {
 		t.Fatal(err)
 	}
 	for _, args := range deletedHereCommands {
@@ -193,5 +194,43 @@ func TestRefusedSignInOnADeletedEndpointSaysDeleted(t *testing.T) {
 	plain := errors.New("boom")
 	if framedIn(cfg, tTo("a"), plain) != plain {
 		t.Error("an unrelated error must pass through")
+	}
+}
+
+func TestDeletedHereNeedsTheCredsFileGone(t *testing.T) {
+	creds := filepath.Join(t.TempDir(), "bob.creds")
+	if err := os.WriteFile(creds+".deleted", nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	refused := errors.New("nats: Authorization Violation")
+	if d := deletedHere("bob", creds, refused); d == nil || !strings.HasSuffix(d.Msg, cmdcore.ReasonEndpointDeleted) {
+		t.Errorf("marker + absent creds: %v", d)
+	}
+	if err := os.WriteFile(creds, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if d := deletedHere("bob", creds, refused); d != nil {
+		t.Errorf("marker + present creds read as deleted: %v", d)
+	}
+}
+
+func TestOnlyTheDeletedFailureIsTakenAsDeleted(t *testing.T) {
+	other := cliframe.Failf("bob: something else broke")
+	if isEndpointDeleted(other) || isEndpointDeleted(errors.New("x")) {
+		t.Error("a non-deleted error matched")
+	}
+	if !isEndpointDeleted(cmdcore.EndpointDeleted("bob")) {
+		t.Error("the deleted failure did not match")
+	}
+	cfg := config.Config{Name: "bob"}
+	if got := leaseCause(cfg, other); strings.Contains(got, cmdcore.ReasonEndpointDeleted) {
+		t.Errorf("leaseCause: %q", got)
+	}
+	_, err := (&sessionState{failed: other}).usable("bob")
+	if err == nil || strings.Contains(err.Error(), cmdcore.ReasonEndpointDeleted) {
+		t.Errorf("usable: %v", err)
+	}
+	if got := leaseCause(cfg, cmdcore.EndpointDeleted("bob")); got != cmdcore.ReasonEndpointDeleted {
+		t.Errorf("leaseCause deleted: %q", got)
 	}
 }

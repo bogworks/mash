@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -12,7 +11,6 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/bogworks/mash/internal/cliframe"
 	"github.com/bogworks/mash/internal/cmdcore"
 	"github.com/bogworks/mash/internal/cmdcore/cmds"
 	"github.com/bogworks/mash/internal/config"
@@ -77,9 +75,8 @@ func (s *statusSource) lease() (state, cause string) {
 
 // leaseCause words why a serve could not take its endpoint, as the sign-in row words a failed sign-in.
 func leaseCause(cfg config.Config, err error) string {
-	var deleted *cliframe.Error // startFailed: only a deleted endpoint is framed
 	switch msg := err.Error(); {
-	case errors.As(err, &deleted):
+	case isEndpointDeleted(err):
 		return cmdcore.ReasonEndpointDeleted
 	case endpoint.IsAuthFailure(err):
 		return "the server refused its credentials"

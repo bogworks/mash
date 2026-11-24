@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"os"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -152,10 +154,23 @@ func deletedHere(addr, creds string, err error) *cliframe.Error {
 		if setAsideDeleted(cm.Path) {
 			return cmdcore.EndpointDeleted(addr)
 		}
-	case err != nil && creds != "" && endpoint.IsAuthFailure(err) && setAsideDeleted(creds):
+	case err != nil && creds != "" && endpoint.IsAuthFailure(err) && setAsideDeleted(creds) && credsAbsent(creds):
 		return cmdcore.EndpointDeleted(addr)
 	}
 	return nil
+}
+
+// credsAbsent is whether the creds file itself is gone: a stale .deleted marker beside a current creds file (a reused
+// path) is an ordinary refused sign-in, not a deleted endpoint.
+func credsAbsent(creds string) bool {
+	_, err := os.Lstat(creds)
+	return errors.Is(err, fs.ErrNotExist)
+}
+
+// isEndpointDeleted is whether err is the deleted-endpoint failure (cmdcore.EndpointDeleted), matched by its sentence.
+func isEndpointDeleted(err error) bool {
+	var d *cliframe.Error
+	return errors.As(err, &d) && strings.HasSuffix(d.Msg, cmdcore.ReasonEndpointDeleted)
 }
 
 // framedIn is framed for a command or tool with a configuration: a refused sign-in on a deleted endpoint is worded as

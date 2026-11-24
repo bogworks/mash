@@ -126,8 +126,9 @@ func (s *sessionState) usable(name string) (*endpoint.Endpoint, error) {
 	case s.ep != nil:
 		return s.ep, nil
 	case s.failed != nil:
-		var d *cliframe.Error
-		if errors.As(s.failed, &d) { // startFailed: a deleted endpoint, in the shell's sentence
+		if isEndpointDeleted(s.failed) { // startFailed: a deleted endpoint, in the shell's sentence
+			var d *cliframe.Error
+			errors.As(s.failed, &d)
 			return nil, cmdcore.ToolError(d)
 		}
 		return nil, errors.New(endpoint.ErrorInstructions(name, s.failed))
