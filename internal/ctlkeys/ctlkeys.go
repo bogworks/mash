@@ -19,6 +19,7 @@ import (
 
 	"github.com/nats-io/nkeys"
 
+	"github.com/bogworks/mash/internal/cliframe"
 	"github.com/bogworks/mash/internal/config"
 )
 
@@ -35,54 +36,139 @@ var (
 	// ErrSigningKeyLost is returned by Signing when the store records a configured signing key (signing.pub) but
 	// signing.nk is missing, unreadable or another key. The identity key must not stand in for it: a strict server
 	// rejects what it signs.
-	ErrSigningKeyLost = errors.New("mashctl: the account signing key was configured (signing.pub) but signing.nk is missing or is not that key: restore signing.nk, or run `mashctl init` again with signing_key set to the SAME key (any other key is refused)")
+	ErrSigningKeyLost = errors.New("mashctl: the account signing key was configured but signing.nk is missing, unreadable or not that key")
 )
+
+// Every signing refusal below is an ErrSigningKeyLost and renders through cliframe as `error: MSG` and `hint: HINT`
+// (each has an As method that gives the *cliframe.Error, so cliframe.Report and the commands' own wrapping find it).
+// Its Error text is the message alone. The long public keys it carries are fields for callers and tests, not text.
+
+// signingFrame is the *cliframe.Error a signing refusal presents.
+func signingFrame(msg, hint string) *cliframe.Error { return cliframe.Failf("%s", msg).WithHint(hint) }
+
+// asFrame is the As method of every signing refusal.
+func asFrame(target any, f *cliframe.Error) bool {
+	if t, ok := target.(**cliframe.Error); ok {
+		*t = f
+		return true
+	}
+	return false
+}
 
 // SigningLostBothError is what Signing returns when config.json records a configured signing key (signing_key_pub)
 // and the key store holds neither signing.nk nor signing.pub. It is an ErrSigningKeyLost: the identity key must not
 // stand in for the signing key.
 type SigningLostBothError struct{ Pub, Dir string }
 
-func (e *SigningLostBothError) Error() string {
-	return fmt.Sprintf("mashctl: signing.nk and signing.pub are both missing from the key store %s (config.json records signing_key_pub %s)\n  hint: run `mashctl init --config <file>` with the same signing_key", e.Dir, e.Pub)
+func (e *SigningLostBothError) frame() *cliframe.Error {
+	return signingFrame(fmt.Sprintf("signing.nk and signing.pub are missing in %s", e.Dir), "mashctl init --config <file>")
 }
+func (e *SigningLostBothError) Error() string { return e.frame().Msg }
 
 // Is makes the error an ErrSigningKeyLost.
 func (e *SigningLostBothError) Is(target error) bool { return target == ErrSigningKeyLost }
+
+// As gives the error's cliframe form.
+func (e *SigningLostBothError) As(target any) bool { return asFrame(target, e.frame()) }
 
 // SigningPubMissingError is what Signing returns when signing.nk is in the key store and signing.pub is gone. Pub is
 // the key signing.nk holds. It is an ErrSigningKeyLost.
 type SigningPubMissingError struct{ Pub, Dir string }
 
-func (e *SigningPubMissingError) Error() string {
-	return fmt.Sprintf("mashctl: signing.pub is missing from the key store %s (signing.nk is there and holds %s)\n  hint: run `mashctl init --config <file>` with the same signing_key to record it again", e.Dir, e.Pub)
+func (e *SigningPubMissingError) frame() *cliframe.Error {
+	return signingFrame(fmt.Sprintf("signing.pub is missing from %s", e.Dir), "mashctl init --config <file>")
 }
+func (e *SigningPubMissingError) Error() string { return e.frame().Msg }
 
 // Is makes the error an ErrSigningKeyLost.
 func (e *SigningPubMissingError) Is(target error) bool { return target == ErrSigningKeyLost }
+
+// As gives the error's cliframe form.
+func (e *SigningPubMissingError) As(target any) bool { return asFrame(target, e.frame()) }
+
+// SigningNkMissingError is what Signing returns when signing.pub records a signing key and signing.nk is gone.
+// Recorded is the key signing.pub records. It is an ErrSigningKeyLost.
+type SigningNkMissingError struct{ Recorded, Dir string }
+
+func (e *SigningNkMissingError) frame() *cliframe.Error {
+	return signingFrame(fmt.Sprintf("signing.nk is missing from %s", e.Dir), "mashctl init --config <file>")
+}
+func (e *SigningNkMissingError) Error() string { return e.frame().Msg }
+
+// Is makes the error an ErrSigningKeyLost.
+func (e *SigningNkMissingError) Is(target error) bool { return target == ErrSigningKeyLost }
+
+// As gives the error's cliframe form.
+func (e *SigningNkMissingError) As(target any) bool { return asFrame(target, e.frame()) }
 
 // SigningRecordMismatchError is what Signing returns when signing.pub records another key than config.json's
 // signing_key_pub. It is an ErrSigningKeyLost.
 type SigningRecordMismatchError struct{ Expected, Recorded, Dir string }
 
-func (e *SigningRecordMismatchError) Error() string {
-	return fmt.Sprintf("mashctl: signing.pub in the key store %s records signing key %s, but config.json records signing_key_pub %s\n  hint: put back the signing.pub and signing.nk of key %s, or point MASH_KEYS_DIR at a key folder that holds them", e.Dir, e.Recorded, e.Expected, e.Expected)
+func (e *SigningRecordMismatchError) frame() *cliframe.Error {
+	return signingFrame(fmt.Sprintf("signing.pub in %s does not match config.json", e.Dir), "mashctl doctor")
 }
+func (e *SigningRecordMismatchError) Error() string { return e.frame().Msg }
 
 // Is makes the error an ErrSigningKeyLost.
 func (e *SigningRecordMismatchError) Is(target error) bool { return target == ErrSigningKeyLost }
+
+// As gives the error's cliframe form.
+func (e *SigningRecordMismatchError) As(target any) bool { return asFrame(target, e.frame()) }
 
 // SigningKeyMismatchError is what Signing returns when signing.nk holds another key than the one wanted. Want is the
 // key signing.pub records, or, when signing.pub is gone, the one config.json records; WantFrom names which. It is an
 // ErrSigningKeyLost.
 type SigningKeyMismatchError struct{ Held, Want, WantFrom, Dir string }
 
-func (e *SigningKeyMismatchError) Error() string {
-	return fmt.Sprintf("mashctl: signing.nk in the key store %s holds signing key %s, but %s records %s\n  hint: restore the signing.nk of key %s", e.Dir, e.Held, e.WantFrom, e.Want, e.Want)
+func (e *SigningKeyMismatchError) frame() *cliframe.Error {
+	return signingFrame(fmt.Sprintf("signing.nk in %s does not match signing.pub", e.Dir), "mashctl doctor")
 }
+func (e *SigningKeyMismatchError) Error() string { return e.frame().Msg }
 
 // Is makes the error an ErrSigningKeyLost.
 func (e *SigningKeyMismatchError) Is(target error) bool { return target == ErrSigningKeyLost }
+
+// As gives the error's cliframe form.
+func (e *SigningKeyMismatchError) As(target any) bool { return asFrame(target, e.frame()) }
+
+// SigningUnreadableError is what Signing returns when signing.nk is there and cannot be read (its mode, owner or
+// type is refused, or reading it failed). Err is the cause. It is an ErrSigningKeyLost.
+type SigningUnreadableError struct {
+	Dir string
+	Err error
+}
+
+func (e *SigningUnreadableError) frame() *cliframe.Error {
+	return signingFrame(fmt.Sprintf("signing.nk in %s cannot be read", e.Dir), "mashctl doctor")
+}
+func (e *SigningUnreadableError) Error() string { return e.frame().Msg }
+func (e *SigningUnreadableError) Unwrap() error { return e.Err }
+
+// Is makes the error an ErrSigningKeyLost.
+func (e *SigningUnreadableError) Is(target error) bool { return target == ErrSigningKeyLost }
+
+// As gives the error's cliframe form.
+func (e *SigningUnreadableError) As(target any) bool { return asFrame(target, e.frame()) }
+
+// SigningInvalidError is what Signing returns when signing.nk holds no valid signing key. Err is the cause. It is an
+// ErrSigningKeyLost.
+type SigningInvalidError struct {
+	Dir string
+	Err error
+}
+
+func (e *SigningInvalidError) frame() *cliframe.Error {
+	return signingFrame(fmt.Sprintf("signing.nk in %s is not a valid key", e.Dir), "mashctl doctor")
+}
+func (e *SigningInvalidError) Error() string { return e.frame().Msg }
+func (e *SigningInvalidError) Unwrap() error { return e.Err }
+
+// Is makes the error an ErrSigningKeyLost.
+func (e *SigningInvalidError) Is(target error) bool { return target == ErrSigningKeyLost }
+
+// As gives the error's cliframe form.
+func (e *SigningInvalidError) As(target any) bool { return asFrame(target, e.frame()) }
 
 const (
 	accountFile  = "account.nk"
@@ -547,14 +633,17 @@ func (a *Authority) Signing() (nkeys.KeyPair, string, error) {
 			kp.Wipe()
 		}
 		return nil, "", &SigningRecordMismatchError{Expected: exp, Recorded: rec, Dir: a.dir}
+	case (exp != "" || rec != "") && err != nil && !errors.Is(err, ErrNoSigningKey):
+		var sc *SeedContentError
+		if errors.As(err, &sc) {
+			return nil, "", &SigningInvalidError{Dir: a.dir, Err: err}
+		}
+		return nil, "", &SigningUnreadableError{Dir: a.dir, Err: err}
 	case rec == "":
 		return kp, pub, err
 	case err != nil:
-		// signing.nk simply missing: the record is the detail; a mode or read error is told as it is.
-		if errors.Is(err, ErrNoSigningKey) {
-			return nil, "", fmt.Errorf("%w (signing.pub records %s)", ErrSigningKeyLost, rec)
-		}
-		return nil, "", fmt.Errorf("%w (%v; signing.pub records %s)", ErrSigningKeyLost, err, rec)
+		// signing.nk simply missing while signing.pub records the key.
+		return nil, "", &SigningNkMissingError{Recorded: rec, Dir: a.dir}
 	case pub != rec:
 		kp.Wipe()
 		return nil, "", &SigningKeyMismatchError{Held: pub, Want: rec, WantFrom: "signing.pub", Dir: a.dir}

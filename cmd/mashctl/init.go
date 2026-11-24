@@ -195,6 +195,7 @@ type initState struct {
 	cfgPath          string
 	folder           string // the configuration folder as shown in a refusal: the home directory written as ~
 	keyFolder        string // the key folder as shown in a refusal
+	keyDir           string // the key folder as it is on disk
 	haveOp, haveAcct bool   // the key store already holds this very key
 	haveSys          bool   // sys.creds already in place with the same content
 	haveCfg          bool   // config.json already holds these settings
@@ -276,6 +277,7 @@ func doInit(setupPath string, dry, jsonOut, detail bool, env func(string) string
 	st := &initState{serverDir: filepath.Join(cfg.Dir, "server"), cfgPath: cfg.Find("config.json")}
 	st.folder = shownFolder(cfg.Dir, env("HOME"))
 	st.keyFolder = shownFolder(keyDir, env("HOME"))
+	st.keyDir = keyDir
 	st.sysDst = filepath.Join(st.serverDir, sysCredsFile)
 	cfg.SysCreds = st.sysDst
 	defer func() {
@@ -616,6 +618,18 @@ func seedFileFailure(field string, err error, must string) error {
 func differentSigningKey(st *initState, recorded string) error {
 	return cliframe.Failf("the key folder %s holds a different signing key (public key %s) than the setup file's signing_key; nothing was changed: give that key's seed as signing_key, or use a new key folder (set MASH_KEYS_DIR)", st.keyFolder, recorded).WithWrap().
 		WithHint("MASH_KEYS_DIR=<a new folder> mashctl init --config <file>")
+}
+
+// shownSigningRefusal is a signing refusal of the key store as init prints it: the error:/hint: form, the key folder
+// written with ~ for the home directory.
+func shownSigningRefusal(err error, st *initState) error {
+	var ce *cliframe.Error
+	if !errors.As(err, &ce) || ce == nil {
+		return err
+	}
+	c := *ce
+	c.Msg = strings.Replace(c.Msg, st.keyDir, st.keyFolder, 1)
+	return &c
 }
 
 // differentSetup is the refusal when the configuration folder holds a different what than the setup file gives: init
@@ -985,12 +999,12 @@ func checkStore(ks *ctlkeys.Authority, st *initState) error {
 		// Both signing.nk and signing.pub are gone. config.json says whether a signing key was ever configured: then
 		// only the same signing_key restores it (a different one is refused with the config.json comparison).
 		if st.signPub == "" && st.cfgSignPub != "" {
-			return fmt.Errorf("signing_key was configured (public key %s in config.json) but signing.nk and signing.pub are both missing from the key store: give the same signing_key in the setup file (nothing was changed)", st.cfgSignPub)
+			return cliframe.Failf("signing.nk and signing.pub are missing in %s", st.keyFolder).WithHint("mashctl init --config <file>")
 		}
 	case errors.Is(err, ctlkeys.ErrSigningKeyLost):
 		// signing.nk is gone: init with the same signing_key restores it; anything else is refused.
 		if st.signPub == "" {
-			return fmt.Errorf("%v (nothing was changed)", err)
+			return shownSigningRefusal(err, st)
 		}
 		if rec != st.signPub || (cfgPub != "" && rec != cfgPub) {
 			return differentSigningKey(st, rec)
@@ -1009,7 +1023,7 @@ func checkStore(ks *ctlkeys.Authority, st *initState) error {
 			if rec == "" {
 				// signing.nk without its record and no signing_key to restore it: recording the key in config.json
 				// would make every later command refuse, so init refuses now, before any write.
-				return fmt.Errorf("%w (nothing was changed)", &ctlkeys.SigningPubMissingError{Pub: pub, Dir: st.keyFolder})
+				return &ctlkeys.SigningPubMissingError{Pub: pub, Dir: st.keyFolder}
 			}
 			if cfgPub != "" && pub != cfgPub {
 				return cliframe.Failf("the key folder %s holds signing key %s but config.json records signing_key_pub %s; nothing was changed: give the seed of the recorded key as signing_key, or use a new key folder (set MASH_KEYS_DIR)", st.keyFolder, pub, cfgPub).WithWrap().

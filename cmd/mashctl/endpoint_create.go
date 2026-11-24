@@ -435,6 +435,9 @@ func epCreate(in *epInput, env func(string) string, lookup config.Lookup, stderr
 	// configured (ErrNoSigningKey) means the identity key signs, as before.
 	if skp, _, serr := keys.Signing(); serr != nil {
 		if !errors.Is(serr, ctlkeys.ErrNoSigningKey) {
+			if errors.Is(serr, ctlkeys.ErrSigningKeyLost) { // error: / hint: from the key store, exactly
+				return t, epResult{}, failErr(serr)
+			}
 			return t, epResult{}, cliframe.Failf("%s; nothing was changed", strings.TrimPrefix(serr.Error(), "mashctl: ")).WithWrap().
 				WithHint("mashctl init --config <file>")
 		}

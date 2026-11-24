@@ -441,7 +441,7 @@ func TestInitSigningKeyLost(t *testing.T) {
 	if err := os.Remove(filepath.Join(keysDir, "signing.nk")); err != nil {
 		t.Fatal(err)
 	}
-	a.refuses(1, []string{"signing.nk", "mashctl init", "SAME key", "signing.pub records " + skPub}, map[string]any{"signing_key": nil})
+	a.refuses(1, []string{"error: signing.nk is missing from ~/keys", "hint: mashctl init --config <file>"}, map[string]any{"signing_key": nil})
 	if out, errb, code := a.init(); code != 0 {
 		t.Fatalf("init to restore: %d\n%s\n%s", code, out, errb)
 	}
@@ -463,7 +463,7 @@ func TestEndpointCreateSigningKeyLostRecordsNothing(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("create: exit %d\n%s\n%s", code, out, errb)
 	}
-	for _, m := range []string{"signing.nk", "SAME key", "nothing was changed", "mashctl init --config <file>"} {
+	for _, m := range []string{"error: signing.nk is missing from " + keysDir, "hint: mashctl init --config <file>"} {
 		if !strings.Contains(errb, m) {
 			t.Errorf("stderr lacks %q:\n%s", m, errb)
 		}
