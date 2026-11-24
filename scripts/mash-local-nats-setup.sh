@@ -146,6 +146,55 @@ filemode_l() {
     if [ "$BSD" = 1 ]; then stat -L -f %Lp "$1" 2>/dev/null; else stat -L -c %a "$1" 2>/dev/null; fi
 }
 
+# not_others_writable MODE: true when neither the group nor others digit of an
+# octal mode has the write bit
+not_others_writable() {
+    case $1 in '' | *[!0-7]*) return 1 ;; esac
+    _g=${1%?}
+    _g=${_g#"${_g%?}"}
+    _w=${1#"${1%?}"}
+    case $_g$_w in *[2367]*) return 1 ;; esac
+    return 0
+}
+
+# root_only_path DIR: true when DIR and every ancestor up to / (and the same for
+# DIR's physical path, which differs when a part of it is a symlink) is owned by
+# root and not writable by group or others. Anything unreadable is a failure.
+root_only_path() {
+    _p=$(CDPATH='' cd -P -- "$1" 2>/dev/null && pwd -P) || return 1
+    for _r in "$1" "$_p"; do
+        while :; do
+            [ "$(fileowner_l "$_r")" = 0 ] || return 1
+            not_others_writable "$(filemode_l "$_r")" || return 1
+            [ "$_r" = / ] && break
+            _r=${_r%/*}
+            [ -n "$_r" ] || _r=/
+        done
+    done
+    return 0
+}
+
+# find_nats_server: sets NATS_SERVER to nats-server when it is on PATH; else to
+# the first one in the sbin folders (Debian's package installs there), only if
+# the binary, its folder and every ancestor of it are owned by root and not
+# writable by group or others, and then says so. Returns 1 when none is usable.
+find_nats_server() {
+    NATS_SERVER=nats-server
+    if command -v nats-server >/dev/null 2>&1; then return 0; fi
+    for _d in /usr/sbin /usr/local/sbin /sbin; do
+        _f=$_d/nats-server
+        [ -f "$_f" ] && [ -x "$_f" ] && [ ! -L "$_f" ] || continue # a link could point outside the checked folder
+        [ "$(fileowner_l "$_f")" = 0 ] && [ "$(fileowner_l "$_d")" = 0 ] || continue
+        not_others_writable "$(filemode_l "$_f")" || continue
+        not_others_writable "$(filemode_l "$_d")" || continue
+        root_only_path "$_d" || continue
+        NATS_SERVER=$_f
+        echo "Using $_f (not on your PATH)"
+        return 0
+    done
+    return 1
+}
+
 # check_parent_mode DIR: refuse a folder that group or others can write to,
 # unless it has the sticky bit (like /tmp), since they could swap what is under it
 check_parent_mode() {
@@ -402,7 +451,7 @@ start_server() { # needs PORT
             "stop that program, then run $SELF --start again"
     fi
     if [ -f "$DIR/server.log" ]; then mv -f "$DIR/server.log" "$DIR/server.log.1"; fi
-    nohup nats-server -c "$DIR/server.conf" >"$DIR/server.log" 2>&1 </dev/null &
+    nohup "$NATS_SERVER" -c "$DIR/server.conf" >"$DIR/server.log" 2>&1 </dev/null &
     SPID=$!
     echo "$SPID" >"$DIR/server.pid"
     _i=0
@@ -572,7 +621,10 @@ mode_start() {
         die 1 "pid $_p is running but the server does not answer on 127.0.0.1:$PORT" \
             "run $SELF --stop, then $SELF --start"
     fi
-    need_tools nats-server nats
+    miss=''
+    find_nats_server || miss="$miss nats-server"
+    command -v nats >/dev/null 2>&1 || miss="$miss nats"
+    [ -z "$miss" ] || die 1 "missing:$miss" "install it: brew install nats-server nats (macOS), or see the docs"
     need_port_tool
     if port_taken "$PORT"; then
         die 1 "port $PORT is now used by another program" \
@@ -652,7 +704,7 @@ keyfile() { # PUBKEY: path of its seed file in the CLI key store
 
 do_create() {
     miss=''; hints=''
-    command -v nats-server >/dev/null 2>&1 ||
+    find_nats_server ||
         add_miss nats-server "install nats-server 2.10.7+: apt install nats-server (Debian/Ubuntu) \
 or brew install nats-server"
     command -v nats >/dev/null 2>&1 ||
@@ -663,7 +715,7 @@ from https://github.com/nats-io/natscli/releases"
     [ -z "$miss" ] || die 1 "missing: $miss" "$hints"
     need_port_tool
 
-    NSV=$(nats-server --version 2>/dev/null </dev/null |
+    NSV=$("$NATS_SERVER" --version 2>/dev/null </dev/null |
         sed -n 's/^[^0-9]*\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' | head -n 1)
     [ -n "$NSV" ] || die 1 "cannot read the nats-server version" "need nats-server 2.10.7 or newer"
     IFS=. read -r v1 v2 v3 <<EOF

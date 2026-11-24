@@ -32,7 +32,7 @@ The requirements apply to mash 0.5.7. They are what mash checks or creates; wher
 
 ## Getting nats-server and the nats command
 
-You need two programs, on the `PATH` of the user who runs mash and its setup script:
+You need two programs, on the `PATH` of the user who runs mash and its setup script (the setup script also finds `nats-server` in `/usr/sbin`, where Debian's package puts it):
 
 - **`nats-server` 2.10.7 or newer.** Tested with 2.15.1.
 - **`nats`** (natscli). Tested with 0.5.2. The setup script needs it; mash itself does not.
@@ -81,7 +81,7 @@ They print `nats-server: v2.15.1` and `0.5.2`. Both projects publish the same fi
 
 Check where the package put the program and whether it started a service. For example, Debian's and Ubuntu's `nats-server` package (2.10.27 on Debian 13):
 
-- puts the binary at `/usr/sbin/nats-server`, which is not on a normal user's `PATH`, so the setup script reports nats-server as missing;
+- puts the binary at `/usr/sbin/nats-server`, which is not on a normal user's `PATH`. The setup script also looks in `/usr/sbin`, `/usr/local/sbin` and `/sbin`, and uses a `nats-server` there if it and its folder are owned by root and not writable by others. Put it on your `PATH` to run it by hand;
 - starts a system service, `nats-server.service`, at boot. With the package's own `/etc/nats-server.conf` it listens on `127.0.0.1:4222` with no authentication, so any process on the machine can use it, and mash cannot use a server like that. The setup script then takes the next free port. If nothing needs that service, an administrator can stop it and keep it from starting again with `sudo systemctl disable --now nats-server`.
 
 ## TLS
