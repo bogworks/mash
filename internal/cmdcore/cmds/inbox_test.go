@@ -588,7 +588,7 @@ func TestReadQuotesEveryLineWithASpace(t *testing.T) {
 // #958, REQ-011: a count that is not exact says so in the count itself, "about", with no separate line. --detail gives the
 // reason, --json carries "exact". An exact count prints what it always did.
 func TestInboxCountExactness(t *testing.T) {
-	const capped = "only the oldest 1000 messages were checked"
+	const capped = "the count stopped at its limit of 1000 messages"
 	const noServe = "mash serve is not running, so mail it has not verified is still counted"
 	table := "\n\nNUMBER  FROM  WHEN     STATE  URGENT  KIND      MESSAGE\n" +
 		"1       bob   10s ago  new    no      task      lunch at noon?\n" +

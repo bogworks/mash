@@ -303,13 +303,13 @@ func inboxOn(ctx context.Context, ep *endpoint.Endpoint, q cmds.InboxQuery, w wa
 func cappedWhy(r endpoint.InboxRead) string {
 	switch {
 	case r.PartialBy == "messages" && r.PartialAt == 1:
-		return "only the oldest message was checked"
+		return "the count stopped at its limit of 1 message"
 	case r.PartialBy == "messages":
-		return fmt.Sprintf("only the oldest %d messages were checked", r.PartialAt)
+		return fmt.Sprintf("the count stopped at its limit of %d messages", r.PartialAt)
 	case r.PartialBy == "bytes" && r.PartialAt%(1<<20) == 0:
-		return fmt.Sprintf("only the oldest %d MiB of message text was checked", r.PartialAt>>20)
+		return fmt.Sprintf("the count stopped at its limit of %d MiB of message text", r.PartialAt>>20)
 	case r.PartialBy == "bytes":
-		return fmt.Sprintf("only the oldest %d bytes of message text were checked", r.PartialAt)
+		return fmt.Sprintf("the count stopped at its limit of %d bytes of message text", r.PartialAt)
 	case r.Partial: // the pass stopped part way, with no cap named: the count is still not exact
 		return "the count stopped part way"
 	}

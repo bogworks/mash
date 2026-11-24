@@ -74,7 +74,7 @@ func TestInboxCountIsAboutWhenCapped(t *testing.T) {
 	if !strings.HasPrefix(out, "About 4 messages for o.dev.a, about 4 new, about 0 urgent.\n") {
 		t.Fatalf("capped: %q", out)
 	}
-	if d, _ := w.cli(t, "a", "inbox", "--limit", "1", "--detail"); !strings.HasSuffix(d, "\nexact: no (only the oldest 2 messages were checked)\n") {
+	if d, _ := w.cli(t, "a", "inbox", "--limit", "1", "--detail"); !strings.HasSuffix(d, "\nexact: no (the count stopped at its limit of 2 messages)\n") {
 		t.Errorf("--detail: %q", d)
 	}
 	if j, _ := w.cli(t, "a", "inbox", "--limit", "1", "--json"); exactOf(t, j) {
@@ -87,7 +87,7 @@ func TestInboxCountIsAboutWhenCapped(t *testing.T) {
 	}
 	d, _ := nw.cli(t, "a", "inbox", "--limit", "1", "--detail")
 	if !strings.HasPrefix(d, "About 3 messages for o.dev.a, about 3 new") || strings.Count(d, "About") != 1 ||
-		!strings.HasSuffix(d, "\nexact: no (only the oldest message was checked; "+noServeWhy+")\n") {
+		!strings.HasSuffix(d, "\nexact: no (the count stopped at its limit of 1 message; "+noServeWhy+")\n") {
 		t.Errorf("both: %q", d)
 	}
 }
