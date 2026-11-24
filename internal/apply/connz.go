@@ -1,6 +1,7 @@
 package apply
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -69,6 +70,9 @@ type ConnzServer struct {
 	// scan read, each connection once, and the list is NOT the whole list: a caller must treat the server like one
 	// that did not answer.
 	Incomplete string
+	// Changed holds the connections that were in some of this server's scans and not in all of them: connections that
+	// opened or closed while the server was read (each once, by id). Conns is the last scan's list.
+	Changed []ConnzConn
 }
 
 type connzReply struct {
@@ -136,6 +140,9 @@ func (n NATS) Connz(ctx context.Context, account string, expect []string, page i
 	start := time.Now()
 	wait := connzTotal
 	for ctx.Err() == nil {
+		if dl, ok := ctx.Deadline(); ok { // never wait past the caller's deadline
+			wait = max(min(wait, time.Until(dl)), time.Millisecond)
+		}
 		msg, err := sub.NextMsg(wait)
 		if err != nil {
 			if errors.Is(err, nats.ErrTimeout) {
@@ -210,10 +217,30 @@ func allSeen(expect []string, seen map[string]bool) bool {
 func (n NATS) connzScan(ctx context.Context, cs *ConnzServer, account string, page int, first connzReply) error {
 	r := first
 	var prev map[uint64]bool // the set of the last multi-page scan that reconciled
+	var all map[uint64]ConnzConn
+	var count map[uint64]int
+	scans := 0
+	defer func() { // the connections not in every scan
+		cs.Changed = nil
+		for id, c := range all {
+			if count[id] < scans {
+				cs.Changed = append(cs.Changed, c)
+			}
+		}
+		slices.SortFunc(cs.Changed, func(a, b ConnzConn) int { return cmp.Compare(a.CID, b.CID) })
+	}()
 	for attempt := 1; ; attempt++ {
 		ok, multi, err := n.connzScanOnce(ctx, cs, account, page, r)
 		if err != nil {
 			return err
+		}
+		scans++
+		if all == nil {
+			all, count = map[uint64]ConnzConn{}, map[uint64]int{}
+		}
+		for _, c := range cs.Conns {
+			all[c.CID] = c
+			count[c.CID]++
 		}
 		if ok {
 			if !multi {
