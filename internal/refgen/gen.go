@@ -199,6 +199,9 @@ func buildTree(c *cmdSpec, path []string, current, inheritedRelease, inheritedPl
 	}
 	_, hasPlan := c.meta("x-plan")
 	if hasPlan {
+		if root {
+			return nil, fmt.Errorf("%s: the tool root is built and must not carry x-plan", n.full())
+		}
 		if !validPlan(p) {
 			return nil, fmt.Errorf("%s: x-plan %q is not one of now, next, later", n.full(), p)
 		}
@@ -383,6 +386,9 @@ func (g *gen) checkPlanned(n *node) error {
 		return fmt.Errorf("%s: release %q is neither %s nor %s", n.full(), n.release, g.current, nextRelease)
 	}
 	for _, s := range n.subs {
+		if s.plan == "" && g.released(s.release) {
+			return fmt.Errorf("%s: a built entry (x-release %s) cannot sit under a planned parent", s.full(), s.release)
+		}
 		if err := g.checkPlanned(s); err != nil {
 			return err
 		}

@@ -713,6 +713,28 @@ func TestPlanInherits(t *testing.T) {
 	}
 }
 
+func TestBuiltChildUnderPlannedParentRefused(t *testing.T) {
+	built := `{"name":"x-release","value":"1.0.0"}`
+	kids := `"commands":[{"name":"kid","description":"Kid.","metadata":[` + built + `]}]`
+	want := "mash future kid: a built entry (x-release 1.0.0) cannot sit under a planned parent"
+	plan := `{"name":"future","description":"Comes later.","metadata":[{"name":"x-plan","value":"next"}],` + kids + `}`
+	old := `{"name":"future","description":"Comes later.","metadata":[{"name":"x-release","value":"0.6.0"}],` + kids + `}`
+	for name, entry := range map[string]string{"x-plan parent": plan, "old-form parent": old} {
+		if _, err := Generate(planFixture(t, entry)); err == nil || err.Error() != want {
+			t.Errorf("%s: err = %v, want %q", name, err, want)
+		}
+	}
+}
+
+func TestPlanOnToolRootRefused(t *testing.T) {
+	dir := patchedFixture(t, "mash.json", `"description":"The tool.",`,
+		`"description":"The tool.","metadata":[{"name":"x-plan","value":"next"}],`)
+	_, err := Generate(dir)
+	if want := "mash: the tool root is built and must not carry x-plan"; err == nil || err.Error() != want {
+		t.Errorf("err = %v, want %q", err, want)
+	}
+}
+
 func TestRealSpecGeneratesWithZeroDiff(t *testing.T) {
 	root := repoRoot(t)
 	if d := CheckDir(filepath.Join(root, "spec"), filepath.Join(root, "docs", "reference")); len(d) != 0 {
