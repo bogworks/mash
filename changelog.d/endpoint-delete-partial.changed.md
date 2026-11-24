@@ -1,0 +1,1 @@
+**`mashctl endpoint delete` names the address and the cause when a later step fails.** When the endpoint's key was cancelled but a later step failed, the error is now one line naming the address and the cause in plain words, with the command to run again ([#1081](https://github.com/bogworks/mash/issues/1081)).

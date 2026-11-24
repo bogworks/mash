@@ -246,7 +246,7 @@ func TestRetireChecksSymlinkedCredsTarget(t *testing.T) {
 		calls := fakeRevoke(t, nil)
 		out, errb, code := h.run("endpoint", "delete", "o.g.c", "--yes")
 		// as for any symlinked creds, the retire completes and reports that the link was left in place
-		if code != 1 || out != "" || !strings.Contains(errb, "error: deleted o.g.c, but ") || !strings.Contains(errb, "not a regular file") || len(*calls) != 1 {
+		if code != 1 || out != "" || !strings.Contains(errb, "error: o.g.c is partly deleted: its creds path is not a file\n") || len(*calls) != 1 {
 			t.Fatalf("%d %q %q calls %+v", code, out, errb, *calls)
 		}
 		if _, err := os.Lstat(h.creds(ad("c"))); err != nil {

@@ -108,10 +108,50 @@ func (a *Admin) revokeLocked(ctx context.Context, lk *streamLock, name, user str
 // shortKey is the first 8 characters of a key for messages (ctl.ShortKey; admin cannot import ctl).
 func shortKey(k string) string { return fmt.Sprintf("%.8s", k) }
 
+// The causes a partial removal names, in plain words (each 28 characters or fewer). A cause is the last step that
+// failed after the user key was revoked; mashctl prints it and never the error behind it.
+const (
+	causeLockLost      = "its lock was lost"
+	causeRecordRead    = "its record could not be read"
+	causeRecordChanged = "its record changed meanwhile"
+	causePurgeUnsure   = "record removal not confirmed"
+	causeNameNotFreed  = "its name was not freed"
+	causeNotClosed     = "its address was not closed"
+	causeInboxThere    = "its inbox is still there"
+	causeEarlierStuck  = "an earlier removal is stuck"
+	causeUnknown       = "it could not be finished"
+
+	// For mashctl: the cause of the leftovers of an earlier removal, and the fallback.
+	CauseEarlierRemovalStuck = causeEarlierStuck
+	CauseUnknown             = causeUnknown
+)
+
+// causeError tags err with the plain-words cause a partial removal would name. It prints as err and unwraps to it.
+type causeError struct {
+	cause string
+	err   error
+}
+
+func (c *causeError) Error() string { return c.err.Error() }
+func (c *causeError) Unwrap() error { return c.err }
+
+// withCause tags err (when not nil) with cause, unless it already carries one: the step nearest the failure names it.
+func withCause(cause string, err error) error {
+	if err == nil {
+		return nil
+	}
+	var c *causeError
+	if errors.As(err, &c) {
+		return err
+	}
+	return &causeError{cause: cause, err: err}
+}
+
 // partialError: the endpoint's NATS user was revoked, so its credentials are dead, but the removal did not complete.
 // It is never a refusal, whatever it wraps.
 type partialError struct {
 	name, user string
+	cause      string // plain words; see PartialCause
 	err        error
 }
 
@@ -119,6 +159,25 @@ func (p *partialError) Error() string {
 	return "mash: PARTIAL: " + p.name + "'s user key " + shortKey(p.user) + " was revoked in the account JWT, so its credentials no longer work, but the removal did not complete: " + p.err.Error() + "; run the same command again (revoking again is safe)"
 }
 func (p *partialError) Unwrap() error { return p.err }
+
+// PartialCause returns the plain-words cause (28 characters or fewer, no punctuation) of a partial removal: ok is
+// false when err is not one (see IsPartial). The error behind it is only on Unwrap.
+func PartialCause(err error) (cause string, ok bool) {
+	var p *partialError
+	if !errors.As(err, &p) {
+		return "", false
+	}
+	// A pending marker that the server would not delete is what blocks finishing; one left because the lock was lost
+	// is the lock's cause.
+	var m *pendingMarkerError
+	if errors.As(err, &m) && !errors.Is(m, ErrLockLost) {
+		return causeEarlierStuck, true
+	}
+	if p.cause == "" {
+		return causeUnknown, true
+	}
+	return p.cause, true
+}
 
 // partialIf words err as a partialError when the user was revoked (done) and err is not nil.
 func partialIf(done bool, name, user string, err error) error {
@@ -129,7 +188,12 @@ func partialIf(done bool, name, user string, err error) error {
 	if errors.As(err, &p) {
 		return err
 	}
-	return &partialError{name: name, user: user, err: err}
+	cause := ""
+	var c *causeError
+	if errors.As(err, &c) {
+		cause = c.cause
+	}
+	return &partialError{name: name, user: user, cause: cause, err: err}
 }
 
 // SetLimits sets the caps Init, Provision and EnsureInbox use (default: store.DefaultLimits). It validates them.
@@ -1124,9 +1188,9 @@ func purgeDirectory(ctx context.Context, kv jetstream.KeyValue, name string, opt
 // left pending: it blocks the name until the deprovision is run again, which resolves it.
 func unfinishedPurge(name string, pm *retireMark, err error) error {
 	if pm == nil {
-		return fmt.Errorf("mash: directory record: %w", err)
+		return withCause(causePurgeUnsure, fmt.Errorf("mash: directory record: %w", err))
 	}
-	return fmt.Errorf("mash: the retirement of %s is unfinished: the directory purge did not report success (%w); its retired marker stays pending and blocks the name; run the same command again to finish it", name, err)
+	return withCause(causePurgeUnsure, fmt.Errorf("mash: the retirement of %s is unfinished: the directory purge did not report success (%w); its retired marker stays pending and blocks the name; run the same command again to finish it", name, err))
 }
 
 // fenceAndDeleteInbox is the part of a deprovision that follows a guarded record delete (DeprovisionIfUser,
@@ -1236,7 +1300,7 @@ func (a *Admin) DeprovisionDrained(ctx context.Context, addr sap.Address, id str
 	if err := purgeDirectory(ctx, kv, name, jetstream.LastRevision(e.Revision())); err != nil {
 		if isRevisionConflict(err) {
 			// The server refused the guarded purge: the retirement did not happen, so the pending marker goes.
-			err = partialIf(revoked, name, rec.User, fmt.Errorf("mash: refusing to deprovision %s: the record changed; left in place", name))
+			err = partialIf(revoked, name, rec.User, withCause(causeRecordChanged, fmt.Errorf("mash: refusing to deprovision %s: the record changed; left in place", name)))
 			return a.abortRetire(ctx, lk, pm, err, true)
 		}
 		// The answer does not say whether the server purged it: the marker stays pending.
@@ -1310,7 +1374,7 @@ func (a *Admin) DeprovisionIfUser(ctx context.Context, addr sap.Address, user st
 	defer lk.release(ctx)
 	ctx, end := lk.guard(ctx, "deprovision", &err)
 	defer end()
-	changed := &refusedError{name: name, why: ErrRecordChanged, text: "the record for " + name + " changed; left in place"}
+	changed := withCause(causeRecordChanged, &refusedError{name: name, why: ErrRecordChanged, text: "the record for " + name + " changed; left in place"})
 	purged, revoked := false, false
 	var pm *retireMark
 	// keep: the marker must stay pending (the purge's outcome is unknown, or the record vanished and nothing proves
@@ -1330,11 +1394,11 @@ func (a *Admin) DeprovisionIfUser(ctx context.Context, addr sap.Address, user st
 				return a.finishAfterPurge(ctx, lk, lease, addr, user)
 			}
 			if err != nil {
-				return partialIf(revoked, name, user, fmt.Errorf("mash: directory %s: %w", name, err))
+				return partialIf(revoked, name, user, withCause(causeRecordRead, fmt.Errorf("mash: directory %s: %w", name, err)))
 			}
 			rec, err := store.ParseRecord(name, e.Value())
 			if err != nil {
-				return partialIf(revoked, name, user, fmt.Errorf("mash: refusing to deprovision %s: its record cannot be read, so nothing proves the key owns it (left in place): %w", name, err))
+				return partialIf(revoked, name, user, withCause(causeRecordRead, fmt.Errorf("mash: refusing to deprovision %s: its record cannot be read, so nothing proves the key owns it (left in place): %w", name, err)))
 			}
 			if rec.User != user {
 				if try > 0 {
@@ -1472,14 +1536,26 @@ func isTombstone(v []byte) bool { return bytes.Contains(v, []byte(`"deprovisione
 // fence writes the lease tombstone for name.
 func fence(ctx context.Context, lease jetstream.KeyValue, name string) error {
 	if _, err := lease.Put(ctx, name, store.LeaseTombstone()); err != nil {
-		return fmt.Errorf("mash: lease: %w", err)
+		return withCause(causeNotClosed, fmt.Errorf("mash: lease: %w", err))
 	}
 	return nil
 }
 
+// InboxDeleteFault is a test seam for tests in other packages: when it is not nil and returns an error, the inbox
+// stream delete of a removal fails with that error instead of calling the server. Nil in production. A server
+// has no way to refuse the delete of a stream that exists, so this is the only way to reach that step.
+var InboxDeleteFault func() error
+
 func (a *Admin) deleteInbox(ctx context.Context, name string) error {
-	if err := a.js.DeleteStream(ctx, sap.InboxStream(name)); err != nil && !errors.Is(err, jetstream.ErrStreamNotFound) {
-		return fmt.Errorf("mash: inbox stream: %w", err)
+	err := error(nil)
+	if InboxDeleteFault != nil {
+		err = InboxDeleteFault()
+	}
+	if err == nil {
+		err = a.js.DeleteStream(ctx, sap.InboxStream(name))
+	}
+	if err != nil && !errors.Is(err, jetstream.ErrStreamNotFound) {
+		return withCause(causeInboxThere, fmt.Errorf("mash: inbox stream: %w", err))
 	}
 	return nil
 }

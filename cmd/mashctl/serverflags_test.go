@@ -64,7 +64,7 @@ func TestRetirePartialListsWhatWasRevokedAndWhatIsPending(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
-	if out != "" || !strings.Contains(errb, "error: deleted o.g.b, but ") || !strings.HasSuffix(errb, "hint: mashctl endpoint delete o.g.b\n") {
+	if out != "" || !strings.Contains(errb, "error: o.g.b is partly deleted: it could not be finished\n") || !strings.HasSuffix(errb, "hint: mashctl endpoint delete o.g.b\n") {
 		t.Errorf("stderr: %q", errb)
 	}
 }

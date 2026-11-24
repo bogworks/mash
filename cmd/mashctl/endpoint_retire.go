@@ -69,9 +69,10 @@ func retireAddress(addr sap.Address, opts retireOpts, env func(string) string, l
 	fail := func(format string, a ...any) *cliframe.Error {
 		return cliframe.Failf("%s", plainMsg(admin.RewordUnavailable(fmt.Sprintf(format, a...))))
 	}
-	// partial is a removal that did part of its work.
-	partial := func(format string, a ...any) *cliframe.Error {
-		return cliframe.Failf("deleted %s, but %s", name, plainMsg(admin.RewordUnavailable(fmt.Sprintf(format, a...)))).WithHint(opts.again)
+	// partial is a removal that did part of its work: one line naming the address the user typed and the cause in
+	// plain words (the error behind it is never printed), then the command that finishes it.
+	partial := func(cause string) *cliframe.Error {
+		return cliframe.Failf("%s is partly deleted: %s", name, cause).WithHint(opts.again)
 	}
 	cfg, err := loadCtlConfig(env, lookup, true)
 	if err != nil {
@@ -138,7 +139,7 @@ func retireAddress(addr sap.Address, opts retireOpts, env func(string) string, l
 	}
 	if cleanup {
 		if derr := adm.Deprovision(ctx, addr); derr != nil {
-			return retireResult{}, partial("finishing the removal on the server failed: %v", derr)
+			return retireResult{}, partial(admin.CauseEarlierRemovalStuck)
 		}
 	}
 	var revokeOut bytes.Buffer
@@ -214,12 +215,13 @@ func retireAddress(addr sap.Address, opts retireOpts, env func(string) string, l
 				return retireResult{}, fail("%v: nothing was changed", err)
 			}
 			if admin.IsPartial(err) {
-				return retireResult{}, partial("%v", err)
+				cause, _ := admin.PartialCause(err)
+				return retireResult{}, partial(cause)
 			}
 			if !revokedOK {
 				return retireResult{}, fail("%v; %s", err, ctl.NotRevoked).WithHint(opts.again)
 			}
-			return retireResult{}, partial("the lease fence or the inbox was not removed: %v", err)
+			return retireResult{}, partial(admin.CauseUnknown)
 		}
 		// A warning from the revocation is kept; the rest of its lines are the acknowledgement counts.
 		for _, l := range strings.Split(revokeOut.String(), "\n") {
@@ -235,14 +237,14 @@ func retireAddress(addr sap.Address, opts retireOpts, env func(string) string, l
 		switch {
 		case errors.Is(err, os.ErrNotExist):
 		case err != nil:
-			return retireResult{}, partial("the credentials file was not set aside: %v", err)
+			return retireResult{}, partial("its creds file was not moved")
 		case !fi.Mode().IsRegular():
-			return retireResult{}, partial("%s is not a regular file and was left in place", credsPath)
+			return retireResult{}, partial("its creds path is not a file")
 		default:
 			dest := credsPath + ".deleted"
 			final, err := archiveNoReplace(credsPath, dest)
 			if err != nil {
-				return retireResult{}, partial("the credentials file was not set aside: %v", err)
+				return retireResult{}, partial("its creds file was not moved")
 			}
 			res.renamedTo = final
 		}

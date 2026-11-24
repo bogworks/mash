@@ -105,7 +105,7 @@ func TestRetireMissingCredsFileIsFineAndSymlinkIsLeft(t *testing.T) {
 		t.Fatal(err)
 	}
 	out, errb, code := h.run("endpoint", "delete", "o.g.b", "--yes")
-	if code != 1 || out != "" || !strings.Contains(errb, "\nerror: deleted o.g.b, but ") || !strings.Contains(errb, "is not a regular file and was left in place\nhint: mashctl endpoint delete o.g.b\n") {
+	if code != 1 || out != "" || !strings.Contains(errb, "\nerror: o.g.b is partly deleted: its creds path is not a file\nhint: mashctl endpoint delete o.g.b\n") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
 	if b, err := os.ReadFile(target); err != nil || !bytes.Equal(b, want) {
@@ -220,7 +220,7 @@ func TestRetirePartialFailureIsNotReportedAsUnchanged(t *testing.T) {
 	if code != 1 || out != "" {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
-	if !strings.Contains(errb, "\nerror: deleted o.g.b, but ") || !strings.HasSuffix(errb, "\nhint: mashctl endpoint delete o.g.b\n") || !strings.Contains(errb, "lease fence: connection lost") {
+	if !strings.HasSuffix(errb, "\nerror: o.g.b is partly deleted: it could not be finished\nhint: mashctl endpoint delete o.g.b\n") || strings.Contains(errb, "connection lost") {
 		t.Errorf("stderr: %q", errb)
 	}
 	if strings.Contains(errb, "nothing was changed") {

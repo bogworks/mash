@@ -329,7 +329,7 @@ func (a *Admin) finalizeRetire(ctx context.Context, lk *streamLock, pm *retireMa
 				return nil
 			}
 		}
-		return fmt.Errorf("mash: finalize retired marker %s: %w; it stays pending and blocks the name; run the same command again", pm.key, err)
+		return withCause(causeNameNotFreed, fmt.Errorf("mash: finalize retired marker %s: %w; it stays pending and blocks the name; run the same command again", pm.key, err))
 	}
 	pm.rev, pm.m = rev, m
 	return nil
