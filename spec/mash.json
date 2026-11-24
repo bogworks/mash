@@ -1321,11 +1321,11 @@
        {
         "case": "The certificate is not trusted",
         "issue": "#1099",
-        "stream": "stdout, then the hint on stderr",
+        "stream": "stdout",
         "exit": 1,
         "replaces": "The server's certificate is not trusted",
-        "text": "config    ok\ncreds     ok\nserver    FAIL  the server's certificate is not trusted: tls://myserver:4222\nsign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no unverified mail was refused\n\n1 problem.\nhint: mash join <file>",
-        "note": "PROPOSED, not yet in the specification (REQ-006). The count line follows the rows and any hint goes to stderr. Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors. A new join file brings the certificate authority. The server row is fixed wording (rule: \"The server not answering reads the same everywhere\"), so its 76 columns stay; it is under the 80 limit."
+        "text": "config    ok\ncreds     ok\nserver    FAIL  the server's certificate is not trusted: tls://myserver:4222\nsign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no unverified mail was refused\n\n1 problem.",
+        "note": "PROPOSED, not yet in the specification (REQ-006). The count line follows the rows and any hint goes to stderr. Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors. No hint: mash join cannot change the folder's certificate authority, even with --replace, and no other command of ours does. The server row is fixed wording (rule: \"The server not answering reads the same everywhere\"), so its 76 columns stay; it is under the 80 limit."
        },
        {
         "case": "The server does not offer TLS",
@@ -1342,8 +1342,8 @@
         "stream": "stdout, then the hint on stderr",
         "exit": 1,
         "replaces": "A problem and a warning",
-        "text": "config    ok\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   FAIL  the server refused these credentials\ndelivery  skip  needs sign-in\nrefused   warn  3 unverified messages were refused\n\n1 problem, 1 warning.\nhint: mash join <file>",
-        "note": "PROPOSED, not yet in the specification (REQ-006, core #1403). The hint is a command of ours that fixes the first problem: a new join file brings new credentials. v0.5.8 printed a sentence ('ask whoever runs your mesh to run: mashctl endpoint reissue ...'); ADR 0168 says a hint is a command or there is none."
+        "text": "config    ok\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   FAIL  the server refused these credentials\ndelivery  skip  needs sign-in\nrefused   warn  3 unverified messages were refused\n\n1 problem, 1 warning.\nhint: mash join <file> --replace",
+        "note": "PROPOSED, not yet in the specification (REQ-006, core #1403). The hint is a command of ours that fixes the first problem: a new join file brings new credentials, and --replace because creds for this address are installed (mash join refuses them otherwise). v0.5.8 printed a sentence ('ask whoever runs your mesh to run: mashctl endpoint reissue ...'); ADR 0168 says a hint is a command or there is none."
        },
        {
         "case": "The endpoint was deleted, seen from another machine, with one hint",
@@ -1368,16 +1368,16 @@
         "issue": "#1099",
         "stream": "stdout, then the hint on stderr",
         "exit": 1,
-        "text": "config    ok\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   FAIL  the server refused these credentials\ndelivery  skip  needs sign-in\nrefused   ok    no unverified mail was refused\n\n1 problem.\nhint: mash join <file>",
-        "note": "PROPOSED, not yet in the specification (REQ-006, core #1403). Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors. Also the hint for a creds file that belongs to another endpoint. The person needs a new join file from whoever runs the mesh; over creds already installed, mash join then asks for --replace."
+        "text": "config    ok\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   FAIL  the server refused these credentials\ndelivery  skip  needs sign-in\nrefused   ok    no unverified mail was refused\n\n1 problem.\nhint: mash join <file> --replace",
+        "note": "PROPOSED, not yet in the specification (REQ-006, core #1403). Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors. Also the hint for a creds file that belongs to another endpoint. The person needs a new join file from whoever runs the mesh; --replace, because creds for this address are installed."
        },
        {
         "case": "The creds file is not a creds file",
         "issue": "#1099",
         "stream": "stdout, then the hint on stderr",
         "exit": 1,
-        "text": "config    ok\ncreds     FAIL  ~/.config/mash/acme.demo.bob.creds is not a creds file\nserver    ok    tls://myserver:4222\nsign-in   skip  needs the creds\ndelivery  skip  needs sign-in\nrefused   ok    no unverified mail was refused\n\n1 problem.\nhint: mash join <file>",
-        "note": "PROPOSED, not yet in the specification (REQ-006, core #1403). Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors. The file's content is never printed. Same shape as 'A creds file is missing' (the file, with ~, then what is wrong), so the row fits in 80 columns; status keeps its longer sentence as the reason."
+        "text": "config    ok\ncreds     FAIL  ~/.config/mash/acme.demo.bob.creds is not a creds file\nserver    ok    tls://myserver:4222\nsign-in   skip  needs the creds\ndelivery  skip  needs sign-in\nrefused   ok    no unverified mail was refused\n\n1 problem.\nhint: mash join <file> --replace",
+        "note": "PROPOSED, not yet in the specification (REQ-006, core #1403). Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors. The file's content is never printed. Same shape as 'A creds file is missing' (the file, with ~, then what is wrong), so the row fits in 80 columns; status keeps its longer sentence as the reason. --replace, because a file is installed at the creds path."
        },
        {
         "case": "The creds file can be read by others",
@@ -1408,8 +1408,8 @@
         "issue": "#1099",
         "stream": "stdout",
         "exit": 1,
-        "text": "{\n \"endpoint\": \"acme.demo.bob\",\n \"problems\": 1,\n \"warnings\": 1,\n \"checks\": [\n  {\n   \"name\": \"config\",\n   \"state\": \"ok\",\n   \"detail\": null,\n   \"fix\": null\n  },\n  {\n   \"name\": \"creds\",\n   \"state\": \"ok\",\n   \"detail\": null,\n   \"fix\": null\n  },\n  {\n   \"name\": \"server\",\n   \"state\": \"ok\",\n   \"detail\": \"tls://myserver:4222\",\n   \"fix\": null\n  },\n  {\n   \"name\": \"sign-in\",\n   \"state\": \"fail\",\n   \"detail\": \"the server refused these credentials\",\n   \"fix\": \"mash join <file>\"\n  },\n  {\n   \"name\": \"delivery\",\n   \"state\": \"skip\",\n   \"detail\": \"needs sign-in\",\n   \"fix\": null\n  },\n  {\n   \"name\": \"refused\",\n   \"state\": \"warn\",\n   \"detail\": \"3 unverified messages were refused\",\n   \"fix\": null\n  }\n ],\n \"hint\": \"mash join <file>\"\n}",
-        "note": "PROPOSED, not yet in the specification (REQ-006, core #1403). The example above with the sign-in fix 'mash join <file>' and a top-level \"hint\": the one hint the text prints, null when there is none. Each row's \"fix\" stays."
+        "text": "{\n \"endpoint\": \"acme.demo.bob\",\n \"problems\": 1,\n \"warnings\": 1,\n \"checks\": [\n  {\n   \"name\": \"config\",\n   \"state\": \"ok\",\n   \"detail\": null,\n   \"fix\": null\n  },\n  {\n   \"name\": \"creds\",\n   \"state\": \"ok\",\n   \"detail\": null,\n   \"fix\": null\n  },\n  {\n   \"name\": \"server\",\n   \"state\": \"ok\",\n   \"detail\": \"tls://myserver:4222\",\n   \"fix\": null\n  },\n  {\n   \"name\": \"sign-in\",\n   \"state\": \"fail\",\n   \"detail\": \"the server refused these credentials\",\n   \"fix\": \"mash join <file> --replace\"\n  },\n  {\n   \"name\": \"delivery\",\n   \"state\": \"skip\",\n   \"detail\": \"needs sign-in\",\n   \"fix\": null\n  },\n  {\n   \"name\": \"refused\",\n   \"state\": \"warn\",\n   \"detail\": \"3 unverified messages were refused\",\n   \"fix\": null\n  }\n ],\n \"hint\": \"mash join <file> --replace\"\n}",
+        "note": "PROPOSED, not yet in the specification (REQ-006, core #1403). The example above with the sign-in fix 'mash join <file> --replace' and a top-level \"hint\": the one hint the text prints, null when there is none. Each row's \"fix\" stays."
        }
       ]
      }
