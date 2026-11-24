@@ -468,11 +468,6 @@ func TestInboxReadMatchSpec(t *testing.T) {
 			json.Unmarshal([]byte(sx), &spec)
 			msgs := got["messages"].([]any)
 			got["messages"] = msgs[:1]
-			// #958: "exact" is new in 0.5.9 and the committed spec example does not have it yet (the spec lane adds it).
-			if got["exact"] != true {
-				t.Errorf("inbox object exact = %v, want true", got["exact"])
-			}
-			delete(got, "exact")
 			if !reflect.DeepEqual(got, spec) {
 				t.Errorf("inbox object %v, spec x-json %v", got, spec)
 			}

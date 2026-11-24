@@ -31,8 +31,9 @@ func TestInboxCountIsExactWithServeRunning(t *testing.T) {
 	if code != 0 || !strings.HasPrefix(out, "1 message for o.dev.a, 1 new, 0 urgent.\n\nNUMBER") {
 		t.Fatalf("inbox: %d %q", code, out)
 	}
-	if d, _ := w.cli(t, "a", "inbox", "--detail"); d != out {
-		t.Errorf("--detail on an exact count: %q, want %q", d, out)
+	// Only the count line is compared: the WHEN column of the table moves with the clock.
+	if d, _ := w.cli(t, "a", "inbox", "--detail"); strings.SplitN(d, "\n", 2)[0] != strings.SplitN(out, "\n", 2)[0] || strings.Contains(d, "exact:") {
+		t.Errorf("--detail on an exact count: %q, want the count line of %q and no exact: line", d, out)
 	}
 	if j, _ := w.cli(t, "a", "inbox", "--json"); !exactOf(t, j) {
 		t.Errorf("--json: %s", j)
