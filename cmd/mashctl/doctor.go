@@ -758,28 +758,31 @@ func doctorKeys(rep *doctorReport, ctx context.Context, adm *admin.Admin, cfg co
 }
 
 // incompleteLines is a scan's Incomplete text, one clean line for each of its lines, each at most detailWidth columns
-// (continued on the next line when longer; a word longer than that is split).
+// (continued on the next line when longer; a word longer than that is split, between characters, never inside one).
 func incompleteLines(s string) string {
 	var out []string
 	for _, l := range strings.Split(s, "\n") {
-		line := ""
+		line, n := "", 0 // the line so far and its width in characters
 		for _, w := range strings.Fields(oneLine(l)) {
-			if line != "" && len(line)+1+len(w) > detailWidth {
+			r := []rune(w)
+			if line != "" && n+1+len(r) > detailWidth {
 				out = append(out, line)
-				line = ""
+				line, n = "", 0
 			}
-			for len(w) > detailWidth { // a word longer than a line is split
+			for len(r) > detailWidth { // a word longer than a line is split
 				if line != "" {
 					out = append(out, line)
-					line = ""
+					line, n = "", 0
 				}
-				out = append(out, w[:detailWidth])
-				w = w[detailWidth:]
+				out = append(out, string(r[:detailWidth]))
+				r = r[detailWidth:]
 			}
 			if line != "" {
 				line += " "
+				n++
 			}
-			line += w
+			line += string(r)
+			n += len(r)
 		}
 		out = append(out, line)
 	}
