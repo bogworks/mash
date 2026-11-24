@@ -522,6 +522,20 @@ func TestInboxAndReadMatchesSpec(t *testing.T) {
 			b.view.OutOfOrder, b.view.Waiting = true, 1 // message 2 was read out of order: the server holds 1 waiting
 			_, got, _ = runInbox(b, cliframe.Global{Detail: true})
 			got = strings.TrimRight(got, "\n")
+		case "Counts without serve running", "Counts without serve running, with --detail":
+			b.view.NoServe = true
+			_, got, _ = runInbox(b, cliframe.Global{Detail: strings.HasSuffix(oc["case"].(string), "--detail")})
+			got = strings.TrimRight(got, "\n")
+		case "Counts are capped", "Counts are capped, with --detail", "Counts are capped and serve is not running, with --detail":
+			b.view.Total, b.view.Waiting, b.view.NewUrgent = 1000, 90, 4
+			b.view.WakeCount = 1000 // the wake line is not part of these cases
+			b.view.Capped = "only the oldest 1000 messages were checked"
+			b.view.NoServe = strings.Contains(oc["case"].(string), "serve is not running")
+			_, got, _ = runInbox(b, cliframe.Global{Detail: strings.HasSuffix(oc["case"].(string), "--detail")})
+			got = strings.TrimRight(got, "\n")
+			if oc["case"] == "Counts are capped" { // the spec shows the count line alone
+				got, _, _ = strings.Cut(got, "\n\n")
+			}
 		default:
 			t.Errorf("unknown spec case %v", oc["case"])
 			continue

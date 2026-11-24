@@ -514,6 +514,46 @@
         "exit": 0,
         "issue": "#1399",
         "note": "#1399. A message above the oldest new one was read out of order (the read tool acknowledges it while an earlier one is still held); the server says which are acknowledged only up to the floor, so the urgent count may still include it: here message 2 was read, 1 is still new, and 2 is still listed as new and urgent. --json: \"exact\": false. --detail adds: \"exact: no (mail read out of order may still be counted as urgent)\". The values are examples."
+       },
+       {
+        "case": "Counts without serve running",
+        "text": "About 2 messages for acme.demo.alice, about 2 new, about 1 urgent.\n\nNUMBER  FROM  WHEN     STATE  URGENT  KIND      MESSAGE\n1       bob   10s ago  new    no      task      lunch at noon?\n2       bob   8s ago   new    yes     question  ready?",
+        "stream": "stdout",
+        "exit": 0,
+        "issue": "#958",
+        "note": "The word \"about\" before each count says the counts are not exact; there is no extra line (#958 shipped a line, \"Counts may include mail not yet checked\", which is removed). The shape and columns are the exact form's (\"2 messages for acme.demo.alice, 2 new, 1 urgent.\"). Printed whenever serve is not running. --json: \"exact\": false (true when serve is running; same field in the MCP structured result). --detail adds one line under the count line: \"exact: no (mash serve is not running, so unverified mail is counted)\". When this and the capped case both apply, there is one About line and --detail gives one line per reason, the capped one first (see \"Counts are capped and serve is not running, with --detail\"). The inbox x-json example gains \"exact\": true (and the structured example in spec/mash-mcp.json) in the change that moves these cases into x-output; x-json stays as released until then, because the conformance test holds it to the code."
+       },
+       {
+        "case": "Counts are capped",
+        "text": "About 1000 messages for acme.demo.alice, about 90 new, about 4 urgent.",
+        "stream": "stdout",
+        "exit": 0,
+        "issue": "#955",
+        "note": "From mash-core. The count pass stopped at its cap, so the counts are not exact; the word \"about\" before each count says so, with no extra line (v0.5.8 printed none for this case either). Same shape as \"Counts without serve running\". --json: \"exact\": false. --detail adds one line under the count line: \"exact: no (only the oldest 1000 messages were checked)\"; for a cap on bytes the reason reads \"only the oldest N MiB of message text was checked\". The code caps messages and bytes. The values are examples."
+       },
+       {
+        "case": "Counts without serve running, with --detail",
+        "text": "About 2 messages for acme.demo.alice, about 2 new, about 1 urgent.\nexact: no (mash serve is not running, so unverified mail is counted)\n\nNUMBER  FROM  WHEN     STATE  URGENT  KIND      MESSAGE\n1       bob   10s ago  new    no      task      lunch at noon?\n2       bob   8s ago   new    yes     question  ready?",
+        "stream": "stdout",
+        "exit": 0,
+        "issue": "#958",
+        "note": "--detail adds the line \"exact: no (<reason>)\" under the count line; the table follows as in \"Counts without serve running\". The reason is core's exact wording for serve not running (core #1395). The table shows two rows here; it lists the waiting messages as in \"Messages\" with --detail."
+       },
+       {
+        "case": "Counts are capped, with --detail",
+        "text": "About 1000 messages for acme.demo.alice, about 90 new, about 4 urgent.\nexact: no (only the oldest 1000 messages were checked)\n\nNUMBER  FROM  WHEN     STATE  URGENT  KIND      MESSAGE\n1       bob   10s ago  new    no      task      lunch at noon?\n2       bob   8s ago   new    yes     question  ready?",
+        "stream": "stdout",
+        "exit": 0,
+        "issue": "#955",
+        "note": "From mash-core (#1395). --detail adds the line \"exact: no (<reason>)\" under the count line. For a cap on bytes the reason reads \"only the oldest N MiB of message text was checked\". The table shows two rows here; it lists the waiting messages as in \"Messages\" with --detail."
+       },
+       {
+        "case": "Counts are capped and serve is not running, with --detail",
+        "text": "About 1000 messages for acme.demo.alice, about 90 new, about 4 urgent.\nexact: no (only the oldest 1000 messages were checked)\nexact: no (mash serve is not running, so unverified mail is counted)\n\nNUMBER  FROM  WHEN     STATE  URGENT  KIND      MESSAGE\n1       bob   10s ago  new    no      task      lunch at noon?\n2       bob   8s ago   new    yes     question  ready?",
+        "stream": "stdout",
+        "exit": 0,
+        "issue": "#958",
+        "note": "From mash-core (#1395). Both reasons apply: one About line, then one \"exact: no (<reason>)\" line per reason, the capped one first, then the serve one, each under the count line and within 80 columns. The table shows two rows here; it lists the waiting messages as in \"Messages\" with --detail."
        }
       ]
      },
@@ -558,56 +598,6 @@
      {
       "name": "x-notes",
       "value": "FROM shows only the name when the sender is in your own owner and group. MESSAGE is the sender's words, as untrusted as the full text; it is not quoted because the column already marks it. It shows the first line of the text, cut to fit 80 columns and ending in … when there is more; mash read shows all of it. The JSON carries the same cut text as 'preview'."
-     },
-     {
-      "name": "x-output-next",
-      "value": [
-       {
-        "case": "Counts without serve running",
-        "text": "About 2 messages for acme.demo.alice, about 2 new, about 1 urgent.\n\nNUMBER  FROM  WHEN     STATE  URGENT  KIND      MESSAGE\n1       bob   10s ago  new    no      task      lunch at noon?\n2       bob   8s ago   new    yes     question  ready?",
-        "stream": "stdout",
-        "exit": 0,
-        "issue": "#958",
-        "replaces": "Messages",
-        "note": "PROPOSED. The word \"about\" before each count says the counts are not exact; there is no extra line (#958 shipped a line, \"Counts may include mail not yet checked\", which is removed). The shape and columns are the exact form's (\"2 messages for acme.demo.alice, 2 new, 1 urgent.\"). Printed whenever serve is not running. --json: \"exact\": false (true when serve is running; same field in the MCP structured result). --detail adds one line under the count line: \"exact: no (mash serve is not running, so unverified mail is counted)\". When this and the capped case both apply, there is one About line and --detail gives one line per reason, the capped one first (see \"Counts are capped and serve is not running, with --detail\"). The inbox x-json example gains \"exact\": true (and the structured example in spec/mash-mcp.json) in the change that moves these cases into x-output; x-json stays as released until then, because the conformance test holds it to the code."
-       },
-       {
-        "case": "Counts are capped",
-        "text": "About 1000 messages for acme.demo.alice, about 90 new, about 4 urgent.",
-        "stream": "stdout",
-        "exit": 0,
-        "issue": "#955",
-        "note": "From mash-core. The count pass stopped at its cap, so the counts are not exact; the word \"about\" before each count says so, with no extra line (v0.5.8 printed none for this case either). Same shape as \"Counts without serve running\". --json: \"exact\": false. --detail adds one line under the count line: \"exact: no (only the oldest 1000 messages were checked)\"; for a cap on bytes the reason reads \"only the oldest N MiB of message text was checked\". The code caps messages and bytes. The values are examples.",
-        "replaces": "Messages"
-       },
-       {
-        "case": "Counts without serve running, with --detail",
-        "text": "About 2 messages for acme.demo.alice, about 2 new, about 1 urgent.\nexact: no (mash serve is not running, so unverified mail is counted)\n\nNUMBER  FROM  WHEN     STATE  URGENT  KIND      MESSAGE\n1       bob   10s ago  new    no      task      lunch at noon?\n2       bob   8s ago   new    yes     question  ready?",
-        "stream": "stdout",
-        "exit": 0,
-        "issue": "#958",
-        "note": "PROPOSED. --detail adds the line \"exact: no (<reason>)\" under the count line; the table follows as in \"Counts without serve running\". The reason is core's exact wording for serve not running (core #1395). The table shows two rows here; it lists the waiting messages as in \"Messages\" with --detail.",
-        "replaces": "Messages"
-       },
-       {
-        "case": "Counts are capped, with --detail",
-        "text": "About 1000 messages for acme.demo.alice, about 90 new, about 4 urgent.\nexact: no (only the oldest 1000 messages were checked)\n\nNUMBER  FROM  WHEN     STATE  URGENT  KIND      MESSAGE\n1       bob   10s ago  new    no      task      lunch at noon?\n2       bob   8s ago   new    yes     question  ready?",
-        "stream": "stdout",
-        "exit": 0,
-        "issue": "#955",
-        "note": "From mash-core (#1395). --detail adds the line \"exact: no (<reason>)\" under the count line. For a cap on bytes the reason reads \"only the oldest N MiB of message text was checked\". The table shows two rows here; it lists the waiting messages as in \"Messages\" with --detail.",
-        "replaces": "Messages"
-       },
-       {
-        "case": "Counts are capped and serve is not running, with --detail",
-        "text": "About 1000 messages for acme.demo.alice, about 90 new, about 4 urgent.\nexact: no (only the oldest 1000 messages were checked)\nexact: no (mash serve is not running, so unverified mail is counted)\n\nNUMBER  FROM  WHEN     STATE  URGENT  KIND      MESSAGE\n1       bob   10s ago  new    no      task      lunch at noon?\n2       bob   8s ago   new    yes     question  ready?",
-        "stream": "stdout",
-        "exit": 0,
-        "issue": "#958",
-        "note": "From mash-core (#1395). Both reasons apply: one About line, then one \"exact: no (<reason>)\" line per reason, the capped one first, then the serve one, each under the count line and within 80 columns. The table shows two rows here; it lists the waiting messages as in \"Messages\" with --detail.",
-        "replaces": "Messages"
-       }
-      ]
      }
     ]
    },
