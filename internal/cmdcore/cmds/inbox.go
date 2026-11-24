@@ -134,7 +134,7 @@ type InboxResult struct {
 	rows  []inboxRow
 	count int // wake_count, for the line that names it
 	age   string
-	why   string // why the count is not exact; "" when it is
+	why   []string // why the count is not exact, one reason per line, the cap first; none when it is
 }
 
 type inboxRow struct {
@@ -194,7 +194,9 @@ func (r InboxResult) Text(o cmdcore.Opts) string {
 	}
 	b.WriteString(total + " for " + r.Endpoint + ", " + about + strconv.Itoa(r.New) + " new, " + about + strconv.Itoa(r.Urgent) + " urgent.")
 	if o.Detail && !r.Exact { // why, directly under the count line; Opts.Detail is read here because the result is not a Detailer, which would add a param to the MCP tool
-		b.WriteString("\nexact: no (" + r.why + ")")
+		for _, w := range r.why {
+			b.WriteString("\nexact: no (" + w + ")")
+		}
 	}
 	if r.OverWakeCount {
 		b.WriteString("\nMore than " + strconv.Itoa(r.count) + " are waiting.")
@@ -264,7 +266,7 @@ var Inbox = cmdcore.Command[InboxParams, InboxResult]{
 		}
 		r.Exact = v.Capped == "" && !(v.NoServe && v.Total > 0) && !v.OutOfOrder
 		if !r.Exact {
-			r.why = strings.Join(nonEmpty(v.Capped, noServe(v), outOfOrder(v)), "; ")
+			r.why = nonEmpty(v.Capped, noServe(v), outOfOrder(v))
 		}
 		r.OverWakeCount = v.WakeCount > 0 && v.Waiting > v.WakeCount
 		if v.Waiting > 0 && !v.OldestWaiting.IsZero() {
@@ -292,7 +294,7 @@ var Inbox = cmdcore.Command[InboxParams, InboxResult]{
 }
 
 // NoServeWhy is the reason of a count made while mash serve is not running.
-const NoServeWhy = "mash serve is not running, so mail it has not verified is still counted"
+const NoServeWhy = "mash serve is not running, so unverified mail is counted"
 
 func noServe(v InboxView) string {
 	if v.NoServe {

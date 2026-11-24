@@ -9,7 +9,7 @@ import (
 	"github.com/bogworks/mash/internal/endpoint"
 )
 
-const noServeWhy = "mash serve is not running, so mail it has not verified is still counted"
+const noServeWhy = "mash serve is not running, so unverified mail is counted"
 
 func exactOf(t *testing.T, s string) bool {
 	t.Helper()
@@ -75,7 +75,7 @@ func TestInboxCountIsAboutWhenCapped(t *testing.T) {
 	if !strings.HasPrefix(out, "About 4 messages for o.dev.a, about 4 new, about 0 urgent.\n") {
 		t.Fatalf("capped: %q", out)
 	}
-	if d, _ := w.cli(t, "a", "inbox", "--limit", "1", "--detail"); !strings.HasPrefix(d, "About 4 messages for o.dev.a, about 4 new, about 0 urgent.\nexact: no (the count stopped at its limit of 2 messages)\n\nNUMBER") {
+	if d, _ := w.cli(t, "a", "inbox", "--limit", "1", "--detail"); !strings.HasPrefix(d, "About 4 messages for o.dev.a, about 4 new, about 0 urgent.\nexact: no (only the oldest 2 messages were checked)\n\nNUMBER") {
 		t.Errorf("--detail: %q", d)
 	}
 	if j, _ := w.cli(t, "a", "inbox", "--limit", "1", "--json"); exactOf(t, j) {
@@ -88,7 +88,7 @@ func TestInboxCountIsAboutWhenCapped(t *testing.T) {
 	}
 	d, _ := nw.cli(t, "a", "inbox", "--limit", "1", "--detail")
 	if !strings.HasPrefix(d, "About 3 messages for o.dev.a, about 3 new") || strings.Count(d, "About") != 1 ||
-		!strings.Contains(d, "\nexact: no (the count stopped at its limit of 1 message; "+noServeWhy+")\n\nNUMBER") {
+		!strings.Contains(d, "\nexact: no (only the oldest message was checked)\nexact: no ("+noServeWhy+")\n\nNUMBER") {
 		t.Errorf("both: %q", d)
 	}
 }
