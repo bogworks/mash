@@ -100,7 +100,7 @@
     },
     {
      "case": "A deleted endpoint here",
-     "note": "This case applies to an endpoint deleted during a session (#1396): the tool call fails once the creds file has been set aside by mashctl endpoint delete. A serve started after the delete registers only version, status and doctor, by design, so there is no send tool to fail.",
+     "note": "This case applies to an endpoint deleted during a session (#1396): the tool call fails once the creds file has been set aside by mashctl endpoint delete. A serve started after the delete registers only version, status and doctor, by design, so there is no send tool to fail. A call refused for its own arguments (such as a bad send id) keeps its own error; only a call that fails at the server says deleted.",
      "text": "error: acme.demo.bob: this endpoint was deleted; its address cannot be used again\nhint: mash doctor",
      "stream": "stderr",
      "exit": 1
@@ -180,7 +180,7 @@
    "errors": [
     {
      "case": "A deleted endpoint here",
-     "note": "This case applies to an endpoint deleted during a session (#1396): the tool call fails once the creds file has been set aside by mashctl endpoint delete. A serve started after the delete registers only version, status and doctor, by design, so there is no inbox tool to fail.",
+     "note": "This case applies to an endpoint deleted during a session (#1396): the tool call fails once the creds file has been set aside by mashctl endpoint delete. A serve started after the delete registers only version, status and doctor, by design, so there is no inbox tool to fail. A call refused for its own arguments (such as a bad send id) keeps its own error; only a call that fails at the server says deleted.",
      "text": "error: acme.demo.bob: this endpoint was deleted; its address cannot be used again\nhint: mash doctor",
      "stream": "stderr",
      "exit": 1
@@ -235,7 +235,7 @@
     },
     {
      "case": "A deleted endpoint here",
-     "note": "This case applies to an endpoint deleted during a session (#1396): the tool call fails once the creds file has been set aside by mashctl endpoint delete. A serve started after the delete registers only version, status and doctor, by design, so there is no read tool to fail.",
+     "note": "This case applies to an endpoint deleted during a session (#1396): the tool call fails once the creds file has been set aside by mashctl endpoint delete. A serve started after the delete registers only version, status and doctor, by design, so there is no read tool to fail. A call refused for its own arguments (such as a bad send id) keeps its own error; only a call that fails at the server says deleted.",
      "text": "error: acme.demo.bob: this endpoint was deleted; its address cannot be used again\nhint: mash doctor",
      "stream": "stderr",
      "exit": 1
