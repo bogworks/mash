@@ -937,10 +937,74 @@
           "exit": 1
          },
          {
-          "case": "Cancelled everywhere, then a later step failed (0.5.6 as built)",
-          "text": "error: deleted acme.demo.bob, but PARTIAL: acme_demo_bob's user key UBIDWPW3 was revoked in the account JWT, so its credentials no longer work, but the removal did not complete: mash: lease: nats: nats: API error: code=400 err_code=10109 description=invalid operation on sealed stream; run the same command again (revoking again is safe)\nhint: mashctl endpoint delete acme.demo.bob",
+          "case": "Cancelled, then a later step failed: a. its lock was lost",
+          "text": "error: acme.demo.bob is partly deleted: its lock was lost\nhint: mashctl endpoint delete acme.demo.bob",
           "stream": "stderr",
-          "exit": 1
+          "exit": 1,
+          "note": "One frame for all ten causes: \"error: <address> is partly deleted: <cause>\", the cause 28 characters or fewer, then the command that finishes the job. Its credentials already no longer work and running the command again is safe; that does not fit on the line."
+         },
+         {
+          "case": "Cancelled, then a later step failed: b. its record could not be read",
+          "text": "error: acme.demo.bob is partly deleted: its record could not be read\nhint: mashctl endpoint delete acme.demo.bob",
+          "stream": "stderr",
+          "exit": 1,
+          "note": "Same frame, hint and exit as a."
+         },
+         {
+          "case": "Cancelled, then a later step failed: c. its record changed meanwhile",
+          "text": "error: acme.demo.bob is partly deleted: its record changed meanwhile\nhint: mashctl endpoint delete acme.demo.bob",
+          "stream": "stderr",
+          "exit": 1,
+          "note": "Same frame, hint and exit as a."
+         },
+         {
+          "case": "Cancelled, then a later step failed: d. record removal not confirmed",
+          "text": "error: acme.demo.bob is partly deleted: record removal not confirmed\nhint: mashctl endpoint delete acme.demo.bob",
+          "stream": "stderr",
+          "exit": 1,
+          "note": "Same frame, hint and exit as a."
+         },
+         {
+          "case": "Cancelled, then a later step failed: e. its name was not freed",
+          "text": "error: acme.demo.bob is partly deleted: its name was not freed\nhint: mashctl endpoint delete acme.demo.bob",
+          "stream": "stderr",
+          "exit": 1,
+          "note": "Same frame, hint and exit as a."
+         },
+         {
+          "case": "Cancelled, then a later step failed: f. its address was not closed",
+          "text": "error: acme.demo.bob is partly deleted: its address was not closed\nhint: mashctl endpoint delete acme.demo.bob",
+          "stream": "stderr",
+          "exit": 1,
+          "note": "Same frame, hint and exit as a."
+         },
+         {
+          "case": "Cancelled, then a later step failed: g. its inbox is still there",
+          "text": "error: acme.demo.bob is partly deleted: its inbox is still there\nhint: mashctl endpoint delete acme.demo.bob",
+          "stream": "stderr",
+          "exit": 1,
+          "note": "Same frame, hint and exit as a."
+         },
+         {
+          "case": "Cancelled, then a later step failed: h. an earlier removal is stuck",
+          "text": "error: acme.demo.bob is partly deleted: an earlier removal is stuck\nhint: mashctl endpoint delete acme.demo.bob",
+          "stream": "stderr",
+          "exit": 1,
+          "note": "Same frame, hint and exit as a."
+         },
+         {
+          "case": "Cancelled, then a later step failed: i. its creds file was not moved",
+          "text": "error: acme.demo.bob is partly deleted: its creds file was not moved\nhint: mashctl endpoint delete acme.demo.bob",
+          "stream": "stderr",
+          "exit": 1,
+          "note": "Same frame, hint and exit as a."
+         },
+         {
+          "case": "Cancelled, then a later step failed: j. its creds path is not a file",
+          "text": "error: acme.demo.bob is partly deleted: its creds path is not a file\nhint: mashctl endpoint delete acme.demo.bob",
+          "stream": "stderr",
+          "exit": 1,
+          "note": "Same frame, hint and exit as a."
          }
         ]
        },
@@ -965,101 +1029,11 @@
        },
        {
         "name": "x-notes",
-        "value": "Order. The endpoint's key is cancelled on every server first; only when every server confirms is anything removed, so a failure there leaves the endpoint whole. If this machine holds the endpoint's creds file, it is set aside as <address>.creds.deleted, so mash no longer counts it as installed; the path is predictable and nothing prints it. Nothing else on any machine is touched. THE LATE-FAILURE LINE in 0.5.6 is not how it should read: it carries an internal word (PARTIAL), the flat name with underscores, a key id and the server's raw error. Two parts of it vary: the eight-character key id after 'user key', and the cause between 'did not complete: ' and '; run the same command again'. From 0.5.7 one line replaces it: 'error: deleted acme.demo.bob, but the removal did not finish: <cause in plain words>' with the same hint; its credentials already no longer work, and running the command again is safe."
+        "value": "Order. The endpoint's key is cancelled on every server first; only when every server confirms is anything removed, so a failure there leaves the endpoint whole. If this machine holds the endpoint's creds file, it is set aside as <address>.creds.deleted, so mash no longer counts it as installed; the path is predictable and nothing prints it. Nothing else on any machine is touched. If a step after the cancellation fails, the error is one line naming the address and the cause in plain words, with the command to run again; the key is already cancelled, so its credentials no longer work, and running the command again is safe."
        },
        {
         "name": "x-output-next",
         "value": [
-         {
-          "case": "Cancelled everywhere, then a later step failed: a. its lock was lost",
-          "text": "error: acme.demo.bob is partly deleted: its lock was lost\nhint: mashctl endpoint delete acme.demo.bob",
-          "stream": "stderr",
-          "exit": 1,
-          "issue": "#1081",
-          "replaces": "Cancelled everywhere, then a later step failed (0.5.6 as built)",
-          "note": "One frame for all ten causes: \"error: <address> is partly deleted: <cause>\", the cause 28 characters or fewer, then the command that finishes the job. Its credentials already no longer work and running the command again is safe; that does not fit on the line, so it is here and in --detail and --json (\"credentials_revoked\": true). PROPOSED plain words for the cause. Draft 3 wording for this cause: \"the server's lock on this endpoint was lost\"."
-         },
-         {
-          "case": "Cancelled everywhere, then a later step failed: b. its record could not be read",
-          "text": "error: acme.demo.bob is partly deleted: its record could not be read\nhint: mashctl endpoint delete acme.demo.bob",
-          "stream": "stderr",
-          "exit": 1,
-          "issue": "#1081",
-          "replaces": "Cancelled everywhere, then a later step failed (0.5.6 as built)",
-          "note": "Same frame, hint and exit as a. Cause in plain words; the draft 3 wording was \"its directory record could not be read\"."
-         },
-         {
-          "case": "Cancelled everywhere, then a later step failed: c. its record changed meanwhile",
-          "text": "error: acme.demo.bob is partly deleted: its record changed meanwhile\nhint: mashctl endpoint delete acme.demo.bob",
-          "stream": "stderr",
-          "exit": 1,
-          "issue": "#1081",
-          "replaces": "Cancelled everywhere, then a later step failed (0.5.6 as built)",
-          "note": "Same frame, hint and exit as a. Cause in plain words; the draft 3 wording was \"its directory record was changed by someone else\"."
-         },
-         {
-          "case": "Cancelled everywhere, then a later step failed: d. record removal not confirmed",
-          "text": "error: acme.demo.bob is partly deleted: record removal not confirmed\nhint: mashctl endpoint delete acme.demo.bob",
-          "stream": "stderr",
-          "exit": 1,
-          "issue": "#1081",
-          "replaces": "Cancelled everywhere, then a later step failed (0.5.6 as built)",
-          "note": "Same frame, hint and exit as a. Cause in plain words; the draft 3 wording was \"the server did not confirm that its directory record was removed\"."
-         },
-         {
-          "case": "Cancelled everywhere, then a later step failed: e. its name was not freed",
-          "text": "error: acme.demo.bob is partly deleted: its name was not freed\nhint: mashctl endpoint delete acme.demo.bob",
-          "stream": "stderr",
-          "exit": 1,
-          "issue": "#1081",
-          "replaces": "Cancelled everywhere, then a later step failed (0.5.6 as built)",
-          "note": "Same frame, hint and exit as a. Cause in plain words; the draft 3 wording was \"its name could not be released\"."
-         },
-         {
-          "case": "Cancelled everywhere, then a later step failed: f. its address was not closed",
-          "text": "error: acme.demo.bob is partly deleted: its address was not closed\nhint: mashctl endpoint delete acme.demo.bob",
-          "stream": "stderr",
-          "exit": 1,
-          "issue": "#1081",
-          "replaces": "Cancelled everywhere, then a later step failed (0.5.6 as built)",
-          "note": "Same frame, hint and exit as a. Cause in plain words; the draft 3 wording was \"its address could not be closed to new sessions\"."
-         },
-         {
-          "case": "Cancelled everywhere, then a later step failed: g. its inbox is still there",
-          "text": "error: acme.demo.bob is partly deleted: its inbox is still there\nhint: mashctl endpoint delete acme.demo.bob",
-          "stream": "stderr",
-          "exit": 1,
-          "issue": "#1081",
-          "replaces": "Cancelled everywhere, then a later step failed (0.5.6 as built)",
-          "note": "Same frame, hint and exit as a. Cause in plain words; the draft 3 wording was \"its inbox could not be removed\"."
-         },
-         {
-          "case": "Cancelled everywhere, then a later step failed: h. an earlier removal is stuck",
-          "text": "error: acme.demo.bob is partly deleted: an earlier removal is stuck\nhint: mashctl endpoint delete acme.demo.bob",
-          "stream": "stderr",
-          "exit": 1,
-          "issue": "#1081",
-          "replaces": "Cancelled everywhere, then a later step failed (0.5.6 as built)",
-          "note": "Same frame, hint and exit as a. Cause in plain words; the draft 3 wording was \"an earlier, unfinished removal could not be completed\"."
-         },
-         {
-          "case": "Cancelled everywhere, then a later step failed: i. its creds file was not moved",
-          "text": "error: acme.demo.bob is partly deleted: its creds file was not moved\nhint: mashctl endpoint delete acme.demo.bob",
-          "stream": "stderr",
-          "exit": 1,
-          "issue": "#1081",
-          "replaces": "Cancelled everywhere, then a later step failed (0.5.6 as built)",
-          "note": "Same frame, hint and exit as a. Cause in plain words; the draft 3 wording was \"its credentials file could not be set aside\"."
-         },
-         {
-          "case": "Cancelled everywhere, then a later step failed: j. its creds path is not a file",
-          "text": "error: acme.demo.bob is partly deleted: its creds path is not a file\nhint: mashctl endpoint delete acme.demo.bob",
-          "stream": "stderr",
-          "exit": 1,
-          "issue": "#1081",
-          "replaces": "Cancelled everywhere, then a later step failed (0.5.6 as built)",
-          "note": "Same frame, hint and exit as a. Cause in plain words; the draft 3 wording was \"its credentials path is not a regular file and was left in place\"."
-         },
          {
           "case": "Deleting without a terminal",
           "issue": "#1161",

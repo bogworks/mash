@@ -294,7 +294,7 @@ func (l *streamLock) bound(ctx context.Context) (context.Context, context.Cancel
 // lockSafety of its deadline. Call it immediately before a write that cannot be undone or that another admin could
 // invalidate.
 func (l *streamLock) check(ctx context.Context) error {
-	lost := fmt.Errorf("mash: the lock of %s was lost or is about to expire; nothing further was changed; try again: %w", l.name, ErrLockLost)
+	lost := withCause(causeLockLost, fmt.Errorf("mash: the lock of %s was lost or is about to expire; nothing further was changed; try again: %w", l.name, ErrLockLost))
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.lost || !l.now().Before(l.deadline.Add(-lockSafety)) {
@@ -325,7 +325,7 @@ func (l *streamLock) explain(ctx context.Context, op string, err error) error {
 		return err // already says what was and was not done
 	}
 	if err != nil && errors.Is(context.Cause(ctx), ErrLockExpiring) {
-		return fmt.Errorf("mash: %s ran past the lock of %s; nothing after the point it stopped was changed; try again: %w", op, l.name, err)
+		return withCause(causeLockLost, fmt.Errorf("mash: %s ran past the lock of %s; nothing after the point it stopped was changed; try again: %w", op, l.name, err))
 	}
 	return err
 }
