@@ -73,6 +73,14 @@ error: cannot reach tls://localhost:4222
 hint: mashctl doctor
 ```
 
+### The account's limits are below what one endpoint needs
+
+Stream: stderr. Exit code: 0.
+
+```text
+(two warning lines before the result, for an account that allows 5 streams and 100 MiB of disk: "warning: the account allows 5 streams; one endpoint needs 6, one more each" and "warning: the account has 100MiB of disk; one endpoint needs 109MiB"; an account that allows 6 streams and 109 MiB gets neither)
+```
+
 ## JSON
 
 With `--json` the result is this shape. The values are an example.

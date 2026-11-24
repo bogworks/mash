@@ -8,11 +8,13 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats-server/v2/server"
@@ -20,6 +22,7 @@ import (
 
 	"github.com/bogworks/mash/internal/ctlkeys"
 	"github.com/bogworks/mash/internal/natsfixture"
+	"github.com/bogworks/mash/internal/store"
 )
 
 // initer is a second, empty key dir and config dir: the machine that sets mash up on the server of an applyEnv, from a
@@ -787,6 +790,99 @@ func TestShownFolder(t *testing.T) {
 	} {
 		if got := shownFolder(c.dir, c.home); got != c.want {
 			t.Errorf("shownFolder(%q, %q) = %q, want %q", c.dir, c.home, got, c.want)
+		}
+	}
+}
+
+// TestLimitWarnings: one endpoint needs 6 streams (5 buckets and the inbox), 1 consumer and 109 MiB (93 MiB of
+// buckets and a 16 MiB inbox) with the defaults (docs/nats-server.md, Sizing).
+func TestLimitWarnings(t *testing.T) {
+	def := store.DefaultLimits()
+	small := limitWarnings(jwt.JetStreamLimits{Streams: 5, Consumer: 1, DiskStorage: 100 << 20}, def)
+	want := []string{
+		"the account allows 5 streams; one endpoint needs 6, one more each",
+		"the account has 100MiB of disk; one endpoint needs 109MiB",
+	}
+	if !reflect.DeepEqual(small, want) {
+		t.Errorf("5 streams, 100 MiB: got %q, want %q", small, want)
+	}
+	if got := limitWarnings(jwt.JetStreamLimits{Streams: 6, Consumer: 1, DiskStorage: 109 << 20}, def); len(got) != 0 {
+		t.Errorf("6 streams, 109 MiB: %q", got)
+	}
+	if got := limitWarnings(jwt.JetStreamLimits{Streams: -1, Consumer: -1, DiskStorage: -1}, def); len(got) != 0 {
+		t.Errorf("unlimited: %q", got)
+	}
+	if got := limitWarnings(jwt.JetStreamLimits{Consumer: 0, DiskStorage: 1 << 30, Streams: 1024}, def); len(got) != 0 {
+		t.Errorf("roomy: %q", got)
+	}
+	// The configured caps count: a 32 MiB inbox cap makes one endpoint need 125 MiB.
+	big := def
+	big.InboxMaxBytes = 32 << 20
+	if got := limitWarnings(jwt.JetStreamLimits{Streams: 6, DiskStorage: 109 << 20}, big); len(got) != 1 || !strings.Contains(got[0], "needs 125MiB") {
+		t.Errorf("configured inbox cap: %q", got)
+	}
+	// Every printed line, the "warning: " prefix of init included, keeps to 80 columns, also with 4-digit numbers:
+	// the widest form FormatSize makes is MiB (GiB only for whole GiB, which is shorter).
+	wide := def
+	wide.InboxMaxBytes = 1000 << 20
+	wide.DirectoryMaxBytes = 1000 << 20
+	cases := map[string][]string{
+		"defaults": small,
+		"4 digits": limitWarnings(jwt.JetStreamLimits{Streams: 5, Consumer: 1, DiskStorage: 1000 << 20}, wide),
+	}
+	if got := cases["4 digits"]; len(got) != 2 {
+		t.Fatalf("4-digit case: %q", got)
+	}
+	for name, got := range cases {
+		for _, w := range got {
+			if n := utf8.RuneCountInString("warning: " + w); n > 80 {
+				t.Errorf("%s: %d columns, want at most 80: %q", name, n, w)
+			}
+		}
+	}
+}
+
+// TestInitPrintsLimitsWarnings runs the real init against a server whose MASH account allows 5 streams and 100 MiB
+// of disk: init still succeeds, and prints both warnings on stderr (limitWarnings is unit-tested; this proves doInit
+// prints them).
+func TestInitPrintsLimitsWarnings(t *testing.T) {
+	e := newApplyEnvTweak(t, func(e *applyEnv) {
+		opKP, _, err := e.ks.Operator()
+		if err != nil {
+			t.Fatal(err)
+		}
+		conf := e.pl.ConfPath()
+		cb := string(mustRead(t, conf))
+		m := regexp.MustCompile(`(?m)^  ` + e.acctPub + `: "([^"]+)"$`).FindStringSubmatch(cb)
+		if m == nil {
+			t.Fatal("JWT of the MASH account not found in server.conf")
+		}
+		ac, err := jwt.DecodeAccountClaims(m[1])
+		if err != nil {
+			t.Fatal(err)
+		}
+		lim := ac.Limits.JetStreamLimits
+		lim.Streams, lim.DiskStorage, lim.Consumer = 5, 100<<20, -1
+		ac.Limits.JetStreamLimits = lim
+		tok, err := ac.Encode(opKP)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(conf, []byte(strings.Replace(cb, m[1], tok, 1)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	})
+	a := newIniter(t, e)
+	_, errb, code := a.init()
+	if code != 0 {
+		t.Fatalf("init: %d\n%s", code, errb)
+	}
+	for _, w := range []string{
+		"warning: the account allows 5 streams; one endpoint needs 6, one more each\n",
+		"warning: the account has 100MiB of disk; one endpoint needs 109MiB\n",
+	} {
+		if !strings.Contains(errb, w) {
+			t.Errorf("stderr lacks %q:\n%s", w, errb)
 		}
 	}
 }
