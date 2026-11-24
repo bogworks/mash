@@ -10,9 +10,11 @@ import (
 	"errors"
 	"io"
 	"io/fs"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -37,6 +39,7 @@ const maxJoinFile = 1 << 20
 // The rename and remove the install steps and their rollback use; tests replace them to fail a step.
 var (
 	joinRename = os.Rename
+	joinLink   = os.Link
 	joinRemove = os.Remove
 )
 
@@ -638,29 +641,66 @@ func (w *joinWrote) stillMade(path string) bool {
 // kept: the backup is linked to <creds>.old (never over an existing file), and kept is that path; if that cannot be
 // done the backup keeps its own name and kept is that.
 //
-// With no backup the creds path is removed only if it is still the file this run installed (wrote: the same file by
-// os.SameFile and the same bytes); a path someone replaced since is left in place and reported in left, like any other
-// path the rollback did not remove. A nil wrote means nothing was recorded and the path is removed by name.
+// The creds path is first captured by renaming it to <creds>.join-undo-<random>, so what is checked is what is removed
+// or restored: a file put at the path after the capture is never touched. A captured file that is not the one this run
+// installed (wrote: the same file by os.SameFile and the same bytes) is linked back, never over an existing file; if
+// the path is taken again both stay and the captured one is named in left. A nil wrote means nothing was recorded and
+// the captured file counts as the run's own. The backup is restored by link too, so it never overwrites a file that
+// appeared at the path; then the backup is kept, as for any restore that fails.
 func joinUndo(made []string, backup, credsPath string, wrote *joinWrote) (left []string, kept string) {
 	left = joinRemoveAll(made)
-	if backup == "" {
-		if !wrote.stillMade(credsPath) {
-			return append(left, credsPath), ""
+	keep := func() string {
+		if backup == "" {
+			return ""
 		}
-		if err := joinRemove(credsPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			left = append(left, credsPath)
-		}
-		return left, ""
-	}
-	if err := joinRename(backup, credsPath); err != nil {
-		left = append(left, credsPath)
-		kept = backup
 		if old := credsPath + ".old"; os.Link(backup, old) == nil {
 			os.Remove(backup)
-			kept = old
+			return old
+		}
+		return backup
+	}
+	tmp := credsPath + ".join-undo-" + strconv.FormatUint(rand.Uint64(), 36)
+	captured := true
+	if err := joinRename(credsPath, tmp); errors.Is(err, fs.ErrNotExist) {
+		captured = false
+	} else if err != nil {
+		return append(left, credsPath), keep()
+	}
+	if captured && !wrote.stillMade(tmp) { // not ours: put it back, never over a file that is there now
+		if err := joinLink(tmp, credsPath); err != nil {
+			return append(left, tmp), keep()
+		}
+		if err := joinRemove(tmp); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			left = append(left, tmp)
+		}
+		return append(left, credsPath), keep()
+	}
+	dropOwn := func() {
+		if captured {
+			if err := joinRemove(tmp); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				left = append(left, tmp)
+			}
 		}
 	}
-	return left, kept
+	if backup == "" {
+		dropOwn()
+		return left, ""
+	}
+	if err := joinLink(backup, credsPath); err != nil {
+		if captured && !errors.Is(err, fs.ErrExist) { // the run's own creds stay in place
+			if joinLink(tmp, credsPath) == nil {
+				os.Remove(tmp)
+			} else {
+				left = append(left, tmp)
+			}
+		} else {
+			dropOwn()
+		}
+		return append(left, credsPath), keep()
+	}
+	os.Remove(backup)
+	dropOwn()
+	return left, ""
 }
 
 // undoFailure is the failure for a rollback that left paths behind: it names each by exact path and, when a replaced
