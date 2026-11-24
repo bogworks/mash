@@ -129,6 +129,9 @@ func openFailure(cfg config.Config, err error) error {
 	var cm *endpoint.CredsMissingError
 	switch {
 	case errors.As(err, &cm):
+		if setAsideDeleted(cm.Path) {
+			return cmdcore.EndpointDeleted(cfg.DisplayName())
+		}
 		return cmdcore.NoCredentials(cfg.DisplayName(), config.TildeIn(cm.Path, cfg.Home))
 	case endpoint.IsAuthFailure(err):
 		return framed(cfg.DisplayName(), err)

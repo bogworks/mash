@@ -396,6 +396,8 @@ func TestWhoMatchesSpec(t *testing.T) {
 			argv = []string{"--offline", "acme.lab"}
 		case "A prefix that is not part of an address":
 			argv = []string{"Acme.Demo"}
+		case "A deleted endpoint here":
+			continue // a stderr failure: cmd/mash/deleted_here_test.go (TestEverydayCommandsDeletedHereMatchSpec) compares it
 		default:
 			t.Errorf("unknown spec case %v", oc["case"])
 			continue

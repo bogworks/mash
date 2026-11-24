@@ -635,6 +635,7 @@ var sendCasesComparedInCmdMash = map[string]string{
 	"Nothing arrives on standard input":         "cmd/mash/prerun_errors_test.go",
 	"No such endpoint":                          "cmd/mash/send_cmd_test.go",
 	"The recipient is suspended or was deleted": "cmd/mash/spec_failures_test.go (TestSendToSuspendedMatchesSpec)",
+	"A deleted endpoint here":                   "cmd/mash/deleted_here_test.go (TestEverydayCommandsDeletedHereMatchSpec, reads the spec text)",
 	"No credentials here":                       "cmd/mash/spec_failures_test.go (TestMissingCredsMatchesSpec, reads the spec text)",
 	"Not signed in":                             "cmd/mash/frame_auth_test.go",
 }

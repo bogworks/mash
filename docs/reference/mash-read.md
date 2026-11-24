@@ -85,6 +85,15 @@ error: message 12 was refused: it was not verified
 hint: mash doctor
 ```
 
+### A deleted endpoint here
+
+Stream: stderr. Exit code: 1.
+
+```text
+error: acme.dev.bob: this endpoint was deleted; its address cannot be used again
+hint: mash doctor
+```
+
 ## JSON
 
 With `--json` the result is this shape. The values are an example.
