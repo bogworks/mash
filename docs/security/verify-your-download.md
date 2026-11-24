@@ -41,7 +41,7 @@ Each line should end in `OK`. This shows the file matches `SHA256SUMS`. It does 
 ## 3. Check the attestation
 
 ```sh
-COMMIT=$(gh api repos/bogworks/mash/commits/$MASH_VERSION --jq .sha)
+COMMIT=$(curl -fsSL -H 'Accept: application/vnd.github.sha' https://api.github.com/repos/bogworks/mash/commits/$MASH_VERSION)
 gh attestation verify SHA256SUMS -R bogworks/mash --bundle mash.intoto.jsonl \
   --signer-workflow bogworks/mash/.github/workflows/release.yml \
   --source-ref refs/tags/$MASH_VERSION --source-digest "$COMMIT"

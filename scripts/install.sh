@@ -223,7 +223,9 @@ main() {
                 if ! [[ $commit =~ ^[0-9a-f]{40}$ ]]; then
                     # A gh that is not logged in falls back to the public API (60 an hour per address).
                     echo "error: could not read the commit of $REPO $tag; nothing was installed" >&2
-                    echo "hint: gh auth login, then run the install again" >&2
+                    if ! gh auth status >/dev/null 2>&1; then
+                        echo "hint: gh auth login, then run the install again" >&2
+                    fi
                     exit 1
                 fi
                 (cd "$WORKDIR" && gh attestation verify "$sumsname" -R "$REPO" --bundle mash.intoto.jsonl \

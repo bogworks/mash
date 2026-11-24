@@ -501,6 +501,7 @@ func TestInstallSh_aTruncatedScriptInstallsNothing(t *testing.T) {
 // ghStub answers --version with real gh's two lines for GH_VERSION (default 2.105.0), or GH_VERSION_OUT verbatim when
 // set, exiting GH_VERSION_EXIT (default 0), without logging; every other call is logged and exits GH_EXIT (default 0).
 const ghStub = `case "$*" in --version) if [ -n "${GH_VERSION_OUT+x}" ]; then printf '%s\n' "$GH_VERSION_OUT"; else printf 'gh version %s (2026-11-18)\nhttps://github.com/cli/cli/releases/tag/v%s\n' "${GH_VERSION:-2.105.0}" "${GH_VERSION:-2.105.0}"; fi; exit "${GH_VERSION_EXIT:-0}";; esac
+case "$1 $2" in "auth status") exit "${GH_AUTH_EXIT:-0}";; esac
 case "$1" in api) echo "$*" >> "$GH_LOG.api"; [ -z "${GH_API_EXIT:-}" ] || exit "$GH_API_EXIT"; printf '%s\n' "${GH_API_SHA-` + fakeCommit + `}"; exit 0;; esac
 echo "$*" >> "$GH_LOG"
 if [ -n "${GH_WANT_DIGEST:-}" ]; then case "$*" in *"--source-digest $GH_WANT_DIGEST") ;; *) exit 1;; esac; fi
@@ -996,24 +997,30 @@ func TestInstallSh_withGhNotLoggedInTheCommitComesFromThePublicAPI(t *testing.T)
 }
 
 func TestInstallSh_refusesWhenTheTagsCommitCannotBeRead(t *testing.T) {
-	const refusal = "error: could not read the commit of bogworks/mash v0.5.6; nothing was installed\nhint: gh auth login, then run the install again\n"
+	const refusal = "error: could not read the commit of bogworks/mash v0.5.6; nothing was installed\n"
+	const hint = "hint: gh auth login, then run the install again\n"
 	rel, _, _ := fakeRelease(t)
 	log := filepath.Join(t.TempDir(), "gh.log")
 	tools := installTools(t, map[string]string{"gh": ghStub})
 	missing := "file://" + t.TempDir()
 
-	// (c) both lookups fail, or the API answers something that is not a full sha.
-	for name, api := range map[string]string{"api unreachable": missing, "api answers junk": apiFolder(t, "{\"message\": \"Not Found\"}"), "short sha": apiFolder(t, "0123abc\n")} {
-		t.Run(name, func(t *testing.T) {
-			r := runInstall(t, rel, tools, "GH_LOG="+log, "MASH_VERSION=v0.5.6", "GH_API_EXIT=4", "MASH_API_BASE="+api)
-			if r.err == nil || r.stderr != refusal {
-				t.Errorf("want exactly %q on stderr, got err=%v\nstdout:\n%s\nstderr:\n%s", refusal, r.err, r.stdout, r.stderr)
-			}
-			if b, _ := os.ReadFile(log); len(b) != 0 {
-				t.Errorf("verify must not run without a commit: %s", b)
-			}
-			assertNothingInstalled(t, r.dest)
-		})
+	// (c) both lookups fail, or the API answers something that is not a full sha. The hint is a fix only when gh is not logged in.
+	for authName, auth := range map[string]struct{ env, want string }{
+		"gh not logged in": {"GH_AUTH_EXIT=1", refusal + hint},
+		"gh logged in":     {"GH_AUTH_EXIT=0", refusal},
+	} {
+		for name, api := range map[string]string{"api unreachable": missing, "api answers junk": apiFolder(t, "{\"message\": \"Not Found\"}"), "short sha": apiFolder(t, "0123abc\n")} {
+			t.Run(authName+"/"+name, func(t *testing.T) {
+				r := runInstall(t, rel, tools, "GH_LOG="+log, "MASH_VERSION=v0.5.6", "GH_API_EXIT=4", "MASH_API_BASE="+api, auth.env)
+				if r.err == nil || r.stderr != auth.want {
+					t.Errorf("want exactly %q on stderr, got err=%v\nstdout:\n%s\nstderr:\n%s", auth.want, r.err, r.stdout, r.stderr)
+				}
+				if b, _ := os.ReadFile(log); len(b) != 0 {
+					t.Errorf("verify must not run without a commit: %s", b)
+				}
+				assertNothingInstalled(t, r.dest)
+			})
+		}
 	}
 }
 
