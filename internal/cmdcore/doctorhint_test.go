@@ -10,17 +10,25 @@ func TestDoctorHintIsTheFirstProblemsCommandOrNone(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		fixes []string
+		warns []string
 		want  string
 	}{
-		{"no problem", nil, ""},
-		{"a command", []string{"mash join <file>"}, "mash join <file>"},
-		{"the first problem only", []string{"mash join <file>", "mash x"}, "mash join <file>"},
-		{"a first problem with no command gives none", []string{"", "mash join <file>"}, ""},
-		{"a check is never a hint", []string{"mash doctor"}, ""},
-		{"status is a check", []string{"mash status --endpoint a.b.c"}, ""},
-		{"mashctl doctor is a check", []string{"mashctl doctor --audit-users"}, ""},
+		{"nothing", nil, nil, ""},
+		{"a command", []string{"mash join <file>"}, nil, "mash join <file>"},
+		{"the first problem only", []string{"mash join <file>", "mash x"}, nil, "mash join <file>"},
+		{"a first problem with no command gives none", []string{"", "mash join <file>"}, nil, ""},
+		{"a check is never a hint", []string{"mash doctor"}, nil, ""},
+		{"status is a check", []string{"mash status --endpoint a.b.c"}, nil, ""},
+		{"mashctl doctor is a check", []string{"mashctl doctor --audit-users"}, nil, ""},
+		{"a problem with no command is not replaced by a warning's", []string{""}, []string{"mash y"}, ""},
+		{"a problem's command outranks a warning's", []string{"mash join <file>"}, []string{"mash y"}, "mash join <file>"},
+		{"a warning's command when there is no problem", nil, []string{"mash y"}, "mash y"},
+		{"a warning with no command gives none", nil, []string{"", ""}, ""},
+		{"the first warning that has a command", nil, []string{"", "mash y", "mash z"}, "mash y"},
+		{"a check-only warning command is passed over", nil, []string{"mash doctor", "mash y"}, "mash y"},
+		{"only check-only warning commands give none", nil, []string{"mash doctor", "mash status"}, ""},
 	} {
-		if got := cmdcore.DoctorHint(tc.fixes); got != tc.want {
+		if got := cmdcore.DoctorHint(tc.fixes, tc.warns); got != tc.want {
 			t.Errorf("%s: %q, want %q", tc.name, got, tc.want)
 		}
 	}

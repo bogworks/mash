@@ -21,16 +21,27 @@ func CheckOnly(hint string) bool {
 	return false
 }
 
-// DoctorHint is the one hint a doctor ends with. fixes holds the command that fixes each problem row, in the order the
-// rows are reported, with "" for a row no command of ours fixes. The hint is the first problem's command: that is the
-// thing to mend first, and a later row's command is never offered in its place. It is "" when that row has no command,
-// when no row has a problem (fixes is empty), and when the command only checks (CheckOnly): a hint is a command that
-// fixes the problem, or there is none, and the row's own words say what is wrong.
-func DoctorHint(fixes []string) string {
-	if len(fixes) == 0 || fixes[0] == "" || CheckOnly(fixes[0]) {
-		return ""
+// DoctorHint is the one hint a doctor ends with. problemFixes and warnFixes hold the command that fixes each problem row
+// and each warning row, each in the order the rows are reported, with "" for a row no command of ours fixes.
+//
+// With a problem the hint is the first problem's command: that is the thing to mend first, and a later row's command (or
+// a warning's) is never offered in its place. It is "" when that row has no command or when the command only checks
+// (CheckOnly). With no problem the hint is the first warning that has a command that fixes it; a warning with no
+// command, or one whose command only checks, is passed over. A hint is a command that fixes the problem, or there is
+// none, and the row's own words say what is wrong.
+func DoctorHint(problemFixes, warnFixes []string) string {
+	if len(problemFixes) > 0 {
+		if problemFixes[0] == "" || CheckOnly(problemFixes[0]) {
+			return ""
+		}
+		return problemFixes[0]
 	}
-	return fixes[0]
+	for _, f := range warnFixes {
+		if f != "" && !CheckOnly(f) {
+			return f
+		}
+	}
+	return ""
 }
 
 // DoctorExitCode is the exit code of a doctor: 1 when it found a problem, 0 otherwise. A warning alone is 0, or 1 when

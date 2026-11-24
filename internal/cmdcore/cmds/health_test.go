@@ -550,7 +550,11 @@ func TestDoctorSummaryAndHint(t *testing.T) {
 		{"the first problem only", []cmds.HealthCheck{fail(""), fail("mash join <file>"), fail("mash x")}, "3 problems.", 1, ""},
 		{"the first problem's command, not a later one's", []cmds.HealthCheck{fail("mash join <file>"), fail("mash x")}, "2 problems.", 1, "mash join <file>"},
 		{"a skip is neither a problem nor a warning", []cmds.HealthCheck{fail("mash join <file>"), skip("sign-in", "creds"), skip("refused", "creds")}, "1 problem.", 1, "mash join <file>"},
-		{"a warning has no hint", []cmds.HealthCheck{{Name: "refused", State: cmds.CheckWarn, Detail: "w", Fix: "mash y"}}, "1 warning.", 0, ""},
+		{"a warning with a command gives the hint", []cmds.HealthCheck{{Name: "refused", State: cmds.CheckWarn, Detail: "w", Fix: "mash y"}}, "1 warning.", 0, "mash y"},
+		{"warnings with no command give none", []cmds.HealthCheck{warn, warn}, "2 warnings.", 0, ""},
+		{"the first warning that has a command", []cmds.HealthCheck{warn, {Name: "claude", State: cmds.CheckWarn, Detail: "w", Fix: "mash y"}, {Name: "x", State: cmds.CheckWarn, Detail: "w", Fix: "mash z"}}, "3 warnings.", 0, "mash y"},
+		{"a check-only warning command is passed over", []cmds.HealthCheck{{Name: "claude", State: cmds.CheckWarn, Detail: "w", Fix: "mash doctor"}, {Name: "x", State: cmds.CheckWarn, Detail: "w", Fix: "mash z"}}, "2 warnings.", 0, "mash z"},
+		{"warnings then a problem with no command give none", []cmds.HealthCheck{{Name: "claude", State: cmds.CheckWarn, Detail: "w", Fix: "mash y"}, fail("")}, "1 problem, 1 warning.", 1, ""},
 		{"a problem outranks an earlier warning", []cmds.HealthCheck{{Name: "refused", State: cmds.CheckWarn, Detail: "w", Fix: "mash y"}, fail("mash join <file>")}, "1 problem, 1 warning.", 1, "mash join <file>"},
 	} {
 		code, out, errs := runDoctor(report("a.b.c", false, tc.checks...), cliframe.Global{})
@@ -693,7 +697,7 @@ func TestDoctorStrict(t *testing.T) {
 // A strict doctor with only a warning is an error result in a tool, with the report and the structured result kept; without
 // strict the same report is a normal result.
 func TestDoctorToolStrictMarksTheResultAnError(t *testing.T) {
-	warn := cmds.HealthCheck{Name: "refused", State: cmds.CheckWarn, Detail: "2 unverified messages were refused", Fix: "mashctl endpoint reissue a.b.c"}
+	warn := cmds.HealthCheck{Name: "refused", State: cmds.CheckWarn, Detail: "2 unverified messages were refused"}
 	reg := cmdcore.NewRegistry(healthEnv(report("a.b.c", false, ok("config", ""), warn)), cmdcore.Register(cmds.Doctor))
 	e, _ := reg.Lookup("doctor")
 	tool := e.Tool(reg.Env)
@@ -706,7 +710,7 @@ func TestDoctorToolStrictMarksTheResultAnError(t *testing.T) {
 	if err == nil || !ok {
 		t.Fatalf("strict with a warning is an error result, got %v", err)
 	}
-	if !strings.HasSuffix(err.Error(), "1 warning.") || strings.HasPrefix(err.Error(), "error:") { // a warning has no hint
+	if !strings.HasSuffix(err.Error(), "1 warning.") || strings.HasPrefix(err.Error(), "error:") { // this warning has no command, so no hint
 		t.Errorf("the report is kept as it is: %q", err.Error())
 	}
 	b, _ := json.Marshal(se.Structured())

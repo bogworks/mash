@@ -82,8 +82,6 @@ func (h *healthSvc) configCheck() cmds.HealthCheck {
 		c.Detail = "the endpoint address has no group: " + config.CodeGroupMissing
 	case h.cfgErr != nil && !errors.Is(h.cfgErr, config.ErrNoURL) && !errors.Is(h.cfgErr, config.ErrNoOwner):
 		c.Detail = redactText(strings.TrimPrefix(h.cfgErr.Error(), "mash: "))
-		if strings.Contains(c.Detail, "MASH_ENDPOINT") {
-		}
 	case h.cfg.Name == "":
 		// only a session reaches here: at a shell Health stops before the rows with "no endpoint is installed here"
 		c.Detail = cmds.ReasonNoSessionEndpoint

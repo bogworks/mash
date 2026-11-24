@@ -454,7 +454,7 @@ func (r DoctorResult) ExitCode() int {
 }
 
 // Hint is the one command that fixes the first problem (cmdcore.DoctorHint): none when that row has no command of ours.
-// With no problem there is no hint.
+// With no problem it is the command of the first warning that has one that fixes it, or none.
 func (r DoctorResult) Hint() string { return r.hint }
 
 // Doctor is the doctor command.
@@ -479,7 +479,7 @@ var Doctor = cmdcore.Command[DoctorParams, DoctorResult]{
 			}
 			checks = append(append(append([]HealthCheck{}, checks[:at]...), row), checks[at:]...)
 		}
-		var fixes []string
+		var fixes, warnFixes []string
 		for _, c := range checks {
 			switch c.State {
 			case CheckFail:
@@ -487,10 +487,11 @@ var Doctor = cmdcore.Command[DoctorParams, DoctorResult]{
 				fixes = append(fixes, c.Fix)
 			case CheckWarn:
 				r.Warnings++
+				warnFixes = append(warnFixes, c.Fix)
 			}
 			r.Checks = append(r.Checks, DoctorCheck{Name: c.Name, State: c.State, Detail: strPtr(c.Detail), Fix: strPtr(c.Fix)})
 		}
-		r.hint = cmdcore.DoctorHint(fixes)
+		r.hint = cmdcore.DoctorHint(fixes, warnFixes)
 		r.HintText = strPtr(r.hint)
 		return r, nil
 	},

@@ -159,7 +159,7 @@ func TestDoctorOneHintACommandThatFixesIt(t *testing.T) {
 	}
 }
 
-// No problem: exit 0, six rows, no hint, hint null. A warning alone does not make a hint, and exits 0 (1 with --strict).
+// No problem: exit 0, six rows, no hint, hint null. A warning alone with no command that fixes it does not make a hint, and exits 0 (1 with --strict).
 func TestDoctorNoProblemNoHint(t *testing.T) {
 	w := tlsWorld(t, "a")
 	env := strictEnv(w, "a", nil)
