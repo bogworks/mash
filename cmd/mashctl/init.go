@@ -30,6 +30,7 @@ import (
 	"github.com/bogworks/mash/internal/ctl"
 	"github.com/bogworks/mash/internal/ctlkeys"
 	"github.com/bogworks/mash/internal/natsauth"
+	"github.com/bogworks/mash/internal/sap"
 )
 
 // lookupWait bounds the account lookup of init (a variable so tests need not wait for the full time).
@@ -158,7 +159,7 @@ func loadSetup(path, home string) (setupFile, error) {
 	if sf.owner, err = text("owner"); err != nil {
 		return sf, cliframe.Failf("%s: owner must be a name", shown)
 	}
-	if !config.ValidOwner(sf.owner) {
+	if !config.ValidName(sf.owner) || len(sf.owner) > sap.MaxTokenLen {
 		return sf, cliframe.Failf("%s: owner is not a valid name: use lower-case letters, digits and single hyphens, starting with a letter, up to 32 characters", shown)
 	}
 	list, ok := doc["servers"].([]any)

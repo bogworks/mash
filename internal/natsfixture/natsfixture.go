@@ -19,6 +19,7 @@ import (
 
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/ctlkeys"
+	"github.com/bogworks/mash/internal/sap"
 )
 
 // File names inside the server directory.
@@ -139,7 +140,7 @@ func Build(p Params, ks *ctlkeys.Authority) (*Plan, error) {
 	if strings.ContainsAny(p.Dir, "\r\n\x00") {
 		return nil, errors.New("mashctl: server directory has a control character in its name")
 	}
-	if !config.ValidOwner(p.Owner) {
+	if !config.ValidName(p.Owner) || len(p.Owner) > sap.MaxTokenLen {
 		return nil, fmt.Errorf("mashctl: owner %q is not a valid name: use lower-case letters, digits and single hyphens, starting with a letter, up to 32 characters", p.Owner)
 	}
 	if p.Port < 1 || p.Port > 65535 {
