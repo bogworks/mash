@@ -139,8 +139,8 @@ func Build(p Params, ks *ctlkeys.Authority) (*Plan, error) {
 	if strings.ContainsAny(p.Dir, "\r\n\x00") {
 		return nil, errors.New("mashctl: server directory has a control character in its name")
 	}
-	if !config.ValidName(p.Owner) {
-		return nil, fmt.Errorf("mashctl: owner %q is not a valid name: use lower-case letters, digits and single hyphens, starting with a letter, up to 48 characters", p.Owner)
+	if !config.ValidOwner(p.Owner) {
+		return nil, fmt.Errorf("mashctl: owner %q is not a valid name: use lower-case letters, digits and single hyphens, starting with a letter, up to 32 characters", p.Owner)
 	}
 	if p.Port < 1 || p.Port > 65535 {
 		return nil, fmt.Errorf("mashctl: port %d is out of range", p.Port)

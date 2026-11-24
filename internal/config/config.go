@@ -174,6 +174,14 @@ func ValidName(s string) bool {
 	return len(s) >= 1 && len(s) <= 48 && nameRE.MatchString(s)
 }
 
+// MaxOwnerLen is the longest owner: an owner is the first token of an address, and a token is at most 32 characters
+// (ADR 0145, sap.MaxTokenLen).
+const MaxOwnerLen = 32
+
+// ValidOwner reports whether s is a valid owner: a valid name of at most MaxOwnerLen characters, so the admin
+// connection accepts what a setup file's owner check let through.
+func ValidOwner(s string) bool { return len(s) <= MaxOwnerLen && ValidName(s) }
+
 // Inert reports whether no endpoint name is configured.
 func (c Config) Inert() bool { return c.Name == "" }
 

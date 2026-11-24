@@ -976,3 +976,19 @@ func TestSkipEncryptionWarningIsOneLineWithin76Columns(t *testing.T) {
 		t.Errorf("warning = %q, want %q", w, want)
 	}
 }
+
+func TestValidOwner(t *testing.T) {
+	for s, want := range map[string]bool{
+		"acme":                  true,
+		strings.Repeat("a", 32): true,
+		strings.Repeat("a", 33): false,
+		strings.Repeat("a", 48): false,
+		"":                      false,
+		"Acme":                  false,
+		"a--b":                  false,
+	} {
+		if got := ValidOwner(s); got != want {
+			t.Errorf("ValidOwner(%q) = %v, want %v", s, got, want)
+		}
+	}
+}

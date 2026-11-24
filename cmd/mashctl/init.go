@@ -158,8 +158,8 @@ func loadSetup(path, home string) (setupFile, error) {
 	if sf.owner, err = text("owner"); err != nil {
 		return sf, cliframe.Failf("%s: owner must be a name", shown)
 	}
-	if !config.ValidName(sf.owner) {
-		return sf, cliframe.Failf("%s: owner is not a valid name: use lower-case letters, digits and single hyphens, starting with a letter, up to 48 characters", shown)
+	if !config.ValidOwner(sf.owner) {
+		return sf, cliframe.Failf("%s: owner is not a valid name: use lower-case letters, digits and single hyphens, starting with a letter, up to 32 characters", shown)
 	}
 	list, ok := doc["servers"].([]any)
 	if !ok || len(list) == 0 {
