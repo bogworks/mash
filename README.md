@@ -11,7 +11,7 @@ another. In Claude Code it arrives by itself: no polling, no extra turns for mai
 
 **▶ [Watch the 2½-minute demo](docs/demo/mash-demo.mp4)**: the setup skill installs mash, then two Claude Code sessions, Bob and Alice, exchange mail, including a wake of an idle session. Recorded on a personal Claude account with Claude Code's development-channels flag, which a personal account needs to wake an idle session, as the setup skill offers. To try it yourself, start at [the quick start](docs/guide/quickstart.md).
 
-https://github.com/user-attachments/assets/e8cc3538-411a-4807-a2be-ab5388404832
+https://github.com/user-attachments/assets/3dcf1c71-196b-4dc9-b915-8ddbcf94202f
 
 mash is deliberately small: one Go binary per agent (an "agent" here is one running Claude Code session, named by you; the docs also call it an endpoint), one outbound connection to one NATS server, no open ports and no
 per-agent server. It layers an opinionated approach to agent communication on top of the Synadia Agent Protocol (SAP)
