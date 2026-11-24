@@ -195,7 +195,8 @@ func sha(b []byte) string {
 // SHA256SUMS, nothing else; each binary's digest is the hash of our build for that target; the SBOMs and the provenance must be attached (their contents are verified separately, as
 // they cannot be rebuilt); and SHA256SUMS is exactly the file those hashes and the attached digests produce. It names
 // every problem. For a keyless release (at or above the cutover) SHA256SUMS omits the provenance bundle (which stays
-// required to be attached), and a SHA256SUMS.sig is not allowed.
+// required to be attached), and a SHA256SUMS.sig is not allowed. An asset whose digest GitHub did not give (empty or
+// absent) is reported as "digest not available" by name, still a refusal, and the empty value is never compared.
 func CheckAssets(have map[string]string, hashes map[Binary]string, keyless bool) error {
 	var problems []string
 	add := func(f string, a ...any) { problems = append(problems, fmt.Sprintf(f, a...)) }
@@ -207,6 +208,8 @@ func CheckAssets(have map[string]string, hashes map[Binary]string, keyless bool)
 		switch {
 		case !ok:
 			add("asset %s is missing from the release", n)
+		case got == "": // GitHub gave none: say so, never compare it
+			add("asset %s: digest not available", n)
 		case !found || len(hex) != 64:
 			add("asset %s has digest %q, not a sha256", n, got)
 		default:
@@ -228,6 +231,8 @@ func CheckAssets(have map[string]string, hashes map[Binary]string, keyless bool)
 		switch {
 		case !ok:
 			add("asset %s is missing from the release", name)
+		case got == "": // GitHub gave none: say so, never compare it
+			add("asset %s: digest not available", name)
 		case got != digest:
 			add("asset %s has digest %q, our build of the candidate gives %q", name, got, digest)
 		}
@@ -261,6 +266,8 @@ func CheckScripts(have map[string]string, content map[string][]byte) error {
 		switch want := "sha256:" + sha(b); {
 		case !ok:
 			problems = append(problems, fmt.Sprintf("script %s is missing from the release", n))
+		case got == "": // GitHub gave none: say so, never compare it
+			problems = append(problems, fmt.Sprintf("script %s: digest not available", n))
 		case got != want:
 			problems = append(problems, fmt.Sprintf("script %s has digest %q, scripts/%s at the release commit gives %q", n, got, n, want))
 		}
