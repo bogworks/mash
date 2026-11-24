@@ -1,6 +1,0 @@
-ADDRESS          STATE
-acme.demo.alice  online
-acme.demo.bob    online
-acme.demo.carol  offline
-
-warning: 1 discovery answer could not be verified

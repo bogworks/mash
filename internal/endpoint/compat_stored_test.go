@@ -62,7 +62,7 @@ func TestCompatStoredLegacyInbox(t *testing.T) {
 	f := newFixture(t, "a", "b", "c")
 	b, c := f.client(t, "b"), f.client(t, "c")
 	ctx := context.Background()
-	if _, err := c.SendWith(ctx, "b", "the original", SendOptions{}); err != nil {
+	if _, err := c.SendWith(ctx, tdot("b"), "the original", SendOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	for _, o := range []struct {
@@ -77,11 +77,11 @@ func TestCompatStoredLegacyInbox(t *testing.T) {
 		{"all marks", SendOptions{Kind: kind.Task, Urgent: true, InReplyTo: 4, Via: 1}},
 		{"héllo \"quoted\" <tag> & 日本", SendOptions{}},
 	} {
-		if _, err := b.SendWith(ctx, "a", o.body, o.opts); err != nil {
+		if _, err := b.SendWith(ctx, tdot("a"), o.body, o.opts); err != nil {
 			t.Fatal(err)
 		}
 	}
-	mash, sdk := compatStoredLabels(t, f, sap.InboxStream("a"), 7)
+	mash, sdk := compatStoredLabels(t, f, sap.InboxStream(taddr("a").Flat()), 7)
 	requireCompatVerified(t, mash, sdk)
 }
 
