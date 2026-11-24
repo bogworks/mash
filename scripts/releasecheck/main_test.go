@@ -136,6 +136,7 @@ esac
 	f.setReleases(map[string]bool{"v0.0.9": false}) // the tag several tests add below the candidate: published
 	f.o.candBinary = candidateBinary(goodMash)
 	f.o.policyTests = func(context.Context, Options, string) error { return nil } // the policy tests have their own tests (policytests_test.go)
+	f.o.unlinked = func(context.Context, Options, string) error { return nil }    // and so has the unlinked step (unlinked_test.go)
 	// The fixture's binaries are shell scripts that cannot talk to NATS: a measurement that is fast and clean, by default.
 	f.setLatency(func(string) latencies { return latencies{Fresh: 100 * time.Millisecond, FreshOK: true} })
 	return f

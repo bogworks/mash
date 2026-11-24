@@ -75,6 +75,7 @@ type Options struct {
 	consumerTimeout time.Duration                                                                             // test seam: the script's deadline; default consumerTimeout
 	policyRun       policyRunner                                                                              // test seam: runs `go test -json` for one policy test; default the real go
 	policyTests     func(ctx context.Context, o Options, x string) error                                      // test seam: the whole policy-tests step; default a fresh clone of X
+	unlinked        func(ctx context.Context, o Options, x string) error                                      // test seam: the whole no-policy-package-linked step; default go list in a fresh clone of X
 	hostGOOS        string                                                                                    // test seam: the host's GOOS, which decides whether the candidate's host build serves the linux container; default runtime.GOOS
 }
 
@@ -426,6 +427,7 @@ func check(ctx context.Context, o Options) error {
 	r.step("the render contract is unchanged since the previous release, or the change is called out", renderContract(o, x))
 	r.step("fresh-session mail arrives no slower than the previous release", latencyStep(ctx, o, bins))
 	r.step("the policy tests pass (REQ-020)", policyTestsStep(ctx, o, x))
+	r.step("no policy package is linked into the released programs (order 16)", policyUnlinkedStep(ctx, o, x))
 	if o.Consumer != "" { // opt-in: it takes 30+ minutes,
 		r.step("the consumer's check passes against the candidate", consumerStep(ctx, o, x, bins))
 	}
