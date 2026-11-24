@@ -81,13 +81,18 @@ tilde() {
 }
 
 # unsafe_path DIR: DIR is a real path (no symlinks). Say, as the whole error
-# line, why it may not be installed into, or print nothing: DIR owned by someone other than this user
-# or root, or DIR or any folder above it writable by group or others (except a
-# sticky folder owned by root above DIR, such as /tmp). A writable folder's
-# reason names the fix, chmod go-w.
+# line, why it may not be installed into, or print nothing. DIR owned by
+# someone other than this user or root is refused first and alone. Otherwise
+# every folder on the walk up from DIR that is writable by group or others
+# (except a sticky folder owned by root above DIR, such as /tmp) is collected,
+# nearest first, and ONE line names them all with one fix: chmod go-w with each
+# folder in single quotes. With one folder the line reads "<dir> is writable by
+# its group or other users: not installing there. Fix: ..."; with several it
+# adds "(so is <second>, <third>)" after the first folder's name.
 unsafe_path() {
-    local target=$1 c perms owner me sq q
+    local target=$1 c perms owner me sq q first="" others="" fix="" n=0
     me=$(id -u)
+    sq="'\\''"
     c=$target
     while :; do
         # shellcheck disable=SC2012 # ls -ld is the portable way to read a mode
@@ -101,16 +106,28 @@ unsafe_path() {
         case "${perms:5:1}${perms:8:1}" in
         *w*)
             if [ "$c" = "$target" ] || [ "${perms:9:1}" != t ] || [ "$owner" != 0 ]; then
-                sq="'\\''"
                 q=${c//\'/$sq}
-                echo "$c is writable by its group or other users: not installing there. Fix: chmod go-w '$q', then run the installer again"
-                return
+                fix="$fix '$q'"
+                if [ "$n" = 0 ]; then
+                    first=$c
+                elif [ "$n" = 1 ]; then
+                    others=$c
+                else
+                    others="$others, $c"
+                fi
+                n=$((n + 1))
             fi
             ;;
         esac
-        [ "$c" = / ] && return
+        [ "$c" = / ] && break
         c=$(dirname -- "$c")
     done
+    [ "$n" = 0 ] && return
+    if [ "$n" = 1 ]; then
+        echo "$first is writable by its group or other users: not installing there. Fix: chmod go-w$fix, then run the installer again"
+    else
+        echo "$first is writable by its group or other users (so is $others): not installing there. Fix: chmod go-w$fix, then run the installer again"
+    fi
 }
 
 main() {

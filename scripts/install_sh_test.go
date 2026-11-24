@@ -470,6 +470,49 @@ func TestInstallSh_groupWritableLocalNamesTheFix(t *testing.T) {
 	}
 }
 
+// Every writable folder on the walk is named in one refusal with one fix command; a single folder keeps the one-folder text.
+func TestInstallSh_oneRefusalNamesEveryWritableFolder(t *testing.T) {
+	rel, _, _ := fakeRelease(t)
+	tools := installTools(t, nil)
+	home := tempHome(t)
+	local := filepath.Join(home, ".local")
+	dest := filepath.Join(local, "bin")
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range []string{local, dest} {
+		if err := os.Chmod(d, 0o775); err != nil {
+			t.Fatal(err)
+		}
+	}
+	realLocal, err := filepath.EvalSymlinks(local)
+	if err != nil {
+		t.Fatal(err)
+	}
+	realDest := filepath.Join(realLocal, "bin")
+
+	r := runInstallIn(t, rel, tools, home, dest, "install.sh")
+	want := realDest + " is writable by its group or other users (so is " + realLocal + "): not installing there. " +
+		"Fix: chmod go-w '" + realDest + "' '" + realLocal + "', then run the installer again"
+	if r.err == nil || !strings.Contains(r.out, want) {
+		t.Fatalf("want %q, got err=%v\n%s", want, r.err, r.out)
+	}
+	if n := strings.Count(r.out, "chmod go-w"); n != 1 {
+		t.Errorf("want exactly one chmod go-w command, got %d\n%s", n, r.out)
+	}
+	assertNothingInstalled(t, dest)
+
+	if err := os.Chmod(dest, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	r = runInstallIn(t, rel, tools, home, dest, "install.sh")
+	want = realLocal + " is writable by its group or other users: not installing there. Fix: chmod go-w '" + realLocal + "', then run the installer again"
+	if r.err == nil || !strings.Contains(r.out, want) || strings.Contains(r.out, "(so is") {
+		t.Fatalf("want %q, got err=%v\n%s", want, r.err, r.out)
+	}
+	assertNothingInstalled(t, dest)
+}
+
 func TestInstallSh_aTruncatedScriptInstallsNothing(t *testing.T) {
 	rel, _, _ := fakeRelease(t)
 	tools := installTools(t, nil)
