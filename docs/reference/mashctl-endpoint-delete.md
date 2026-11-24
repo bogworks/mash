@@ -201,12 +201,13 @@ None. Administration. There are no MCP tools for mashctl.
 Order. The endpoint's key is cancelled on every server first; only when every
 server confirms is anything removed, so a failure there leaves the endpoint
 whole. If this machine holds the endpoint's creds file, it is set aside as
-&lt;address&gt;.creds.deleted, so mash no longer counts it as installed; the
-path is predictable and nothing prints it. Nothing else on any machine is
-touched. If a step after the cancellation fails, the error is one line naming
-the address and the cause in plain words, with the command to run again; the
-key is already cancelled, so its credentials no longer work, and running the
-command again is safe.
+&lt;address&gt;.creds.deleted, a marker that keeps the endpoint's name and its
+JWT only, no key, so mash no longer counts it as installed; the path is
+predictable and nothing prints it. Nothing else on any machine is touched. If
+a step after the cancellation fails, the error is one line naming the address
+and the cause in plain words, with the command to run again; the key is
+already cancelled, so its credentials no longer work, and running the command
+again is safe.
 
 ## What it replaces
 

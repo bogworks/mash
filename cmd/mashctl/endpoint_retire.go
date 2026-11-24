@@ -255,49 +255,63 @@ func retireAddress(addr sap.Address, opts retireOpts, env func(string) string, l
 	return res, nil
 }
 
-// archiveNoReplace moves src to dest without ever replacing an existing file. If dest exists it tries dest.1,
-// dest.2, ... up to dest.100, then fails with src left in place. It returns the path the file ended up at.
+// archiveNoReplace sets src aside at dest as a marker that keeps the endpoint's name and its JWT block and no key:
+// a new file, never replacing an existing one (dest, then dest.1 to dest.100), with src's mode bits, written, synced
+// and its directory synced before src is removed. It returns the marker's path. If every name is taken, or the
+// marker cannot be made durable, src is left in place. The seed may remain in disk blocks after src is removed.
 func archiveNoReplace(src, dest string) (string, error) {
 	fi, err := os.Stat(src)
 	if err != nil {
 		return "", err
 	}
+	raw, err := os.ReadFile(src)
+	if err != nil {
+		return "", err
+	}
+	marker := jwtBlock(raw)
 	for i := 0; i <= 100; i++ {
 		d := dest
 		if i > 0 {
 			d = fmt.Sprintf("%s.%d", dest, i)
 		}
-		err := os.Link(src, d)
-		if err == nil {
-			// The new name must be durable before the old one goes: a crash or a failed sync here leaves both
-			// names, never neither. On a sync failure the original stays and the link is reported.
-			if err := syncDir(filepath.Dir(d)); err != nil {
-				return "", fmt.Errorf("archived to %s but could not make it durable (%w); %s was left in place", d, err, src)
-			}
-			if err := os.Remove(src); err != nil {
-				return "", fmt.Errorf("archived to %s but could not remove %s: %w", d, src, err)
-			}
-			_ = syncDir(filepath.Dir(d)) // best effort: the removal
-			return d, nil
-		}
-		if errors.Is(err, os.ErrExist) {
-			continue
-		}
-		// Link unsupported here (EPERM, EXDEV, ENOTSUP, ...): copy into a new file, never over an existing one.
-		out, cerr := os.OpenFile(d, os.O_WRONLY|os.O_CREATE|os.O_EXCL, fi.Mode().Perm())
-		if cerr != nil {
-			if errors.Is(cerr, os.ErrExist) {
+		out, err := os.OpenFile(d, os.O_WRONLY|os.O_CREATE|os.O_EXCL, fi.Mode().Perm())
+		if err != nil {
+			if errors.Is(err, os.ErrExist) {
 				continue
 			}
-			return "", cerr
+			return "", err
 		}
-		if cerr := copyAndRemove(src, out, fi.Mode().Perm()); cerr != nil {
-			os.Remove(d)
-			return "", cerr
+		if err := writeMarkerAndRemove(src, out, marker, fi.Mode().Perm()); err != nil {
+			return "", err
 		}
 		return d, nil
 	}
 	return "", fmt.Errorf("could not archive %s: %s and %s.1 to %s.100 all exist; nothing was moved", src, dest, dest, dest)
+}
+
+// jwtBlock is the JWT block of a creds file, from the BEGIN line through the END line with a trailing newline, or
+// nil when there is none. It copies by whitelist: only lines of the JWT alphabet between the two marker lines.
+func jwtBlock(creds []byte) []byte {
+	var out []byte
+	in := false
+	for _, l := range strings.Split(string(creds), "\n") {
+		l = strings.TrimRight(l, "\r ")
+		switch {
+		case !in && l == "-----BEGIN NATS USER JWT-----":
+			in = true
+			out = append(out[:0], l...)
+			out = append(out, '\n')
+		case in && l == "------END NATS USER JWT------":
+			return append(append(out, l...), '\n')
+		case in:
+			if l == "" || strings.Trim(l, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.=") != "" {
+				return nil
+			}
+			out = append(out, l...)
+			out = append(out, '\n')
+		}
+	}
+	return nil
 }
 
 // syncFile flushes a file to stable storage; a variable so tests can make it fail.
@@ -320,20 +334,15 @@ func syncDir(dir string) error {
 	return err
 }
 
-// copyAndRemove copies src into out, makes the archive durable (file, then its directory), and only then
-// removes src. On any failure before removal the half-written archive is deleted and src is left in place.
-func copyAndRemove(src string, out *os.File, mode os.FileMode) error {
+// writeMarkerAndRemove writes marker into out, makes it durable (file, then its directory), and only then removes
+// src. On any failure before removal the half-written marker is deleted and src is left in place.
+func writeMarkerAndRemove(src string, out *os.File, marker []byte, mode os.FileMode) error {
 	fail := func(err error) error {
 		out.Close()
 		os.Remove(out.Name())
 		return err
 	}
-	in, err := os.Open(src)
-	if err != nil {
-		return fail(err)
-	}
-	defer in.Close()
-	if _, err := io.Copy(out, in); err != nil {
+	if _, err := out.Write(marker); err != nil {
 		return fail(err)
 	}
 	if err := out.Chmod(mode); err != nil {
@@ -354,7 +363,7 @@ func copyAndRemove(src string, out *os.File, mode os.FileMode) error {
 	if err := os.Remove(src); err != nil {
 		return err
 	}
-	// Best effort: the archive is already durable, and failing here must not make the caller delete it.
+	// Best effort: the marker is already durable, and failing here must not make the caller delete it.
 	_ = syncDir(dir)
 	return nil
 }
