@@ -11,6 +11,8 @@ import (
 
 	"github.com/nats-io/nats-server/v2/server"
 	"github.com/nats-io/nats.go"
+
+	"github.com/bogworks/mash/internal/cellwidth"
 )
 
 // fakeConnz answers the CONNZ ping and the server's direct subject like one server with the connection ids in pages(call,
@@ -233,5 +235,27 @@ func TestElideNameKeepsTheTail(t *testing.T) {
 	}
 	if got := elideName(strings.Repeat("é", 40)); len([]rune(got)) != maxShownName {
 		t.Errorf("%q", got)
+	}
+}
+
+// A long name of wide characters is cut by terminal cells, not characters: at most maxShownName cells, ends still
+// distinguishable, and the whole doctor row (17-column indent plus the sentence) stays within 80 cells.
+func TestElideNameCountsCells(t *testing.T) {
+	p := strings.Repeat("世", 30)
+	a, b := elideName(p+"一二三"), elideName(p+"四五六")
+	if a == b {
+		t.Fatalf("both are %q", a)
+	}
+	for _, n := range []string{a, b, elideName(strings.Repeat("🙂", 40)), elideName(strings.Repeat("a", 9) + strings.Repeat("世", 30))} {
+		if w := cellwidth.String(n); w > maxShownName {
+			t.Errorf("%q is %d cells", n, w)
+		}
+		line := strings.Repeat(" ", 17) + fmt.Sprintf("server %s's connected users kept changing", n)
+		if w := cellwidth.String(line); w > 80 {
+			t.Errorf("%d cells: %q", w, line)
+		}
+	}
+	if got := elideName(strings.Repeat("世", 12)); got != strings.Repeat("世", 12) {
+		t.Errorf("24-cell name changed: %q", got)
 	}
 }

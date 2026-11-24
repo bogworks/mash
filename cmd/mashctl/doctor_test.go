@@ -22,6 +22,7 @@ import (
 
 	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/apply"
+	"github.com/bogworks/mash/internal/cellwidth"
 	"github.com/bogworks/mash/internal/natsauth"
 	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/store"
@@ -1298,6 +1299,24 @@ func TestIncompleteLinesSplitsBetweenCharacters(t *testing.T) {
 		}
 		if n := utf8.RuneCountInString(l); n > 80 || n > detailWidth {
 			t.Fatalf("%d columns: %q", n, l)
+		}
+		all.WriteString(strings.ReplaceAll(l, " ", ""))
+	}
+	if want := strings.ReplaceAll(strings.ReplaceAll(in, " ", ""), "\n", ""); all.String() != want {
+		t.Fatalf("text changed: %q", got)
+	}
+}
+
+// Widths are terminal cells, not characters: words of wide (CJK, fullwidth, emoji) characters wrap so no line is wider
+// than the detail's 63 cells, and the text is kept whole and in order.
+func TestIncompleteLinesCountsCells(t *testing.T) {
+	in := "server " + strings.Repeat("世界", 20) + " did not reply " + strings.Repeat("界", 10) + " " +
+		strings.Repeat("🙂", 40) + " " + strings.Repeat("ａ", 70) + "\nnext " + strings.Repeat("한국어 ", 30)
+	got := incompleteLines(in)
+	var all strings.Builder
+	for _, l := range strings.Split(got, "\n") {
+		if n := cellwidth.String(l); n > detailWidth {
+			t.Fatalf("%d cells: %q", n, l)
 		}
 		all.WriteString(strings.ReplaceAll(l, " ", ""))
 	}

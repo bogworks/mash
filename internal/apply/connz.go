@@ -12,6 +12,7 @@ import (
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats.go"
 
+	"github.com/bogworks/mash/internal/cellwidth"
 	"github.com/bogworks/mash/internal/config"
 )
 
@@ -239,18 +240,29 @@ func (n NATS) connzScan(ctx context.Context, cs *ConnzServer, account string, pa
 	}
 }
 
-// maxShownName is the longest server name a "kept changing" line shows whole: with the rest of the sentence it fills
-// 63 columns, which is what is left of 80 after the doctor row's 17-column indent.
+// maxShownName is the longest server name, in terminal cells, a "kept changing" line shows whole: with the rest of the
+// sentence it fills 63 cells, which is what is left of 80 after the doctor row's 17-column indent.
 const maxShownName = 24
 
-// elideName shortens a name longer than maxShownName to its first 10 characters, "..." and its last 11, so two long
-// names that differ only at the end stay distinguishable. A server with no name is known by its 56-character id.
+// elideName shortens a name wider than maxShownName cells to its first 10 cells, "..." and its last 11, so two long
+// names that differ only at the end stay distinguishable. Whole characters only: a wide one that would not fit is
+// left out. A server with no name is known by its 56-character id.
 func elideName(s string) string {
-	r := []rune(s)
-	if len(r) <= maxShownName {
+	if cellwidth.String(s) <= maxShownName {
 		return s
 	}
-	return string(r[:10]) + "..." + string(r[len(r)-(maxShownName-13):])
+	r := []rune(s)
+	head, hw := 0, 0
+	for head < len(r) && hw+cellwidth.Rune(r[head]) <= 10 {
+		hw += cellwidth.Rune(r[head])
+		head++
+	}
+	tail, tw := len(r), 0
+	for tail > head && tw+cellwidth.Rune(r[tail-1]) <= maxShownName-13 {
+		tw += cellwidth.Rune(r[tail-1])
+		tail--
+	}
+	return string(r[:head]) + "..." + string(r[tail:])
 }
 
 func (n NATS) connzFetch(ctx context.Context, cs *ConnzServer, account string, offset, page int) (connzReply, error) {
