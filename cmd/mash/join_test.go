@@ -859,7 +859,9 @@ func TestJoinRefusesACredsNameThatIsNotTheAddress(t *testing.T) {
 	w.joinFor("mix.join", other, "acme.demo.bob", nil)
 	writeJoin(t, "mixjwt.join", joinfile.File{MashJoin: 1, Address: "acme.demo.bob", Servers: []string{"tls://myserver:4222"}, UserJWT: other.token})
 	os.WriteFile("carol.seed", other.seed, 0o600)
-	hint := func(file string) string { return "hint: mashctl endpoint reissue acme.demo.bob --out " + file + "\n" }
+	hint := func(string) string {
+		return "hint: mashctl endpoint reissue acme.demo.bob --out acme.demo.bob.new.join\n"
+	}
 	for _, args := range [][]string{{"join", "mix.join"}, {"join", "mixjwt.join", "--key", "carol.seed"}} {
 		r := w.run(args...)
 		if r.code != 1 || r.out != "" || r.errs != "error: "+args[1]+" names acme.demo.bob but is for acme.demo.carol\n"+hint(args[1]) {

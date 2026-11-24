@@ -147,7 +147,7 @@
    "id": "join-user-jwt-name-differs",
    "where": "mash join",
    "case": "The join file's user JWT is named for another address",
-   "text": "error: bob.join names acme.demo.bob but is for acme.demo.carol\nhint: mashctl endpoint reissue acme.demo.bob --out bob.join",
+   "text": "error: bob.join names acme.demo.bob but is for acme.demo.carol\nhint: mashctl endpoint reissue acme.demo.bob --out acme.demo.bob.new.join",
    "stream": "stderr",
    "exit": 1,
    "issue": "#1303",

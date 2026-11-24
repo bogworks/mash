@@ -51,10 +51,10 @@ func notJoinFile(path string) *cliframe.Error {
 
 // wrongJWTName is the failure for a user JWT whose name is not the join file's address (a user signed outside mashctl,
 // say). It names both, which are not secrets: the address the file gives and the one the JWT was made for; nothing else
-// of the file is shown. A JWT with no name says so. The hint is the command that makes a right file. The names are cleaned.
+// of the file is shown. A JWT with no name says so. The hint is the command that makes a right file, written to a new name so it cannot meet the file just refused. The names are cleaned.
 func wrongJWTName(path, jwtName, address string) *cliframe.Error {
 	addr := config.Clean(address)
-	hint := "mashctl endpoint reissue " + addr + " --out " + filepath.Base(path)
+	hint := "mashctl endpoint reissue " + addr + " --out " + addr + ".new.join"
 	if jwtName == "" {
 		return cliframe.Failf("%s has no name but names %s", config.Clean(path), addr).WithHint(hint)
 	}
