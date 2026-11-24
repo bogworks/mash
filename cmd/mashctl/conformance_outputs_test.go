@@ -356,6 +356,25 @@ func init() {
 		return confOutRun{ran: w.run("doctor", "--audit-users"), subs: urlSub(w)}
 	})
 
+	reg("doctor A revoked key is connected and mashctl's users keep connecting and leaving", func(t *testing.T) confOutRun {
+		w := newConfWorld(t, true)
+		w.fleet()
+		_, key := credsSubject(t, filepath.Join(w.a.env["MASH_CONFIG_DIR"], "acme.demo.alice.creds"))
+		if err := w.adm.MarkRevoked(w.ctx, key, time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)); err != nil {
+			t.Fatal(err)
+		}
+		scriptScans(t, keyScan(true, key), keyScan(true), keyScan(true, key))
+		return confOutRun{ran: w.run("doctor"), subs: urlSub(w)}
+	})
+	reg("doctor --audit-users: two servers whose users keep changing", func(t *testing.T) confOutRun {
+		w := newConfWorld(t, true)
+		w.fleet()
+		sc := keyScan(true)
+		sc.Incomplete = "server s1's connected users kept changing\nserver NABCDEFGHI...LMNOPQRSTUV's connected users kept changing"
+		scriptScans(t, sc)
+		return confOutRun{ran: w.run("doctor", "--audit-users"), subs: urlSub(w)}
+	})
+
 	reg("limits show Limits", func(t *testing.T) confOutRun {
 		return confOutRun{ran: newConfWorld(t, true).run("limits", "show")}
 	})

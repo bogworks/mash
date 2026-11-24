@@ -243,14 +243,14 @@ func (n NATS) connzScan(ctx context.Context, cs *ConnzServer, account string, pa
 // 63 columns, which is what is left of 80 after the doctor row's 17-column indent.
 const maxShownName = 24
 
-// elideName shortens a name longer than maxShownName to its first characters and "...". A server with no name is
-// known by its 56-character id.
+// elideName shortens a name longer than maxShownName to its first 10 characters, "..." and its last 11, so two long
+// names that differ only at the end stay distinguishable. A server with no name is known by its 56-character id.
 func elideName(s string) string {
 	r := []rune(s)
 	if len(r) <= maxShownName {
 		return s
 	}
-	return string(r[:maxShownName-3]) + "..."
+	return string(r[:10]) + "..." + string(r[len(r)-(maxShownName-13):])
 }
 
 func (n NATS) connzFetch(ctx context.Context, cs *ConnzServer, account string, offset, page int) (connzReply, error) {

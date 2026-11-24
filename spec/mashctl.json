@@ -450,6 +450,22 @@
         "exit": 1
        },
        {
+        "case": "A revoked key is connected and mashctl's users keep connecting and leaving",
+        "text": "config     ok\nserver     ok    tls://localhost:4222\nsign-in    ok\nstorage    ok\nendpoints  ok    3 records, 3 inboxes\nkeys       FAIL  1 revoked key is still connected\n                 mashctl's users kept connecting and leaving; read 3 times\n\n1 problem.\nhint: mashctl endpoint list",
+        "stream": "stdout, then the hint on stderr",
+        "exit": 1,
+        "issue": "#1361",
+        "note": "A warning or a failure with several lines has each on a line of its own, within 80 columns."
+       },
+       {
+        "case": "--audit-users: two servers whose users keep changing",
+        "text": "config     ok\nserver     ok    tls://localhost:4222\nsign-in    ok\nstorage    ok\nendpoints  ok    3 records, 3 inboxes\nkeys       FAIL  server s1's connected users kept changing\n                 server NABCDEFGHI...LMNOPQRSTUV's connected users kept changing\n                 read 3 times\n\n1 problem.\nhint: wait a minute, then run mashctl doctor --audit-users again",
+        "stream": "stdout, then the hint on stderr",
+        "exit": 1,
+        "issue": "#1361",
+        "note": "A warning or a failure with several lines has each on a line of its own, within 80 columns."
+       },
+       {
         "case": "No server is configured",
         "text": "config     FAIL  no server is configured\nserver     skip  needs the config\nsign-in    skip  needs the server\nstorage    skip  needs sign-in\nendpoints  skip  needs the storage\nkeys       skip  needs sign-in\n\n1 problem.\nhint: mashctl init --config <file>",
         "stream": "stdout, then the hint on stderr",
