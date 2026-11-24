@@ -50,7 +50,7 @@ func TestFrameSaysDeletedForAFailedCallOnceTheCredsAreSetAside(t *testing.T) {
 		}
 	}
 	// A usage error keeps its text, bare or wrapped; a Code 1 failure (plainFail's form of a timeout) is still deleted.
-	for _, e := range []error{cliframe.Usagef("send id must be 1 to 128 characters"), fmt.Errorf("send: %w", cliframe.Usagef("bad"))} {
+	for _, e := range []error{cliframe.Usagef("send id must be 1 to 128 characters"), cliframe.Usagef("send id \"authorization violation\" has a space"), fmt.Errorf("send: %w", cliframe.Usagef("bad"))} {
 		if err := svc.frame(ep, e); err != e {
 			t.Errorf("usage error %v: %v", e, err)
 		}
@@ -133,6 +133,11 @@ func TestServeToolsSayDeletedAfterTheEndpointIsDeletedDuringTheSession(t *testin
 	r, txt = call(40, "send", `{"address":"`+tTo("b")+`","message":"hi","id":"has space"}`)
 	if r["isError"] != true || !strings.Contains(txt, "send id") || strings.Contains(txt, cmdcore.ReasonEndpointDeleted) {
 		t.Errorf("send with a bad id: isError=%v %q, want its own error", r["isError"], txt)
+	}
+	// Auth words in a bad id must not make it a sign-in failure either.
+	r, txt = call(41, "send", `{"address":"`+tTo("b")+`","message":"hi","id":"authorization violation"}`)
+	if r["isError"] != true || !strings.Contains(txt, "send id") || strings.Contains(txt, cmdcore.ReasonEndpointDeleted) {
+		t.Errorf("send with an auth-worded bad id: isError=%v %q, want its own error", r["isError"], txt)
 	}
 	// The revoked connection is still reconnecting, so serve takes about 10 seconds to release its lease and exit:
 	// wait for it here, longer than the harness's own cleanup would.
