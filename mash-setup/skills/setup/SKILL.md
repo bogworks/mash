@@ -371,11 +371,12 @@ Expected: `Installed mash v<version> (<commit>) in <folder>` and the same for
 (do not edit their shell files): for this session use the full path the line
 printed. The folder is the one in the output; take it from there. If it says
 the folder `is writable by its group or other users`, see the table at the
-end. A line starting `warning: gh not found` (or `gh did not run`, `gh's version
-could not be read`, `gh is older than 2.102.0`) is normal: it says the download
-was not authenticated and was checked only against checksums from the same
-release. If `gh` 2.102.0 or newer is installed, step 3 can also verify the
-attestation (see `docs/install.md`); if it fails, stop and ask.
+end. A line on stderr starting `warning: gh not found` (or `gh did not run`, `gh
+version unreadable`, `gh is below 2.102.0`) is normal: it says the download
+was checked against checksums only, not verified. If `gh` 2.102.0 or newer is
+installed, the installer prints `Verified the release attestation for` and the
+repository and tag; if it stops with `the release failed verification`, stop
+and ask. To verify by hand, see `docs/install.md`.
 
 Check, read-only: `mash version` and `mashctl version` print the same version.
 

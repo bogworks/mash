@@ -191,27 +191,27 @@ main() {
     # The attestation of SHA256SUMS, when gh is there and 2.102.0 or newer: older
     # versions check --signer-workflow only as a prefix (GHSA-wjmr-j3rp-mh2g).
     if ! command -v gh >/dev/null 2>&1; then
-        echo "warning: gh not found, so this download was not authenticated; it was checked only against checksums from the same release. See docs/install.md to verify it."
+        echo "warning: gh not found: checked checksums only, not verified" >&2
     else
         ghout=$(gh --version 2>/dev/null) || ghout=
         ghline=$(printf '%s\n' "$ghout" | head -n 1)
         ghver=$(printf '%s\n' "$ghline" | awk '$1 == "gh" && $2 == "version" && $3 ~ /^[0-9]+\.[0-9]+\.[0-9]+/ { split($3, v, /[^0-9]+/); print v[1], v[2], v[3], ($3 ~ /^[0-9.]+-/ ? "pre" : "") }')
         if [ -z "$ghout" ]; then
-            echo "warning: gh did not run, so this download was not authenticated; it was checked only against checksums from the same release. See docs/install.md to verify it."
+            echo "warning: gh did not run: checked checksums only, not verified" >&2
         elif [ -z "$ghver" ]; then
-            echo "warning: gh's version could not be read, so this download was not authenticated; it was checked only against checksums from the same release. See docs/install.md to verify it."
+            echo "warning: gh version unreadable: checked checksums only, not verified" >&2
         else
             read -r ghmajor ghminor ghpatch ghpre <<<"$ghver"
             # A prerelease of 2.102.0 itself is older than 2.102.0.
             if [ "$ghmajor" -lt 2 ] || { [ "$ghmajor" -eq 2 ] && [ "$ghminor" -lt 102 ]; } ||
                 { [ "$ghmajor" -eq 2 ] && [ "$ghminor" -eq 102 ] && [ "$ghpatch" -eq 0 ] && [ -n "$ghpre" ]; }; then
-                echo "warning: gh is older than 2.102.0, so this download was not authenticated; it was checked only against checksums from the same release. See docs/install.md to verify it."
+                echo "warning: gh is below 2.102.0: checked checksums only, not verified" >&2
             else
                 fetch mash.intoto.jsonl
                 (cd "$WORKDIR" && gh attestation verify "$sumsname" -R "$REPO" --bundle mash.intoto.jsonl \
                     --signer-workflow "$REPO/.github/workflows/release.yml" --source-ref "refs/tags/$tag" >/dev/null) ||
-                    die "the attestation of the release's SHA256SUMS did not verify: nothing was installed"
-                echo "Verified SHA256SUMS against the release attestation: built by $REPO's release workflow from $tag"
+                    die "the release failed verification; nothing was installed"
+                echo "Verified the release attestation for $REPO $tag"
             fi
         fi
     fi

@@ -1,6 +1,7 @@
 package scripts
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -104,10 +105,12 @@ func writeFile(t *testing.T, p, body string) {
 }
 
 type installRun struct {
-	out  string
-	err  error
-	home string
-	dest string
+	out    string // stdout then stderr
+	stdout string
+	stderr string
+	err    error
+	home   string
+	dest   string
 }
 
 // runInstall runs the script (path, or "" for scripts/install.sh) with the given tool dir as PATH.
@@ -161,8 +164,10 @@ func runInstallGroup(t *testing.T, ownGroup bool, release, toolPath, home, dest,
 	if ownGroup {
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	}
-	out, err := cmd.CombinedOutput()
-	return installRun{out: string(out), err: err, home: home, dest: dest}
+	var so, se bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &so, &se
+	err = cmd.Run()
+	return installRun{out: so.String() + se.String(), stdout: so.String(), stderr: se.String(), err: err, home: home, dest: dest}
 }
 
 func assertNothingInstalled(t *testing.T, dest string) {
@@ -611,7 +616,7 @@ func TestInstallSh_latestIsResolvedToATagFirst(t *testing.T) {
 }
 
 func TestInstallSh_ghBeforeTheMinimumFallsBackToChecksumsWithAnHonestNote(t *testing.T) {
-	const note = "warning: gh is older than 2.102.0, so this download was not authenticated; it was checked only against checksums from the same release. See docs/install.md to verify it.\n"
+	const note = "warning: gh is below 2.102.0: checked checksums only, not verified\n"
 	for _, v := range []string{"2.48.0", "2.67.0", "2.101.0", "2.101.9", "2.9.0", "1.99.0", "2.102.0-rc1"} {
 		t.Run(v, func(t *testing.T) {
 			rel, _, _ := fakeRelease(t)
@@ -621,13 +626,13 @@ func TestInstallSh_ghBeforeTheMinimumFallsBackToChecksumsWithAnHonestNote(t *tes
 			if r.err != nil {
 				t.Fatalf("install failed: %v\n%s", r.err, r.out)
 			}
-			if strings.Count(r.out, note) != 1 {
+			if strings.Count(r.stderr, note) != 1 || strings.Contains(r.stdout, "warning:") {
 				t.Errorf("want the note once:\n%s", r.out)
 			}
 			if b, _ := os.ReadFile(log); len(b) != 0 {
 				t.Errorf("verify must not run with an old gh: %s", b)
 			}
-			if strings.Contains(r.out, "did not verify") || strings.Contains(r.out, "Verified") {
+			if strings.Contains(r.out, "failed verification") || strings.Contains(r.out, "Verified") {
 				t.Errorf("no verification text wanted:\n%s", r.out)
 			}
 		})
@@ -636,7 +641,7 @@ func TestInstallSh_ghBeforeTheMinimumFallsBackToChecksumsWithAnHonestNote(t *tes
 
 func TestInstallSh_ghAtOrAboveTheMinimumVerifiesAndSaysSo(t *testing.T) {
 	const want = "attestation verify SHA256SUMS -R bogworks/mash --bundle mash.intoto.jsonl --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/v0.5.6"
-	const line = "Verified SHA256SUMS against the release attestation: built by bogworks/mash's release workflow from v0.5.6\n"
+	const line = "Verified the release attestation for bogworks/mash v0.5.6\n"
 	for _, v := range []string{"2.102.0", "2.102.1", "2.103.0-rc1", "2.105.0", "2.200.1", "3.0.0"} {
 		t.Run(v, func(t *testing.T) {
 			rel, _, _ := fakeRelease(t)
@@ -649,7 +654,7 @@ func TestInstallSh_ghAtOrAboveTheMinimumVerifiesAndSaysSo(t *testing.T) {
 			if calls, _ := os.ReadFile(log); strings.TrimSpace(string(calls)) != want {
 				t.Errorf("gh was called with\n%s\nwant\n%s", calls, want)
 			}
-			if strings.Count(r.out, line) != 1 {
+			if strings.Count(r.stdout, line) != 1 || strings.Contains(r.stderr, "Verified") {
 				t.Errorf("want the Verified line once:\n%s", r.out)
 			}
 			if strings.Contains(r.out, "older than") || strings.Contains(r.out, "did not run") {
@@ -660,7 +665,7 @@ func TestInstallSh_ghAtOrAboveTheMinimumVerifiesAndSaysSo(t *testing.T) {
 }
 
 func TestInstallSh_ghThatDoesNotRunSaysSoAndFallsBack(t *testing.T) {
-	const note = "warning: gh did not run, so this download was not authenticated; it was checked only against checksums from the same release. See docs/install.md to verify it.\n"
+	const note = "warning: gh did not run: checked checksums only, not verified\n"
 	for name, env := range map[string][]string{
 		"exit 127":  {"GH_VERSION_EXIT=127"},
 		"no output": {"GH_VERSION_OUT="},
@@ -673,7 +678,7 @@ func TestInstallSh_ghThatDoesNotRunSaysSoAndFallsBack(t *testing.T) {
 			if r.err != nil {
 				t.Fatalf("install failed: %v\n%s", r.err, r.out)
 			}
-			if strings.Count(r.out, note) != 1 {
+			if strings.Count(r.stderr, note) != 1 || strings.Contains(r.stdout, "warning:") {
 				t.Errorf("want the note once:\n%s", r.out)
 			}
 			if b, _ := os.ReadFile(log); len(b) != 0 {
@@ -684,7 +689,7 @@ func TestInstallSh_ghThatDoesNotRunSaysSoAndFallsBack(t *testing.T) {
 }
 
 func TestInstallSh_ghWhoseVersionCannotBeParsedSaysSoAndFallsBack(t *testing.T) {
-	const note = "warning: gh's version could not be read, so this download was not authenticated; it was checked only against checksums from the same release. See docs/install.md to verify it.\n"
+	const note = "warning: gh version unreadable: checked checksums only, not verified\n"
 	for name, v := range map[string]string{"DEV": "gh version DEV (2026-11-18)", "v prefix": "gh version v2.105.0 (2026-11-18)", "garbage": "garbage"} {
 		t.Run(name, func(t *testing.T) {
 			rel, _, _ := fakeRelease(t)
@@ -694,7 +699,7 @@ func TestInstallSh_ghWhoseVersionCannotBeParsedSaysSoAndFallsBack(t *testing.T) 
 			if r.err != nil {
 				t.Fatalf("install failed: %v\n%s", r.err, r.out)
 			}
-			if strings.Count(r.out, note) != 1 {
+			if strings.Count(r.stderr, note) != 1 || strings.Contains(r.stdout, "warning:") {
 				t.Errorf("want the note once:\n%s", r.out)
 			}
 			if b, _ := os.ReadFile(log); len(b) != 0 {
@@ -785,8 +790,9 @@ func TestInstallSh_refusesWhenTheAttestationFails(t *testing.T) {
 	log := filepath.Join(t.TempDir(), "gh.log")
 	tools := installTools(t, map[string]string{"gh": ghStub})
 	r := runInstall(t, rel, tools, "GH_LOG="+log, "GH_EXIT=1")
-	if r.err == nil || !strings.Contains(r.out, "attestation") || !strings.Contains(r.out, "nothing was installed") {
-		t.Errorf("want a refusal, got err=%v\n%s", r.err, r.out)
+	const refusal = "error: the release failed verification; nothing was installed\n"
+	if r.err == nil || r.stderr != refusal || strings.Contains(r.stdout, "error:") {
+		t.Errorf("want exactly %q on stderr, got err=%v\nstdout:\n%s\nstderr:\n%s", refusal, r.err, r.stdout, r.stderr)
 	}
 	if strings.Contains(r.out, "Verified") {
 		t.Errorf("no Verified line after a failure:\n%s", r.out)
@@ -800,8 +806,8 @@ func TestInstallSh_withoutGhSaysSoInOneLine(t *testing.T) {
 	if r.err != nil {
 		t.Fatalf("install failed: %v\n%s", r.err, r.out)
 	}
-	const note = "warning: gh not found, so this download was not authenticated; it was checked only against checksums from the same release. See docs/install.md to verify it.\n"
-	if strings.Count(r.out, note) != 1 {
+	const note = "warning: gh not found: checked checksums only, not verified\n"
+	if strings.Count(r.stderr, note) != 1 || strings.Contains(r.stdout, "warning:") {
 		t.Errorf("want the one-line note once:\n%s", r.out)
 	}
 }

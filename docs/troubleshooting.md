@@ -27,15 +27,15 @@ Fix: start Claude Code as `MASH_ENDPOINT=alice.dev.design claude`, then check `s
 
 If several endpoints are installed and none is named, mash stops with `error: more than one endpoint is installed here: a, b` and `hint: mash status --endpoint a` (the first installed address in alphabetical order): name one with `MASH_ENDPOINT` or `--endpoint`. If it says to fix `MASH_ENDPOINT`, the value is not three dotted parts `owner.group.name`, each 1-32 lower-case letters, digits and single hyphens, starting with a letter.
 
-## `warning: gh ... so this download was not authenticated` from `install.sh`
+## `warning: gh ...: checked checksums only, not verified` from `install.sh`
 
-Message: `warning: gh not found, so this download was not authenticated; it was checked only against checksums from the same release. See docs/install.md to verify it.`, or the same with `gh did not run`, `gh's version could not be read` or `gh is older than 2.102.0` in place of `gh not found`. It is not an error: the install went on. It means the installer checked each binary against `SHA256SUMS` but could not check that `SHA256SUMS` itself came from the release's own workflow, so the download was not authenticated.
+Message, on stderr: `warning: gh not found: checked checksums only, not verified`, or the same with `gh did not run`, `gh version unreadable` or `gh is below 2.102.0` in place of `gh not found`. It is not an error: the install went on. It means the installer checked each binary against `SHA256SUMS` but could not check that `SHA256SUMS` itself came from the release's own workflow, so the download was not verified.
 
 Fix, if you want the full check: install or update `gh` ([cli.github.com](https://cli.github.com/)) and run the install line again, or check by hand as [Verify what you download](install.md#verify-what-you-download) shows.
 
-## `the attestation of the release's SHA256SUMS did not verify`
+## `the release failed verification`
 
-`install.sh` stopped with `the attestation of the release's SHA256SUMS did not verify: nothing was installed`. Nothing was installed. Do not install from that download. Run the manual check in [Verify what you download](install.md#verify-what-you-download) for the tag you meant, and if it fails there too, report it through [SECURITY.md](../SECURITY.md).
+`install.sh` stopped with `error: the release failed verification; nothing was installed`. Nothing was installed. Do not install from that download. Run the manual check in [Verify what you download](install.md#verify-what-you-download) for the tag you meant, and if it fails there too, report it through [SECURITY.md](../SECURITY.md).
 
 ## `is writable by its group or other users: not installing there` from `install.sh`
 
