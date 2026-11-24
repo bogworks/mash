@@ -185,44 +185,15 @@
    "note": "From ctl (final text, head f1c8b74; replaces ctl's earlier #1303 text). When the user JWT has no name: `error: mix.join has no name, but its address is \"acme.demo.bob\"` and the same hint. The old line `error: mix.join is not a join file this mash can read` stays for every other join-file problem. Lines wrapped here; one error line and one hint line in the program."
   },
   {
-   "id": "setup-remove-port-held-1",
+   "id": "setup-remove-port-held",
    "where": "mash-local-nats-setup.sh --remove",
-   "case": "The port is held: no pid visible",
-   "text": "error: something still listens on 127.0.0.1:PORT; nothing was removed",
+   "case": "The port is held",
+   "text": "error: port 4222 is in use (pid 12); nothing was removed\nhint: mash-local-nats-setup.sh --remove",
    "stream": "stderr",
    "exit": 1,
    "issue": "#1287",
-   "note": "From mash-sdk (lead #833). --remove still refuses whenever the port is held; only the error line names the holder, the hint is unchanged. The earlier 'removing anyway' line is dropped: there is no remove-anyway path in 0.5.8. One line in the program; wrapped here."
-  },
-  {
-   "id": "setup-remove-port-held-2",
-   "where": "mash-local-nats-setup.sh --remove",
-   "case": "The port is held: one pid",
-   "text": "error: something still listens on 127.0.0.1:PORT (pid N); nothing was removed",
-   "stream": "stderr",
-   "exit": 1,
-   "issue": "#1287",
-   "note": "From mash-sdk (lead #833). --remove still refuses whenever the port is held; only the error line names the holder, the hint is unchanged. The earlier 'removing anyway' line is dropped: there is no remove-anyway path in 0.5.8. One line in the program; wrapped here."
-  },
-  {
-   "id": "setup-remove-port-held-3",
-   "where": "mash-local-nats-setup.sh --remove",
-   "case": "The port is held: a pid that is a mash local server",
-   "text": "error: something still listens on 127.0.0.1:PORT (pid N, the local server in X);\n  nothing was removed",
-   "stream": "stderr",
-   "exit": 1,
-   "issue": "#1287",
-   "note": "From mash-sdk (lead #833). --remove still refuses whenever the port is held; only the error line names the holder, the hint is unchanged. The earlier 'removing anyway' line is dropped: there is no remove-anyway path in 0.5.8. One line in the program; wrapped here."
-  },
-  {
-   "id": "setup-remove-port-held-4",
-   "where": "mash-local-nats-setup.sh --remove",
-   "case": "The port is held: several pids",
-   "text": "error: something still listens on 127.0.0.1:PORT (pid 12, the local\n  server in /a; pid 34); nothing was removed",
-   "stream": "stderr",
-   "exit": 1,
-   "issue": "#1287",
-   "note": "From mash-sdk (lead #833). --remove still refuses whenever the port is held; only the error line names the holder, the hint is unchanged. The earlier 'removing anyway' line is dropped: there is no remove-anyway path in 0.5.8. One line in the program; wrapped here."
+   "note": "From mash-sdk (lead #833). One wording for one situation. --remove still refuses whenever the port is held, and the error names the holder by pid: \"(pid 12)\" for one, \"(pids 12, 34)\" for several, listed once each and nothing else printed about them; the pid and the port vary. No paths. The hint is the retry: the script has already run --stop before it checks the port, so what holds it is something else (for example a wrapper that runs nats-server); once that is stopped, --remove finishes. v0.5.8 printed a sentence for the hint. The \"removing anyway\" line is dropped: there is no remove-anyway path. The case where no pid is visible is not changed here.",
+   "replaces": "error: something still listens on 127.0.0.1:PORT; nothing was removed"
   },
   {
    "id": "serve-shell-reports-delivered",
