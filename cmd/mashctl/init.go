@@ -418,7 +418,7 @@ func doInit(setupPath string, dry, jsonOut, detail bool, env func(string) string
 	if st.signPub == "" && st.storedSignPub == "" && len(claims.SigningKeys) > 0 {
 		// init does not read the operator JWT, so it cannot see strict_signing_key_usage itself. An account that lists
 		// signing keys is the only visible sign that the operator will require one (#1255, REQ-038).
-		warns = append(warns, fmt.Sprintf("no signing_key in %s, but the account lists signing keys", config.Clean(setupPath)))
+		warns = append(warns, fmt.Sprintf("no signing_key in %s; this server may require one", config.Clean(setupPath)))
 	}
 
 	// (3) JetStream.

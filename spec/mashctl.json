@@ -215,8 +215,8 @@
         "issue": "#1255",
         "stream": "stderr",
         "exit": 0,
-        "text": "warning: no signing_key in mash-setup.yaml, but the account lists signing keys",
-        "note": "The warning appears when the account JWT lists signing keys and the setup file has no signing_key (and no signing key is already stored). One line before the result; exit stays 0 and the setup goes on; printed once. init does not read the operator's JWT, so it cannot see strict_signing_key_usage: listed signing keys are the only sign it has that the operator will require one. Applies to init only."
+        "text": "warning: no signing_key in mash-setup.yaml; this server may require one",
+        "note": "The condition, in plain words: the account lists signing keys, the setup file has no signing_key, and no signing key is already stored. In that case the warning appears (and no signing key is already stored). One line before the result; exit stays 0 and the setup goes on; printed once. init does not read the operator's JWT, so it cannot see strict_signing_key_usage: listed signing keys are the only sign it has that the operator will require one. Applies to init only."
        },
        {
         "case": "A strict operator with a signing_key",

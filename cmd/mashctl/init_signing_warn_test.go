@@ -11,7 +11,7 @@ import (
 // is stored. init cannot read the operator's strict_signing_key_usage, so the listed keys are its only sign.
 // warningFor is the line for a setup file at path (init names the file as it was given).
 func warningFor(path string) string {
-	return "warning: no signing_key in " + path + ", but the account lists signing keys\n"
+	return "warning: no signing_key in " + path + "; this server may require one\n"
 }
 
 // strictInitWith runs init on the strict server (its account lists a signing key). The admin user is signed by that

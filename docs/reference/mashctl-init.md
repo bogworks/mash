@@ -86,7 +86,7 @@ Stream: stderr. Exit code: 0.
 Stream: stderr. Exit code: 0.
 
 ```text
-warning: no signing_key in mash-setup.yaml, but the account lists signing keys
+warning: no signing_key in mash-setup.yaml; this server may require one
 ```
 
 ### A strict operator with a signing_key
