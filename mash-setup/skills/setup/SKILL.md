@@ -322,9 +322,11 @@ Say the tag back to the person (it looks like `v0.5.6`) and use that same
 value as `TAG` in step 4.
 
 The checksums come from the same download as the scripts, so on their own
-they only show the files are intact. If `gh` (the GitHub CLI) is installed,
-also check the release's signed attestation of `SHA256SUMS`, pinned to the
-tag, before either script runs:
+they only show the files are intact. If `gh` (the GitHub CLI) 2.102.0 or
+newer is installed (`gh --version`; older versions check `--signer-workflow`
+only as a prefix, so they cannot be trusted with it), also check the
+release's signed attestation of `SHA256SUMS`, pinned to the tag, before
+either script runs:
 
 ```sh
 DL="$HOME/mash-setup-dl"; TAG=vX.Y.Z; cd "$DL" && U=https://github.com/bogworks/mash/releases/download/$TAG && curl -fsSL -O "$U/mash.intoto.jsonl" && gh attestation verify SHA256SUMS -R bogworks/mash --bundle mash.intoto.jsonl --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref "refs/tags/$TAG"
@@ -333,9 +335,10 @@ DL="$HOME/mash-setup-dl"; TAG=vX.Y.Z; cd "$DL" && U=https://github.com/bogworks/
 Replace `vX.Y.Z` with the tag from the block above (each block runs in a
 fresh shell). Expected: it exits 0 and says it verified. Any failure: stop,
 run nothing.
-If `gh` is missing, or too old to have `gh attestation verify`, say so to the
-person in one sentence: the scripts are then trusted on github.com's TLS
-alone (the installer says the same). Run them only if the person says yes
+If `gh` is missing, does not run, or is older than 2.102.0, do not run the
+block above. Say so to the person in one sentence: the scripts are then
+checked against checksums from the same release, not authenticated (the
+installer says the same). Run them only if the person says yes
 to that.
 
 Expected: `install.sh: OK` and `mash-local-nats-setup.sh: OK`. On macOS
@@ -368,9 +371,12 @@ Expected: `Installed mash v<version> (<commit>) in <folder>` and the same for
 (do not edit their shell files): for this session use the full path the line
 printed. The folder is the one in the output; take it from there. If it says
 the folder `is writable by its group or other users`, see the table at the
-end. A line saying `gh not found` is normal: it says the checksums come from
-the same download. If `gh` is installed, step 3 can also verify the
-attestation (see `docs/install.md`); if it fails, stop and ask.
+end. A line on stderr starting `warning: gh not found` (or `gh did not run`, `gh
+version unreadable`, `gh is below 2.102.0`) is normal: it says the download
+was checked against checksums only, not verified. If `gh` 2.102.0 or newer is
+installed, the installer prints `Verified the release attestation for` and the
+repository and tag; if it stops with `the release failed verification`, stop
+and ask. To verify by hand, see `docs/install.md`.
 
 Check, read-only: `mash version` and `mashctl version` print the same version.
 

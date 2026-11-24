@@ -52,3 +52,6 @@ nothing, if any text looks like a secret (an nkey seed, a PEM header, a JWT,
 
 When the code lands, move the case into `x-output` and bump `x-release` in the
 same change, and delete it from the next-places.
+Cases with no `x-output` home (installer, setup script) stay in
+`spec/next.json` until the spec is closed for their release, so the Gate 1
+demo keeps showing them.

@@ -7,61 +7,61 @@
    "id": "installer-unauth-gh-not-found",
    "where": "install.sh",
    "case": "Not authenticated: gh not found",
-   "text": "warning: gh not found, so this download was not authenticated; it was checked\n  only against checksums from the same release. See docs/install.md to verify\n  it.",
-   "stream": "stdout",
+   "text": "warning: gh not found: checked checksums only, not verified",
+   "stream": "stderr",
    "exit": 0,
    "issue": "#1274",
-   "note": "The installer still installs (checksums only). Wrapped here to fit the 80-column limit; as one line it is 157 columns. Wording to be settled: shorter words or this wrapping."
+   "note": "The installer still installs (checksums only); one line on stderr. Stays in spec/next.json until the spec is closed for 0.5.9: the installer has no x-output home."
   },
   {
    "id": "installer-unauth-gh-did-not-run",
    "where": "install.sh",
    "case": "Not authenticated: gh did not run",
-   "text": "warning: gh did not run, so this download was not authenticated; it was checked\n  only against checksums from the same release. See docs/install.md to verify\n  it.",
-   "stream": "stdout",
+   "text": "warning: gh did not run: checked checksums only, not verified",
+   "stream": "stderr",
    "exit": 0,
    "issue": "#1274",
-   "note": "The installer still installs (checksums only). Wrapped here to fit the 80-column limit; as one line it is 159 columns. Wording to be settled: shorter words or this wrapping."
+   "note": "The installer still installs (checksums only); one line on stderr. Stays in spec/next.json until the spec is closed for 0.5.9: the installer has no x-output home."
   },
   {
    "id": "installer-unauth-gh-version-unreadable",
    "where": "install.sh",
    "case": "Not authenticated: gh's version could not be read",
-   "text": "warning: gh's version could not be read, so this download was not authenticated;\n  it was checked only against checksums from the same release. See\n  docs/install.md to verify it.",
-   "stream": "stdout",
+   "text": "warning: gh version unreadable: checked checksums only, not verified",
+   "stream": "stderr",
    "exit": 0,
    "issue": "#1274",
-   "note": "The installer still installs (checksums only). Wrapped here to fit the 80-column limit; as one line it is 175 columns. Wording to be settled: shorter words or this wrapping."
+   "note": "The installer still installs (checksums only); one line on stderr. Stays in spec/next.json until the spec is closed for 0.5.9: the installer has no x-output home."
   },
   {
    "id": "installer-unauth-gh-too-old",
    "where": "install.sh",
-   "case": "Not authenticated: gh is older than 2.102.0",
-   "text": "warning: gh is older than 2.102.0, so this download was not authenticated; it\n  was checked only against checksums from the same release. See docs/install.md\n  to verify it.",
-   "stream": "stdout",
+   "case": "Not authenticated: gh is below 2.102.0",
+   "text": "warning: gh is below 2.102.0: checked checksums only, not verified",
+   "stream": "stderr",
    "exit": 0,
    "issue": "#1274",
-   "note": "The installer still installs (checksums only). Open for the planner: REQ-014 says refuse for gh older than 2.102.0; the PR warns and installs. Wrapped here to fit the 80-column limit; as one line it is 169 columns. Wording to be settled: shorter words or this wrapping."
+   "note": "The installer still installs (checksums only); one line on stderr. Stays in spec/next.json until the spec is closed for 0.5.9: the installer has no x-output home."
   },
   {
    "id": "installer-verified",
    "where": "install.sh",
    "case": "Verified",
-   "text": "Verified SHA256SUMS against the release attestation: built by <repo>'s\n  release workflow from <tag>",
+   "text": "Verified the release attestation for bogworks/mash v0.5.9",
    "stream": "stdout",
    "exit": 0,
    "issue": "#1152",
-   "note": "<repo> is the configured repository (MASH_REPO, default bogworks/mash) and <tag> the release installed, e.g. `built by bogworks/mash's release workflow from v0.5.8`. Wrapped here to fit the 80-column limit; as one line it is about 106 columns. Wording to be settled: shorter words or this wrapping."
+   "note": "One line on stdout. The repo (MASH_REPO, default bogworks/mash) and the tag vary with the release installed. Stays in spec/next.json until the spec is closed for 0.5.9: the installer has no x-output home."
   },
   {
    "id": "installer-verify-failed",
    "where": "install.sh",
    "case": "A failed verification",
-   "text": "error: the attestation of the release's SHA256SUMS did not verify: nothing was\n  installed",
+   "text": "error: the release failed verification; nothing was installed",
    "stream": "stderr",
    "exit": 1,
    "issue": "#1274",
-   "note": "Unchanged; shown for completeness. Wrapped here to fit the 80-column limit; as one line it is 88 columns. Wording to be settled: shorter words or this wrapping."
+   "note": "One line on stderr; nothing is installed. Stays in spec/next.json until the spec is closed for 0.5.9: the installer has no x-output home."
   },
   {
    "id": "setup-nats-server-sbin",
