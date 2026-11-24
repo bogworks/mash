@@ -128,7 +128,7 @@ func TestSigningRefusalTypes(t *testing.T) {
 			if !errors.As(err, &e) || e.Pub != pub1 {
 				t.Fatalf("type: %T", err)
 			}
-		}, "signing.nk and signing.pub are missing in <dir>", "mashctl init --config <file>"},
+		}, "signing.nk and signing.pub are missing from <dir>", "mashctl init --config <file>"},
 		{"signing.pub missing", func(t *testing.T, dir string) string {
 			rm(t, dir, "signing.pub")
 			return pub1

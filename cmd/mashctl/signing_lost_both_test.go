@@ -69,7 +69,7 @@ func TestEndpointCreateSigningLostBothRefuses(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("create: exit %d\n%s\n%s", code, out, errb)
 	}
-	wantErr := "error: signing.nk and signing.pub are missing in " + keysDir + "\nhint: mashctl init --config <file>\n"
+	wantErr := "error: signing.nk and signing.pub are missing from " + keysDir + "\nhint: mashctl init --config <file>\n"
 	if errb != wantErr || out != "" || strings.Contains(errb, skPub) {
 		t.Errorf("stderr = %q, want %q", errb, wantErr)
 	}
@@ -148,7 +148,7 @@ func TestInitSigningLostBothNeedsTheKey(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	a.refuses(1, []string{"error: signing.nk and signing.pub are missing in", "hint: mashctl init --config <file>"}, map[string]any{"signing_key": nil})
+	a.refuses(1, []string{"error: signing.nk and signing.pub are missing from", "hint: mashctl init --config <file>"}, map[string]any{"signing_key": nil})
 }
 
 // config.json records a different signing_key_pub than the setup file's signing_key: init refuses and changes
@@ -196,7 +196,7 @@ func TestEndpointDeleteSigningLostBothRefuses(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("delete: exit %d\n%s\n%s", code, out, errb)
 	}
-	wantErr := "error: signing.nk and signing.pub are missing in " + a.env["MASH_KEYS_DIR"] + "\nhint: mashctl init --config <file>\n"
+	wantErr := "error: signing.nk and signing.pub are missing from " + a.env["MASH_KEYS_DIR"] + "\nhint: mashctl init --config <file>\n"
 	if errb != wantErr || strings.Contains(errb, skPub) {
 		t.Errorf("stderr = %q, want %q", errb, wantErr)
 	}
@@ -354,7 +354,7 @@ func TestInterruptedInitWritesNewConfigLast(t *testing.T) {
 		t.Fatalf("signing_key_pub = %q, want %s\n%s", got, skPub, raw)
 	}
 	removeSigningFiles(t, keysDir)
-	if out, errb, code := a.run("endpoint", "create", "alice.g.x"); code != 1 || !strings.Contains(errb, "signing.nk and signing.pub are missing in") {
+	if out, errb, code := a.run("endpoint", "create", "alice.g.x"); code != 1 || !strings.Contains(errb, "signing.nk and signing.pub are missing from") {
 		t.Fatalf("create after lost files: %d\n%s\n%s", code, out, errb)
 	}
 }
@@ -400,7 +400,7 @@ func TestInterruptedInitOnExistingConfigHasRecordedTheSigningKey(t *testing.T) {
 		t.Fatalf("the interrupted init left signing_key_pub = %q, want %s\n%s", got, skPub, raw)
 	}
 	removeSigningFiles(t, keysDir)
-	if out, errb, code := a.run("endpoint", "create", "alice.g.x"); code != 1 || !strings.Contains(errb, "signing.nk and signing.pub are missing in") {
+	if out, errb, code := a.run("endpoint", "create", "alice.g.x"); code != 1 || !strings.Contains(errb, "signing.nk and signing.pub are missing from") {
 		t.Fatalf("create after the interrupted init and lost files: %d\n%s\n%s", code, out, errb)
 	}
 	if err := os.Chmod(server, 0o700); err != nil {
@@ -451,7 +451,7 @@ func TestFailedKeyImportOnExistingConfigHasRecordedTheSigningKey(t *testing.T) {
 	if _, err := os.Lstat(filepath.Join(keysDir, "signing.nk")); !os.IsNotExist(err) {
 		t.Fatalf("signing.nk after the failed import: %v", err)
 	}
-	if out, errb, code := a.run("endpoint", "create", "alice.g.x"); code != 1 || !strings.Contains(errb, "signing.nk and signing.pub are missing in") {
+	if out, errb, code := a.run("endpoint", "create", "alice.g.x"); code != 1 || !strings.Contains(errb, "signing.nk and signing.pub are missing from") {
 		t.Fatalf("create after the failed import: %d\n%s\n%s", code, out, errb)
 	}
 	if err := os.Chmod(keysDir, 0o700); err != nil {

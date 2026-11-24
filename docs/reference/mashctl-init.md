@@ -112,8 +112,8 @@ account's signing seeds, a 0600 file: when set, endpoint users are signed with
 it, which a strict operator needs; init refuses a key that is not listed in
 the account JWT, is the identity key or is scoped; the default result does not
 show the key: --detail adds a line, 'Signing key: ' and its public key (69
-columns), and --json has it as signing_key; init also records its public key,
-never the seed, in config.json as signing_key_pub, so that when both
+columns), and --json has it as signing_key_pub; init also records its public
+key, never the seed, in config.json as signing_key_pub, so that when both
 signing.nk and signing.pub are later lost mashctl refuses to create endpoints
 and names mashctl init instead of signing with the identity key). If the
 folder was set up with a different signing key, init refuses the same way. The

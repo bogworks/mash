@@ -77,7 +77,7 @@
    "id": "signing-lost-both",
    "where": "mashctl endpoint create / reissue (strict signing)",
    "case": "signing.nk and signing.pub are both missing",
-   "text": "error: signing.nk and signing.pub are missing in <dir>\nhint: mashctl init --config <file>",
+   "text": "error: signing.nk and signing.pub are missing from <dir>\nhint: mashctl init --config <file>",
    "stream": "stderr",
    "exit": 1,
    "issue": "#1390",

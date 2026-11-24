@@ -1,0 +1,1 @@
+**`mashctl init --json` now names the signing key's public key `signing_key_pub`**, the name `config.json` already uses, so `signing_key` means only the seed file in the setup file. The value is the same public key. The signing refusals all now read `signing.nk and signing.pub are missing from <dir>`.

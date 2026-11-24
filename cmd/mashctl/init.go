@@ -214,12 +214,12 @@ func (st *initState) recordPub() string {
 
 // initResult is what `mashctl init --json` prints.
 type initResult struct {
-	Server     []string `json:"server"`
-	Owner      string   `json:"owner"`
-	Changed    bool     `json:"changed"`
-	DryRun     bool     `json:"dry_run,omitempty"`
-	WouldApply *bool    `json:"would_change,omitempty"`
-	SigningKey string   `json:"signing_key,omitempty"`
+	Server        []string `json:"server"`
+	Owner         string   `json:"owner"`
+	Changed       bool     `json:"changed"`
+	DryRun        bool     `json:"dry_run,omitempty"`
+	WouldApply    *bool    `json:"would_change,omitempty"`
+	SigningKeyPub string   `json:"signing_key_pub,omitempty"`
 }
 
 // isUnreachable reports whether err is a server that did not answer, as opposed to one that answered and refused.
@@ -646,7 +646,7 @@ func finishInit(stdout io.Writer, jsonOut, detail, dry, changed bool, sf setupFi
 		shown[i] = maskURL(s)
 	}
 	if jsonOut {
-		r := initResult{Server: shown, Owner: sf.owner, Changed: changed && !dry, SigningKey: signPub}
+		r := initResult{Server: shown, Owner: sf.owner, Changed: changed && !dry, SigningKeyPub: signPub}
 		if dry {
 			r.DryRun = true
 			r.WouldApply = &changed
@@ -999,7 +999,7 @@ func checkStore(ks *ctlkeys.Authority, st *initState) error {
 		// Both signing.nk and signing.pub are gone. config.json says whether a signing key was ever configured: then
 		// only the same signing_key restores it (a different one is refused with the config.json comparison).
 		if st.signPub == "" && st.cfgSignPub != "" {
-			return cliframe.Failf("signing.nk and signing.pub are missing in %s", st.keyFolder).WithHint("mashctl init --config <file>")
+			return cliframe.Failf("signing.nk and signing.pub are missing from %s", st.keyFolder).WithHint("mashctl init --config <file>")
 		}
 	case errors.Is(err, ctlkeys.ErrSigningKeyLost):
 		// signing.nk is gone: init with the same signing_key restores it; anything else is refused.
