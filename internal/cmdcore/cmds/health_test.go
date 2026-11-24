@@ -36,7 +36,7 @@ func allWell() *fakeHealth {
 func refusedSignIn() *fakeHealth {
 	return &fakeHealth{rep: cmds.HealthReport{Endpoint: "acme.demo.bob", Checks: []cmds.HealthCheck{
 		ok("config", ""), ok("creds", ""), ok("server", "tls://myserver:4222"),
-		{Name: "sign-in", State: cmds.CheckFail, Detail: "the server refused these credentials", Reason: "the server refused its credentials", Fix: cmds.JoinFix},
+		{Name: "sign-in", State: cmds.CheckFail, Detail: "the server refused these credentials", Reason: "the server refused its credentials", Fix: cmds.JoinReplaceFix},
 		{Name: "delivery", State: cmds.CheckSkip, Detail: "needs sign-in"},
 		{Name: "refused", State: cmds.CheckWarn, Detail: "3 unverified messages were refused"}}}}
 }
@@ -303,6 +303,40 @@ func withClaude(f *fakeHealth, row cmds.HealthCheck) *fakeHealth {
 	return f
 }
 
+// reportOfSpecText is the report a doctor case's text shows: a row per line (name in 10 columns, state in 6, then the
+// detail), and the hint line, if any, as the fix of the first problem.
+func reportOfSpecText(t *testing.T, text string) *fakeHealth {
+	t.Helper()
+	body, hint, _ := strings.Cut(text, "\nhint: ")
+	body, _, _ = strings.Cut(body, "\n\n")
+	states := map[string]string{"ok": cmds.CheckOK, "warn": cmds.CheckWarn, "FAIL": cmds.CheckFail, "skip": cmds.CheckSkip}
+	var rows []cmds.HealthCheck
+	for _, l := range strings.Split(body, "\n") {
+		if len(l) < 16 {
+			l += strings.Repeat(" ", 16-len(l))
+		}
+		st, ok := states[strings.TrimSpace(l[10:16])]
+		if !ok {
+			t.Fatalf("row %q has no state", l)
+		}
+		c := cmds.HealthCheck{Name: strings.TrimSpace(l[:10]), State: st, Detail: strings.TrimSpace(l[16:])}
+		if st == cmds.CheckFail && hint != "" && !hintGiven(rows) {
+			c.Fix = hint
+		}
+		rows = append(rows, c)
+	}
+	return report("acme.demo.bob", false, rows...)
+}
+
+func hintGiven(rows []cmds.HealthCheck) bool {
+	for _, r := range rows {
+		if r.Fix != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // Every doctor case of the specification, word for word.
 func TestDoctorMatchesSpec(t *testing.T) {
 	c, meta := specCommand(t, "doctor")
@@ -337,35 +371,31 @@ func TestDoctorMatchesSpec(t *testing.T) {
 		switch oc["case"] {
 		case "All well":
 			f = withClaude(allWell(), claudeOK)
-		case "A problem and a warning":
-			f = withClaude(refusedSignIn(), claudeOK)
-		case "A check that could not run":
-			f = withClaude(skippedAfterServer(), claudeOK)
-		case "Arriving mail cannot be stored on this machine":
-			// the spec gives the delivery row alone, with the path under the detail column
-			path := strings.TrimSpace(strings.SplitN(oc["text"].(string), "\n", 2)[1])
-			_, out, _ := runDoctor(report("acme.demo.bob", false, ok("config", ""),
-				cmds.HealthCheck{Name: "delivery", State: cmds.CheckFail, Detail: cmds.ReasonMailHeld + ": " + path}), cliframe.Global{})
-			if !strings.Contains(out, oc["text"].(string)+"\n") {
-				t.Errorf("%s: %q lacks %q", oc["case"], out, oc["text"])
+		case "A problem and a warning, with one hint":
+			f = withClaude(refusedSignIn(), noClaude)
+		case "Server not answering":
+			f = withClaude(skippedAfterServer(), noClaude)
+		case "Arriving mail cannot be stored here", "Another session holds the endpoint", "A newer session replaced this one",
+			"The certificate is not trusted", "The server does not offer TLS", "The server address is not tls://",
+			"A creds file is missing", "The server refused the credentials", "The creds file is not a creds file", "The creds file can be read by others":
+			// the report the spec's text describes, row by row, with the hint as the fix of its first problem
+			f = reportOfSpecText(t, oc["text"].(string))
+		case "In a session with no endpoint chosen":
+			// the doctor tool's answer; cmd/mash's serve tests hold the program to this text
+			if oc["text"] != "No endpoint is chosen for this session." {
+				t.Errorf("%s: %q", oc["case"], oc["text"])
 			}
-			_, js, _ := runDoctor(report("acme.demo.bob", false, cmds.HealthCheck{Name: "delivery", State: cmds.CheckFail, Detail: cmds.ReasonMailHeld + ": " + path}), cliframe.Global{JSON: true})
-			if !strings.Contains(js, `"detail":"mail is held: its folder cannot be written: `+path+`","fix":null`) {
-				t.Errorf("%s: json %s", oc["case"], js)
+			continue
+		case "--json: the one hint is a field":
+			// the object is checked below against x-json, which is this text
+			var a, b any
+			if json.Unmarshal([]byte(oc["text"].(string)), &a) != nil || json.Unmarshal(mustJSON(meta["x-json"]), &b) != nil || !reflect.DeepEqual(a, b) {
+				t.Errorf("%s: the case is not the spec's x-json", oc["case"])
 			}
 			continue
 		case "At a shell, where there is no session to deliver to":
 			_, out, _ := runDoctor(report("acme.demo.bob", false, ok("config", ""),
 				cmds.HealthCheck{Name: "delivery", State: cmds.CheckSkip, Detail: "needs a session"}), cliframe.Global{})
-			if !strings.Contains(out, oc["text"].(string)+"\n") {
-				t.Errorf("%s: %q lacks %q", oc["case"], out, oc["text"])
-			}
-			continue
-		case "In a session that does not hold its endpoint", "In a session that a newer session replaced":
-			// the spec gives the delivery row alone
-			row := strings.TrimPrefix(oc["text"].(string), "delivery  FAIL  ")
-			_, out, _ := runDoctor(report("acme.demo.bob", false, ok("config", ""),
-				cmds.HealthCheck{Name: "delivery", State: cmds.CheckFail, Detail: row}), cliframe.Global{})
 			if !strings.Contains(out, oc["text"].(string)+"\n") {
 				t.Errorf("%s: %q lacks %q", oc["case"], out, oc["text"])
 			}
@@ -386,9 +416,9 @@ func TestDoctorMatchesSpec(t *testing.T) {
 				t.Errorf("%s: %q lacks %q", oc["case"], out, oc["text"])
 			}
 			continue
-		case "The endpoint was deleted, seen from another machine", "The endpoint was deleted, on the machine that deleted it":
+		case "The endpoint was deleted, seen from another machine, with one hint", "The endpoint was deleted, on the machine that deleted it, with one hint":
 			f = withClaude(deletedEndpoint(), noClaude)
-			if oc["case"] == "The endpoint was deleted, on the machine that deleted it" {
+			if oc["case"] == "The endpoint was deleted, on the machine that deleted it, with one hint" {
 				f = withClaude(deletedOnThisMachine(), noClaude)
 			}
 			// the tool says the same words, as an error result carrying the report
@@ -401,15 +431,6 @@ func TestDoctorMatchesSpec(t *testing.T) {
 			if mcp != oc["text"] {
 				t.Errorf("%s: mcp spec text %q, cli spec text %q", oc["case"], mcp, oc["text"])
 			}
-		case "The server's certificate is not trusted", "The server does not offer encryption":
-			// the spec gives the server row alone: the row of a report with that detail is word for word the spec's
-			row := strings.TrimPrefix(oc["text"].(string), "server    FAIL  ")
-			_, out, _ := runDoctor(report("acme.demo.bob", false, ok("config", ""), ok("creds", ""),
-				cmds.HealthCheck{Name: "server", State: cmds.CheckFail, Detail: row}), cliframe.Global{})
-			if !strings.Contains(out, oc["text"].(string)+"\n") {
-				t.Errorf("%s: %q lacks %q", oc["case"], out, oc["text"])
-			}
-			continue
 		case "Claude Code is recent enough", "Claude Code is too old", "Claude Code is newer than tested", "No claude command", "The version of claude is unreadable":
 			// the claude row is made by the command (cmd/mash/claudecheck_test.go), not by the report this package renders
 			continue
@@ -418,10 +439,6 @@ func TestDoctorMatchesSpec(t *testing.T) {
 			continue
 		}
 		stdout, hint, _ := strings.Cut(oc["text"].(string), "\nhint: ")
-		if hint != "" {
-			// FLAGGED (#1099): the spec still words these hints as sentences; a doctor's hint is a command of ours (REQ-006)
-			hint = cmds.JoinFix
-		}
 		wantErrs := ""
 		if hint != "" {
 			wantErrs = "hint: " + hint + "\n"
@@ -444,12 +461,6 @@ func TestDoctorMatchesSpec(t *testing.T) {
 	}
 	if err := json.Unmarshal(mustJSON(meta["x-json"]), &spec); err != nil {
 		t.Fatal(err)
-	}
-	// FLAGGED (#1099): the spec's sign-in row still has the mashctl fix; a doctor's fix is a command a person can type (REQ-006)
-	for _, c := range spec.Checks {
-		if c["fix"] == "mashctl endpoint reissue acme.demo.bob" {
-			c["fix"] = cmds.JoinFix
-		}
 	}
 	if got.Endpoint != spec.Endpoint || got.Problems != spec.Problems || got.Warnings != spec.Warnings || !reflect.DeepEqual(got.Checks, spec.Checks) {
 		t.Errorf("object %s, spec x-json %v", out, meta["x-json"])

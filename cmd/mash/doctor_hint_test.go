@@ -27,7 +27,7 @@ func doctorOf(h *healthSvc, asJSON bool) (code int, out, errs string) {
 }
 
 // Every problem `mash doctor` can show ends with at most one hint, a command of ours that fixes it; where none does, the
-// row's own words say what is wrong and there is no hint (#1099, REQ-006). The report always lists the six rows, the
+// row's own words say what is wrong and there is no hint (#1099, REQ-006). The report always lists every row, the
 // exit code is 1, and --json carries the same hint in one "hint" field (null when none).
 func TestDoctorOneHintACommandThatFixesIt(t *testing.T) {
 	w := tlsWorld(t, "a")
@@ -139,7 +139,9 @@ func TestDoctorOneHintACommandThatFixesIt(t *testing.T) {
 			}
 			names := []string{}
 			for _, c := range got.Checks {
-				names = append(names, c.Name)
+				if c.Name != "claude" { // the claude row is the command's: a session test's report here has none
+					names = append(names, c.Name)
+				}
 			}
 			if strings.Join(names, ",") != "config,creds,server,sign-in,delivery,refused" || got.Problems != 1 {
 				t.Errorf("checks %v problems %d", names, got.Problems)

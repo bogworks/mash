@@ -51,7 +51,7 @@ The structured content of a successful result. The values are an example.
       "name": "sign-in",
       "state": "fail",
       "detail": "the server refused these credentials",
-      "fix": "mashctl endpoint reissue acme.demo.bob"
+      "fix": "mash join <file> --replace"
     },
     {
       "name": "delivery",
@@ -65,7 +65,8 @@ The structured content of a successful result. The values are an example.
       "detail": "3 unverified messages were refused",
       "fix": null
     }
-  ]
+  ],
+  "hint": "mash join <file> --replace"
 }
 ```
 
@@ -89,13 +90,13 @@ No problems.
 
 ## Errors
 
-### A problem and a warning
+### A problem and a warning, with one hint
 
 The call returns this text with `isError` set.
 
 ```text
 config    ok
-claude    ok    2.1.320
+claude    skip  no claude command found
 creds     ok
 server    ok    tls://myserver:4222
 sign-in   FAIL  the server refused these credentials
@@ -103,16 +104,16 @@ delivery  skip  needs sign-in
 refused   warn  3 unverified messages were refused
 
 1 problem, 1 warning.
-hint: ask whoever runs your mesh to run: mashctl endpoint reissue acme.demo.bob
+hint: mash join <file> --replace
 ```
 
-### A check that could not run
+### Server not answering
 
 The call returns this text with `isError` set.
 
 ```text
 config    ok
-claude    ok    2.1.320
+claude    skip  no claude command found
 creds     ok
 server    FAIL  the server did not answer: tls://myserver:4222
 sign-in   skip  needs the server
@@ -134,7 +135,7 @@ delivery  FAIL  hooks are not delivering mail to this session;
 hint: claude plugin install mash@mash
 ```
 
-### The endpoint was deleted, seen from another machine
+### The endpoint was deleted, seen from another machine, with one hint
 
 The call returns this text with `isError` set.
 
@@ -148,10 +149,10 @@ delivery  skip  needs sign-in
 refused   ok    no unverified mail was refused
 
 1 problem.
-hint: ask whoever runs your mesh for a join file to a new endpoint
+hint: mash join <file>
 ```
 
-### The endpoint was deleted, on the machine that deleted it
+### The endpoint was deleted, on the machine that deleted it, with one hint
 
 The call returns this text with `isError` set.
 
@@ -165,5 +166,13 @@ delivery  skip  needs sign-in
 refused   ok    no unverified mail was refused
 
 1 problem.
-hint: ask whoever runs your mesh for a join file to a new endpoint
+hint: mash join <file>
+```
+
+### In a session with no endpoint chosen
+
+The call returns this text with `isError` set.
+
+```text
+No endpoint is chosen for this session.
 ```

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"github.com/bogworks/mash/internal/cmdcore/cmds"
 	"os"
 	"path/filepath"
 	"strings"
@@ -109,9 +108,10 @@ func TestMissingCredsMatchesSpec(t *testing.T) {
 
 // doctor after the endpoint was deleted says so in the specification's words, with the fix for a deleted endpoint.
 func TestDoctorDeletedEndpointMatchesSpec(t *testing.T) {
-	c, ok := specCases(t, "doctor")["The endpoint was deleted, seen from another machine"]
+	const name = "The endpoint was deleted, seen from another machine, with one hint"
+	c, ok := specCases(t, "doctor")[name]
 	if !ok {
-		t.Fatal("spec/mash.json no longer has the doctor case \"The endpoint was deleted, seen from another machine\"")
+		t.Fatalf("spec/mash.json no longer has the doctor case %q", name)
 	}
 	w := tlsWorld(t, "a")
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -122,8 +122,6 @@ func TestDoctorDeletedEndpointMatchesSpec(t *testing.T) {
 	// the spec's example shows the server as tls://myserver:4222: here it is the test server's address
 	text := strings.Replace(specText(c), "tls://myserver:4222", w.e.URL, 1)
 	stdout, hint, _ := strings.Cut(text, "\nhint: ")
-	// FLAGGED (#1099): the spec case still has a sentence as its hint; a doctor's hint is a command of ours (REQ-006)
-	hint = cmds.JoinFix
 	r := runMash(strictEnv(w, "a", nil), "doctor")
 	if r.code != c.Exit || r.out != stdout+"\n" || r.errs != "hint: "+hint+"\n" {
 		t.Errorf("doctor: want exit %d, stdout %q, stderr %q; got exit %d, stdout %q, stderr %q", c.Exit, stdout+"\n", "hint: "+hint+"\n", r.code, r.out, r.errs)
@@ -139,7 +137,7 @@ func TestDoctorDeletedEndpointMatchesSpec(t *testing.T) {
 // doctor on the machine that deleted the endpoint: mashctl set the creds file aside as <creds>.deleted, so the creds row
 // says the endpoint was deleted and the rows that need the creds are skipped, in the specification's words.
 func TestDoctorDeletedOnThisMachineMatchesSpec(t *testing.T) {
-	const name = "The endpoint was deleted, on the machine that deleted it"
+	const name = "The endpoint was deleted, on the machine that deleted it, with one hint"
 	c, ok := specCases(t, "doctor")[name]
 	if !ok {
 		t.Fatalf("spec/mash.json no longer has the doctor case %q", name)
@@ -156,8 +154,6 @@ func TestDoctorDeletedOnThisMachineMatchesSpec(t *testing.T) {
 	}
 	text := strings.Replace(specText(c), "tls://myserver:4222", w.e.URL, 1)
 	stdout, hint, _ := strings.Cut(text, "\nhint: ")
-	// FLAGGED (#1099): the spec case still has a sentence as its hint; a doctor's hint is a command of ours (REQ-006)
-	hint = cmds.JoinFix
 	r := runMash(strictEnv(w, "a", nil), "doctor", "--endpoint", tTo("a"))
 	if r.code != c.Exit || r.out != stdout+"\n" || r.errs != "hint: "+hint+"\n" {
 		t.Errorf("doctor: want exit %d, stdout %q, stderr %q; got exit %d, stdout %q, stderr %q", c.Exit, stdout+"\n", "hint: "+hint+"\n", r.code, r.out, r.errs)

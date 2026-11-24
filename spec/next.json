@@ -187,11 +187,5 @@
    "note": "PROPOSED, not yet in the specification (REQ-015, #1062: join refuses to add a certificate authority to a folder with servers but no endpoint, and nothing is added). <file> is the join file and <folder> a new folder; both vary. The lead states the real condition."
   }
  ],
- "rules_next": [
-  {
-   "rule": "Both doctors work the same way",
-   "detail": "mash doctor and mashctl doctor print every row every time, each marked ok, warn, FAIL or skip; a row that cannot run because an earlier one failed is skip, with what it needs. 'checks' in --json always lists every row, whatever failed. After the rows come one blank line and a count ('No problems.', '1 problem, 1 warning.'). A hint is a command of ours that fixes the problem, or there is no hint and the row's own words say what is wrong. A doctor prints at most one hint. It is never a command that only checks, and never one that replaces credentials, moves a folder or changes permissions unless the doctor found exactly the condition that command fixes. With no problem, the first warning that has a command that fixes it gets one hint. Exit 1 when there is a problem; warnings alone exit 0, or 1 with --strict. A server row shows the address as configured.",
-   "replaces": "Both doctors work the same way"
-  }
- ]
+ "rules_next": []
 }
