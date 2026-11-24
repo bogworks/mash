@@ -230,13 +230,27 @@ func (n NATS) connzScan(ctx context.Context, cs *ConnzServer, account string, pa
 			prev = nil
 		}
 		if attempt == connzScanTries {
-			cs.Incomplete = fmt.Sprintf("server %s's connected users kept changing", config.Clean(cs.Name))
+			cs.Incomplete = fmt.Sprintf("server %s's connected users kept changing", elideName(config.Clean(cs.Name)))
 			return nil
 		}
 		if r, err = n.connzFetch(ctx, cs, account, 0, page); err != nil {
 			return err
 		}
 	}
+}
+
+// maxShownName is the longest server name a "kept changing" line shows whole: with the rest of the sentence it fills
+// 63 columns, which is what is left of 80 after the doctor row's 17-column indent.
+const maxShownName = 24
+
+// elideName shortens a name longer than maxShownName to its first characters and "...". A server with no name is
+// known by its 56-character id.
+func elideName(s string) string {
+	r := []rune(s)
+	if len(r) <= maxShownName {
+		return s
+	}
+	return string(r[:maxShownName-3]) + "..."
 }
 
 func (n NATS) connzFetch(ctx context.Context, cs *ConnzServer, account string, offset, page int) (connzReply, error) {

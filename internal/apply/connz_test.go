@@ -200,3 +200,21 @@ func TestConnzStableMultiPageNeedsTwoIdenticalPasses(t *testing.T) {
 		t.Errorf("%d follow-up requests, want 3 (two passes)", f.calls)
 	}
 }
+
+// A server with no name is known by its 56-character id: the "kept changing" sentence shortens it so the line fits the
+// 63 columns an 80-column doctor row has for its detail.
+func TestElideNameKeepsTheChurnLineShort(t *testing.T) {
+	id := strings.Repeat("N", 56)
+	for _, name := range []string{"s1", strings.Repeat("a", maxShownName), id} {
+		line := fmt.Sprintf("server %s's connected users kept changing", elideName(name))
+		if len(line) > 63 {
+			t.Errorf("%d columns: %q", len(line), line)
+		}
+	}
+	if got := elideName("s1"); got != "s1" {
+		t.Fatalf("%q", got)
+	}
+	if got := elideName(id); got != id[:21]+"..." {
+		t.Fatalf("%q", got)
+	}
+}

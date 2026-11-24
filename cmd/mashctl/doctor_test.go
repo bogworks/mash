@@ -828,6 +828,78 @@ func TestDoctorAuditUsersRevokedKeyLinesFit80Columns(t *testing.T) {
 	}
 }
 
+// maxLine is the longest line of a rendered doctor output, and the line itself.
+func maxLine(out string) (int, string) {
+	n, at := 0, ""
+	for _, l := range strings.Split(out, "\n") {
+		if len(l) > n {
+			n, at = len(l), l
+		}
+	}
+	return n, at
+}
+
+// A revoked key still connected plus churn of mashctl's own users: the failure and the warning are lines of their own,
+// in the text and in the JSON detail, and none passes 80 columns.
+func TestDoctorKeysRevokedAndMashChurnLinesFit80Columns(t *testing.T) {
+	e := newXYEnv(t)
+	_, xKey := credsSubject(t, e.credsPath(xy("x").String()))
+	adm, ctx, closeAdm := e.admin()
+	defer closeAdm()
+	if err := adm.MarkRevoked(ctx, xKey, time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+	calls := scriptScans(t, keyScan(true, xKey), keyScan(true), keyScan(true, xKey))
+	_, by, code := doctorJSON(t, e.run)
+	*calls = 0
+	const want = "1 revoked key is still connected\nmashctl's users kept connecting and leaving; read 3 times"
+	if c := by["keys"]; code != 1 || c.State != "fail" || c.Detail != want {
+		t.Fatalf("%d %+v", code, c)
+	}
+	out, errb, _ := e.run("doctor")
+	text := cleanText(e, out)
+	if !strings.Contains(text, "keys       FAIL  1 revoked key is still connected\n                 mashctl's users kept connecting and leaving; read 3 times\n") {
+		t.Fatalf("%q", text)
+	}
+	if n, l := maxLine(text + errb); n > 80 {
+		t.Fatalf("%d columns: %q", n, l)
+	}
+}
+
+// With --audit-users, two servers whose lists kept changing, one of them unnamed (known by its 56-character id), are one
+// line each; no line passes 80 columns and the long id is shortened.
+func TestDoctorAuditUsersChurnOfTwoServersLinesFit80Columns(t *testing.T) {
+	e := newXYEnv(t)
+	id := strings.Repeat("N", 56)
+	short := id[:21] + "..."
+	sc := keyScan(true)
+	sc.Incomplete = "server s1's connected users kept changing\nserver " + short + "'s connected users kept changing"
+	scriptScans(t, sc)
+	_, by, code := doctorJSON(t, e.run, "--audit-users")
+	want := "server s1's connected users kept changing\nserver " + short + "'s connected users kept changing\nread 3 times"
+	if c := by["keys"]; code != 1 || c.State != "fail" || c.Detail != want {
+		t.Fatalf("%d %+v", code, c)
+	}
+	out, errb, _ := e.run("doctor", "--audit-users")
+	text := cleanText(e, out)
+	if n, l := maxLine(text + errb); n > 80 {
+		t.Fatalf("%d columns: %q", n, l)
+	}
+	for _, l := range []string{"server s1's connected", "server " + short + "'s connected"} {
+		if strings.Count(text, l) != 1 {
+			t.Fatalf("%q once: %q", l, text)
+		}
+	}
+	// Other incomplete reasons that run long are continued on lines of their own.
+	long := "2 server(s) replied, and they name different clusters (first seen: " + strings.Repeat("c", 30) + "): membership cannot be verified from here"
+	sc.Incomplete, sc.Unsettled = long, false
+	scriptScans(t, sc)
+	out, errb, _ = e.run("doctor", "--audit-users")
+	if n, l := maxLine(cleanText(e, out) + errb); n > 80 {
+		t.Fatalf("%d columns: %q", n, l)
+	}
+}
+
 // scriptScans makes the keys check read the scripted scans in order (the last one repeats) and returns the number of
 // reads made. churnPause is 0 for the test.
 func scriptScans(t *testing.T, scans ...connScan) *int {
@@ -923,7 +995,7 @@ func TestDoctorAuditUsersFailsOnChurn(t *testing.T) {
 	scriptScans(t, keyScan(true))
 	_, by, code := doctorJSON(t, e.run, "--audit-users")
 	k := by["keys"]
-	if code != 1 || k.State != "fail" || k.Detail != "server s1's connected users kept changing; read 3 times" || k.Fix == nil || *k.Fix != "wait a minute, then run mashctl doctor --audit-users again" {
+	if code != 1 || k.State != "fail" || k.Detail != "server s1's connected users kept changing\nread 3 times" || k.Fix == nil || *k.Fix != "wait a minute, then run mashctl doctor --audit-users again" {
 		t.Fatalf("%d %+v", code, k)
 	}
 	if low := strings.ToLower(k.Detail); strings.Contains(low, "connz") || strings.Contains(low, "nats") || strings.Contains(low, "scans") {
@@ -1057,7 +1129,7 @@ func TestDoctorKeysDeadlineAfterOneRead(t *testing.T) {
 	}
 	calls = 0
 	_, by, code = doctorJSON(t, e.run, "--audit-users")
-	if c := by["keys"]; code != 1 || c.State != "fail" || c.Detail != "server s1's connected users kept changing; read once" {
+	if c := by["keys"]; code != 1 || c.State != "fail" || c.Detail != "server s1's connected users kept changing\nread once" {
 		t.Fatalf("%d %+v", code, c)
 	}
 	// An error on the first read still fails.
