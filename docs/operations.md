@@ -436,7 +436,21 @@ New endpoints (`mashctl endpoint create`) get the configured limits at once. `ma
 
 ### Account limits
 
-The NATS account has limits of its own: streams, consumers and disk. What mash creates and how to size them is on [Sizing](nats-server.md#sizing). Changing an inbox's caps is covered above (`mashctl limits show` and `mashctl limits apply`); to raise the account's own limits, change them with `nsc edit account ... --js-disk-storage ... --js-streams ... --js-consumer ...` and `nsc push`, and leave `--js-mem-storage` unset.
+The NATS account has limits of its own: streams, consumers and disk. What mash creates and how to size them is on [Sizing](nats-server.md#sizing). Changing an inbox's caps is covered above (`mashctl limits show` and `mashctl limits apply`); to raise the account's own limits on a server that `mash-local-nats-setup.sh` made (it has no `nsc`; its own `nats-store`, TLS and CA are under its folder), edit the account in that store with `nats auth account edit` and push it to the running server with the system credentials. This is what raises a server set up by mash 0.5.7 or earlier from 64 streams and 128 consumers to 1024 and 1024:
+
+```
+DIR=$HOME/mash-nats      # the folder the script made (its --dir)
+PORT=4222                # the port the script printed
+OWNER=acme               # the owner name you gave the script
+export XDG_DATA_HOME=$DIR/nats-store XDG_CONFIG_HOME=$DIR/nats-store/config
+nats auth account edit "$OWNER" --operator mash --js-streams 1024 --js-consumers 1024 </dev/null
+nats --server "tls://127.0.0.1:$PORT" --tlsca "$DIR/ca.pem" --creds "$DIR/creds/sys.creds" \
+    auth account push "$OWNER" --operator mash
+```
+
+The server does not restart, the streams and mail in them stay as they are, and the new limits show in `nats account info` (with the admin creds) at once. Add `--js-disk BYTES` to the first command to raise the disk limit too.
+
+On a server you manage with `nsc`, change the limits with `nsc edit account ... --js-disk-storage ... --js-streams ... --js-consumer ...` and `nsc push`, and leave `--js-mem-storage` unset.
 
 ## Durability and sync_interval
 
