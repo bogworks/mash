@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/nats-io/nats.go/jetstream"
@@ -421,6 +422,12 @@ func TestRetireDirectoryReadFailureSaysNothingWasRevoked(t *testing.T) {
 	}
 }
 
+func stagingFiles(t *testing.T, src string) []string {
+	t.Helper()
+	m, _ := filepath.Glob(src + ".deleting.*")
+	return m
+}
+
 func TestArchiveNoReplaceRaceReplacementSurvives(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "n.creds")
@@ -438,8 +445,8 @@ func TestArchiveNoReplaceRaceReplacementSurvives(t *testing.T) {
 	if b, _ := os.ReadFile(got); !strings.Contains(string(b), "eyJold") || strings.Contains(string(b), "eyJreplacement") {
 		t.Errorf("marker %q", b)
 	}
-	if _, err := os.Lstat(src + ".deleting"); !os.IsNotExist(err) {
-		t.Error(".deleting remains")
+	if g := stagingFiles(t, src); len(g) != 0 {
+		t.Errorf(".deleting remains: %v", g)
 	}
 }
 
@@ -461,8 +468,8 @@ func TestArchiveNoReplaceFailureRestoresSource(t *testing.T) {
 	if b, _ := os.ReadFile(src); string(b) != markerCreds("eyJnew") {
 		t.Error("source not restored")
 	}
-	if _, err := os.Lstat(src + ".deleting"); !os.IsNotExist(err) {
-		t.Error(".deleting remains")
+	if g := stagingFiles(t, src); len(g) != 0 {
+		t.Errorf(".deleting remains: %v", g)
 	}
 
 	// A sync failure leaves no marker either.
@@ -479,8 +486,8 @@ func TestArchiveNoReplaceFailureRestoresSource(t *testing.T) {
 	if b, _ := os.ReadFile(src); string(b) != markerCreds("eyJnew") {
 		t.Error("source not restored")
 	}
-	if _, err := os.Lstat(src + ".deleting"); !os.IsNotExist(err) {
-		t.Error(".deleting remains")
+	if g := stagingFiles(t, src); len(g) != 0 {
+		t.Errorf(".deleting remains: %v", g)
 	}
 }
 
@@ -499,7 +506,9 @@ func TestArchiveNoReplaceFailureKeepsAReplacementAndDeleting(t *testing.T) {
 	if b, _ := os.ReadFile(src); string(b) != markerCreds("eyJreplacement") {
 		t.Errorf("replacement clobbered: %q", b)
 	}
-	if b, _ := os.ReadFile(src + ".deleting"); string(b) != markerCreds("eyJold") {
+	if g := stagingFiles(t, src); len(g) != 1 {
+		t.Errorf(".deleting lost: %v", g)
+	} else if b, _ := os.ReadFile(g[0]); string(b) != markerCreds("eyJold") {
 		t.Errorf(".deleting lost: %q", b)
 	}
 	if _, err := os.Lstat(dest); !os.IsNotExist(err) {
@@ -511,7 +520,7 @@ func TestArchiveNoReplaceArchivesALeftoverDeleting(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "n.creds")
 	dest := src + ".deleted"
-	own := src + ".deleting"
+	own := src + ".deleting.12345.1.abc"
 	os.WriteFile(own, []byte(markerCreds("eyJleft")), 0o600)
 	got, err := archiveNoReplace(src, dest)
 	if err != nil || got != dest {
@@ -558,10 +567,100 @@ func TestArchiveNoReplaceRefusesASymlink(t *testing.T) {
 	if fi, err := os.Lstat(src); err != nil || fi.Mode()&os.ModeSymlink == 0 {
 		t.Errorf("symlink not left in place: %v", err)
 	}
-	if _, err := os.Lstat(src + ".deleting"); !os.IsNotExist(err) {
-		t.Error(".deleting made")
+	if g := stagingFiles(t, src); len(g) != 0 {
+		t.Errorf(".deleting made: %v", g)
 	}
 	if _, err := os.Lstat(src + ".deleted"); !os.IsNotExist(err) {
 		t.Error("marker made")
+	}
+}
+
+func TestArchiveNoReplaceConcurrentLosesNothing(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "n.creds")
+	dest := src + ".deleted"
+	os.WriteFile(src, []byte(markerCreds("eyJoriginal")), 0o600)
+	var once sync.Once
+	archiveHook = func() {
+		// The first attempt to stage puts a replacement at src while the other is racing to stage too.
+		once.Do(func() { os.WriteFile(src, []byte(markerCreds("eyJreplacement")), 0o600) })
+	}
+	defer func() { archiveHook = nil }()
+	var wg, ready sync.WaitGroup
+	start := make(chan struct{})
+	ready.Add(2)
+	wg.Add(2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			defer wg.Done()
+			ready.Done()
+			<-start
+			archiveNoReplace(src, dest) // an error from the loser is allowed; loss is not
+		}()
+	}
+	ready.Wait()
+	close(start)
+	wg.Wait()
+	markers, _ := filepath.Glob(dest + "*")
+	orig, repl := 0, 0
+	for _, m := range markers {
+		b, _ := os.ReadFile(m)
+		if strings.Contains(string(b), "eyJoriginal") {
+			orig++
+		}
+		if strings.Contains(string(b), "eyJreplacement") {
+			repl++
+		}
+	}
+	for _, g := range stagingFiles(t, src) {
+		if b, _ := os.ReadFile(g); strings.Contains(string(b), "eyJoriginal") {
+			orig++
+		}
+	}
+	// At least once; a second copy is possible when one attempt claims the staging file of the other after it
+	// was read (a duplicate marker, never a loss).
+	if orig < 1 {
+		t.Errorf("original creds lost (markers %v)", markers)
+	}
+	// The replacement is either still at src, untouched, or (if the loser got to it) archived once; never lost.
+	if b, err := os.ReadFile(src); err == nil {
+		if string(b) != markerCreds("eyJreplacement") {
+			t.Errorf("replacement changed: %q", b)
+		}
+	} else if repl < 1 {
+		t.Errorf("replacement lost: archived %d times", repl)
+	}
+}
+
+func TestRetireRetryFinishesACrashedDelete(t *testing.T) {
+	h := newFleetEnv(t)
+	h.seed(ad("c"))
+	creds := h.creds(ad("c"))
+	want, _ := os.ReadFile(creds)
+	// The server side is gone and the creds file was renamed to its staging name, then the run crashed.
+	aside := filepath.Join(t.TempDir(), "aside")
+	if err := os.Rename(creds, aside); err != nil {
+		t.Fatal(err)
+	}
+	if _, errb, code := h.run("endpoint", "delete", "o.g.c", "--yes"); code != 0 {
+		t.Fatalf("first delete: %q", errb)
+	}
+	stage := creds + ".deleting.99.1.abc"
+	if err := os.Rename(aside, stage); err != nil {
+		t.Fatal(err)
+	}
+	out, errb, code := h.run("endpoint", "delete", "o.g.c", "--yes", "--detail")
+	if code != 0 || strings.Contains(out+errb, "does not exist") {
+		t.Fatalf("%d %q %q", code, out, errb)
+	}
+	if _, err := os.Lstat(stage); !os.IsNotExist(err) {
+		t.Error("staging file remains")
+	}
+	got, err := os.ReadFile(creds + ".deleted")
+	if err != nil || !strings.Contains(string(want), string(got)) || !strings.Contains(string(got), "BEGIN NATS USER JWT") || strings.Contains(string(got), "SEED") {
+		t.Errorf("marker %q %v", got, err)
+	}
+	if !strings.Contains(out, "Deleted endpoint o.g.c") {
+		t.Errorf("not reported as deleted: %q", out)
 	}
 }

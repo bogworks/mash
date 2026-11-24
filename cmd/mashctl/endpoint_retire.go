@@ -3,12 +3,14 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -234,15 +236,20 @@ func retireAddress(addr sap.Address, opts retireOpts, env func(string) string, l
 	// (2) the creds file, last, renamed aside; a symlink or anything but a regular file is left alone.
 	if credsPath != "" {
 		fi, err := os.Lstat(credsPath)
+		archive := false
 		switch {
 		case errors.Is(err, os.ErrNotExist):
+			// A crash after the rename leaves the creds at a staging name; rerunning finishes it.
+			archive = len(leftovers(credsPath)) > 0
 		case err != nil:
 			return retireResult{}, partial("its creds file was not moved")
 		case !fi.Mode().IsRegular():
 			return retireResult{}, partial("its creds path is not a file")
 		default:
-			dest := credsPath + ".deleted"
-			final, err := archiveNoReplace(credsPath, dest)
+			archive = true
+		}
+		if archive {
+			final, err := archiveNoReplace(credsPath, credsPath+".deleted")
 			if err != nil {
 				return retireResult{}, partial("its creds file was not moved")
 			}
@@ -256,27 +263,66 @@ func retireAddress(addr sap.Address, opts retireOpts, env func(string) string, l
 }
 
 // archiveHook is a test seam: called by archiveNoReplace right after it has taken ownership of src (renamed it to
-// src+".deleting") and before it reads it, so a test can replace src at that moment. Nil in production.
+// a unique src+".deleting.<id>" name) and before it reads it, so a test can replace src at that moment. Nil in
+// production.
 var archiveHook func()
+
+var stageSeq atomic.Uint64
+
+// stageName is a staging name for src that no other attempt uses: the process id, a counter and random bytes.
+func stageName(src string) string {
+	var r [6]byte
+	rand.Read(r[:])
+	return fmt.Sprintf("%s.deleting.%d.%d.%x", src, os.Getpid(), stageSeq.Add(1), r)
+}
+
+// leftovers lists the staging files of src, src+".deleting.*", left by interrupted or running attempts, sorted.
+func leftovers(src string) []string {
+	ents, _ := os.ReadDir(filepath.Dir(src))
+	pre := filepath.Base(src) + ".deleting."
+	var out []string
+	for _, e := range ents {
+		if strings.HasPrefix(e.Name(), pre) {
+			out = append(out, filepath.Join(filepath.Dir(src), e.Name()))
+		}
+	}
+	return out
+}
 
 // archiveNoReplace sets src aside at dest as a marker that keeps the endpoint's name and its JWT block and no key:
 // a new file, never replacing an existing one (dest, then dest.1 to dest.100), with src's mode bits, written, synced
 // and its directory synced before the creds file is removed. It returns the marker's path.
 //
-// It first takes ownership of src with an atomic rename to src+".deleting", and reads, stats and removes only that
-// file, never src again, so a creds file put at src meanwhile is neither read nor removed. A ".deleting" file left
-// by an interrupted run is archived first; if src is then missing, that marker's path is returned, otherwise src is
-// archived too and its marker's path is returned (the leftover's marker stays on disk). If every name is taken, or
-// the marker cannot be made durable, the half marker is deleted and src is restored, or left as src+".deleting" if
-// the name src was taken meanwhile (a retry finds it). The seed may remain in disk blocks after removal.
+// It first takes ownership of src with an atomic rename to a name unique to this attempt,
+// src+".deleting.<pid>.<n>.<random>", which no other attempt uses, so a rename never overwrites a file. It reads,
+// stats and removes only that file, never src again, so a creds file put at src meanwhile is neither read nor
+// removed. Staging files left by an interrupted run (src+".deleting.*", regular files only) are each claimed by a
+// rename to a fresh unique name, which only one attempt can win, and archived first, each to its own marker; if src
+// is then missing, the last of those markers' path is returned, otherwise src is archived too and its marker's path
+// is returned. If every name is taken, or the marker cannot be made durable, the half marker is deleted and src is
+// restored, or left under its staging name if the name src was taken meanwhile (a retry finds it). The seed may
+// remain in disk blocks after removal.
 func archiveNoReplace(src, dest string) (string, error) {
-	own := src + ".deleting"
 	left := ""
-	if fi, err := os.Lstat(own); err == nil {
-		if !fi.Mode().IsRegular() {
-			return "", fmt.Errorf("%s is not a file", own)
+	for _, l := range leftovers(src) {
+		fi, err := os.Lstat(l)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
 		}
-		m, err := archiveOwned(src, own, dest)
+		if err != nil {
+			return "", err
+		}
+		if !fi.Mode().IsRegular() {
+			return "", fmt.Errorf("%s is not a file", l)
+		}
+		claimed := stageName(src)
+		if err := os.Rename(l, claimed); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue // another attempt took it
+			}
+			return "", err
+		}
+		m, err := archiveOwned(src, claimed, dest)
 		if err != nil {
 			return "", err
 		}
@@ -292,6 +338,7 @@ func archiveNoReplace(src, dest string) (string, error) {
 	if !fi.Mode().IsRegular() {
 		return "", fmt.Errorf("%s is not a regular file", src)
 	}
+	own := stageName(src)
 	if err := os.Rename(src, own); err != nil {
 		return "", err
 	}
