@@ -421,6 +421,13 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 			}
 			return
 		}
+		if trust != sap.TrustVerified && e.cfg.AcceptUnverified {
+			// Delivered unverified: recorded before it is queued or acked, so a shell shows it with its label whatever
+			// its own setting. A failure to record leaves the shell on its own setting.
+			if err := e.recordDelivered(ref.Seq); err != nil {
+				e.log.Printf("#%s: delivery of unverified mail not recorded: %v", FormatMsgRef(ref), err)
+			}
+		}
 		var key string
 		if trust == sap.TrustVerified || trust == sap.TrustUnknownSigner || trust == sap.TrustStale {
 			key = h.User + "\x00" + h.Nonce
@@ -945,7 +952,7 @@ func (e *Endpoint) toMail(raw *jetstream.RawStreamMsg) (render.Mail, bool) {
 	if id := e.inboxID.Load(); id != nil && e.refusedSeq(raw.Sequence, *id) { // refused earlier: stays refused
 		return render.Mail{Seq: raw.Sequence, From: from, Trust: trust, At: raw.Time}, false
 	}
-	if e.refuses(trust) { // stored, but not shown: serve counted and dropped it (refuse.go)
+	if e.refuses(trust) && !e.shownAtShell(raw.Sequence) { // stored, but not shown: serve counted and dropped it (refuse.go)
 		return render.Mail{Seq: raw.Sequence, From: from, Trust: trust, At: raw.Time}, false
 	}
 	replyTo, via := senderMarks(raw.Header, trust, h)
