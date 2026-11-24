@@ -208,3 +208,19 @@ func TestMalformedVersionRefused(t *testing.T) {
 		}
 	}
 }
+
+func TestBracketedCaseIsDescription(t *testing.T) {
+	dir := fixture(t, `[{"case":"Quiet","text":"(no warning line;\nthe result line is as before)","stream":"stderr","exit":0}]`, "")
+	out, err := render(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "Description (not output): no warning line;\nthe result line is as before\n") {
+		t.Errorf("missing description line in\n%s", out)
+	}
+	for _, w := range []string{"stream: stderr", "```\n(no warning", "```\nno warning"} {
+		if strings.Contains(out, w) {
+			t.Errorf("description must not render as output (%q) in\n%s", w, out)
+		}
+	}
+}

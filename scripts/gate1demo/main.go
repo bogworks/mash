@@ -148,6 +148,27 @@ func streamLine(c outCase) string {
 	return fmt.Sprintf("stream: %s, exit: %d", s, c.Exit)
 }
 
+// description reports whether the case text is wholly in round brackets: the
+// rules reserve those for a description, which is not output.
+func description(text string) (string, bool) {
+	t := strings.TrimSpace(text)
+	if len(t) >= 2 && t[0] == '(' && t[len(t)-1] == ')' {
+		return t[1 : len(t)-1], true
+	}
+	return "", false
+}
+
+// body writes a case's text and its stream line, or, for a description, a
+// plain line with no code block and no stream.
+func body(b *strings.Builder, c outCase) {
+	if d, ok := description(c.Text); ok {
+		b.WriteString("Description (not output): " + d + "\n")
+		return
+	}
+	fence(b, c.Text)
+	b.WriteString(streamLine(c) + "\n")
+}
+
 func (r *renderer) widths(where, text string) {
 	max := 0
 	for i, line := range strings.Split(strings.TrimRight(text, "\n"), "\n") {
@@ -184,8 +205,7 @@ func (r *renderer) entry(where, issue string, c outCase, today *outCase, todaySt
 		r.b.WriteString("\n")
 	}
 	r.b.WriteString(r.rel + ":\n\n")
-	fence(&r.b, c.Text)
-	r.b.WriteString(streamLine(c) + "\n")
+	body(&r.b, c)
 	r.widths(where, c.Text)
 	if c.Note != "" {
 		r.b.WriteString("\nNote: " + c.Note + "\n")
