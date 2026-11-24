@@ -137,7 +137,7 @@ So, for N endpoints with the defaults, the account needs at least:
 
 Round up. The script's account is given 2 GiB of disk, 1024 streams and 1024 consumers. Disk binds first: 93 + 16 x N must fit in 2048 MiB, which gives N = 122 endpoints. The stream limit (5 + N) and the consumer limit of 1024 are no longer the binding ones. Servers set up earlier keep their old limits (64 streams and 128 consumers). To host more endpoints, raise the account's disk limit by 16 MiB per endpoint: in the `nsc` steps in [operations.md](operations.md#the-account) that is the `JS_DISK` variable (the script itself fixes the disk at 2147483648 bytes in its `nats auth account edit` line and has no such variable). Some of these numbers differ from what older text says; the table above is what the 0.5.6 code creates. The inbox cap and the three bucket caps can be raised in `config.json` under `limits` (`inbox_max_bytes`, `inbox_max_age`, `directory_max_bytes`, `lease_max_bytes`, `inbox_max_consumers`); `mashctl limits show` prints what is in force and `mashctl limits apply` raises existing inboxes. mash never lowers a cap.
 
-If you use a smaller account limit than the table, `init` prints a warning. Its arithmetic is based on a rougher estimate than the table above, so work from the table.
+If you use a smaller account limit than the table, `init` prints a warning. The warning uses the table's numbers: one endpoint needs 6 streams, 1 consumer and 109 MiB of disk (the 5 buckets, 93 MiB, and one inbox, 16 MiB), and each further endpoint adds 1 stream and 16 MiB. It follows the caps in `config.json` under `limits`.
 
 ## Connect mash to your server
 

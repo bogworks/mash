@@ -33,6 +33,15 @@ const (
 	RetiredMaxBytes = 64 << 20
 )
 
+// InitBuckets is how many KV buckets mashctl init makes (directory, leases, retired, issued, adoption).
+const InitBuckets = 5
+
+// InitBucketsMaxBytes is the sum of the size caps of the buckets init makes, with the caps of l for the directory and
+// lease buckets. Keep it in step with InitBuckets and with the buckets admin.Init makes.
+func InitBucketsMaxBytes(l Limits) int64 {
+	return l.DirectoryMaxBytes + l.LeaseMaxBytes + RetiredMaxBytes + IssuedMaxBytes + AdoptionMaxBytes
+}
+
 // LeaseTombstone is what Deprovision writes to an endpoint's lease key: it fences the name, so a live or
 // starting session cannot take the lease back after its endpoint is gone. It expires with the bucket's TTL
 // (LeaseTTL) like any lease, and Provision clears it.

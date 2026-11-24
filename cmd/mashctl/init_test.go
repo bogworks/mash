@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -20,6 +21,7 @@ import (
 
 	"github.com/bogworks/mash/internal/ctlkeys"
 	"github.com/bogworks/mash/internal/natsfixture"
+	"github.com/bogworks/mash/internal/store"
 )
 
 // initer is a second, empty key dir and config dir: the machine that sets mash up on the server of an applyEnv, from a
@@ -788,5 +790,34 @@ func TestShownFolder(t *testing.T) {
 		if got := shownFolder(c.dir, c.home); got != c.want {
 			t.Errorf("shownFolder(%q, %q) = %q, want %q", c.dir, c.home, got, c.want)
 		}
+	}
+}
+
+// TestLimitWarnings: one endpoint needs 6 streams (5 buckets and the inbox), 1 consumer and 109 MiB (93 MiB of
+// buckets and a 16 MiB inbox) with the defaults (docs/nats-server.md, Sizing).
+func TestLimitWarnings(t *testing.T) {
+	def := store.DefaultLimits()
+	small := limitWarnings(jwt.JetStreamLimits{Streams: 5, Consumer: 1, DiskStorage: 100 << 20}, def)
+	want := []string{
+		"the account allows 5 streams; one endpoint needs 6 (5 buckets and its inbox), one more per endpoint",
+		"the account has 100MiB of disk; one endpoint needs about 109MiB (93MiB of buckets and a 16MiB inbox), 16MiB more per endpoint; see docs/nats-server.md, Sizing",
+	}
+	if !reflect.DeepEqual(small, want) {
+		t.Errorf("5 streams, 100 MiB: got %q, want %q", small, want)
+	}
+	if got := limitWarnings(jwt.JetStreamLimits{Streams: 6, Consumer: 1, DiskStorage: 109 << 20}, def); len(got) != 0 {
+		t.Errorf("6 streams, 109 MiB: %q", got)
+	}
+	if got := limitWarnings(jwt.JetStreamLimits{Streams: -1, Consumer: -1, DiskStorage: -1}, def); len(got) != 0 {
+		t.Errorf("unlimited: %q", got)
+	}
+	if got := limitWarnings(jwt.JetStreamLimits{Consumer: 0, DiskStorage: 1 << 30, Streams: 1024}, def); len(got) != 0 {
+		t.Errorf("roomy: %q", got)
+	}
+	// The configured caps count: a 32 MiB inbox cap makes one endpoint need 125 MiB.
+	big := def
+	big.InboxMaxBytes = 32 << 20
+	if got := limitWarnings(jwt.JetStreamLimits{Streams: 6, DiskStorage: 109 << 20}, big); len(got) != 1 || !strings.Contains(got[0], "about 125MiB") {
+		t.Errorf("configured inbox cap: %q", got)
 	}
 }

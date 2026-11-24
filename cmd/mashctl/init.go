@@ -31,6 +31,7 @@ import (
 	"github.com/bogworks/mash/internal/ctlkeys"
 	"github.com/bogworks/mash/internal/natsauth"
 	"github.com/bogworks/mash/internal/sap"
+	"github.com/bogworks/mash/internal/store"
 )
 
 // lookupWait bounds the account lookup of init (a variable so tests need not wait for the full time).
@@ -39,13 +40,30 @@ var lookupWait = 5 * time.Second
 // sysCredsFile is the name the system account's creds file has in the config folder's server directory.
 const sysCredsFile = "sys.creds"
 
-// What one endpoint needs of the account (docs/operations.md, "Account limits"): its inbox stream plus the two KV
-// buckets, one consumer, and the default inbox cap (16 MiB) plus the two buckets' caps (16 MiB and 4 MiB).
-const (
-	needStreams   = 3
-	needConsumers = 1
-	needDisk      = (16 + 16 + 4) << 20
-)
+// needConsumers is what one endpoint needs of the account's consumer limit: its inbox's durable consumer. Streams and
+// disk follow the buckets init makes and the inbox cap (docs/nats-server.md, "Sizing"); limitWarnings derives them
+// from store, with the limits of the configuration.
+const needConsumers = 1
+
+// limitWarnings are the warnings for an account whose JetStream limits are lim (a limit of 0 or less is no limit),
+// with the inbox and bucket caps of l. One endpoint needs the buckets init makes plus its inbox stream, one consumer,
+// and the buckets' caps plus the inbox cap of disk; each further endpoint adds a stream and an inbox cap.
+func limitWarnings(lim jwt.JetStreamLimits, l store.Limits) []string {
+	var warns []string
+	needStreams := store.InitBuckets + 1
+	buckets := store.InitBucketsMaxBytes(l)
+	needDisk := buckets + l.InboxMaxBytes
+	if lim.Streams > 0 && lim.Streams < int64(needStreams) {
+		warns = append(warns, fmt.Sprintf("the account allows %d streams; one endpoint needs %d (%d buckets and its inbox), one more per endpoint", lim.Streams, needStreams, store.InitBuckets))
+	}
+	if lim.Consumer > 0 && lim.Consumer < needConsumers {
+		warns = append(warns, fmt.Sprintf("the account allows %d consumers; mash needs one per endpoint", lim.Consumer))
+	}
+	if lim.DiskStorage > 0 && lim.DiskStorage < needDisk {
+		warns = append(warns, fmt.Sprintf("the account has %s of disk; one endpoint needs about %s (%s of buckets and a %s inbox), %s more per endpoint; see docs/nats-server.md, Sizing", config.FormatSize(lim.DiskStorage), config.FormatSize(needDisk), config.FormatSize(buckets), config.FormatSize(l.InboxMaxBytes), config.FormatSize(l.InboxMaxBytes)))
+	}
+	return warns
+}
 
 var initSpec = epSpec{
 	name: "init", verb: "init", values: []string{"--config"}, flags: []string{"--dry-run"}, min: 0, max: 0,
@@ -409,15 +427,7 @@ func doInit(setupPath string, dry, jsonOut, detail bool, env func(string) string
 	if err != nil {
 		return cliframe.Failf("%v (nothing was changed)", err)
 	}
-	if lim.Streams > 0 && lim.Streams < needStreams {
-		warns = append(warns, fmt.Sprintf("the account allows %d streams; one endpoint needs %d (its inbox plus the two KV buckets), one more per endpoint", lim.Streams, needStreams))
-	}
-	if lim.Consumer > 0 && lim.Consumer < needConsumers {
-		warns = append(warns, fmt.Sprintf("the account allows %d consumers; mash needs one per endpoint", lim.Consumer))
-	}
-	if lim.DiskStorage > 0 && lim.DiskStorage < needDisk {
-		warns = append(warns, fmt.Sprintf("the account has %s of disk; one endpoint needs about %s (inbox cap plus the two buckets); see docs/operations.md, Account limits", config.FormatSize(lim.DiskStorage), config.FormatSize(needDisk)))
-	}
+	warns = append(warns, limitWarnings(lim, cfg.Limits)...)
 	if err := checkClusterListed(set, len(sf.servers), setupPath); err != nil {
 		return err
 	}
