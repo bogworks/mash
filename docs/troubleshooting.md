@@ -41,7 +41,7 @@ Fix, if you want the full check: install or update `gh` ([cli.github.com](https:
 
 `install.sh` refuses a folder that its group or other users can write to, and it checks every folder above the install folder too. Nothing was installed. Claude Code's installer can leave `~/.local` and `~/.local/bin` writable by their group, so this is common when Claude Code was installed first.
 
-Fix: run the `chmod go-w '<folder>'` command the message prints (the folder is in single quotes, so a path with a space pastes safely) and run the install line again. It may then name the folder above it (for example `~/.local` after `~/.local/bin`): do the same. Or set `MASH_INSTALL_DIR` to a folder only you can write to.
+Fix: the message names every such folder, nearest first, and prints one `chmod go-w '<folder>' '<folder>'` command that fixes them all (each folder is in single quotes, so a path with a space pastes safely). Run that command and run the install line again. Or set `MASH_INSTALL_DIR` to a folder only you can write to.
 
 ## `mash is not installed`
 

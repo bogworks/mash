@@ -35,9 +35,9 @@ nothing was installed' on stderr, installs nothing and exits 1), puts them in
 for each, with the path it actually used: 'Installed mash v0.5.6 (3f9a41c) in
 ~/.local/bin'. It asks nothing and needs no sudo. If that folder is not on the
 PATH it says so in one line. If the folder, or a folder above it, can be
-written by its group or by other users, it installs nothing and names that
-folder and the fix: chmod go-w with the folder in single quotes, then run it
-again.
+written by its group or by other users, it installs nothing and prints one
+refusal that names every such folder, nearest first, and one fix: chmod go-w
+with each folder in single quotes, then run it again.
 
 ```sh
 curl -fsSL <release base>/install.sh | bash
