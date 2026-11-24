@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"testing"
 
@@ -156,7 +155,7 @@ func TestJoinRefusesACAIntoAFolderWithEndpointsAndNone(t *testing.T) {
 	w = newJoinWorld(t)
 	os.MkdirAll(w.cfg, 0o700)
 	os.WriteFile(filepath.Join(w.cfg, "config.json"), []byte(`{"servers":["tls://myserver:4222"]}`), 0o600)
-	if r := w.run("join", "acme.demo.bob.join"); r.code != 1 || !strings.Contains(r.errs, "different ca") {
+	if r := w.run("join", "acme.demo.bob.join"); r.code != 1 || r.errs != "error: this folder has a server but no endpoint\nhint: mash join acme.demo.bob.join --config-dir <folder>\n" {
 		t.Errorf("servers named: %+v", r)
 	}
 }

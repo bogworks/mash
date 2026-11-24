@@ -406,11 +406,17 @@ func (s joinSvc) Join(_ context.Context, req cmds.JoinRequest) (cmds.JoinOutcome
 	if halfDone && (finishing || req.Replace) {
 		others--
 	}
-	if !haveCA && j.CA != nil && (others > 0 || len(have) > 0) {
-		// the folder has no certificate authority and already holds an endpoint, or was already set up (config.json names
-		// servers): that endpoint, or that setup, trusts the system's roots, and a join file that brings a ca would
-		// change what it trusts. Only the first join into an empty folder (no servers, no endpoint) sets it.
+	if !haveCA && j.CA != nil && others > 0 {
+		// the folder has no certificate authority and already holds an endpoint: that endpoint trusts the system's
+		// roots, and a join file that brings a ca would change what it trusts.
 		return cmds.JoinOutcome{}, otherFolder("ca")
+	}
+	if !haveCA && j.CA != nil && len(have) > 0 {
+		// the folder was set up (config.json names servers) without a certificate authority and holds no endpoint yet:
+		// a join file that brings a ca is refused with its own line (#1062, the Gate 1 text), and nothing is changed.
+		// Only the first join into an empty folder (no servers, no endpoint) sets the ca.
+		return cmds.JoinOutcome{}, cliframe.Failf("this folder has a server but no endpoint").
+			WithHint("mash join " + req.File + " --config-dir <folder>")
 	}
 
 	out := cmds.JoinOutcome{Endpoint: address, Servers: slices.Clone(j.Servers), Creds: s.shown(credsPath), CredsPath: absPath(credsPath), Finished: finishing}

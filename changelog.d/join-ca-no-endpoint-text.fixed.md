@@ -1,0 +1,1 @@
+**`mash join` now says what is wrong when a folder has a server but no endpoint and the join file brings a certificate authority.** It printed the "different ca" line, though the folder has no certificate authority to differ from. It now says "this folder has a server but no endpoint" and hints at joining into another folder, and changes nothing.
