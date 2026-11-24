@@ -1,0 +1,17 @@
+Warning screen text, as shown at the start of bob and alice (identical in alice2), before confirming choice 1:
+$ bob
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  WARNING: Loading development channels
+
+  --dangerously-load-development-channels is for local channel development only. Do not use this option to
+  run channels you have downloaded off the internet.
+
+  Please use --channels to run a list of approved channels.
+
+  Channels: plugin:mash@mash
+
+  ❯ 1. I am using this for local development
+    2. Exit
+
+  Enter to confirm · Esc to cancel

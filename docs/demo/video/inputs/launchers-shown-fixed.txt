@@ -1,0 +1,15 @@
+#!/bin/sh
+# Start Claude Code as acme.demo.bob. Written by mash-setup.
+export MASH_ENDPOINT=acme.demo.bob
+if [ "$#" -eq 0 ]; then
+  set -- "In one line, say you are acme.demo.bob and mail wakes you when you are idle (a channel was requested). If Claude Code showed any channel warning or error at start, say that too. Then wait."
+fi
+exec claude --name acme.demo.bob "$@" --dangerously-load-development-channels plugin:mash@mash
+----
+#!/bin/sh
+# Start Claude Code as acme.demo.alice. Written by mash-setup.
+export MASH_ENDPOINT=acme.demo.alice
+if [ "$#" -eq 0 ]; then
+  set -- "In one line, say you are acme.demo.alice and mail wakes you when you are idle (a channel was requested). If Claude Code showed any channel warning or error at start, say that too. Then wait."
+fi
+exec claude --name acme.demo.alice "$@" --dangerously-load-development-channels plugin:mash@mash

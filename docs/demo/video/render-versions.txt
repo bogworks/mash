@@ -1,0 +1,8 @@
+ffmpeg version 7.1.5-0+deb13u1 Copyright (c) 2000-2026 the FFmpeg developers
+x264: built into ffmpeg (--enable-libx264)
+libx264-164 2:0.164.3108+git31e19f9-2+b1
+Python 3.13.5
+pyte 0.8.0-3 (python3-pyte)
+Pillow 11.1.0
+fonts-dejavu-core 2.37-8
+image: docker.io/library/debian@sha256:9c6e381421d0f48d1b8133e573f33c185ee16cbf505eda9c4a8a4791b25ea8a6
