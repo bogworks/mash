@@ -10,8 +10,9 @@ an endpoint on a NATS mesh. This page says where that is going. What mash does
 today is in the [guide](docs/guide/) and the
 [reference](docs/reference/README.md).
 
-The commands that are planned have entries in the generated reference. See
-[planned commands](docs/reference/coming-in-0-6-0.md).
+The generated reference lists what is planned, as it stands today. See
+[planned commands](docs/reference/coming-in-0-6-0.md). It is not a promise
+of any syntax.
 
 ## Now
 
@@ -30,13 +31,12 @@ Now is the release being built, 0.5.10.
 Next is planned and may change. These are the items we expect to work on
 after Now.
 
-- Policy: who may send to whom. mash ships open, and narrowing the mesh is a
-  choice you make.
-- `mash sap prompt`. The prompt command moves under `mash sap`, and the MCP
-  tool for replying moves with it.
-- A small form of more than one owner. A mesh can hold several owners, with
-  `mashctl owner` to create, list and delete them.
-- Asking to join, by administrator approval. An endpoint asks to join the mesh
+- Policy: you say who may send to whom. mash ships open, and narrowing the
+  mesh is a choice you make.
+- Prompting an agent through the SAP protocol, as a first-class action beside
+  mail.
+- More than one owner on one server, in a small first form.
+- Asking to join, by administrator approval: an endpoint asks to join the mesh
   and an administrator approves it.
 
 ## Later
@@ -45,7 +45,7 @@ Later is a short, unordered list of ideas. Each one is named somewhere in
 these docs as not yet scheduled. None of them has a design, a date or a
 promise.
 
-- Support in `mashctl` for a hosted NATS service
+- Administering a hosted NATS service from mash
   ([#876](https://github.com/bogworks/mash/issues/876)), and guides for a
   local server and for Synadia Cloud
   ([#1037](https://github.com/bogworks/mash/issues/1037)). See
