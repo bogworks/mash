@@ -248,7 +248,7 @@ func TestInitSigningKeyImport(t *testing.T) {
 	a.refuses(1, []string{"different signing key", skPub, "MASH_KEYS_DIR"}, map[string]any{"signing_key": seedFile(t, filepath.Join(a.root, "in"), "signing2.seed", sk2)})
 }
 
-// The signing key is shown only on request: --detail adds a line of its own, --json has it as signing_key.
+// The signing key is shown only on request: --detail adds a line of its own, --json has it as signing_key_pub.
 func TestInitSigningKeyOutput(t *testing.T) {
 	for _, mode := range []string{"--detail", "--json"} {
 		t.Run(mode, func(t *testing.T) {
@@ -274,9 +274,9 @@ func TestInitSigningKeyOutput(t *testing.T) {
 			}
 			if mode == "--json" {
 				var r struct {
-					SigningKey string `json:"signing_key"`
+					SigningKeyPub string `json:"signing_key_pub"`
 				}
-				if err := json.Unmarshal([]byte(out), &r); err != nil || r.SigningKey != skPub {
+				if err := json.Unmarshal([]byte(out), &r); err != nil || r.SigningKeyPub != skPub {
 					t.Fatalf("--json signing_key: %v %q", err, out)
 				}
 				return

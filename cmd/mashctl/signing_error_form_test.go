@@ -20,7 +20,7 @@ var signingRefusalCases = []struct {
 	hint  string
 }{
 	{"both missing", func(t *testing.T, a *initer, keysDir string) { removeSigningFiles(t, keysDir) },
-		"signing.nk and signing.pub are missing in DIR", "mashctl init --config <file>"},
+		"signing.nk and signing.pub are missing from DIR", "mashctl init --config <file>"},
 	{"pub missing", func(t *testing.T, a *initer, keysDir string) {
 		if err := os.Remove(filepath.Join(keysDir, "signing.pub")); err != nil {
 			t.Fatal(err)
@@ -101,7 +101,7 @@ func TestInitSigningRefusalForm(t *testing.T) {
 	defer func() { a.env["HOME"] = home }()
 	delete(a.vals, "signing_key")
 	_, errb, code := a.init()
-	want := "error: signing.nk and signing.pub are missing in ~/" + filepath.Base(a.env["MASH_KEYS_DIR"]) + "\nhint: mashctl init --config <file>\n"
+	want := "error: signing.nk and signing.pub are missing from ~/" + filepath.Base(a.env["MASH_KEYS_DIR"]) + "\nhint: mashctl init --config <file>\n"
 	if code != 1 || errb != want {
 		t.Fatalf("exit %d, stderr %q, want %q", code, errb, want)
 	}

@@ -61,7 +61,7 @@ func asFrame(target any, f *cliframe.Error) bool {
 type SigningLostBothError struct{ Pub, Dir string }
 
 func (e *SigningLostBothError) frame() *cliframe.Error {
-	return signingFrame(fmt.Sprintf("signing.nk and signing.pub are missing in %s", e.Dir), "mashctl init --config <file>")
+	return signingFrame(fmt.Sprintf("signing.nk and signing.pub are missing from %s", e.Dir), "mashctl init --config <file>")
 }
 func (e *SigningLostBothError) Error() string { return e.frame().Msg }
 
