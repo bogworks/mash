@@ -1311,7 +1311,7 @@ func TestIncompleteLinesSplitsBetweenCharacters(t *testing.T) {
 // than the detail's 63 cells, and the text is kept whole and in order.
 func TestIncompleteLinesCountsCells(t *testing.T) {
 	in := "server " + strings.Repeat("世界", 20) + " did not reply " + strings.Repeat("界", 10) + " " +
-		strings.Repeat("🙂", 40) + " " + strings.Repeat("ａ", 70) + "\nnext " + strings.Repeat("한국어 ", 30)
+		strings.Repeat("🙂", 40) + " " + strings.Repeat("🚀", 24) + " " + strings.Repeat("ａ", 70) + "\nnext " + strings.Repeat("한국어 ", 30)
 	got := incompleteLines(in)
 	var all strings.Builder
 	for _, l := range strings.Split(got, "\n") {
