@@ -207,6 +207,9 @@ func (r *renderer) entry(where, issue string, c outCase, today *outCase, todaySt
 	r.b.WriteString(r.rel + ":\n\n")
 	body(&r.b, c)
 	r.widths(where, c.Text)
+	if n := strings.ToLower(c.Note); strings.Contains(n, "wrapped here") || strings.Contains(n, "one line in the program") {
+		r.errs = append(r.errs, where+": the text is wrapped for display (the note says so); show the program's own lines, which the width rule measures")
+	}
 	if c.Note != "" {
 		r.b.WriteString("\nNote: " + c.Note + "\n")
 	}

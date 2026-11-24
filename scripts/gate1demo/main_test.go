@@ -125,6 +125,25 @@ func TestWidth(t *testing.T) {
 	}
 }
 
+func TestWrappedNoteRefused(t *testing.T) {
+	const msg = "the text is wrapped for display (the note says so); show the program's own lines, which the width rule measures"
+	for _, note := range []string{"One line in the program; wrapped here", "Shown WRAPPED HERE for display"} {
+		dir := fixture(t, `[{"case":"A","text":"short","note":"`+note+`"}]`, "")
+		if out, err := render(dir); err == nil || out != "" || !strings.Contains(err.Error(), msg) {
+			t.Errorf("note %q: want wrapped refusal, got %v", note, err)
+		}
+	}
+	// An ordinary case is unaffected.
+	if _, err := render(fixture(t, `[{"case":"A","text":"short","note":"a plain note"}]`, "")); err != nil {
+		t.Error(err)
+	}
+	// A normal case with an 81-column line is still refused by width, not as wrapped.
+	dir := fixture(t, `[{"case":"A","text":"`+strings.Repeat("a", 81)+`","note":"a plain note"}]`, "")
+	if _, err := render(dir); err == nil || !strings.Contains(err.Error(), "81 columns") || strings.Contains(err.Error(), "wrapped") {
+		t.Errorf("want width error only, got %v", err)
+	}
+}
+
 func TestSecretsRefused(t *testing.T) {
 	bad := []string{
 		"SU" + strings.Repeat("A", 40),
