@@ -546,7 +546,7 @@ func verifyLatest(o Options, tag string, sleep func(time.Duration)) error {
 	return verifyMarker(o, tag, true, sleep, fmt.Errorf("%s was published but is not marked Latest", tag))
 }
 
-func (r realWorld) VerifyLatest(tag string) error    { return verifyLatest(r.o, tag, r.Sleep) }
+func (r realWorld) VerifyLatest(tag string) error { return verifyLatest(r.o, tag, r.Sleep) }
 func (r realWorld) VerifyLatestDownloads(tag string) error {
 	exists, commit, err := r.RemoteTag(tag)
 	if err != nil {
