@@ -30,18 +30,16 @@ func TestLinkedPolicyPackages(t *testing.T) {
 			[]string{"internal/issue/v2", "internal/listset/foo", "internal/reconcile/x/y", "internal/requesterreg/z"}},
 		{"policy subpackage deep, policyfoo subpackage", m + "internal/policyfoo/x\n", []string{"internal/policyfoo/x"}},
 		{"the size constants do not hide a neighbour", m + "internal/policy\n" + m + "internal/policyview\n", []string{"internal/policyview"}},
-		{"sdk identity, caller, host", sdk + "/identity\n" + sdk + "/caller\n" + sdk + "/host\n",
-			[]string{sdk + "/caller", sdk + "/host", sdk + "/identity"}},
-		{"sdk identity alone", sdk + "/identity\n", []string{sdk + "/identity"}},
+		{"sdk caller and host refused, identity allowed", sdk + "/identity\n" + sdk + "/caller\n" + sdk + "/host\n",
+			[]string{sdk + "/caller", sdk + "/host"}},
+		{"sdk identity alone allowed", sdk + "/identity\n" + sdk + "/identity/sub\n", nil},
 		{"sdk caller alone", sdk + "/caller\n", []string{sdk + "/caller"}},
 		{"sdk host alone", sdk + "/host\n", []string{sdk + "/host"}},
 		{"sdk subpackage of a refused one", sdk + "/host/x\n", []string{sdk + "/host/x"}},
 		{"sdk root allowed", sdk + "\n", nil},
 		{"sdk root and other subpackages allowed", sdk + "\n" + sdk + "/other\n" + sdk + "/identityx\n", nil},
 		{"sdk path as prefix of another module", sdk + "-fork/identity\n" + sdk + ".x/host\n" + "other.example/synadia-agents.go/caller\n", nil},
-		{"sapsdk", m + "internal/sapsdk\n", []string{"internal/sapsdk"}},
-		{"sapsdk subpackage", m + "internal/sapsdk/sub\n", []string{"internal/sapsdk/sub"}},
-		{"sapsdk lookalike", m + "internal/sapsdkx\n", nil},
+		{"sapsdk allowed", m + "internal/sapsdk\n" + m + "internal/sapsdk/sub\n", nil},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -62,9 +60,8 @@ func TestLinkedPolicyPackagesOtherModule(t *testing.T) {
 
 func TestRefusalReason(t *testing.T) {
 	for pkg, want := range map[string]string{
-		"github.com/bogworks/synadia-agents.go/identity": "SDK identity",
-		"internal/sapsdk/sub":                            "SAP SDK adapter",
-		"internal/policyfoo":                             "policy engine",
+		"github.com/bogworks/synadia-agents.go/caller": "SDK caller and host",
+		"internal/policyfoo":                           "policy engine",
 	} {
 		if got := refusalReason(pkg); !strings.Contains(got, want) {
 			t.Errorf("%s: got %q, want it to contain %q", pkg, got, want)
