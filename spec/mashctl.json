@@ -921,9 +921,11 @@
          },
          {
           "case": "No terminal and no --yes",
-          "text": "error: deleting needs a terminal to confirm, or --yes\nhint: mashctl endpoint delete --help",
+          "text": "error: mashctl endpoint delete needs a terminal to type the address\nhint: mashctl endpoint delete --help",
           "stream": "stderr",
-          "exit": 2
+          "exit": 2,
+          "issue": "#1161",
+          "note": "The error does not mention --yes, so an agent does not skip the confirmation; --help documents it. Nothing is attempted."
          },
          {
           "case": "A server did not confirm the key was cancelled: nothing is deleted",
@@ -1025,19 +1027,6 @@
        {
         "name": "x-notes",
         "value": "Order. The endpoint's key is cancelled on every server first; only when every server confirms is anything removed, so a failure there leaves the endpoint whole. If this machine holds the endpoint's creds file, it is set aside as <address>.creds.deleted, so mash no longer counts it as installed; the path is predictable and nothing prints it. Nothing else on any machine is touched. If a step after the cancellation fails, the error is one line naming the address and the cause in plain words, with the command to run again; the key is already cancelled, so its credentials no longer work, and running the command again is safe."
-       },
-       {
-        "name": "x-output-next",
-        "value": [
-         {
-          "case": "Deleting without a terminal",
-          "issue": "#1161",
-          "stream": "stderr",
-          "exit": 2,
-          "text": "error: mashctl endpoint delete needs a terminal to type the address\nhint: mashctl endpoint delete --help",
-          "note": "PROPOSED, not yet in the specification (REQ-002, #1161: the error must not advertise --yes, so an agent does not skip the confirmation; --help still documents it). Today: \"error: deleting needs a terminal to confirm, or --yes\", same hint, exit 2. Nothing is attempted; a script uses --yes, which --help documents."
-         }
-        ]
        }
       ]
      },
