@@ -1,0 +1,29 @@
+{
+  "output": {"width": 1920, "height": 1080, "fps": 30},
+  "sequence": [
+    {"card": "0-title", "seconds": 3.4, "lines": [
+      {"text": "mash", "size": 230, "style": "bold", "color": [235, 235, 245]},
+      {"text": "Two Claude Code sessions. One inbox each. Mail that waits.", "size": 46, "style": "regular", "color": [150, 160, 185]}
+    ]},
+    {"scene": "1-install", "tag": "1 · install", "layout": "single", "font_size": 27, "tail": 3.0,
+     "sources": ["setup"], "panes": [{"source": "setup", "label": ""}],
+     "t0": 0, "t1": 41, "speed": 1, "type_speed": 1, "hold": 2.5, "idle": 2.5},
+    {"scene": "2-one-sentence", "tag": "2 · one sentence", "layout": "single", "font_size": 27, "tail": 3.5,
+     "sources": ["setup"], "panes": [{"source": "setup", "label": ""}],
+     "t0": 41, "t1": 236.0, "speed": 6, "type_speed": 1.5, "hold": 2.0, "idle": 0.8},
+    {"scene": "3-two-sessions", "tag": "3 · two sessions", "layout": "dual", "font_size": 14, "tail": 3.0,
+     "sources": ["bob", "alice"], "panes": [{"source": "bob", "label": "bob"}, {"source": "alice", "label": "alice"}],
+     "t0": 0, "t1": 194, "speed": 1, "type_speed": 1, "hold": 2.0, "idle": 0.8},
+    {"scene": "4a-mail-waits", "tag": "4 · mail waits · alice closes, bob sends", "layout": "dual", "font_size": 14, "tail": 1.2,
+     "sources": ["bob", "alice"], "panes": [{"source": "bob", "label": "bob"}, {"source": "alice", "label": "alice"}],
+     "t0": 194, "t1": 258, "speed": 1, "type_speed": 1, "hold": 1.0, "idle": 0.8},
+    {"scene": "4b-alice-reopens", "tag": "4 · mail waits · alice reopens her session", "layout": "single", "font_size": 27, "tail": 3.2,
+     "sources": ["alice2"], "panes": [{"source": "alice2", "label": ""}],
+     "t0": 0, "t1": 124.5, "speed": 1, "type_speed": 1.5, "hold": 1.6, "idle": 0.8},
+    {"card": "5-close", "seconds": 4.4, "lines": [
+      {"text": "mash", "size": 190, "style": "bold", "color": [235, 235, 245]},
+      {"text": "github.com/bogworks/mash", "size": 58, "style": "bold", "color": [120, 200, 255]},
+      {"text": "Quick start: docs/guide/quickstart.md", "size": 40, "style": "regular", "color": [150, 160, 185]}
+    ]}
+  ]
+}
