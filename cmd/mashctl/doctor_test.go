@@ -1371,3 +1371,27 @@ func TestDoctorKeysInnerScanChangeOfMashUserWarns(t *testing.T) {
 		t.Fatalf("%d %+v", code, by["keys"])
 	}
 }
+
+// A revoked key seen only in some of a server's page scans (its Changed list) still fails; a foreign key there does not.
+func TestDoctorKeysRevokedOnlyInChangedFails(t *testing.T) {
+	e := newXYEnv(t)
+	_, xKey := credsSubject(t, e.credsPath(xy("x").String()))
+	adm, ctx, closeAdm := e.admin()
+	defer closeAdm()
+	if err := adm.MarkRevoked(ctx, xKey, time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+	sc := keyScan(false)
+	sc.Conns[0].Changed = []apply.ConnzConn{{Key: xKey, CID: 7}}
+	scriptScans(t, sc)
+	_, by, code := doctorJSON(t, e.run)
+	if c := by["keys"]; code != 1 || c.State != "fail" || !strings.HasPrefix(c.Detail, "1 revoked key is still connected") {
+		t.Fatalf("%d %+v", code, c)
+	}
+	f := keyScan(false)
+	f.Conns[0].Changed = []apply.ConnzConn{{Key: "UFOREIGN1", CID: 7}}
+	scriptScans(t, f)
+	if _, by, code := doctorJSON(t, e.run); code != 0 || by["keys"].State != "ok" {
+		t.Fatalf("%d %+v", code, by["keys"])
+	}
+}

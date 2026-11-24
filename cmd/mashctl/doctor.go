@@ -714,14 +714,25 @@ func doctorKeys(rep *doctorReport, ctx context.Context, adm *admin.Admin, cfg co
 		}
 	}
 	unrecorded, keyless, revoked := connectedFindings(scan.Conns, recs)
-	// A key recorded as revoked that was connected in ANY read counts, even when the last read no longer saw it.
-	for _, a := range attempts[:len(attempts)-1] {
-		_, _, r := connectedFindings(a.Conns, recs)
+	// A key recorded as revoked that was connected in ANY read counts, even when the last read no longer saw it, and
+	// even when it was seen in only some of a server's page scans (its Changed list).
+	addRevoked := func(conns []apply.ConnzServer) {
+		_, _, r := connectedFindings(conns, recs)
 		for _, k := range r {
 			if !slices.Contains(revoked, k) {
 				revoked = append(revoked, k)
 			}
 		}
+	}
+	for i, a := range attempts {
+		if i < len(attempts)-1 {
+			addRevoked(a.Conns)
+		}
+		var changed []apply.ConnzServer
+		for _, s := range a.Conns {
+			changed = append(changed, apply.ConnzServer{Name: s.Name, Conns: s.Changed})
+		}
+		addRevoked(changed)
 	}
 	slices.Sort(revoked)
 	var fails []finding
