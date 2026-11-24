@@ -50,6 +50,26 @@ func TestDoctorOneHintACommandThatFixesIt(t *testing.T) {
 	if err := os.Chmod(loose, 0o644); err != nil {
 		t.Fatal(err)
 	}
+	otherBytes, err := os.ReadFile(otherCreds)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// the creds path join writes: no MASH_CREDS, <config dir>/<address>.creds
+	atDefault := func(content []byte) (map[string]string, string) {
+		dir := t.TempDir()
+		env := strictEnv(w, "a", map[string]string{"MASH_CONFIG_DIR": dir})
+		delete(env, "MASH_CREDS")
+		p := filepath.Join(dir, env["MASH_ENDPOINT"]+".creds")
+		if content != nil {
+			if err := os.WriteFile(p, content, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return env, p
+	}
+	dMissingEnv, dMissing := atDefault(nil)
+	dJunkEnv, dJunk := atDefault([]byte(credsSecret))
+	dRefusedEnv, _ := atDefault(otherBytes)
 	shell := func(env map[string]string) func(args ...string) ran {
 		return func(args ...string) ran { return runMash(env, append([]string{"doctor"}, args...)...) }
 	}
@@ -74,11 +94,15 @@ func TestDoctorOneHintACommandThatFixesIt(t *testing.T) {
 		run             func(args ...string) ran
 		long            bool // the row carries a temp path: its width is not ours to bound
 	}{
-		{"creds file missing", "creds     FAIL  " + config.Tilde(missing) + " is missing", "mash join <file>",
+		{"creds file missing", "creds     FAIL  " + config.Tilde(missing) + " is missing", "",
 			shell(strictEnv(w, "a", map[string]string{"MASH_CREDS": missing})), true},
-		{"creds file not a creds file", "creds     FAIL  " + junk + " is not a creds file", cmds.JoinReplaceFix,
+		{"creds file not a creds file", "creds     FAIL  " + config.Tilde(junk) + " is not a creds file", "",
 			shell(strictEnv(w, "a", map[string]string{"MASH_CREDS": junk})), true},
-		{"creds file readable by others", "creds     FAIL  " + loose + " can be read by others", "",
+		{"default creds file missing", "creds     FAIL  " + config.Tilde(dMissing) + " is missing", cmds.JoinFix, shell(dMissingEnv), true},
+		{"default creds file not a creds file", "creds     FAIL  " + config.Tilde(dJunk) + " is not a creds file", cmds.JoinReplaceFix, shell(dJunkEnv), true},
+		{"default creds refused", "sign-in   FAIL  the server refused these credentials", cmds.JoinReplaceFix,
+			shell(dRefusedEnv), false},
+		{"creds file readable by others", "creds     FAIL  " + config.Tilde(loose) + " can be read by others", "",
 			shell(strictEnv(w, "a", map[string]string{"MASH_CREDS": loose})), true},
 		{"server not answering", "server    FAIL  the server did not answer: tls://127.0.0.1:1", "",
 			shell(strictEnv(w, "a", map[string]string{"MASH_SERVER": "tls://127.0.0.1:1", "MASH_OPEN_TIMEOUT": "2s"})), false},
@@ -86,7 +110,7 @@ func TestDoctorOneHintACommandThatFixesIt(t *testing.T) {
 			shell(untrusted), true},
 		{"server does not offer TLS", "server    FAIL  the server did not offer TLS: " + plainURL, "",
 			shell(strictEnv(w, "a", map[string]string{"MASH_SERVER": plainURL, "MASH_OPEN_TIMEOUT": "5s"})), true},
-		{"credentials refused", "sign-in   FAIL  the server refused these credentials", cmds.JoinReplaceFix,
+		{"credentials refused", "sign-in   FAIL  the server refused these credentials", "",
 			shell(strictEnv(w, "a", map[string]string{"MASH_CREDS": otherCreds})), false},
 		{"endpoint deleted", "sign-in   FAIL  " + cmds.ReasonEndpointDeleted, "mash join <file>",
 			shell(strictEnv(w, "a", map[string]string{"MASH_ENDPOINT": tTo("ghost"), "MASH_CREDS": ghostCreds})), false},

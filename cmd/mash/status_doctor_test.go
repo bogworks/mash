@@ -314,12 +314,12 @@ func TestDoctorAProblemAndAWarning(t *testing.T) {
 		"refused   warn  3 unverified messages were refused\n" +
 		"\n" +
 		"1 problem, 1 warning.\n"
-	if r.code != 1 || r.out != want || r.errs != "hint: mash join <file> --replace\n" {
+	if r.code != 1 || r.out != want || r.errs != "" { // MASH_CREDS is a custom path: no join hint
 		t.Fatalf("doctor:\n%+v\nwant %q", r, want)
 	}
 	j := runMash(env, "doctor", "--json")
 	if j.code != 1 || j.errs != "" || !strings.Contains(j.out, `"problems":1,"warnings":1`) ||
-		!strings.Contains(j.out, `{"name":"sign-in","state":"fail","detail":"the server refused these credentials","fix":"mash join <file> --replace"}`) {
+		!strings.Contains(j.out, `{"name":"sign-in","state":"fail","detail":"the server refused these credentials","fix":null}`) {
 		t.Fatalf("doctor --json: %+v", j)
 	}
 }
@@ -353,7 +353,7 @@ func TestDoctorServerNotAnsweringAndCredsProblems(t *testing.T) {
 	}
 	p := w.env["a"]["MASH_CREDS"]
 	r = runMash(w.env["a"], "doctor")
-	if r.code != 1 || !strings.Contains(r.out, "creds     FAIL  "+p+" can be read by others\n") ||
+	if r.code != 1 || !strings.Contains(r.out, "creds     FAIL  "+config.Tilde(p)+" can be read by others\n") ||
 		!strings.Contains(r.out, "sign-in   skip  needs the creds\ndelivery  skip  needs sign-in\n") || !strings.Contains(r.out, "refused   ok    ") || r.errs != "" { // chmod is not a command of ours: the row says what is wrong
 		t.Fatalf("doctor, creds mode: %+v", r)
 	}
@@ -365,7 +365,7 @@ func TestDoctorServerNotAnsweringAndCredsProblems(t *testing.T) {
 		t.Fatal(err)
 	}
 	r = runMash(w.env["a"], "doctor")
-	if r.code != 1 || !strings.Contains(r.out, "creds     FAIL  "+p+" is not a creds file\n") || strings.Contains(r.out+r.errs, credsSecret) {
+	if r.code != 1 || !strings.Contains(r.out, "creds     FAIL  "+config.Tilde(p)+" is not a creds file\n") || strings.Contains(r.out+r.errs, credsSecret) {
 		t.Fatalf("doctor, bad creds: %+v", r)
 	}
 	// missing
@@ -373,7 +373,7 @@ func TestDoctorServerNotAnsweringAndCredsProblems(t *testing.T) {
 		t.Fatal(err)
 	}
 	r = runMash(w.env["a"], "doctor")
-	if r.code != 1 || !strings.Contains(r.out, "creds     FAIL  "+config.Tilde(p)+" is missing\n") || r.errs != "hint: mash join <file>\n" {
+	if r.code != 1 || !strings.Contains(r.out, "creds     FAIL  "+config.Tilde(p)+" is missing\n") || r.errs != "" { // a custom creds path: join cannot mend it, no hint
 		t.Fatalf("doctor, missing creds: %+v", r)
 	}
 }
@@ -646,7 +646,17 @@ func TestStatusAndDoctorHintsAreOnStderr(t *testing.T) {
 	w := tlsWorld(t, "a")
 	other := testenv.Start(t)
 	creds, _ := other.Mint(t, tAddr("a"))
-	env := strictEnv(w, "a", map[string]string{"MASH_CREDS": creds}) // refused: both commands have a fix to hint
+	// refused, with the creds at the path join writes: both commands have a fix to hint
+	dir := t.TempDir()
+	env := strictEnv(w, "a", map[string]string{"MASH_CONFIG_DIR": dir})
+	delete(env, "MASH_CREDS")
+	b, err := os.ReadFile(creds)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, env["MASH_ENDPOINT"]+".creds"), b, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	for _, cmd := range []string{"status", "doctor"} {
 		r := runMash(env, cmd)
 		if r.code != 1 || !strings.HasPrefix(r.errs, "hint: ") || strings.HasSuffix(strings.TrimSuffix(r.errs, "\n"), "\n") {

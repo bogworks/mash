@@ -104,6 +104,16 @@ func setAsideDeleted(p string) bool {
 	return err == nil && fi.Mode().IsRegular()
 }
 
+// joinFix is the join hint fix when join can mend the creds file: join writes only <config-dir>/<address>.creds, so
+// with a custom creds path (MASH_CREDS or "creds": Load fills Creds with the default when none is set) no join command
+// repairs it and there is no hint.
+func (h *healthSvc) joinFix(fix string) string {
+	if p := credsPath(h.cfg); p == "" || p != h.cfg.Find(h.cfg.CredsName()+".creds") {
+		return ""
+	}
+	return fix
+}
+
 // credsCheck is the creds row: the file exists, is a regular file only this user can read, and holds a user JWT and
 // its seed. It reads the file to check its shape and prints none of it.
 func (h *healthSvc) credsCheck() cmds.HealthCheck {
@@ -121,18 +131,18 @@ func (h *healthSvc) credsCheck() cmds.HealthCheck {
 		c.Detail, c.Fix, c.Code = cmds.ReasonEndpointDeleted, cmds.JoinFix, cmds.CodeEndpointDeleted
 	case errors.Is(err, fs.ErrNotExist):
 		// the row names the file with ~; status keeps its longer sentence
-		c.Detail, c.Fix = config.Tilde(p)+" is missing", cmds.JoinFix
+		c.Detail, c.Fix = config.Tilde(p)+" is missing", h.joinFix(cmds.JoinFix)
 		c.Reason = "the creds file is missing: " + p
 	case err != nil && strings.Contains(err.Error(), "readable by other users"):
-		c.Detail = p + " can be read by others"
+		c.Detail = config.Tilde(p) + " can be read by others"
 	case err != nil && strings.Contains(err.Error(), "not a regular file"):
 		c.Detail = "the creds file is not a regular file: " + p
 	case err != nil:
 		c.Detail = "the creds file cannot be read: " + p
 	default:
 		if cerr := natsauth.CheckCreds(p, raw); cerr != nil {
-			c.Detail = p + " is not a creds file"
-			c.Fix = cmds.JoinReplaceFix
+			c.Detail = config.Tilde(p) + " is not a creds file"
+			c.Fix = h.joinFix(cmds.JoinReplaceFix)
 		} else {
 			c.State, c.Code = cmds.CheckOK, ""
 		}
@@ -193,13 +203,13 @@ func (h *healthSvc) signInCheck(ctx context.Context) (c cmds.HealthCheck, online
 		switch msg := err.Error(); {
 		case endpoint.IsAuthFailure(err):
 			c.Detail, c.Reason = "the server refused these credentials", "the server refused its credentials"
-			c.Fix, c.Code = cmds.JoinReplaceFix, cmds.CodeCredsRefused
+			c.Fix, c.Code = h.joinFix(cmds.JoinReplaceFix), cmds.CodeCredsRefused
 		case transient(err) || strings.Contains(msg, "no servers available"):
 			c.Detail = "the server did not answer: " + config.RedactURL(h.cfg.URL)
 			c.Reason, c.Code = c.Detail, cmds.CodeServerUnreachable
 		case errors.Is(err, endpoint.ErrCredsMismatch):
 			c.Detail = "the creds file belongs to another endpoint than " + h.cfg.DisplayName()
-			c.Fix, c.Code = cmds.JoinReplaceFix, cmds.CodeCredsRefused
+			c.Fix, c.Code = h.joinFix(cmds.JoinReplaceFix), cmds.CodeCredsRefused
 		case strings.Contains(msg, "the server refused the client certificate"):
 			c.Detail = "the server refused the client certificate: " + config.RedactURL(h.cfg.URL)
 			c.Code = cmds.CodeCredsRefused
