@@ -235,14 +235,13 @@ first.
 `BIN` may not exist yet. Debian's default umask is 002, so a folder made with
 `mkdir -p` is writable by its group, and `install.sh` refuses to install
 there. `install.sh` checks every folder above it too, and `install -d -m`
-sets the mode only on the folders it is given, so each block names `~/.local`
-as well as `BIN`. For a custom `BIN` with other new folders above it, add
-each missing one the same way, top down. Each block makes only the folders
-that are missing, with mode 755, and never changes a folder that already
-exists: `install.sh` refuses a group-writable one and says so, and the
-person decides. Each block works in a
-fresh `mktemp -d` folder: a throwaway folder. After the install you remove
-only that one folder, the `T` the block set (`rm -r "$T"`), never a glob.
+sets the mode only on the folders it is given, so each block creates the
+missing folders above the chosen `BIN` itself, top down, each with mode 755
+(the `mkp` helper). It never changes a folder that already exists:
+`install.sh` refuses a group-writable one and says so, and the person
+decides. Each block works in a fresh `mktemp -d` folder: a throwaway
+folder. After the install you remove only that one folder, the `T` the block
+set (`rm -r "$T"`), never a glob.
 
 `nats-server` (tested v2.15.1). The block names the operating system and the
 processor (`linux` or `darwin`; `amd64` or `arm64`), downloads the release
@@ -253,13 +252,13 @@ set -e
 BIN="$HOME/.local/bin"; V=2.15.1
 case "$(uname -s)" in Linux) OS=linux ;; Darwin) OS=darwin ;; esac
 case "$(uname -m)" in x86_64) ARCH=amd64 ;; aarch64 | arm64) ARCH=arm64 ;; esac
-SUM="sha256sum -c -"; command -v sha256sum >/dev/null || SUM="shasum -a 256 -c -"
-[ -d "$HOME/.local" ] || install -d -m 755 "$HOME/.local"
-[ -d "$BIN" ] || install -d -m 755 "$BIN"
+if command -v sha256sum >/dev/null; then sha() { sha256sum -c -; }; else sha() { shasum -a 256 -c -; }; fi
+mkp() { [ -d "$1" ] && return 0; mkp "$(dirname "$1")"; install -d -m 755 "$1"; }
+mkp "$BIN"
 T=$(mktemp -d) && cd "$T"
 curl -fsSLO https://github.com/nats-io/nats-server/releases/download/v$V/nats-server-v$V-$OS-$ARCH.tar.gz
 curl -fsSLO https://github.com/nats-io/nats-server/releases/download/v$V/SHA256SUMS
-grep " nats-server-v$V-$OS-$ARCH.tar.gz\$" SHA256SUMS | $SUM
+grep " nats-server-v$V-$OS-$ARCH.tar.gz\$" SHA256SUMS | sha
 tar -xzf nats-server-v$V-$OS-$ARCH.tar.gz
 install -m 0755 nats-server-v$V-$OS-$ARCH/nats-server "$BIN/nats-server"
 cd "$HOME" && rm -r "$T"
@@ -273,13 +272,13 @@ set -e
 BIN="$HOME/.local/bin"; V=0.5.2
 case "$(uname -s)" in Linux) OS=linux ;; Darwin) OS=darwin ;; esac
 case "$(uname -m)" in x86_64) ARCH=amd64 ;; aarch64 | arm64) ARCH=arm64 ;; esac
-SUM="sha256sum -c -"; command -v sha256sum >/dev/null || SUM="shasum -a 256 -c -"
-[ -d "$HOME/.local" ] || install -d -m 755 "$HOME/.local"
-[ -d "$BIN" ] || install -d -m 755 "$BIN"
+if command -v sha256sum >/dev/null; then sha() { sha256sum -c -; }; else sha() { shasum -a 256 -c -; }; fi
+mkp() { [ -d "$1" ] && return 0; mkp "$(dirname "$1")"; install -d -m 755 "$1"; }
+mkp "$BIN"
 T=$(mktemp -d) && cd "$T"
 curl -fsSLO https://github.com/nats-io/natscli/releases/download/v$V/nats-$V-$OS-$ARCH.zip
 curl -fsSLO https://github.com/nats-io/natscli/releases/download/v$V/SHA256SUMS
-grep " nats-$V-$OS-$ARCH.zip\$" SHA256SUMS | $SUM
+grep " nats-$V-$OS-$ARCH.zip\$" SHA256SUMS | sha
 if command -v unzip >/dev/null; then unzip -q nats-$V-$OS-$ARCH.zip
 else python3 -m zipfile -e nats-$V-$OS-$ARCH.zip .; fi
 install -m 0755 nats-$V-$OS-$ARCH/nats "$BIN/nats"
