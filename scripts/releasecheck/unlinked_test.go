@@ -4,19 +4,12 @@ import (
 	"context"
 	"os/exec"
 	"reflect"
-	"sort"
 	"strings"
 	"testing"
 )
 
 func TestLinkedPolicyPackages(t *testing.T) {
 	const m = "github.com/bogworks/mash/"
-	var all []string
-	for _, p := range policyEnginePackages {
-		all = append(all, m+p)
-	}
-	sorted := append([]string(nil), policyEnginePackages...)
-	sort.Strings(sorted)
 	tests := []struct {
 		name string
 		in   string
@@ -24,8 +17,13 @@ func TestLinkedPolicyPackages(t *testing.T) {
 	}{
 		{"clean, with the size constants", "fmt\n" + m + "internal/policy\n" + m + "cmd/mash\n", nil},
 		{"empty", "", nil},
-		{"lookalikes", m + "internal/policyfoo\n" + m + "internal/listsetx\n" + m + "internal/xissue\nother.example/internal/issue\n", nil},
-		{"each engine package", strings.Join(all, "\n") + "\n", sorted},
+		{"prefix, new name", m + "internal/policyfoo\n", []string{"internal/policyfoo"}},
+		{"policy itself allowed", m + "internal/policy\n", nil},
+		{"policy subpackage", m + "internal/policy/sub\n", []string{"internal/policy/sub"}},
+		{"policydoc", m + "internal/policydoc\n", []string{"internal/policydoc"}},
+		{"the four named elsewhere", m + "internal/requesterreg\n" + m + "internal/issue\n" + m + "internal/reconcile\n" + m + "internal/listset\n",
+			[]string{"internal/issue", "internal/listset", "internal/reconcile", "internal/requesterreg"}},
+		{"lookalikes", m + "internal/listsetx\n" + m + "internal/xissue\nother.example/internal/issue\nother.example/internal/policyfoo\n", nil},
 		{"duplicates collapse", m + "internal/issue\n" + m + "internal/issue\n" + m + "internal/policydoc\n", []string{"internal/issue", "internal/policydoc"}},
 		{"the size constants do not hide a neighbour", m + "internal/policy\n" + m + "internal/policyview\n", []string{"internal/policyview"}},
 	}
@@ -63,6 +61,7 @@ func TestPolicyUnlinkedStepGoList(t *testing.T) {
 		{"nothing linked", empty, empty, ""},
 		{"mashctl links listset", empty, imp("internal/listset"), "internal/listset"},
 		{"mash links only the size constants", imp("internal/policy"), empty, ""},
+		{"mash links a new policy package", imp("internal/policyfoo"), empty, "internal/policyfoo"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -73,6 +72,7 @@ func TestPolicyUnlinkedStepGoList(t *testing.T) {
 			write(t, repo, "cmd/mashctl/main.go", tc.mashct)
 			write(t, repo, "internal/policy/policy.go", "package policy\n")
 			write(t, repo, "internal/listset/listset.go", "package listset\n")
+			write(t, repo, "internal/policyfoo/policyfoo.go", "package policyfoo\n")
 			gitT(t, repo, "add", "-A")
 			gitT(t, repo, "commit", "-q", "-m", "c")
 			x := gitT(t, repo, "rev-parse", "HEAD")

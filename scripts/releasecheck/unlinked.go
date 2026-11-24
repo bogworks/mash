@@ -18,31 +18,37 @@ import (
 
 const policyModule = "github.com/bogworks/mash/"
 
-var policyEnginePackages = []string{
-	"internal/listset",
-	"internal/policydoc",
-	"internal/policyapply",
-	"internal/policyintake",
-	"internal/policyserve",
-	"internal/policyview",
+// policyPrefix: every package whose path starts with it and is longer than it is refused (internal/policydoc,
+// internal/policyfoo, internal/policy/sub). internal/policy itself is allowed.
+const policyPrefix = "internal/policy"
+
+// policyNamedElsewhere lists the engine packages whose names do not start with internal/policy. A new engine package
+// whose name does not start with internal/policy must be added to this list, or the gate will not see it. These match
+// the whole path: internal/listsetx and internal/xissue are not refused.
+var policyNamedElsewhere = []string{
 	"internal/requesterreg",
 	"internal/issue",
 	"internal/reconcile",
+	"internal/listset",
 }
 
 // linkedPolicyPackages returns, sorted and without duplicates, the engine packages named in `go list -deps` output.
 func linkedPolicyPackages(listOutput string) []string {
-	engine := map[string]bool{}
-	for _, p := range policyEnginePackages {
-		engine[policyModule+p] = true
+	elsewhere := map[string]bool{}
+	for _, p := range policyNamedElsewhere {
+		elsewhere[p] = true
 	}
 	seen := map[string]bool{}
 	var out []string
 	for _, line := range strings.Split(listOutput, "\n") {
 		line = strings.TrimSpace(line)
-		if engine[line] && !seen[line] {
-			seen[line] = true
-			out = append(out, strings.TrimPrefix(line, policyModule))
+		rel, ok := strings.CutPrefix(line, policyModule)
+		if !ok || seen[rel] {
+			continue
+		}
+		if (strings.HasPrefix(rel, policyPrefix) && len(rel) > len(policyPrefix)) || elsewhere[rel] {
+			seen[rel] = true
+			out = append(out, rel)
 		}
 	}
 	sort.Strings(out)
