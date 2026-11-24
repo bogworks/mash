@@ -70,6 +70,7 @@ type toolFile struct {
 		Version     string `json:"version"`
 		Description string `json:"description"`
 		Source      string `json:"x-source"`
+		NowRelease  string `json:"x-now-release"`
 	} `json:"info"`
 	Command *cmdSpec `json:"command"`
 }
@@ -166,7 +167,8 @@ func (c *cmdSpec) metaString(name string) (string, error) {
 type node struct {
 	*cmdSpec
 	path    []string
-	release string
+	release string // "" for an entry planned with x-plan
+	plan    string // "", or now, next or later for a planned entry
 	root    bool
 	subs    []*node
 }
@@ -174,17 +176,47 @@ type node struct {
 func (n *node) page() string { return strings.Join(n.path, "-") + ".md" }
 func (n *node) full() string { return strings.Join(n.path, " ") }
 
-func buildTree(c *cmdSpec, path []string, inherited string, root bool) (*node, error) {
-	n := &node{cmdSpec: c, path: append(append([]string{}, path...), c.Name), release: inherited, root: root}
+// builtSet is true when an ancestor, or the entry itself, sets x-release to
+// the current version; the tool's own root is built by default, which does
+// not count, so a planned command can sit directly under it.
+//
+// isOldPlannedRelease reports whether r is the old way of planning an entry:
+// x-release naming the next release, with no x-plan. It is accepted only
+// until the planner moves the planned entries to x-plan; remove then.
+func isOldPlannedRelease(r string) bool { return r == nextRelease }
+
+func validPlan(p string) bool { return p == "now" || p == "next" || p == "later" }
+
+func buildTree(c *cmdSpec, path []string, current, inheritedRelease, inheritedPlan string, builtSet, root bool) (*node, error) {
+	n := &node{cmdSpec: c, path: append(append([]string{}, path...), c.Name), release: inheritedRelease, plan: inheritedPlan, root: root}
 	r, err := c.metaString("x-release")
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", n.full(), err)
 	}
-	if r != "" {
-		n.release = r
+	p, err := c.metaString("x-plan")
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", n.full(), err)
+	}
+	_, hasPlan := c.meta("x-plan")
+	if hasPlan {
+		if !validPlan(p) {
+			return nil, fmt.Errorf("%s: x-plan %q is not one of now, next, later", n.full(), p)
+		}
+		if r != "" {
+			if r == current {
+				return nil, fmt.Errorf("%s: a built entry (x-release %s) must not carry x-plan %s", n.full(), r, p)
+			}
+			return nil, fmt.Errorf("%s: an unbuilt entry (x-plan %s) must not carry x-release %s", n.full(), p, r)
+		}
+		if builtSet {
+			return nil, fmt.Errorf("%s: a built entry (it inherits x-release %s) must not carry x-plan %s", n.full(), current, p)
+		}
+		n.release, n.plan, builtSet = "", p, false
+	} else if r != "" {
+		n.release, n.plan, builtSet = r, "", r == current
 	}
 	for _, s := range c.Commands {
-		sub, err := buildTree(s, n.path, n.release, false)
+		sub, err := buildTree(s, n.path, current, n.release, n.plan, builtSet, false)
 		if err != nil {
 			return nil, err
 		}
@@ -198,7 +230,7 @@ func buildTree(c *cmdSpec, path []string, inherited string, root bool) (*node, e
 // page content.
 func Generate(specDir string) (map[string][]byte, error) {
 	var tools []*node
-	var current, source string
+	var current, source, now string
 	for _, name := range []string{"mash", "mashctl"} {
 		var f toolFile
 		if err := readJSON(filepath.Join(specDir, name+".json"), &f); err != nil {
@@ -218,7 +250,14 @@ func Generate(specDir string) (map[string][]byte, error) {
 		} else if f.Info.Source != source {
 			return nil, fmt.Errorf("%s.json: x-source %q differs from %q", name, f.Info.Source, source)
 		}
-		root, err := buildTree(f.Command, nil, current, true)
+		if f.Info.NowRelease != "" {
+			if now == "" {
+				now = f.Info.NowRelease
+			} else if f.Info.NowRelease != now {
+				return nil, fmt.Errorf("%s.json: x-now-release %q differs from %q", name, f.Info.NowRelease, now)
+			}
+		}
+		root, err := buildTree(f.Command, nil, current, current, "", false, true)
 		if err != nil {
 			return nil, err
 		}
@@ -232,12 +271,13 @@ func Generate(specDir string) (map[string][]byte, error) {
 	if err := readJSON(filepath.Join(specDir, "rules.json"), &rules); err != nil {
 		return nil, err
 	}
-	g := &gen{current: current, source: source, pages: map[string][]byte{}, mcp: mcp, rules: rules, tools: tools}
+	g := &gen{current: current, now: now, source: source, pages: map[string][]byte{}, mcp: mcp, rules: rules, tools: tools}
 	return g.run()
 }
 
 type gen struct {
 	current string
+	now     string // x-now-release, the version Now plans name
 	source  string
 	pages   map[string][]byte
 	mcp     mcpFile
@@ -303,6 +343,13 @@ func (g *gen) run() (map[string][]byte, error) {
 // tree writes a page for every command of the current release and collects
 // the commands that are planned for the next one.
 func (g *gen) tree(n *node) error {
+	if n.plan != "" {
+		if n.plan == "now" && g.now == "" {
+			return fmt.Errorf("%s: x-plan now needs x-now-release in the tool file's info", n.full())
+		}
+		g.coming = append(g.coming, n)
+		return nil
+	}
 	switch n.release {
 	case g.current, closeRelease:
 		if !n.root {
@@ -313,12 +360,25 @@ func (g *gen) tree(n *node) error {
 				return err
 			}
 		}
-	case nextRelease:
+	case nextRelease: // the old form; see isOldPlannedRelease
 		g.coming = append(g.coming, n)
 	default:
 		return fmt.Errorf("%s: release %q is neither %s, %s nor %s", n.full(), n.release, g.current, closeRelease, nextRelease)
 	}
 	return nil
+}
+
+// planLabel is the text that says when a planned entry is due: "Planned for
+// <x-now-release>" for now, "Planned: next" or "Planned: later", and for the
+// old form "Planned for <release>".
+func (g *gen) planLabel(n *node) string {
+	switch n.plan {
+	case "now":
+		return "Planned for " + g.now
+	case "next", "later":
+		return "Planned: " + n.plan
+	}
+	return "Planned for " + n.release
 }
 
 // ---- markdown helpers ----
@@ -663,6 +723,9 @@ func (g *gen) mcpCases(b *bld, lvl int, cs []outCase, isError bool) {
 func (g *gen) body(b *bld, n *node, lvl int) {
 	b.para(esc(n.Description))
 	meta := fmt.Sprintf("Release: %s.", esc(n.release))
+	if n.plan != "" {
+		meta = esc(g.planLabel(n)) + "."
+	}
 	if grp := g.metaStr(n, "x-group"); grp != "" {
 		meta += " Group: " + esc(grp) + "."
 	}
@@ -850,14 +913,19 @@ func (g *gen) toolIndex(n *node) {
 		}
 	}
 	if len(g.coming) > 0 {
-		var names []string
+		var labels []string
+		byLabel := map[string][]string{}
 		for _, c := range g.coming {
 			if c.path[0] == n.Name {
-				names = append(names, code(c.full()))
+				l := g.planLabel(c)
+				if _, ok := byLabel[l]; !ok {
+					labels = append(labels, l)
+				}
+				byLabel[l] = append(byLabel[l], code(c.full()))
 			}
 		}
-		if len(names) > 0 {
-			b.para("Planned for " + nextRelease + ": " + strings.Join(names, ", ") + ". See [coming in " + nextRelease + "](" + comingPage + ").")
+		for _, l := range labels {
+			b.para(esc(l) + ": " + strings.Join(byLabel[l], ", ") + ". See [coming in " + nextRelease + "](" + comingPage + ").")
 		}
 	}
 	g.put(n.page(), b)
