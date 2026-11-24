@@ -988,14 +988,18 @@ func cidScan(unsettled bool, cids map[string]uint64) connScan {
 	return sc
 }
 
-func checkFits80(t *testing.T, e *applyEnv, args ...string) {
+// checkFits80 runs doctor with args and fails if any line passes 80 columns; it returns the text so the caller can
+// assert the line it meant to measure is there. The caller resets the scripted read counter first.
+func checkFits80(t *testing.T, e *applyEnv, args ...string) string {
 	t.Helper()
 	out, errb, _ := e.run(args...)
-	for _, l := range strings.Split(cleanText(e, out)+errb, "\n") {
+	text := cleanText(e, out) + errb
+	for _, l := range strings.Split(text, "\n") {
 		if len(l) > 80 {
 			t.Errorf("%v: %d columns: %q", args, len(l), l)
 		}
 	}
+	return text
 }
 
 // Churn only among users mashctl did not issue is not a finding: ok in both modes, the count shown.
@@ -1009,7 +1013,10 @@ func TestDoctorKeysChurnOfForeignUsersIsNotAFinding(t *testing.T) {
 			t.Fatalf("%v: %d %+v", args, code, c)
 		}
 	}
-	checkFits80(t, e, "doctor")
+	*calls = 0
+	if text := checkFits80(t, e, "doctor"); !strings.Contains(text, "mashctl's users ok; 2 other users") {
+		t.Fatalf("not measuring the ok line: %q", text)
+	}
 }
 
 // Persistent churn of one of mashctl's users warns after three reads: exit 0, and 1 with --strict.
@@ -1034,7 +1041,10 @@ func TestDoctorKeysChurnOfMashUsersWarns(t *testing.T) {
 	if !strings.Contains(cleanText(e, out), "keys       warn  "+line) {
 		t.Fatalf("%q", cleanText(e, out))
 	}
-	checkFits80(t, e, "doctor")
+	*calls = 0
+	if text := checkFits80(t, e, "doctor"); !strings.Contains(text, "keys       warn  "+line) {
+		t.Fatalf("not measuring the warn line: %q", text)
+	}
 }
 
 // With --audit-users an unsettled read fails in plain words, and never names the scan's inner workings.
@@ -1049,7 +1059,9 @@ func TestDoctorAuditUsersFailsOnChurn(t *testing.T) {
 	if low := strings.ToLower(k.Detail); strings.Contains(low, "connz") || strings.Contains(low, "nats") || strings.Contains(low, "scans") {
 		t.Fatalf("%q", k.Detail)
 	}
-	checkFits80(t, e, "doctor", "--audit-users")
+	if text := checkFits80(t, e, "doctor", "--audit-users"); !strings.Contains(text, "kept changing") {
+		t.Fatalf("not measuring the churn line: %q", text)
+	}
 }
 
 // A read that settles on the second or third try gives the usual ok line.
@@ -1190,6 +1202,65 @@ func TestDoctorKeysDeadlineAfterOneRead(t *testing.T) {
 	}
 	if _, by, code := doctorJSON(t, e.run); code != 1 || by["keys"].State != "fail" {
 		t.Fatalf("%d %+v", code, by["keys"])
+	}
+}
+
+// A scan whose pages never reconcile is unsettled (worth another read) only when the server set is complete and every
+// server answered: with a server missing it is incomplete, not churn, and the keys row fails with the init hint after
+// one read.
+func TestDoctorKeysIncompleteServerSetWithShiftingPagesIsNotChurn(t *testing.T) {
+	e := newXYEnv(t)
+	_, xKey := credsSubject(t, e.credsPath(xy("x").String()))
+	fake := fakeShiftingConnz(t, xKey)
+	// The scan itself: one server expected (complete) is unsettled; two expected (one answered) is not.
+	sc, err := scanConnections(context.Background(), fake, "A", 1)
+	if err != nil || !sc.Unsettled || !strings.Contains(sc.Incomplete, "kept changing") {
+		t.Fatalf("complete set: %v %+v", err, sc)
+	}
+	sc, err = scanConnections(context.Background(), fake, "A", 2)
+	if err != nil || sc.Unsettled || sc.Incomplete == "" || !strings.Contains(sc.Incomplete, "kept changing") {
+		t.Fatalf("incomplete set: %v %+v", err, sc)
+	}
+	// Through doctor: the same incomplete scan fails, once, with the init hint.
+	oldScan, oldPause := scanConns, churnPause
+	t.Cleanup(func() { scanConns, churnPause = oldScan, oldPause })
+	churnPause = 0
+	reads := 0
+	scanConns = func(ctx context.Context, _ *nats.Conn, account string, _ int) (connScan, error) {
+		reads++
+		return scanConnections(ctx, fake, account, 2)
+	}
+	_, by, code := doctorJSON(t, e.run)
+	k := by["keys"]
+	if code != 1 || k.State != "fail" || reads != 1 || !strings.Contains(k.Detail, "kept changing") || k.Fix == nil || *k.Fix != "mashctl init --config <file>" {
+		t.Fatalf("%d reads %d: %+v", code, reads, k)
+	}
+}
+
+// The deadline arriving during the pause between reads stops the loop: the row is decided from the reads so far.
+func TestDoctorKeysDeadlineDuringPauseBetweenReads(t *testing.T) {
+	e := newXYEnv(t)
+	oldScan, oldPause, oldDeadline := scanConns, churnPause, applyDeadline
+	t.Cleanup(func() { scanConns, churnPause, applyDeadline = oldScan, oldPause, oldDeadline })
+	churnPause = time.Minute // far longer than the deadline
+	applyDeadline = 200 * time.Millisecond
+	calls := 0
+	scanConns = func(context.Context, *nats.Conn, string, int) (connScan, error) {
+		calls++
+		return keyScan(true), nil
+	}
+	start := time.Now()
+	_, by, code := doctorJSON(t, e.run)
+	if c := by["keys"]; code != 0 || c.State != "warn" || !strings.HasPrefix(c.Detail, "mashctl's users kept connecting and leaving; read once") || calls != 1 {
+		t.Fatalf("%d calls %d %+v", code, calls, c)
+	}
+	if time.Since(start) > 30*time.Second {
+		t.Fatalf("the pause was not cut short: %v", time.Since(start))
+	}
+	calls = 0
+	_, by, code = doctorJSON(t, e.run, "--audit-users")
+	if c := by["keys"]; code != 1 || c.State != "fail" || c.Detail != "server s1's connected users kept changing\nread once" || calls != 1 {
+		t.Fatalf("%d calls %d %+v", code, calls, c)
 	}
 }
 
