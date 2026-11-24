@@ -612,8 +612,8 @@ func TestInboxCountExactness(t *testing.T) {
 		}
 		_, out, _ = runInbox(b, cliframe.Global{Detail: true})
 		want := c.summary + table
-		if c.detailExtra != "" {
-			want += c.detailExtra + "\n"
+		if c.detailExtra != "" { // directly under the count line
+			want = c.summary + "\n" + c.detailExtra + table
 		}
 		if out != want {
 			t.Errorf("%s: --detail %q, want %q", c.name, out, want)

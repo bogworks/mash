@@ -191,6 +191,9 @@ func (r InboxResult) Text(o cmdcore.Opts) string {
 		about, total = "about ", "About "+total
 	}
 	b.WriteString(total + " for " + r.Endpoint + ", " + about + strconv.Itoa(r.New) + " new, " + about + strconv.Itoa(r.Urgent) + " urgent.")
+	if o.Detail && !r.Exact { // why, directly under the count line; Opts.Detail is read here because the result is not a Detailer, which would add a param to the MCP tool
+		b.WriteString("\nexact: no (" + r.why + ")")
+	}
 	if r.OverWakeCount {
 		b.WriteString("\nMore than " + strconv.Itoa(r.count) + " are waiting.")
 	}
@@ -198,7 +201,7 @@ func (r InboxResult) Text(o cmdcore.Opts) string {
 		b.WriteString("\nThe oldest has waited " + *r.OldestWaiting + ".")
 	}
 	if len(r.rows) == 0 {
-		return r.withWhy(o, b.String())
+		return b.String()
 	}
 	cols := []string{"number", "from", "when", "state", "urgent", "kind"}
 	if r.wide {
@@ -225,16 +228,7 @@ func (r InboxResult) Text(o cmdcore.Opts) string {
 		width = 0 // wide may pass the width
 	}
 	b.WriteString("\n\n" + render.Table(cols, rows, width, true))
-	return r.withWhy(o, b.String())
-}
-
-// withWhy adds, behind --detail, why the count is not exact (nothing when it is). It reads Opts.Detail itself: the
-// result is not a Detailer, which would add a param to the MCP tool.
-func (r InboxResult) withWhy(o cmdcore.Opts, text string) string {
-	if !o.Detail || r.Exact {
-		return text
-	}
-	return text + "\nexact: no (" + r.why + ")"
+	return b.String()
 }
 
 // Inbox is the inbox command.
