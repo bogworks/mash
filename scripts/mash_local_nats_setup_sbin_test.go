@@ -4,7 +4,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -16,6 +18,13 @@ func sbinSetup(t *testing.T, mode os.FileMode, uid int) (out string, argvLog str
 }
 
 func sbinSetupIn(t *testing.T, dir string, mode os.FileMode, uid int) (out string, argvLog string, runErr error) {
+	t.Helper()
+	return sbinRun(t, dir, mode, uid, nil)
+}
+
+// sbinRun is sbinSetupIn with a hook: prep(tmp) may make files under tmp and returns the script's arguments
+// (nil keeps the default create arguments). The folder to pass as --dir is tmp/n.
+func sbinRun(t *testing.T, dir string, mode os.FileMode, uid int, prep func(tmp string) []string) (out string, argvLog string, runErr error) {
 	t.Helper()
 	if os.Geteuid() != 0 || os.Getenv("MASH_TEST_SBIN") != "1" {
 		t.Skip("needs root and MASH_TEST_SBIN=1, in a throwaway container")
@@ -67,13 +76,17 @@ func sbinSetupIn(t *testing.T, dir string, mode os.FileMode, uid int) (out strin
 	if err := os.Chown(bin, 1000, 1000); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("setpriv", "--reuid=1000", "--regid=1000", "--clear-groups", "bash", filepath.Join(root, "scripts/mash-local-nats-setup.sh"), "--owner", "alice", "--dir", filepath.Join(tmp, "n"))
+	args := []string{"--owner", "alice", "--dir", filepath.Join(tmp, "n")}
+	if prep != nil {
+		args = prep(tmp)
+	}
+	cmd := exec.Command("setpriv", append([]string{"--reuid=1000", "--regid=1000", "--clear-groups", "bash", filepath.Join(root, "scripts/mash-local-nats-setup.sh")}, args...)...)
 	cmd.Env = []string{"PATH=" + bin + ":/usr/bin:/bin", "HOME=" + tmp}
 	b, err := cmd.CombinedOutput()
 	return string(b), argvLog, err
 }
 
-const sbinLine = "nats-server: using /usr/sbin/nats-server (that folder is not on your PATH)"
+const sbinLine = "Using /usr/sbin/nats-server (not on your PATH)"
 
 // exitCode is the script's exit status, or -1 when it did not run to an exit.
 func exitCode(err error) int {
@@ -102,6 +115,52 @@ func TestSbinNatsServerUsed(t *testing.T) {
 	if rerr != nil || !strings.Contains(string(b), "/usr/sbin/nats-server --version") {
 		t.Fatalf("stub not called by full path with --version: %q %v\n%s", b, rerr, out)
 	}
+}
+
+// --start must launch the discovered /usr/sbin binary itself (not some nats-server from PATH): the stub
+// logs its own $0 and arguments, and the script records the pid it started. The stub `nats` fails, so --start
+// ends with "did not come up" after the launch; the stub exits at once.
+func TestSbinNatsServerStartRunsDiscovered(t *testing.T) {
+	var d string
+	out, argv, err := sbinRun(t, "/usr/sbin", 0o755, 0, func(tmp string) []string {
+		d = filepath.Join(tmp, "n")
+		if err := os.Mkdir(d, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		marker := "{\n \"schema\": 1,\n \"dir\": \"" + d + "\",\n \"owner\": \"alice\",\n \"port\": 54222\n}\n"
+		if err := os.WriteFile(filepath.Join(d, "mash-setup.json"), []byte(marker), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(d, "server.conf"), []byte("# stand-in\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		for _, f := range []string{d, filepath.Join(d, "mash-setup.json"), filepath.Join(d, "server.conf")} {
+			if err := os.Chown(f, 1000, 1000); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return []string{"--start", "--dir", d}
+	})
+	if strings.Count(out, sbinLine) != 1 || strings.Contains(out, "missing") {
+		t.Fatalf("want the sbin line once and nothing missing, got %v:\n%s", err, out)
+	}
+	b, rerr := os.ReadFile(argv)
+	if rerr != nil || !strings.Contains(string(b), "/usr/sbin/nats-server -c "+d+"/server.conf") {
+		t.Fatalf("--start did not run /usr/sbin/nats-server -c <dir>/server.conf: %q %v\n%s", b, rerr, out)
+	}
+	pidb, perr := os.ReadFile(filepath.Join(d, "server.pid"))
+	if perr != nil {
+		t.Fatalf("no server.pid recorded: %v\n%s", perr, out)
+	}
+	pid := strings.TrimSpace(string(pidb))
+	// the stub exits by itself; if it somehow still runs, stop only the recorded pid
+	t.Cleanup(func() {
+		if n, e := strconv.Atoi(pid); e == nil && n > 1 {
+			if _, serr := os.Stat("/proc/" + pid); serr == nil {
+				syscall.Kill(n, syscall.SIGTERM)
+			}
+		}
+	})
 }
 
 func TestSbinNatsServerGroupWritable(t *testing.T) {
