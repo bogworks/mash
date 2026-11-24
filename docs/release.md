@@ -45,6 +45,18 @@ commands download from `releases/latest/download`, so a release that is not Late
 standard): once the release is published, its page text may still be corrected with `gh release edit`, but the tag and the
 assets are not changed.
 
+#### Who pushes the tag today
+
+Until the swamp-workflow minting service ships, the minting service is an interim one, the Mire Manager App
+(release rule 10 is served by it). It is not a person signing a tag on a laptop: the app pushes the annotated tag.
+v0.5.8's tag was pushed this way on 2026-11-23 at 16:27Z.
+
+The named publisher, the x-ops1 lane, operates the app. It does so only on the planner's go, and the planner gives
+that go after the operator has read the gate report. So where this document says the maintainer asks for the tag,
+the request goes through that sequence: gate report, operator reads it, planner's go, the publisher has the app
+push the tag. When the swamp-workflow minting service ships, it replaces the interim service and this section is
+rewritten.
+
 ### What a keyless release does not prove
 
 - That a checked gate run authorized the release: only that the maintainer asked for the tag and ran the gate by hand.
