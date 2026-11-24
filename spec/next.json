@@ -128,41 +128,71 @@
    "id": "signing-lost-both",
    "where": "mashctl endpoint create / reissue (strict signing)",
    "case": "signing.nk and signing.pub are both missing",
-   "text": "mashctl: signing.nk and signing.pub are both missing from the key store\n  <dir> (config.json records signing_key_pub <pub>)\n  hint: run `mashctl init --config <file>` with the same signing_key",
+   "text": "error: signing.nk and signing.pub are missing in <dir>\nhint: mashctl init --config <file>",
    "stream": "stderr",
    "exit": 1,
-   "issue": "#1282",
-   "note": "Source: ctl #1282 at d0d2b39. Printed by mashctl commands that sign an endpoint (endpoint create, reissue). Written exactly as ctl sends them: they start `mashctl:` and indent `hint:`, while the specification's error rule is `error: <what>` then `hint: <command>`; the planner decides which form holds. Lines wrap at 80 here; one line in the program. "
+   "issue": "#1390",
+   "note": "From ctl #1390. The signing refusals print in the specification's error rule: `error: <what>` then `hint: <command>`, on stderr, exit 1. <dir> is the key folder as the error carries it (the plain path). The public keys the earlier text printed are not in default output. They are left out of --json too: the error object has only `error` and `hint`, and cliframe has no detail slot for errors. Printed by every mashctl command that signs (endpoint create, reissue, delete) and by init for the first two cases."
   },
   {
    "id": "signing-pub-missing",
    "where": "mashctl endpoint create / reissue (strict signing)",
    "case": "signing.pub is missing, signing.nk is there",
-   "text": "mashctl: signing.pub is missing from the key store <dir>\n  (signing.nk is there and holds <pub>)\n  hint: run `mashctl init --config <file>` with the same signing_key to\n  record it again",
+   "text": "error: signing.pub is missing from <dir>\nhint: mashctl init --config <file>",
    "stream": "stderr",
    "exit": 1,
-   "issue": "#1282",
-   "note": "Source: ctl #1282 at d0d2b39. Printed by mashctl commands that sign an endpoint (endpoint create, reissue). Written exactly as ctl sends them: they start `mashctl:` and indent `hint:`, while the specification's error rule is `error: <what>` then `hint: <command>`; the planner decides which form holds. Lines wrap at 80 here; one line in the program. "
+   "issue": "#1390",
+   "note": "From ctl #1390. The signing refusals print in the specification's error rule: `error: <what>` then `hint: <command>`, on stderr, exit 1. <dir> is the key folder as the error carries it (the plain path). The public keys the earlier text printed are not in default output. They are left out of --json too: the error object has only `error` and `hint`, and cliframe has no detail slot for errors. Printed by every mashctl command that signs (endpoint create, reissue, delete) and by init for the first two cases."
   },
   {
    "id": "signing-record-mismatch",
    "where": "mashctl endpoint create / reissue (strict signing)",
    "case": "signing.pub differs from config.json",
-   "text": "mashctl: signing.pub in the key store <dir> records signing key\n  <recorded>, but config.json records signing_key_pub <expected>\n  hint: put back the signing.pub and signing.nk of key <expected>, or\n  point MASH_KEYS_DIR at a key folder that holds them",
+   "text": "error: signing.pub in <dir> does not match config.json\nhint: mashctl doctor",
    "stream": "stderr",
    "exit": 1,
-   "issue": "#1282",
-   "note": "Source: ctl #1282 at d0d2b39. Printed by mashctl commands that sign an endpoint (endpoint create, reissue). Written exactly as ctl sends them: they start `mashctl:` and indent `hint:`, while the specification's error rule is `error: <what>` then `hint: <command>`; the planner decides which form holds. Lines wrap at 80 here; one line in the program. "
+   "issue": "#1390",
+   "note": "From ctl #1390. The signing refusals print in the specification's error rule: `error: <what>` then `hint: <command>`, on stderr, exit 1. <dir> is the key folder as the error carries it (the plain path). The public keys the earlier text printed are not in default output. They are left out of --json too: the error object has only `error` and `hint`, and cliframe has no detail slot for errors. Printed by every mashctl command that signs (endpoint create, reissue, delete) and by init for the first two cases."
   },
   {
    "id": "signing-key-mismatch",
    "where": "mashctl endpoint create / reissue (strict signing)",
    "case": "signing.nk holds another key",
-   "text": "mashctl: signing.nk in the key store <dir> holds signing key <held>,\n  but signing.pub records <want>\n  hint: restore the signing.nk of key <want>",
+   "text": "error: signing.nk in <dir> does not match signing.pub\nhint: mashctl doctor",
    "stream": "stderr",
    "exit": 1,
-   "issue": "#1282",
-   "note": "Source: ctl #1282 at d0d2b39. Printed by mashctl commands that sign an endpoint (endpoint create, reissue). Written exactly as ctl sends them: they start `mashctl:` and indent `hint:`, while the specification's error rule is `error: <what>` then `hint: <command>`; the planner decides which form holds. Lines wrap at 80 here; one line in the program. When signing.pub is gone the text says `but config.json (signing_key_pub) records <want>`. "
+   "issue": "#1390",
+   "note": "From ctl #1390. The signing refusals print in the specification's error rule: `error: <what>` then `hint: <command>`, on stderr, exit 1. <dir> is the key folder as the error carries it (the plain path). The public keys the earlier text printed are not in default output. They are left out of --json too: the error object has only `error` and `hint`, and cliframe has no detail slot for errors. Printed by every mashctl command that signs (endpoint create, reissue, delete) and by init for the first two cases. Also printed when signing.pub is gone and signing.nk is not the key config.json records."
+  },
+ {
+   "id": "signing-nk-missing",
+   "where": "mashctl endpoint create / reissue (strict signing)",
+   "case": "signing.nk is missing, signing.pub is there",
+   "text": "error: signing.nk is missing from <dir>\nhint: mashctl init --config <file>",
+   "stream": "stderr",
+   "exit": 1,
+   "issue": "#1390",
+   "note": "From ctl #1390. The signing refusals print in the specification's error rule: `error: <what>` then `hint: <command>`, on stderr, exit 1. <dir> is the key folder as the error carries it (the plain path). The public keys the earlier text printed are not in default output. They are left out of --json too: the error object has only `error` and `hint`, and cliframe has no detail slot for errors. Printed by every mashctl command that signs (endpoint create, reissue, delete) and by init for the first two cases. The hint is the same as for a missing signing.pub: init with the same signing_key puts the key back."
+  },
+ {
+   "id": "signing-nk-invalid",
+   "where": "mashctl endpoint create / reissue (strict signing)",
+   "case": "signing.nk is not a valid key",
+   "text": "error: signing.nk in <dir> is not a valid key\nhint: mashctl doctor",
+   "stream": "stderr",
+   "exit": 1,
+   "issue": "#1390",
+   "note": "From ctl #1390. The signing refusals print in the specification's error rule: `error: <what>` then `hint: <command>`, on stderr, exit 1. <dir> is the key folder as the error carries it (the plain path). The public keys the earlier text printed are not in default output. They are left out of --json too: the error object has only `error` and `hint`, and cliframe has no detail slot for errors. Printed by every mashctl command that signs (endpoint create, reissue, delete) and by init for the first two cases."
+  },
+ {
+   "id": "signing-nk-unreadable",
+   "where": "mashctl endpoint create / reissue (strict signing)",
+   "case": "signing.nk cannot be read",
+   "text": "error: signing.nk in <dir> cannot be read\nhint: mashctl doctor",
+   "stream": "stderr",
+   "exit": 1,
+   "issue": "#1390",
+   "note": "From ctl #1390. The signing refusals print in the specification's error rule: `error: <what>` then `hint: <command>`, on stderr, exit 1. <dir> is the key folder as the error carries it (the plain path). The public keys the earlier text printed are not in default output. They are left out of --json too: the error object has only `error` and `hint`, and cliframe has no detail slot for errors. Printed by every mashctl command that signs (endpoint create, reissue, delete) and by init for the first two cases. Its mode, owner or type is refused, or reading it failed."
   },
   {
    "id": "join-user-jwt-name-differs",

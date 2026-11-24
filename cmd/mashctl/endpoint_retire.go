@@ -17,6 +17,7 @@ import (
 	"github.com/bogworks/mash/internal/cliframe"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/ctl"
+	"github.com/bogworks/mash/internal/ctlkeys"
 	"github.com/bogworks/mash/internal/sap"
 )
 
@@ -192,6 +193,9 @@ func retireAddress(addr sap.Address, opts retireOpts, env func(string) string, l
 		}
 		if err := deprovisionIfUser(adm, ctx, addr, user); err != nil {
 			if admin.IsRefusal(err) {
+				if revokeErr != nil && errors.Is(err, revokeErr) && errors.Is(revokeErr, ctlkeys.ErrSigningKeyLost) {
+					return retireResult{}, failErr(revokeErr) // the key store's own error: / hint: lines
+				}
 				if checkErr != nil && errors.Is(err, checkErr) {
 					return retireResult{}, fail("%v", checkErr)
 				}

@@ -13,6 +13,7 @@ import (
 	"github.com/bogworks/mash/internal/cliframe"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/ctl"
+	"github.com/bogworks/mash/internal/ctlkeys"
 	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/store"
 )
@@ -172,6 +173,13 @@ func failErr(err error) error {
 	}
 	if _, ok := err.(*cliframe.Error); ok {
 		return err
+	}
+	// the signing refusals present themselves as error:/hint: (ctlkeys)
+	if errors.Is(err, ctlkeys.ErrSigningKeyLost) {
+		var ce *cliframe.Error
+		if errors.As(err, &ce) && ce != nil {
+			return ce
+		}
 	}
 	msg := err.Error()
 	for _, p := range []string{"mash: ", "mashctl: "} {

@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/bogworks/mash/internal/cliframe"
 )
 
 // With config.json's signing_key_pub given to Open, Signing returns the key only when signing.nk and signing.pub both
@@ -48,7 +50,7 @@ func TestSigningWithAnExpectedKey(t *testing.T) {
 	}
 	// the record differs from the expectation
 	_, _, err := open(pub2).Signing()
-	lost("record differs", err, pub1, pub2)
+	lost("record differs", err)
 
 	// signing.pub gone, signing.nk present
 	rec := filepath.Join(dir, "signing.pub")
@@ -61,15 +63,15 @@ func TestSigningWithAnExpectedKey(t *testing.T) {
 		kp.Wipe()
 	}
 	_, _, err = open(pub1).Signing()
-	lost("nk only", err, "signing.pub is missing", "mashctl init --config <file>")
+	lost("nk only", err, "signing.pub is missing")
 	_, _, err = open(pub2).Signing()
-	lost("nk only, other expectation", err, pub1, pub2)
+	lost("nk only, other expectation", err)
 
 	// signing.nk differs from the expectation (record restored)
 	if err := os.Rename(rec+".away", rec); err != nil {
 		t.Fatal(err)
 	}
-	p3, pub3 := signingSeed(t, src, "s3")
+	p3, _ := signingSeed(t, src, "s3")
 	if err := os.Remove(filepath.Join(dir, "signing.nk")); err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +80,7 @@ func TestSigningWithAnExpectedKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, _, err = open(pub1).Signing()
-	lost("stored nk differs", err, pub3, pub1)
+	lost("stored nk differs", err)
 
 	// both gone
 	for _, f := range []string{"signing.nk", "signing.pub"} {
@@ -90,7 +92,7 @@ func TestSigningWithAnExpectedKey(t *testing.T) {
 		t.Fatalf("both gone, no expectation: %v", err)
 	}
 	_, _, err = open(pub1).Signing()
-	lost("both gone", err, pub1, "both missing", "mashctl init --config <file>")
+	lost("both gone", err, "signing.nk and signing.pub are missing")
 	var lb *SigningLostBothError
 	if !errors.As(err, &lb) || lb.Pub != pub1 {
 		t.Fatalf("not a SigningLostBothError for %s: %v", pub1, err)
@@ -115,6 +117,8 @@ func TestSigningRefusalTypes(t *testing.T) {
 		name  string
 		setup func(t *testing.T, dir string) (expect string)
 		check func(t *testing.T, err error)
+		want  string // the message, "<dir>" for the key folder
+		hint  string
 	}{
 		{"both missing", func(t *testing.T, dir string) string {
 			rm(t, dir, "signing.nk", "signing.pub")
@@ -124,7 +128,7 @@ func TestSigningRefusalTypes(t *testing.T) {
 			if !errors.As(err, &e) || e.Pub != pub1 {
 				t.Fatalf("type: %T", err)
 			}
-		}},
+		}, "signing.nk and signing.pub are missing in <dir>", "mashctl init --config <file>"},
 		{"signing.pub missing", func(t *testing.T, dir string) string {
 			rm(t, dir, "signing.pub")
 			return pub1
@@ -133,13 +137,13 @@ func TestSigningRefusalTypes(t *testing.T) {
 			if !errors.As(err, &e) || e.Pub != pub1 {
 				t.Fatalf("type: %T", err)
 			}
-		}},
+		}, "signing.pub is missing from <dir>", "mashctl init --config <file>"},
 		{"record differs from config.json", func(t *testing.T, dir string) string { return pub2 }, func(t *testing.T, err error) {
 			var e *SigningRecordMismatchError
 			if !errors.As(err, &e) || e.Expected != pub2 || e.Recorded != pub1 {
 				t.Fatalf("type: %T", err)
 			}
-		}},
+		}, "signing.pub in <dir> does not match config.json", "mashctl doctor"},
 		{"signing.nk differs from the record", func(t *testing.T, dir string) string {
 			b, _ := os.ReadFile(p2)
 			if err := os.WriteFile(filepath.Join(dir, "signing.nk"), b, 0o600); err != nil {
@@ -151,7 +155,7 @@ func TestSigningRefusalTypes(t *testing.T) {
 			if !errors.As(err, &e) || e.Held != pub2 || e.Want != pub1 {
 				t.Fatalf("type: %T", err)
 			}
-		}},
+		}, "signing.nk in <dir> does not match signing.pub", "mashctl doctor"},
 		{"signing.nk differs from config.json, no record", func(t *testing.T, dir string) string {
 			rm(t, dir, "signing.pub")
 			return pub2
@@ -160,7 +164,7 @@ func TestSigningRefusalTypes(t *testing.T) {
 			if !errors.As(err, &e) || e.Held != pub1 || e.Want != pub2 {
 				t.Fatalf("type: %T", err)
 			}
-		}},
+		}, "signing.nk in <dir> does not match signing.pub", "mashctl doctor"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -178,12 +182,17 @@ func TestSigningRefusalTypes(t *testing.T) {
 				t.Fatalf("err = %v", err)
 			}
 			c.check(t, err)
-			msg := err.Error()
-			lines := strings.Split(msg, "\n")
-			if !strings.Contains(msg, dir) || len(lines) != 2 || !strings.HasPrefix(lines[1], "  hint: ") {
-				t.Errorf("text lacks the folder or the hint line: %q", msg)
+			var f *cliframe.Error
+			if !errors.As(err, &f) || f.Hint != c.hint || f.Code != 1 {
+				t.Fatalf("frame = %+v, want hint %q", f, c.hint)
 			}
-			t.Log(strings.ReplaceAll(msg, dir, "<dir>"))
+			msg := err.Error()
+			if !strings.Contains(msg, dir) || strings.Contains(msg, "\n") || strings.Contains(msg, "SA") || strings.Contains(msg, pub1) || strings.Contains(msg, pub2) {
+				t.Errorf("text lacks the folder, or holds a key or a second line: %q", msg)
+			}
+			if msg != strings.ReplaceAll(c.want, "<dir>", dir) {
+				t.Errorf("msg = %q, want %q", msg, c.want)
+			}
 		})
 	}
 }
@@ -194,5 +203,69 @@ func rm(t *testing.T, dir string, names ...string) {
 		if err := os.Remove(filepath.Join(dir, n)); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+// signing.nk that cannot be read, holds no valid key, or is gone while signing.pub records it: each its own refusal,
+// in the error:/hint: form, the cause kept for errors.As and never printed with a key.
+func TestSigningRefusalUnreadableInvalidMissing(t *testing.T) {
+	src := t.TempDir()
+	p1, pub1 := signingSeed(t, src, "s1")
+	cases := []struct {
+		name, want string
+		hint       string
+		setup      func(t *testing.T, dir string)
+		check      func(t *testing.T, err error)
+	}{
+		{"unreadable", "signing.nk in <dir> cannot be read", "mashctl doctor", func(t *testing.T, dir string) {
+			if err := os.Chmod(filepath.Join(dir, "signing.nk"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}, func(t *testing.T, err error) {
+			var e *SigningUnreadableError
+			if !errors.As(err, &e) || e.Err == nil {
+				t.Fatalf("type %T", err)
+			}
+		}},
+		{"invalid", "signing.nk in <dir> is not a valid key", "mashctl doctor", func(t *testing.T, dir string) {
+			if err := os.WriteFile(filepath.Join(dir, "signing.nk"), []byte("not a seed\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}, func(t *testing.T, err error) {
+			var e *SigningInvalidError
+			if !errors.As(err, &e) || e.Err == nil {
+				t.Fatalf("type %T", err)
+			}
+		}},
+		{"nk missing", "signing.nk is missing from <dir>", "mashctl init --config <file>", func(t *testing.T, dir string) {
+			rm(t, dir, "signing.nk")
+		}, func(t *testing.T, err error) {
+			var e *SigningNkMissingError
+			if !errors.As(err, &e) || e.Recorded != pub1 {
+				t.Fatalf("type %T", err)
+			}
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			a, dir := newStore(t)
+			if _, _, err := a.ImportSigning(p1); err != nil {
+				t.Fatal(err)
+			}
+			c.setup(t, dir)
+			ks, err := Open(dir, pub1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, _, err = ks.Signing()
+			if !errors.Is(err, ErrSigningKeyLost) || errors.Is(err, ErrNoSigningKey) {
+				t.Fatalf("err = %v", err)
+			}
+			c.check(t, err)
+			var f *cliframe.Error
+			if !errors.As(err, &f) || f.Hint != c.hint || f.Msg != strings.ReplaceAll(c.want, "<dir>", dir) {
+				t.Fatalf("frame = %+v", f)
+			}
+		})
 	}
 }
