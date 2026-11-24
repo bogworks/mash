@@ -11,6 +11,7 @@ import (
 	"github.com/nats-io/nats.go"
 
 	"github.com/bogworks/mash/internal/sap"
+	"github.com/bogworks/mash/internal/sapsdk"
 	"github.com/bogworks/mash/internal/store"
 )
 
@@ -72,7 +73,7 @@ func (e *Endpoint) applyPresence(m *nats.Msg) (counted int) {
 		}
 		a, _, ok := sap.AddressFromSubject(ep.Subject)
 		name := a.Flat()
-		if !ok || !sap.VerifyIDSig(md["user_nkey"], md["account"], md["agent"], md["owner"], ep.Subject, md["id_sig"]) {
+		if !ok || !sapsdk.VerifyIDSig(md["user_nkey"], md["account"], md["agent"], md["owner"], ep.Subject, md["id_sig"]) {
 			continue
 		}
 		e.mu.Lock()
