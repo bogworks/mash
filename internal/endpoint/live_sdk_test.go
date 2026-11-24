@@ -3,6 +3,7 @@ package endpoint
 import (
 	"bytes"
 	"context"
+	"regexp"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -208,5 +209,84 @@ func TestSigningRefusalSendsNothing(t *testing.T) {
 	}
 	if n, r := seen.Load(), reached.Load(); n != 0 || r != 0 {
 		t.Fatalf("a refused signing published %d messages, %d reached the session", n, r)
+	}
+}
+
+// statusProbe sends a status request with the given Agent-Sender values and returns the reply, its ts blanked
+// (the heartbeat carries the time to the second), or an error text when the service answered with an error.
+func statusProbe(t *testing.T, nc *nats.Conn, subj string, values []string) string {
+	t.Helper()
+	m := nats.NewMsg(subj)
+	m.Data = []byte("status?")
+	for _, v := range values {
+		m.Header.Add(sap.HeaderName, v)
+	}
+	r, err := nc.RequestMsg(m, 5*time.Second)
+	if err != nil {
+		t.Fatalf("status probe: %v", err)
+	}
+	if code := r.Header.Get("Nats-Service-Error-Code"); code != "" {
+		return "ERR " + code
+	}
+	return tsRe.ReplaceAllString(string(r.Data), `"ts":""`)
+}
+
+var tsRe = regexp.MustCompile(`"ts":"[^"]*"`)
+
+// REQ-020: the status endpoint answers every probe with the same heartbeat, whatever the header says, and an
+// unlisted sender's probe records no nonce.
+func TestStatusProbeSameAnswerAndNoNonceForUnlisted(t *testing.T) {
+	f := newFixture(t, "a", "b")
+	a := f.serve(t, "a", answering(new(atomic.Int32)))
+	subj, payload := taddr("a").Subjects().Status, []byte("status?")
+
+	b := f.client(t, "b")
+	bh, err := b.Identity().Sign(subj, payload, tkey("b"), time.Now(), "status-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	xcreds, _ := f.e.Mint(t, taddr("x"))
+	xnc := f.e.ConnAs(t, xcreds, tkey("x"))
+	xid, err := readIdentity(xcreds)
+	if err != nil {
+		t.Fatal(err)
+	}
+	xh, err := xid.Sign(subj, payload, tkey("x"), time.Now(), "status-x")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := statusProbe(t, b.Conn(), subj, nil)
+	if want == "" || strings.HasPrefix(want, "ERR") {
+		t.Fatalf("no-header probe: %q", want)
+	}
+	for name, c := range map[string]struct {
+		nc *nats.Conn
+		v  []string
+	}{
+		"listed verified":   {b.Conn(), []string{bh.Encode()}},
+		"unlisted verified": {xnc, []string{xh.Encode()}},
+		"malformed":         {b.Conn(), []string{"not a header"}},
+		"two headers":       {b.Conn(), []string{bh.Encode(), xh.Encode()}},
+	} {
+		if got := statusProbe(t, c.nc, subj, c.v); got != want {
+			t.Errorf("%s probe: %q, want %q", name, got, want)
+		}
+	}
+
+	a.mu.RLock()
+	set, ok := a.service.nonces.(*sapsdk.SDKNonceSet)
+	a.mu.RUnlock()
+	if !ok {
+		t.Fatalf("nonce set is %T", a.service.nonces)
+	}
+	if set.Contains(xid.User, "status-x") {
+		t.Errorf("an unlisted sender's status probe recorded a nonce")
+	}
+	if !set.Contains(b.Identity().User, "status-b") {
+		t.Errorf("a listed sender's status probe recorded no nonce (as before)")
+	}
+	if n := set.Len(); n != 1 {
+		t.Errorf("nonce set holds %d entries, want 1 (the listed sender's)", n)
 	}
 }
