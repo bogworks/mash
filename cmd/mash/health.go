@@ -135,6 +135,7 @@ func (h *healthSvc) credsCheck() cmds.HealthCheck {
 		c.Reason = "the creds file is missing: " + p
 	case err != nil && strings.Contains(err.Error(), "readable by other users"):
 		c.Detail = config.Tilde(p) + " can be read by others"
+		c.Reason = "the creds file can be read by other users: " + p
 	case err != nil && strings.Contains(err.Error(), "not a regular file"):
 		c.Detail = "the creds file is not a regular file: " + p
 	case err != nil:
@@ -142,6 +143,7 @@ func (h *healthSvc) credsCheck() cmds.HealthCheck {
 	default:
 		if cerr := natsauth.CheckCreds(p, raw); cerr != nil {
 			c.Detail = config.Tilde(p) + " is not a creds file"
+			c.Reason = "the creds file is not a creds file: " + p
 			c.Fix = h.joinFix(cmds.JoinReplaceFix)
 		} else {
 			c.State, c.Code = cmds.CheckOK, ""

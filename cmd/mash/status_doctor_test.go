@@ -357,6 +357,10 @@ func TestDoctorServerNotAnsweringAndCredsProblems(t *testing.T) {
 		!strings.Contains(r.out, "sign-in   skip  needs the creds\ndelivery  skip  needs sign-in\n") || !strings.Contains(r.out, "refused   ok    ") || r.errs != "" { // chmod is not a command of ours: the row says what is wrong
 		t.Fatalf("doctor, creds mode: %+v", r)
 	}
+	// status keeps its longer sentence with the full path; the doctor row above shows ~
+	if r := runMash(w.env["a"], "status"); r.code != 1 || r.out != tTo("a")+": not ready: the creds file can be read by other users: "+p+"\n" {
+		t.Fatalf("status, creds mode: %+v", r)
+	}
 	// not a creds file: its content is never printed
 	if err := os.Chmod(p, 0o600); err != nil {
 		t.Fatal(err)
@@ -367,6 +371,9 @@ func TestDoctorServerNotAnsweringAndCredsProblems(t *testing.T) {
 	r = runMash(w.env["a"], "doctor")
 	if r.code != 1 || !strings.Contains(r.out, "creds     FAIL  "+config.Tilde(p)+" is not a creds file\n") || strings.Contains(r.out+r.errs, credsSecret) {
 		t.Fatalf("doctor, bad creds: %+v", r)
+	}
+	if r := runMash(w.env["a"], "status"); r.code != 1 || r.out != tTo("a")+": not ready: the creds file is not a creds file: "+p+"\n" || strings.Contains(r.out+r.errs, credsSecret) {
+		t.Fatalf("status, bad creds: %+v", r)
 	}
 	// missing
 	if err := os.Remove(p); err != nil {
