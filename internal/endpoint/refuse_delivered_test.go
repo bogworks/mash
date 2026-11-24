@@ -8,8 +8,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nats-io/nats.go/jetstream"
+
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/sap"
+	"github.com/bogworks/mash/internal/spool"
+	"github.com/bogworks/mash/internal/store"
 )
 
 // unknownSignerMsg stores one unknown-signer message in to's inbox.
@@ -154,5 +158,53 @@ func TestDeliveredSeqsKeptWhileStreamHoldsThem(t *testing.T) {
 		if want := i >= 25; e.deliveredSeq(i, id) != want {
 			t.Fatalf("sequence %d delivered=%v, want %v", i, !want, want)
 		}
+	}
+}
+
+// codex H1: a message serve delivered under accept_unverified (recorded, ack lost) is redelivered to a serve restarted
+// with accept_unverified off: it is delivered again, not refused and not recorded as refused.
+func TestDeliveredRedeliveryNotRefusedAfterAcceptOff(t *testing.T) {
+	f := newFixture(t, "a", "b")
+	state := t.TempDir()
+	on := f.cfgState("a", state, true)
+	off := f.cfgState("a", state, false)
+	f.unknownSignerMsg(t, "a")
+
+	ctx := context.Background()
+	ep1, err := Open(ctx, on)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ep1.SetSpool(spool.Spool{Dir: t.TempDir() + "/spool"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ep1.bindRefusals(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := ep1.recordDelivered(1); err != nil { // delivered, the ack lost
+		t.Fatal(err)
+	}
+	cons, err := ep1.js.Consumer(ctx, ep1.ident.InboxStream(), store.Consumer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := cons.Fetch(1, jetstream.FetchMaxWait(5*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for m := range b.Messages() {
+		_ = m.Nak()
+	}
+	ep1.Close()
+
+	_, ev, stop := serveCfg(t, off)
+	defer stop()
+	ev.waitFor(t, 1, 5*time.Second)
+	if n := RefusedCount(off); n != 0 {
+		t.Fatalf("refused count %d, want 0", n)
+	}
+	dir, _ := SpoolDir(off)
+	if _, seqs := readRefusedSeqs(filepath.Join(dir, refusedSeqsFile)); len(seqs) != 0 {
+		t.Fatalf("refused record: %v", seqs)
 	}
 }

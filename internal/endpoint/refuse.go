@@ -436,3 +436,16 @@ func (e *Endpoint) recordDelivered(seq uint64) error {
 	}
 	return werr
 }
+
+// deliveredEarlier reports whether serve recorded this unverified message as delivered, under accept_unverified, before:
+// a redelivery (its ack was lost, or serve restarted with the setting off) keeps that verdict and is not refused now,
+// the way a recorded refusal stays refused.
+func (e *Endpoint) deliveredEarlier(seq uint64) bool {
+	if e.cfg.StateDir == "" {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	id, err := e.bindRefusals(ctx)
+	return err == nil && e.deliveredSeq(seq, id)
+}

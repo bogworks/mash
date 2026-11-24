@@ -85,6 +85,15 @@ error: message 12 was refused: it was not verified
 hint: mash doctor
 ```
 
+### A shell reports what serve delivered
+
+Stream: n/a. Exit code: 0.
+
+```text
+(what serve refused is invisible at a shell; what serve delivered is
+shown there with its label)
+```
+
 ### A deleted endpoint here
 
 Stream: stderr. Exit code: 1.

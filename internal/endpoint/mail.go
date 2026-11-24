@@ -397,7 +397,7 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 			}
 			return
 		}
-		if e.refuses(trust) {
+		if e.refuses(trust) && !e.deliveredEarlier(ref.Seq) {
 			// Dropped and counted, never delivered: acked so it is not redelivered for ever. The sender is told nothing.
 			// Without the lease the new holder gets it (and counts it), so it is nak'd, not counted.
 			if e.mayAck(pending{}) {
