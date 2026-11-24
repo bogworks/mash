@@ -129,6 +129,7 @@ func cases(c *command, name string) ([]outCase, error) {
 }
 
 type renderer struct {
+	rel    string
 	b      strings.Builder
 	errs   []string
 	nflag  int
@@ -182,7 +183,7 @@ func (r *renderer) entry(where, issue string, c outCase, today *outCase, todaySt
 		}
 		r.b.WriteString("\n")
 	}
-	r.b.WriteString("0.5.8:\n\n")
+	r.b.WriteString(r.rel + ":\n\n")
 	fence(&r.b, c.Text)
 	r.b.WriteString(streamLine(c) + "\n")
 	r.widths(where, c.Text)
@@ -252,7 +253,7 @@ func render(dir string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("next.json: %w", err)
 	}
-	r := &renderer{}
+	r := &renderer{rel: rel}
 	r.b.WriteString("# Gate 1 demo: planned " + rel + " output\n\nGenerated from the specification (x-output-next, spec/next.json). Not yet implemented.\n")
 	for _, f := range []string{"mash.json", "mashctl.json"} {
 		var t toolSpec
@@ -300,7 +301,7 @@ func render(dir string) (string, error) {
 				return "", fmt.Errorf("rule %q replaces %q, which is not a rule in rules.json", rn.Rule, rn.Replaces)
 			}
 		}
-		r.b.WriteString("0.5.8:\n\n")
+		r.b.WriteString(rel + ":\n\n")
 		fence(&r.b, rn.Detail)
 	}
 	out := r.b.String()

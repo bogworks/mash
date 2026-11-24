@@ -71,58 +71,7 @@
    "stream": "stdout",
    "exit": 0,
    "issue": "#1151",
-   "note": "Printed once, only when nats-server is not on PATH and a root-owned, not group- or other-writable one (not a symbolic link, in a folder whose every ancestor is the same) is in /usr/sbin, /usr/local/sbin or /sbin (in that order); the folder in the line is the one found."
-  },
-  {
-   "id": "policy-field-prefix",
-   "where": "policy document",
-   "case": "Policy document field",
-   "text": "\"prefix\": \"foo\"",
-   "stream": "n/a",
-   "exit": 0,
-   "issue": "#1262",
-   "note": "Was \"range\". The document's field naming the address prefix it is for. Hard cut: a document with a \"range\" field is refused. The field appears on the wire (the signed document), in stored state (list set, the bucket name pattern) and in policy tooling output; a 0.5.7 program sees nothing (the policy code is not linked into 0.5.7)."
-  },
-  {
-   "id": "policy-flag-prefix",
-   "where": "policy tooling",
-   "case": "The flag",
-   "text": "--prefix is needed to check a first list set's prefix when nothing is in force",
-   "stream": "stderr",
-   "exit": 1,
-   "issue": "#1262",
-   "replaces": "--range is needed to check a first list set's range when nothing is in force"
-  },
-  {
-   "id": "policy-plan-line-prefix",
-   "where": "policy tooling",
-   "case": "The plan line",
-   "text": "refused: nothing would change\n  [prefix] prefix: the document's `prefix` field is bar and the selected address\n    prefix is foo\n  [validate] sender \"foo.c.core\": address prefix \"foo\" is not the account's\n    address prefix \"bar\"",
-   "stream": "stdout",
-   "exit": 1,
-   "issue": "#1258",
-   "replaces": "refused: nothing would change\n  [range] range: the document is for address prefix bar and the selected address prefix is foo\n  [validate] sender \"foo.c.core\": address prefix \"foo\" is not the account's address prefix \"bar\"",
-   "note": "Wrapped here to fit the 80-column limit; as one line it is 96 columns. Wording to be settled: shorter words or this wrapping."
-  },
-  {
-   "id": "policy-bucket-placeholder",
-   "where": "policy tooling",
-   "case": "The bucket placeholder",
-   "text": "policy bucket: the pattern has {prefix} but the prefix is empty",
-   "stream": "stderr",
-   "exit": 1,
-   "issue": "#1262",
-   "replaces": "policy bucket: the pattern has {range} but the range name is empty"
-  },
-  {
-   "id": "policy-show-prefix",
-   "where": "policy tooling",
-   "case": "show",
-   "text": "generation: 3\nprefix: foo",
-   "stream": "stdout",
-   "exit": 0,
-   "issue": "#1262",
-   "replaces": "generation: 3\nrange: foo"
+   "note": "Printed once, only when nats-server is not on PATH and a root-owned, not group- or other-writable one (not a symbolic link, in a folder whose every ancestor is the same) is in /usr/sbin, /usr/local/sbin or /sbin (in that order); the folder in the line is the one found. No \"nats-server:\" prefix: only \"error:\" and \"warning:\" are prefixes."
   },
   {
    "id": "signing-lost-both",
@@ -198,11 +147,12 @@
    "id": "join-user-jwt-name-differs",
    "where": "mash join",
    "case": "The join file's user JWT is named for another address",
-   "text": "error: mix.join was made for \"acme.demo.carol\", but its address is\n  \"acme.demo.bob\"\nhint: ask whoever made this file for a new one: mashctl endpoint reissue\n  acme.demo.bob --out acme.demo.bob.join",
+   "text": "error: bob.join names acme.demo.bob but is for acme.demo.carol\nhint: mashctl endpoint reissue acme.demo.bob --out bob.join",
    "stream": "stderr",
    "exit": 1,
    "issue": "#1303",
-   "note": "From ctl (final text, head f1c8b74; replaces ctl's earlier #1303 text). When the user JWT has no name: `error: mix.join has no name, but its address is \"acme.demo.bob\"` and the same hint. The old line `error: mix.join is not a join file this mash can read` stays for every other join-file problem. Lines wrapped here; one error line and one hint line in the program."
+   "note": "From ctl (final text, head f1c8b74; replaces ctl's earlier #1303 text). \"names\" is the address in the file; \"is for\" is the address its credentials were made for. When the credentials carry no name: `error: bob.join has no name but names acme.demo.bob`, same hint. The old line `error: mix.join is not a join file this mash can read` stays for every other join-file problem. The hint is run by whoever made the file.",
+   "replaces": "error: mix.join is not a join file this mash can read"
   },
   {
    "id": "setup-remove-port-held",
@@ -219,18 +169,48 @@
    "id": "serve-shell-reports-delivered",
    "where": "mash serve / read / inbox (shell)",
    "case": "A shell reports what serve delivered",
-   "text": "what serve refused is invisible at a shell; what serve delivered is shown\nthere with its label",
+   "text": "(a message serve refused stays refused at a shell; one it\ndelivered shows there with its trust label)",
    "stream": "n/a",
    "exit": 0,
    "issue": "#990",
    "replaces": "A refused message is invisible at a shell too",
-   "note": "REQ-013. No new output case. A message serve recorded as refused stays refused at a shell, whatever the shell's accept-unverified setting. A message serve delivered under --accept-unverified shows at a shell with its trust label, whatever the shell's setting. A message no serve has judged yet is judged by the shell's own setting, as today. The existing 'A message that was refused' case and the inbox listing are unchanged."
+   "note": "REQ-013. A description, not output: the whole text is in round brackets, which the rules reserve for a description, so the conformance test skips it. A message serve recorded as refused stays refused at a shell, whatever the shell's accept-unverified setting. A message serve delivered under --accept-unverified shows at a shell with its trust label, whatever the shell's setting. A message no serve has judged yet is judged by the shell's own setting, as today. The existing \"A message that was refused\" case and the inbox listing are unchanged."
+  },
+  {
+   "id": "signing-nk-unreadable",
+   "where": "mashctl endpoint create / reissue (strict signing)",
+   "case": "signing.nk cannot be read",
+   "issue": "#1246",
+   "stream": "stderr",
+   "exit": 1,
+   "text": "error: signing.nk in ~/.config/mash/keys cannot be read\nhint: mashctl doctor",
+   "note": "PROPOSED, not yet in the specification (REQ-036: \"either unreadable or not a valid key\" also fails closed, with an error that says which file). Same for signing.pub. The old hint offered two options; one command now."
+  },
+  {
+   "id": "signing-nk-not-valid",
+   "where": "mashctl endpoint create / reissue (strict signing)",
+   "case": "signing.nk is not a valid key",
+   "issue": "#1246",
+   "stream": "stderr",
+   "exit": 1,
+   "text": "error: signing.nk in ~/.config/mash/keys is not a valid key\nhint: mashctl doctor",
+   "note": "PROPOSED, not yet in the specification (REQ-036). Same for signing.pub."
+  },
+  {
+   "id": "join-ca-into-folder-with-no-endpoint",
+   "where": "mash join",
+   "case": "A folder with servers and no endpoint",
+   "issue": "#1062",
+   "stream": "stderr",
+   "exit": 1,
+   "text": "error: this folder has a server but no endpoint\nhint: mash join <file> --config-dir <folder>",
+   "note": "PROPOSED, not yet in the specification (REQ-015, #1062: join refuses to add a certificate authority to a folder with servers but no endpoint, and nothing is added). <file> is the join file and <folder> a new folder; both vary. The lead states the real condition."
   }
  ],
  "rules_next": [
   {
    "rule": "Both doctors work the same way",
-   "detail": "mash doctor and mashctl doctor print every row every time, each marked ok, warn, FAIL or skip; a row that cannot run because an earlier one failed is skip, with what it needs. 'checks' in --json always lists every row, whatever failed. After the rows come one blank line and a count ('No problems.', '1 problem, 1 warning.'). A doctor that found a problem always ends with exactly one hint. The hint is a command of ours when one fixes the problem, otherwise one plain sentence naming who or what does. It is never a command that only checks, and never one that replaces credentials, moves a folder or changes permissions unless the doctor found exactly the condition that command fixes. Exit 1 when there is a problem; warnings alone exit 0, or 1 with --strict. A server row shows the address as configured.",
+   "detail": "mash doctor and mashctl doctor print every row every time, each marked ok, warn, FAIL or skip; a row that cannot run because an earlier one failed is skip, with what it needs. 'checks' in --json always lists every row, whatever failed. After the rows come one blank line and a count ('No problems.', '1 problem, 1 warning.'). A hint is a command of ours that fixes the problem, or there is no hint and the row's own words say what is wrong. A doctor prints at most one hint. It is never a command that only checks, and never one that replaces credentials, moves a folder or changes permissions unless the doctor found exactly the condition that command fixes. With no problem, the first warning that has a command that fixes it gets one hint. Exit 1 when there is a problem; warnings alone exit 0, or 1 with --strict. A server row shows the address as configured.",
    "replaces": "Both doctors work the same way"
   },
   {

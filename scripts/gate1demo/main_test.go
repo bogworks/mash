@@ -45,13 +45,13 @@ func TestCommandReplaces(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, w := range []string{"## mashx init / New (#1055)", "Today:", "old text", "0.5.8:", "new text", "stream: stderr, exit: 1", "Note: a note"} {
+	for _, w := range []string{"## mashx init / New (#1055)", "Today:", "old text", "0.5.9:", "new text", "stream: stderr, exit: 1", "Note: a note"} {
 		if !strings.Contains(out, w) {
 			t.Errorf("missing %q in\n%s", w, out)
 		}
 	}
 	if strings.Index(out, "old text") > strings.Index(out, "new text") {
-		t.Error("Today must precede 0.5.8")
+		t.Error("Today must precede 0.5.9")
 	}
 }
 
@@ -87,7 +87,7 @@ func TestItemReplacesToday(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "Today:\n\n```\nold flag text\n```\n\n0.5.8:") {
+	if !strings.Contains(out, "Today:\n\n```\nold flag text\n```\n\n0.5.9:") {
 		t.Errorf("Today block wrong:\n%s", out)
 	}
 	if strings.Count(out, "stream:") != 1 {
