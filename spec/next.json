@@ -177,26 +177,6 @@
    "note": "The text is policy's proposed text (spec/next.json at a827f3d2), in round brackets. REQ-013. A description, not output: the whole text is in round brackets, which the rules reserve for a description, so the conformance test skips it. A message serve recorded as refused stays refused at a shell, whatever the shell's accept-unverified setting. A message serve delivered under --accept-unverified shows at a shell with its trust label, whatever the shell's setting. A message no serve has judged yet is judged by the shell's own setting, as today. The existing \"A message that was refused\" case and the inbox listing are unchanged."
   },
   {
-   "id": "signing-nk-unreadable",
-   "where": "mashctl endpoint create / reissue (strict signing)",
-   "case": "signing.nk cannot be read",
-   "issue": "#1246",
-   "stream": "stderr",
-   "exit": 1,
-   "text": "error: signing.nk in ~/.config/mash/keys cannot be read\nhint: mashctl doctor",
-   "note": "PROPOSED, not yet in the specification (REQ-036: \"either unreadable or not a valid key\" also fails closed, with an error that says which file). Same for signing.pub. The old hint offered two options; one command now."
-  },
-  {
-   "id": "signing-nk-not-valid",
-   "where": "mashctl endpoint create / reissue (strict signing)",
-   "case": "signing.nk is not a valid key",
-   "issue": "#1246",
-   "stream": "stderr",
-   "exit": 1,
-   "text": "error: signing.nk in ~/.config/mash/keys is not a valid key\nhint: mashctl doctor",
-   "note": "PROPOSED, not yet in the specification (REQ-036). Same for signing.pub."
-  },
-  {
    "id": "join-ca-into-folder-with-no-endpoint",
    "where": "mash join",
    "case": "A folder with servers and no endpoint",
