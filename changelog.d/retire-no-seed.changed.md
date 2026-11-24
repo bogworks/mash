@@ -1,0 +1,1 @@
+**Deleting an endpoint no longer keeps its key.** `mashctl endpoint delete` still leaves a `.deleted` marker beside where the creds file was, so mash knows the endpoint was deleted, but the marker now holds the endpoint's JWT and no key (#1064). The creds file itself is removed.

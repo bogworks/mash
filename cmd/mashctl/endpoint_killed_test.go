@@ -299,7 +299,7 @@ func TestEndpointDeleteFinishesAfterKill(t *testing.T) {
 	if err := json.Unmarshal([]byte(so), &d); err != nil || !d.Deleted || d.Address != a.String() {
 		t.Fatalf("doc %q %v", so, err)
 	}
-	if got, err := os.ReadFile(retired); err != nil || string(got) != string(creds) {
+	if got, err := os.ReadFile(retired); err != nil || string(got) != string(jwtBlock(creds)) {
 		t.Errorf("retired file: %v", err)
 	}
 	if _, err := os.Lstat(h.creds(a)); !os.IsNotExist(err) {

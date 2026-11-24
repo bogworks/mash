@@ -52,8 +52,11 @@ func TestRetireRenamesCredsByDefault(t *testing.T) {
 		t.Errorf("report: %q", out)
 	}
 	got, err := os.ReadFile(moved)
-	if err != nil || string(got) != string(want) {
-		t.Fatalf("renamed content: %v", err)
+	if err != nil || !strings.Contains(string(want), string(got)) || !strings.Contains(string(got), "BEGIN NATS USER JWT") {
+		t.Fatalf("marker content: %v %q", err, got)
+	}
+	if strings.Contains(string(got), "SEED") {
+		t.Errorf("the marker holds a seed: %q", got)
 	}
 	if fi, _ := os.Stat(moved); fi.Mode().Perm() != 0o600 {
 		t.Errorf("mode %v", fi.Mode())
@@ -257,12 +260,12 @@ func TestRetireTwiceSameSecondKeepsBothSeeds(t *testing.T) {
 	h.seed(ad("c"))
 	for i := 0; i < 2; i++ {
 		if i == 1 { // a retired address cannot be made again: put another creds file at the old path
-			if err := os.WriteFile(h.creds(ad("c")), []byte("second seed"), 0o600); err != nil {
+			if err := os.WriteFile(h.creds(ad("c")), []byte("-----BEGIN NATS USER JWT-----\neyJsecond\n------END NATS USER JWT------\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
 		}
 		b, _ := os.ReadFile(h.creds(ad("c")))
-		seeds = append(seeds, string(b))
+		seeds = append(seeds, string(jwtBlock(b)))
 		if out, errb, code := h.run("endpoint", "delete", "o.g.c", "--yes"); code != 0 {
 			t.Fatalf("%d %q %q", code, out, errb)
 		}
@@ -279,39 +282,94 @@ func TestRetireTwiceSameSecondKeepsBothSeeds(t *testing.T) {
 	}
 }
 
-func TestArchiveNoReplaceNeverOverwritesAndKeepsMode(t *testing.T) {
+const markerSeed = "SUABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUV"
+
+func markerCreds(jwt string) string {
+	return "-----BEGIN NATS USER JWT-----\n" + jwt + "\n------END NATS USER JWT------\n\n************************* IMPORTANT *************************\nNKEY Seed printed below can be used to sign and prove identity.\n\n-----BEGIN USER NKEY SEED-----\n" + markerSeed + "\n------END USER NKEY SEED------\n\n*************************************************************\n"
+}
+
+func TestArchiveNoReplaceKeepsTheJWTAndNoSeed(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "n.creds")
-	dest := src + ".retired-x"
-	if err := os.WriteFile(src, []byte("new"), 0o640); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(dest, []byte("old"), 0o600); err != nil {
+	dest := src + ".deleted"
+	if err := os.WriteFile(src, []byte(markerCreds("eyJhbGciOi.abc_d-e")), 0o640); err != nil {
 		t.Fatal(err)
 	}
 	got, err := archiveNoReplace(src, dest)
-	if err != nil || got != dest+".1" {
+	if err != nil || got != dest {
 		t.Fatalf("%q %v", got, err)
 	}
-	if b, _ := os.ReadFile(dest); string(b) != "old" {
-		t.Errorf("existing archive overwritten: %q", b)
+	fi, err := os.Lstat(got)
+	if err != nil || !fi.Mode().IsRegular() {
+		t.Fatalf("marker not a regular file: %v", err)
 	}
-	if b, _ := os.ReadFile(got); string(b) != "new" {
-		t.Errorf("content %q", b)
-	}
-	if fi, _ := os.Stat(got); fi.Mode().Perm() != 0o640 {
+	if fi.Mode().Perm() != 0o640 {
 		t.Errorf("mode %v", fi.Mode())
+	}
+	b, _ := os.ReadFile(got)
+	want := "-----BEGIN NATS USER JWT-----\neyJhbGciOi.abc_d-e\n------END NATS USER JWT------\n"
+	if string(b) != want {
+		t.Errorf("marker %q", b)
+	}
+	for _, bad := range []string{markerSeed, "SEED", "NKEY"} {
+		if strings.Contains(string(b), bad) {
+			t.Errorf("marker contains %q", bad)
+		}
 	}
 	if _, err := os.Lstat(src); !os.IsNotExist(err) {
 		t.Error("source remains")
 	}
 }
 
+func TestArchiveNoReplaceNeverOverwrites(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "n.creds")
+	dest := src + ".deleted"
+	os.WriteFile(src, []byte(markerCreds("eyJnew")), 0o600)
+	os.WriteFile(dest, []byte("old"), 0o600)
+	got, err := archiveNoReplace(src, dest)
+	if err != nil || got != dest+".1" {
+		t.Fatalf("%q %v", got, err)
+	}
+	if b, _ := os.ReadFile(dest); string(b) != "old" {
+		t.Errorf("existing marker overwritten: %q", b)
+	}
+	if b, _ := os.ReadFile(got); !strings.Contains(string(b), "eyJnew") || strings.Contains(string(b), markerSeed) {
+		t.Errorf("content %q", b)
+	}
+}
+
+func TestArchiveNoReplaceWithoutAJWTBlockIsEmpty(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "n.creds")
+	dest := src + ".deleted"
+	os.WriteFile(src, []byte("-----BEGIN USER NKEY SEED-----\n"+markerSeed+"\n------END USER NKEY SEED------\n"), 0o600)
+	got, err := archiveNoReplace(src, dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi, err := os.Stat(got); err != nil || fi.Size() != 0 {
+		t.Errorf("marker %v %v", fi, err)
+	}
+	if _, err := os.Lstat(src); !os.IsNotExist(err) {
+		t.Error("source remains")
+	}
+}
+
+func TestJWTBlockIgnoresAnythingButTheBlock(t *testing.T) {
+	if b := jwtBlock([]byte("-----BEGIN NATS USER JWT-----\neyJ\n" + markerSeed + " SEED\n------END NATS USER JWT------\n")); b != nil {
+		t.Errorf("a block with a foreign line was copied: %q", b)
+	}
+	if b := jwtBlock([]byte("-----BEGIN NATS USER JWT-----\neyJ\n")); b != nil {
+		t.Errorf("an unterminated block was copied: %q", b)
+	}
+}
+
 func TestArchiveNoReplaceExhaustedLeavesSource(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "n.creds")
-	dest := src + ".retired-x"
-	os.WriteFile(src, []byte("new"), 0o600)
+	dest := src + ".deleted"
+	os.WriteFile(src, []byte(markerCreds("eyJnew")), 0o600)
 	os.WriteFile(dest, []byte("old"), 0o600)
 	for i := 1; i <= 100; i++ {
 		os.WriteFile(dest+"."+strconv.Itoa(i), []byte("old"), 0o600)
@@ -320,51 +378,27 @@ func TestArchiveNoReplaceExhaustedLeavesSource(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "nothing was moved") {
 		t.Fatalf("err %v", err)
 	}
-	if b, _ := os.ReadFile(src); string(b) != "new" {
-		t.Error("source lost")
+	if b, _ := os.ReadFile(src); string(b) != markerCreds("eyJnew") {
+		t.Error("source changed or lost")
 	}
 }
 
-func TestCopyAndRemoveKeepsContent(t *testing.T) {
-	dir := t.TempDir()
-	src := filepath.Join(dir, "n.creds")
-	dest := src + ".retired-x"
-	os.WriteFile(src, []byte("seed"), 0o640)
-	out, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o640)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := copyAndRemove(src, out, 0o640); err != nil {
-		t.Fatal(err)
-	}
-	if b, _ := os.ReadFile(dest); string(b) != "seed" {
-		t.Errorf("archive %q", b)
-	}
-	if _, err := os.Lstat(src); !os.IsNotExist(err) {
-		t.Error("source remains")
-	}
-}
-
-func TestCopyAndRemoveSyncFailureKeepsSource(t *testing.T) {
+func TestArchiveNoReplaceSyncFailureKeepsSource(t *testing.T) {
 	old := syncFile
 	syncFile = func(*os.File) error { return errors.New("disk on fire") }
 	defer func() { syncFile = old }()
 	dir := t.TempDir()
 	src := filepath.Join(dir, "n.creds")
-	dest := src + ".retired-x"
-	os.WriteFile(src, []byte("seed"), 0o600)
-	out, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := copyAndRemove(src, out, 0o600); err == nil {
+	dest := src + ".deleted"
+	os.WriteFile(src, []byte(markerCreds("eyJnew")), 0o600)
+	if _, err := archiveNoReplace(src, dest); err == nil {
 		t.Fatal("expected error")
 	}
-	if b, _ := os.ReadFile(src); string(b) != "seed" {
+	if b, _ := os.ReadFile(src); string(b) != markerCreds("eyJnew") {
 		t.Error("source lost")
 	}
 	if _, err := os.Lstat(dest); !os.IsNotExist(err) {
-		t.Error("half archive remains")
+		t.Error("half marker remains")
 	}
 }
 
