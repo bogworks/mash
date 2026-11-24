@@ -1129,6 +1129,47 @@ func TestInstallSh_aSplitPairIsRepairedOnRerun(t *testing.T) {
 // is left byte for byte as it was.
 func TestInstallSh_refusesAPairAtDifferentVersions(t *testing.T) {
 	rel, _, _ := fakeReleaseVersions(t, fakeMashVersion, "mashctl 0.5.7")
+	refuseStagedPair(t, rel, "error: the downloaded mashctl reports 0.5.7, expected 0.5.6: nothing was installed\n")
+}
+
+// Two programs that agree with each other but not with the requested tag are refused too.
+func TestInstallSh_refusesAPairAtTheWrongVersion(t *testing.T) {
+	rel, _, _ := fakeReleaseVersions(t, "mash v0.5.7 (3f9a41c)", "mashctl 0.5.7")
+	refuseStagedPair(t, rel, "error: the downloaded mash reports 0.5.7, expected 0.5.6: nothing was installed\n")
+}
+
+// A program that exits non-zero is refused even when it prints the right version.
+func TestInstallSh_refusesAProgramThatExitsNonZero(t *testing.T) {
+	for _, which := range []string{"mash", "mashctl"} {
+		t.Run(which, func(t *testing.T) {
+			rel, mashName, ctlName := fakeRelease(t)
+			name, line := mashName, fakeMashVersion
+			if which == "mashctl" {
+				name, line = ctlName, fakeCtlVersion
+			}
+			body := "#!/bin/sh\n[ \"$1\" = version ] && echo '" + line + "'\nexit 3\n"
+			writeFile(t, filepath.Join(rel, name), body)
+			sum := sha256.Sum256([]byte(body))
+			sums, err := os.ReadFile(filepath.Join(rel, "SHA256SUMS"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var out []string
+			for _, l := range strings.Split(strings.TrimSpace(string(sums)), "\n") {
+				if strings.HasSuffix(l, "  "+name) {
+					l = hex.EncodeToString(sum[:]) + "  " + name
+				}
+				out = append(out, l)
+			}
+			writeFile(t, filepath.Join(rel, "SHA256SUMS"), strings.Join(out, "\n")+"\n")
+			refuseStagedPair(t, rel, "error: the downloaded "+which+" did not report its version: nothing was installed\n")
+		})
+	}
+}
+
+// refuseStagedPair installs rel over an old 0.5.4 pair, wants the refusal line, and checks the old pair is intact.
+func refuseStagedPair(t *testing.T, rel, refusal string) {
+	t.Helper()
 	home := tempHome(t)
 	dest := filepath.Join(home, "bin")
 	if err := os.Mkdir(dest, 0o755); err != nil {
@@ -1144,7 +1185,7 @@ func TestInstallSh_refusesAPairAtDifferentVersions(t *testing.T) {
 	if r.err == nil {
 		t.Fatalf("want a refusal:\n%s", r.out)
 	}
-	if !strings.Contains(r.out, "error: mash is 0.5.6 but mashctl is 0.5.7: nothing was installed\n") {
+	if !strings.Contains(r.out, refusal) {
 		t.Errorf("refusal does not name both versions:\n%s", r.out)
 	}
 	if strings.Contains(r.out, "Installed ") {

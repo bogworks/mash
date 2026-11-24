@@ -54,9 +54,12 @@ die() {
 }
 
 # version_of PROGRAM: the version PROGRAM reports, without its name or a leading v
-# ("mash v0.5.6 (3f9a41c)" and "mashctl 0.5.6" both give 0.5.6); empty if it does not run.
+# ("mash v0.5.6 (3f9a41c)" and "mashctl 0.5.6" both give 0.5.6); empty if it does not run
+# or exits non-zero.
 version_of() {
-    "$1" version 2>/dev/null | head -n 1 | awk 'NR == 1 { sub(/^v/, "", $2); print $2 }' || true
+    local out
+    out=$("$1" version 2>/dev/null) || return 0
+    printf '%s\n' "$out" | awk 'NR == 1 { sub(/^v/, "", $2); print $2 }'
 }
 
 # sha256_of FILE: the hex SHA-256 of FILE, with sha256sum or shasum.
@@ -291,12 +294,14 @@ main() {
     done
 
     # The two new programs, still staged and already checked against SHA256SUMS,
-    # must report one version; if not, refuse before either rename.
+    # must each report the requested release's version; if not, refuse before
+    # either rename.
     new_a=$(version_of "${staged_new[0]}")
     new_b=$(version_of "${staged_new[1]}")
     [ -n "$new_a" ] || die "the downloaded mash did not report its version: nothing was installed"
     [ -n "$new_b" ] || die "the downloaded mashctl did not report its version: nothing was installed"
-    [ "$new_a" = "$new_b" ] || die "mash is $new_a but mashctl is $new_b: nothing was installed"
+    [ "$new_a" = "${tag#v}" ] || die "the downloaded mash reports $new_a, expected ${tag#v}: nothing was installed"
+    [ "$new_b" = "${tag#v}" ] || die "the downloaded mashctl reports $new_b, expected ${tag#v}: nothing was installed"
 
     local backup=""
     if [ -f "$real/mash" ]; then
