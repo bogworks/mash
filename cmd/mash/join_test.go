@@ -859,17 +859,17 @@ func TestJoinRefusesACredsNameThatIsNotTheAddress(t *testing.T) {
 	w.joinFor("mix.join", other, "acme.demo.bob", nil)
 	writeJoin(t, "mixjwt.join", joinfile.File{MashJoin: 1, Address: "acme.demo.bob", Servers: []string{"tls://myserver:4222"}, UserJWT: other.token})
 	os.WriteFile("carol.seed", other.seed, 0o600)
-	hint := "hint: ask whoever made this file for a new one: mashctl endpoint reissue acme.demo.bob --out acme.demo.bob.join\n"
+	hint := func(file string) string { return "hint: mashctl endpoint reissue acme.demo.bob --out " + file + "\n" }
 	for _, args := range [][]string{{"join", "mix.join"}, {"join", "mixjwt.join", "--key", "carol.seed"}} {
 		r := w.run(args...)
-		if r.code != 1 || r.out != "" || r.errs != "error: "+args[1]+` was made for "acme.demo.carol", but its address is "acme.demo.bob"`+"\n"+hint {
+		if r.code != 1 || r.out != "" || r.errs != "error: "+args[1]+" names acme.demo.bob but is for acme.demo.carol\n"+hint(args[1]) {
 			t.Errorf("%v: %+v", args, r)
 		}
 	}
 	// a JWT with no name says so, and does not print an empty name
 	none := newJoinMaterial(t, "")
 	w.joinFor("noname.join", none, "acme.demo.bob", nil)
-	if r := w.run("join", "noname.join"); r.code != 1 || r.out != "" || r.errs != "error: noname.join has no name, but its address is \"acme.demo.bob\"\n"+hint {
+	if r := w.run("join", "noname.join"); r.code != 1 || r.out != "" || r.errs != "error: noname.join has no name but names acme.demo.bob\n"+hint("noname.join") {
 		t.Errorf("no name: %+v", r)
 	}
 	if _, err := os.Stat(w.cfg); err == nil {
