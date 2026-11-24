@@ -8,6 +8,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -165,7 +166,9 @@ func run(bin, tag string) (*result, error) {
 		k.creds[name], addrs[name] = creds, a
 	}
 	r := &result{tag: tag, trust: map[string]int{}, class: map[string]int{}}
-	k.sendAll(r, "alice", "bob")
+	if err := k.sendAll(r, "alice", "bob"); err != nil {
+		return nil, err
+	}
 	js, err := jetstream.New(anc)
 	if err != nil {
 		return nil, err
@@ -175,31 +178,44 @@ func run(bin, tag string) (*result, error) {
 			return nil, err
 		}
 	}
+	if ok := r.sends - r.refused; r.msgs < ok || r.msgs < 2 {
+		return nil, fmt.Errorf("%d messages stored, but %d of %d sends succeeded (need at least that many, and 2)", r.msgs, ok, r.sends)
+	}
 	selfCheck(r)
 	return r, nil
 }
 
-// sendAll has each side send every kind this CLI writes. A refused send (a flag this release lacks) is counted, not fatal.
-func (k *kit) sendAll(r *result, a, b string) {
+// sendAll has each side send every kind this CLI writes. The two plain sends every release supports must succeed, or it
+// returns an error; a refused flag-dependent send (a flag this release lacks) is counted and noted, not fatal.
+func (k *kit) sendAll(r *result, a, b string) error {
+	var basicErr error
 	to := func(n string) string { return k.e.Owner + ".dev." + n }
 	long := strings.Repeat("long line of text, with unicode é世界\U0001F600 and tabs\t\n", 150)
-	send := func(who, stdin string, args ...string) {
+	send := func(basic bool, who, stdin string, args ...string) {
 		r.sends++
 		if err := k.mash(who, stdin, append([]string{"send"}, args...)...); err != nil {
+			if basic {
+				r.refused++
+				if basicErr == nil {
+					basicErr = fmt.Errorf("basic send %v failed: %w", args, err)
+				}
+				return
+			}
 			r.refused++
 			fmt.Fprintf(os.Stderr, "note: %s send %v refused: %v\n", r.tag, args, err)
 		}
 	}
-	send(a, "", to(b), "hello bob")
-	send(a, "", to(b), "unicode é世界 \U0001F600 ‮ rtl", "--kind", "fyi")
-	send(a, ".", to(b), "--file", "-")
-	send(a, long, to(b), "--file", "-", "--kind", "result")
-	send(a, "", to(b), "urgent one", "--urgent", "--kind", "blocker")
-	send(a, "", to(b), "keyed", "--id", "storedmail-1", "--kind", "question")
-	send(b, "", to(a), "hello alice")
-	send(b, "", to(a), "reply", "--reply-to", "1")
-	send(b, "", to(a), "unicode é世界", "--kind", "fyi")
-	send(a, "", to(b), "relayed", "--relay", "1")
+	send(true, a, "", to(b), "hello bob")
+	send(false, a, "", to(b), "unicode é世界 \U0001F600 ‮ rtl", "--kind", "fyi")
+	send(false, a, ".", to(b), "--file", "-")
+	send(false, a, long, to(b), "--file", "-", "--kind", "result")
+	send(false, a, "", to(b), "urgent one", "--urgent", "--kind", "blocker")
+	send(false, a, "", to(b), "keyed", "--id", "storedmail-1", "--kind", "question")
+	send(true, b, "", to(a), "hello alice")
+	send(false, b, "", to(a), "reply", "--reply-to", "1")
+	send(false, b, "", to(a), "unicode é世界", "--kind", "fyi")
+	send(false, a, "", to(b), "relayed", "--relay", "1")
+	return basicErr
 }
 
 // check reads every message of one inbox stream and classifies it, with its header and without.
@@ -212,7 +228,10 @@ func check(ctx context.Context, js jetstream.JetStream, a sap.Address, r *result
 	for seq := st.FirstSeq; seq != 0 && seq <= st.LastSeq; seq++ {
 		m, err := s.GetMsg(ctx, seq)
 		if err != nil {
-			continue
+			if errors.Is(err, jetstream.ErrMsgNotFound) {
+				continue
+			}
+			return fmt.Errorf("get %s seq %d: %w", a.InboxStream(), seq, err)
 		}
 		r.msgs++
 		vals := m.Header.Values(sap.HeaderName)
