@@ -165,6 +165,9 @@ func (s *cliSvc) Health(ctx context.Context) (cmds.HealthReport, error) {
 	return (&healthSvc{cfg: s.cfg, cfgErr: s.cfgErr}).Health(ctx)
 }
 
+// ClaudeCheck is doctor's claude row; status does not ask for it.
+func (s *cliSvc) ClaudeCheck(ctx context.Context) cmds.HealthCheck { return claudeCheck(ctx) }
+
 func (s *cliSvc) Send(ctx context.Context, to, text string, o cmds.SendOptions) (cmds.SendReceipt, error) {
 	cfg := s.cfg
 	if err := checkSend(o); err != nil { // before the endpoint: a bad key is a usage error with or without one

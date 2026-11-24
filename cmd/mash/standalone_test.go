@@ -247,31 +247,9 @@ func TestNoForeignToolInSource(t *testing.T) {
 					t.Errorf("%s imports %s", p, path)
 				}
 			}
-			ast.Inspect(f, func(n ast.Node) bool {
-				call, ok := n.(*ast.CallExpr)
-				if !ok {
-					return true
-				}
-				sel, ok := call.Fun.(*ast.SelectorExpr)
-				if !ok {
-					return true
-				}
-				// doctor's claude row looks up claude to read its version (REQ-017); nothing else may
-				if filepath.ToSlash(p) == "../../cmd/mash/claudecheck.go" {
-					return true
-				}
-				switch sel.Sel.Name {
-				case "Command", "CommandContext", "LookPath", "StartProcess":
-					for _, a := range call.Args {
-						if lit, ok := a.(*ast.BasicLit); ok && lit.Kind == token.STRING {
-							if s, _ := strconv.Unquote(lit.Value); hasForeign(filepath.Base(s)) {
-								t.Errorf("%s: %s(%s) names a foreign tool", p, sel.Sel.Name, lit.Value)
-							}
-						}
-					}
-				}
-				return true
-			})
+			for _, msg := range foreignCalls(p, f) {
+				t.Error(msg)
+			}
 			return nil
 		})
 		if err != nil {
@@ -280,6 +258,91 @@ func TestNoForeignToolInSource(t *testing.T) {
 	}
 	if checked < 20 {
 		t.Fatalf("only %d source files checked: wrong root?", checked)
+	}
+}
+
+// claudeCheckFile is the one file that may look up claude and run 2.1.330 (Claude Code) (REQ-017, doctor's claude row).
+const claudeCheckFile = "../../cmd/mash/claudecheck.go"
+
+// foreignCalls lists the calls in f that run or look up a foreign tool. In claudeCheckFile only the lookup of
+// "claude" (one LookPath) and one Command/CommandContext whose last argument is "--version" pass; a second of either, or
+// any other process call there, is listed.
+func foreignCalls(p string, f *ast.File) (bad []string) {
+	inClaude := filepath.ToSlash(p) == claudeCheckFile
+	lookups, runs := 0, 0
+	ast.Inspect(f, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		switch sel.Sel.Name {
+		case "Command", "CommandContext", "LookPath", "StartProcess":
+		default:
+			return true
+		}
+		lit := func(e ast.Expr) string {
+			if b, ok := e.(*ast.BasicLit); ok && b.Kind == token.STRING {
+				s, _ := strconv.Unquote(b.Value)
+				return s
+			}
+			return ""
+		}
+		if inClaude {
+			last := ""
+			if len(call.Args) > 0 {
+				last = lit(call.Args[len(call.Args)-1])
+			}
+			switch {
+			case sel.Sel.Name == "LookPath" && len(call.Args) == 1 && last == "claude":
+				if lookups++; lookups == 1 {
+					return true
+				}
+			case (sel.Sel.Name == "Command" || sel.Sel.Name == "CommandContext") && len(call.Args) >= 2 && last == "--version":
+				if runs++; runs == 1 {
+					return true
+				}
+			}
+			bad = append(bad, p+": "+sel.Sel.Name+" is not the one lookup of claude or the one claude --version")
+			return true
+		}
+		for _, a := range call.Args {
+			if s := lit(a); s != "" && hasForeign(filepath.Base(s)) {
+				bad = append(bad, p+": "+sel.Sel.Name+"("+strconv.Quote(s)+") names a foreign tool")
+			}
+		}
+		return true
+	})
+	return bad
+}
+
+func TestForeignCallsGuardInClaudeCheckFile(t *testing.T) {
+	const head = "package main\nimport \"os/exec\"\nfunc f() {\n"
+	const other = "../../cmd/mash/other.go"
+	for _, tc := range []struct {
+		name, body, file string
+		bad              int
+	}{
+		{"the lookup and the version run", `exec.LookPath("claude"); exec.CommandContext(ctx, path, "--version")`, claudeCheckFile, 0},
+		{"a second run", `exec.LookPath("claude"); exec.CommandContext(ctx, path, "--version"); exec.CommandContext(ctx, path, "--version")`, claudeCheckFile, 1},
+		{"another tool", `exec.LookPath("claude"); exec.Command("ssh", "host")`, claudeCheckFile, 1},
+		{"another argument", `exec.CommandContext(ctx, path, "mcp", "list")`, claudeCheckFile, 1},
+		{"a lookup of another name", `exec.LookPath("git")`, claudeCheckFile, 1},
+		{"a start", `os.StartProcess(path, nil, nil)`, claudeCheckFile, 1},
+		{"elsewhere claude is refused", `exec.LookPath("claude")`, other, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, err := parser.ParseFile(token.NewFileSet(), tc.file, head+tc.body+"\n}\n", 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := foreignCalls(tc.file, f); len(got) != tc.bad {
+				t.Fatalf("%d calls refused, want %d: %v", len(got), tc.bad, got)
+			}
+		})
 	}
 }
 

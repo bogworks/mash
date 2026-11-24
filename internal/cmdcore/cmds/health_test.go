@@ -690,3 +690,34 @@ func TestStatusDetailReasonCode(t *testing.T) {
 		t.Errorf("%s", js)
 	}
 }
+
+// claudeHealth is a health service that can also check claude; calls counts how often it was asked.
+type claudeHealth struct {
+	*fakeHealth
+	calls int
+}
+
+func (c *claudeHealth) ClaudeCheck(context.Context) cmds.HealthCheck {
+	c.calls++
+	return cmds.HealthCheck{Name: cmds.CheckClaude, State: cmds.CheckWarn, Detail: "9.0.0 is above the tested 2.1"}
+}
+
+// Only doctor asks for the claude row, and it sits right after config; status (the command line and the tool) never asks.
+func TestOnlyDoctorAsksForTheClaudeRow(t *testing.T) {
+	svc := &claudeHealth{fakeHealth: allWell()}
+	runStatus(svc, cliframe.Global{})
+	runStatus(svc, cliframe.Global{JSON: true})
+	if _, _, err := cmdcore.MCPTool(cmds.Status, healthEnv(svc)).CallStructured(context.Background(), json.RawMessage(`{}`)); err != nil {
+		t.Fatal(err)
+	}
+	if svc.calls != 0 {
+		t.Fatalf("status asked for the claude row %d times", svc.calls)
+	}
+	_, out, _ := runDoctor(svc, cliframe.Global{})
+	if svc.calls != 1 {
+		t.Fatalf("doctor asked for the claude row %d times, want 1", svc.calls)
+	}
+	if !strings.Contains(out, "config    ok\nclaude    warn  9.0.0 is above the tested 2.1\ncreds     ok\n") {
+		t.Fatalf("doctor:\n%s", out)
+	}
+}

@@ -2,12 +2,16 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
 	"strings"
 	"testing"
 
+	"github.com/bogworks/mash/internal/cmdcore"
+	"github.com/bogworks/mash/internal/cmdcore/cmds"
+	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/host"
 )
 
@@ -130,5 +134,60 @@ func TestDoctorClaudeRowJSONAndSkip(t *testing.T) {
 	j = runMash(env, "doctor", "--json")
 	if !strings.Contains(j.out, `{"name":"claude","state":"skip","detail":"no claude command found","fix":null}`) || j.code != 0 {
 		t.Fatalf("%+v", j)
+	}
+}
+
+// injectClaudeSpies makes any look up or run of claude fail the test, and counts them.
+func injectClaudeSpies(t *testing.T) *int {
+	t.Helper()
+	n := new(int)
+	oldLook, oldRun := claudeLookPath, claudeVersionOutput
+	claudeLookPath = func() (string, error) { *n++; t.Error("claude was looked up"); return "", exec.ErrNotFound }
+	claudeVersionOutput = func(context.Context, string) (string, error) { *n++; t.Error("claude was run"); return "", nil }
+	t.Cleanup(func() { claudeLookPath, claudeVersionOutput = oldLook, oldRun })
+	return n
+}
+
+// The checks behind status never look for claude (ADR 0169): not at a shell, not in a session (the status tool); only
+// the ClaudeCheck of the doctor path does.
+func TestStatusNeverLooksForClaude(t *testing.T) {
+	n := injectClaudeSpies(t)
+	cfg := config.Config{}
+	for _, name := range []string{"shell", "session"} {
+		var rep cmds.HealthReport
+		var err error
+		if name == "shell" {
+			rep, err = (&cliSvc{cfg: cfg, cfgErr: errors.New("no config")}).Health(context.Background())
+		} else {
+			rep, err = sessionSvc{src: &statusSource{cfg: cfg, cfgErr: errors.New("no config")}}.Health(context.Background())
+		}
+		_ = err
+		for _, c := range rep.Checks {
+			if c.Name == cmds.CheckClaude {
+				t.Errorf("%s: status rows include claude", name)
+			}
+		}
+	}
+	// status as the tool: sessionSvc is the service of the status tool
+	env := func(context.Context) (*cmdcore.Env, error) {
+		return &cmdcore.Env{Svc: sessionSvc{src: &statusSource{cfgErr: errors.New("no config")}}}, nil
+	}
+	if _, _, err := cmdcore.MCPTool(cmds.Status, env).CallStructured(context.Background(), json.RawMessage(`{}`)); err != nil {
+		t.Logf("status tool: %v", err)
+	}
+	if *n != 0 {
+		t.Fatalf("status looked for claude %d times", *n)
+	}
+}
+
+func TestDoctorPathChecksClaude(t *testing.T) {
+	injectClaude(t, "2.1.320 (Claude Code)", nil)
+	for name, got := range map[string]cmds.HealthCheck{
+		"shell":   (&cliSvc{}).ClaudeCheck(context.Background()),
+		"session": sessionSvc{}.ClaudeCheck(context.Background()),
+	} {
+		if got.Name != "claude" || got.State != "ok" || got.Detail != "2.1.320" {
+			t.Errorf("%s: %+v", name, got)
+		}
 	}
 }
