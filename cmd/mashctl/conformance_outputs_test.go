@@ -100,8 +100,16 @@ type confWorld struct {
 
 func newConfWorld(t *testing.T, init bool) *confWorld {
 	t.Helper()
-	e := newApplyEnv(t)
+	return newConfWorldOn(t, newApplyEnv(t), init, nil)
+}
+
+// newConfWorldOn is newConfWorld on a given server; prep may change the initer before init runs.
+func newConfWorldOn(t *testing.T, e *applyEnv, init bool, prep func(a *initer)) *confWorld {
+	t.Helper()
 	a := newIniter(t, e)
+	if prep != nil {
+		prep(a)
+	}
 	a.env["MASH_CONFIG_DIR"] = filepath.Join(a.root, ".config", "mash")
 	a.vals["owner"] = "acme"
 	w := &confWorld{t: t, a: a, url: e.srv.ClientURL(), ctx: context.Background()}
@@ -110,7 +118,7 @@ func newConfWorld(t *testing.T, init bool) *confWorld {
 			t.Fatalf("init: %d %s", code, errb)
 		}
 	}
-	nc, err := nats.Connect(w.url, nats.Timeout(15*time.Second), nats.UserCredentials(e.pl.AdminCredsPath()))
+	nc, err := nats.Connect(w.url, nats.Timeout(15*time.Second), nats.UserCredentials(a.vals["admin_creds"].(string)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,6 +252,8 @@ func inTmp(t *testing.T) { t.Helper(); t.Chdir(t.TempDir()) }
 type confOutRun struct {
 	ran  confRan
 	subs []string
+	// alsoOut, set for a case whose text is stderr only, is the start of the result line printed beside it on stdout
+	alsoOut string
 }
 
 // confOutputRunners: key is "<command> <case>". A case not here, and not a description, fails.
@@ -273,6 +283,18 @@ func init() {
 			t.Fatal(err)
 		}
 		return confOutRun{ran: w.run("init", "--config", w.a.setupPath())}
+	})
+	reg("init A strict operator and no signing_key", func(t *testing.T) confOutRun {
+		e, sk, osk := strictEnv(t)
+		w := newConfWorldOn(t, e, false, func(a *initer) {
+			if err := os.WriteFile(a.opSeed, mustRead(t, seedFile(t, t.TempDir(), "op", osk)), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			sc := filepath.Join(a.root, "in", "signer.creds")
+			signingKeyCreds(t, e.acctPub, sk, sc)
+			a.vals["admin_creds"] = sc
+		})
+		return confOutRun{ran: w.run("init", "--config", w.a.setupPath()), subs: []string{"mash-setup.yaml", w.a.setupPath(), "tls://localhost:4222", w.url}, alsoOut: "Initialized mash on "}
 	})
 	reg("init Cannot reach the server", func(t *testing.T) confOutRun {
 		w := newConfWorld(t, false)
@@ -579,7 +601,14 @@ func confOutputProblems(path string, oc confOutCase, r confOutRun) []string {
 		// a usage error carries the hint of its command's help (rules.json), which the case's text leaves out
 		gotErr = strings.TrimSuffix(gotErr, "hint: mashctl "+path+" --help\n")
 	}
-	check("stdout", wantOut, r.ran.out)
+	if r.alsoOut != "" && wantOut == "" {
+		// a warning case: the result goes to stdout as in the case the runner names, and the text is the stderr part
+		if !strings.HasPrefix(r.ran.out, r.alsoOut) {
+			p = append(p, fmt.Sprintf("stdout: want a start of %q, got %q", r.alsoOut, r.ran.out))
+		}
+	} else {
+		check("stdout", wantOut, r.ran.out)
+	}
 	check("stderr", wantErr, gotErr)
 	return p
 }

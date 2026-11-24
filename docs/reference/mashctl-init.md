@@ -81,6 +81,22 @@ Stream: stderr. Exit code: 0.
 (two warning lines before the result, for an account that allows 5 streams and 100 MiB of disk: "warning: the account allows 5 streams; one endpoint needs 6, one more each" and "warning: the account has 100MiB of disk; one endpoint needs 109MiB"; an account that allows 6 streams and 109 MiB gets neither)
 ```
 
+### A strict operator and no signing_key
+
+Stream: stderr. Exit code: 0.
+
+```text
+warning: no signing_key in mash-setup.yaml; this server may require one
+```
+
+### A strict operator with a signing_key
+
+Stream: stderr. Exit code: 0.
+
+```text
+(no warning line; the result line is as in "A signing key is set")
+```
+
 ## JSON
 
 With `--json` the result is this shape. The values are an example.
