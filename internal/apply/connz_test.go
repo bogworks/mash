@@ -214,7 +214,24 @@ func TestElideNameKeepsTheChurnLineShort(t *testing.T) {
 	if got := elideName("s1"); got != "s1" {
 		t.Fatalf("%q", got)
 	}
-	if got := elideName(id); got != id[:21]+"..." {
+	if got := elideName(id); got != id[:10]+"..."+id[len(id)-11:] {
 		t.Fatalf("%q", got)
+	}
+}
+
+// Two long names that share a long prefix and differ only at the end stay distinguishable, within the width.
+func TestElideNameKeepsTheTail(t *testing.T) {
+	p := strings.Repeat("p", 40)
+	a, b := elideName(p+"-one"), elideName(p+"-two")
+	if a == b {
+		t.Fatalf("both are %q", a)
+	}
+	for _, n := range []string{a, b} {
+		if len(n) > maxShownName {
+			t.Errorf("%q is %d columns", n, len(n))
+		}
+	}
+	if got := elideName(strings.Repeat("é", 40)); len([]rune(got)) != maxShownName {
+		t.Errorf("%q", got)
 	}
 }

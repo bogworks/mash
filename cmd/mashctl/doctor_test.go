@@ -12,6 +12,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats-server/v2/server"
@@ -871,7 +872,7 @@ func TestDoctorKeysRevokedAndMashChurnLinesFit80Columns(t *testing.T) {
 func TestDoctorAuditUsersChurnOfTwoServersLinesFit80Columns(t *testing.T) {
 	e := newXYEnv(t)
 	id := strings.Repeat("N", 56)
-	short := id[:21] + "..."
+	short := id[:10] + "..." + id[:11]
 	sc := keyScan(true)
 	sc.Incomplete = "server s1's connected users kept changing\nserver " + short + "'s connected users kept changing"
 	scriptScans(t, sc)
@@ -1281,5 +1282,26 @@ func TestDoctorKeysRealUnsettledScanOfForeignChurnIsOK(t *testing.T) {
 	_, by, code := doctorJSON(t, e.run)
 	if c := by["keys"]; code != 0 || c.State != "ok" || reads < 2 {
 		t.Fatalf("%d reads, exit %d: %+v", reads, code, c)
+	}
+}
+
+// A long word of multibyte characters is split between characters: every line is valid UTF-8 within the width, and the
+// text is kept whole and in order.
+func TestIncompleteLinesSplitsBetweenCharacters(t *testing.T) {
+	word := strings.Repeat("é世🙂", 50) // 150 characters, 2, 3 and 4 bytes each
+	in := "server " + word + " did not reply\nsecond " + strings.Repeat("世", 64)
+	got := incompleteLines(in)
+	var all strings.Builder
+	for _, l := range strings.Split(got, "\n") {
+		if !utf8.ValidString(l) {
+			t.Fatalf("invalid UTF-8: %q", l)
+		}
+		if n := utf8.RuneCountInString(l); n > 80 || n > detailWidth {
+			t.Fatalf("%d columns: %q", n, l)
+		}
+		all.WriteString(strings.ReplaceAll(l, " ", ""))
+	}
+	if want := strings.ReplaceAll(strings.ReplaceAll(in, " ", ""), "\n", ""); all.String() != want {
+		t.Fatalf("text changed: %q", got)
 	}
 }
