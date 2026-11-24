@@ -39,23 +39,17 @@ var lookupWait = 5 * time.Second
 // sysCredsFile is the name the system account's creds file has in the config folder's server directory.
 const sysCredsFile = "sys.creds"
 
-// needConsumers is what one endpoint needs of the account's consumer limit: its inbox's durable consumer. Streams and
-// disk follow the buckets init makes and the inbox cap (docs/nats-server.md, "Sizing"); limitWarnings derives them
-// from store, with the limits of the configuration.
-const needConsumers = 1
-
 // limitWarnings are the warnings for an account whose JetStream limits are lim (a limit of 0 or less is no limit),
 // with the inbox and bucket caps of l. One endpoint needs the buckets init makes plus its inbox stream, one consumer,
-// and the buckets' caps plus the inbox cap of disk; each further endpoint adds a stream and an inbox cap.
+// and the buckets' caps plus the inbox cap of disk; each further endpoint adds a stream and an inbox cap. The account's
+// consumer limit is not checked: it applies per stream, and a stream here has one consumer, so any limit of 1 or more
+// is enough. Streams and disk follow docs/nats-server.md, "Sizing".
 func limitWarnings(lim jwt.JetStreamLimits, l store.Limits) []string {
 	var warns []string
 	needStreams := store.InitBuckets + 1
 	needDisk := store.InitBucketsMaxBytes(l) + l.InboxMaxBytes
 	if lim.Streams > 0 && lim.Streams < int64(needStreams) {
 		warns = append(warns, fmt.Sprintf("the account allows %d streams; one endpoint needs %d, one more each", lim.Streams, needStreams))
-	}
-	if lim.Consumer > 0 && lim.Consumer < needConsumers {
-		warns = append(warns, fmt.Sprintf("the account allows %d consumers; mash needs one per endpoint", lim.Consumer))
 	}
 	if lim.DiskStorage > 0 && lim.DiskStorage < needDisk {
 		warns = append(warns, fmt.Sprintf("the account has %s of disk; one endpoint needs %s", config.FormatSize(lim.DiskStorage), config.FormatSize(needDisk)))
