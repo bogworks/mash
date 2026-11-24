@@ -54,13 +54,13 @@ refused   ok    no unverified mail was refused
 No problems.
 ```
 
-### A problem and a warning
+### A problem and a warning, with one hint
 
-Stream: stdout. Exit code: 1.
+Stream: stdout, then the hint on stderr. Exit code: 1.
 
 ```text
 config    ok
-claude    ok    2.1.320
+claude    skip  no claude command found
 creds     ok
 server    ok    tls://myserver:4222
 sign-in   FAIL  the server refused these credentials
@@ -68,16 +68,16 @@ delivery  skip  needs sign-in
 refused   warn  3 unverified messages were refused
 
 1 problem, 1 warning.
-hint: ask whoever runs your mesh to run: mashctl endpoint reissue acme.demo.bob
+hint: mash join <file> --replace
 ```
 
-### A check that could not run
+### Server not answering
 
 Stream: stdout. Exit code: 1.
 
 ```text
 config    ok
-claude    ok    2.1.320
+claude    skip  no claude command found
 creds     ok
 server    FAIL  the server did not answer: tls://myserver:4222
 sign-in   skip  needs the server
@@ -127,13 +127,20 @@ Stream: stdout. Exit code: 0.
 claude    warn  the version of claude could not be read
 ```
 
-### Arriving mail cannot be stored on this machine
+### Arriving mail cannot be stored here
 
-Stream: stdout. Exit code: 0.
+Stream: stdout. Exit code: 1.
 
 ```text
-delivery  FAIL  mail is held: its folder cannot be written:
-                ~/.local/state/mash/acme.demo.bob
+config    ok
+claude    skip  no claude command found
+creds     ok
+server    ok    tls://myserver:4222
+sign-in   ok
+delivery  FAIL  cannot write ~/.local/state/mash/acme.demo.bob
+refused   ok    no unverified mail was refused
+
+1 problem.
 ```
 
 ### At a shell, where there is no session to deliver to
@@ -144,12 +151,20 @@ Stream: stdout. Exit code: 0.
 delivery  skip  needs a session
 ```
 
-### In a session that does not hold its endpoint
+### Another session holds the endpoint
 
-Stream: stdout. Exit code: 0.
+Stream: stdout. Exit code: 1.
 
 ```text
+config    ok
+claude    skip  no claude command found
+creds     ok
+server    ok    tls://myserver:4222
+sign-in   ok
 delivery  FAIL  another session holds this endpoint
+refused   ok    no unverified mail was refused
+
+1 problem.
 ```
 
 ### In a session whose hooks have not delivered yet
@@ -173,17 +188,25 @@ delivery  FAIL  hooks are not delivering mail to this session;
 hint: claude plugin install mash@mash
 ```
 
-### In a session that a newer session replaced
-
-Stream: stdout. Exit code: 0.
-
-```text
-delivery  FAIL  this session lost this endpoint to a newer one
-```
-
-### The endpoint was deleted, seen from another machine
+### A newer session replaced this one
 
 Stream: stdout. Exit code: 1.
+
+```text
+config    ok
+claude    skip  no claude command found
+creds     ok
+server    ok    tls://myserver:4222
+sign-in   ok
+delivery  FAIL  this session lost this endpoint to a newer one
+refused   ok    no unverified mail was refused
+
+1 problem.
+```
+
+### The endpoint was deleted, seen from another machine, with one hint
+
+Stream: stdout, then the hint on stderr. Exit code: 1.
 
 ```text
 config    ok
@@ -195,12 +218,12 @@ delivery  skip  needs sign-in
 refused   ok    no unverified mail was refused
 
 1 problem.
-hint: ask whoever runs your mesh for a join file to a new endpoint
+hint: mash join <file>
 ```
 
-### The endpoint was deleted, on the machine that deleted it
+### The endpoint was deleted, on the machine that deleted it, with one hint
 
-Stream: stdout. Exit code: 1.
+Stream: stdout, then the hint on stderr. Exit code: 1.
 
 ```text
 config    ok
@@ -212,23 +235,187 @@ delivery  skip  needs sign-in
 refused   ok    no unverified mail was refused
 
 1 problem.
-hint: ask whoever runs your mesh for a join file to a new endpoint
+hint: mash join <file>
 ```
 
-### The server's certificate is not trusted
+### The certificate is not trusted
 
-Stream: stdout. Exit code: 0.
+Stream: stdout. Exit code: 1.
 
 ```text
+config    ok
+claude    skip  no claude command found
+creds     ok
 server    FAIL  the server's certificate is not trusted: tls://myserver:4222
+sign-in   skip  needs the server
+delivery  skip  needs the server
+refused   ok    no unverified mail was refused
+
+1 problem.
 ```
 
-### The server does not offer encryption
+### The server does not offer TLS
 
-Stream: stdout. Exit code: 0.
+Stream: stdout. Exit code: 1.
 
 ```text
+config    ok
+claude    skip  no claude command found
+creds     ok
 server    FAIL  the server did not offer TLS: tls://myserver:4222
+sign-in   skip  needs the server
+delivery  skip  needs the server
+refused   ok    no unverified mail was refused
+
+1 problem.
+```
+
+### A creds file is missing
+
+Stream: stdout, then the hint on stderr. Exit code: 1.
+
+```text
+config    ok
+claude    skip  no claude command found
+creds     FAIL  ~/.config/mash/acme.demo.bob.creds is missing
+server    ok    tls://myserver:4222
+sign-in   skip  needs the creds
+delivery  skip  needs sign-in
+refused   ok    no unverified mail was refused
+
+1 problem.
+hint: mash join <file>
+```
+
+### The server refused the credentials
+
+Stream: stdout, then the hint on stderr. Exit code: 1.
+
+```text
+config    ok
+claude    skip  no claude command found
+creds     ok
+server    ok    tls://myserver:4222
+sign-in   FAIL  the server refused these credentials
+delivery  skip  needs sign-in
+refused   ok    no unverified mail was refused
+
+1 problem.
+hint: mash join <file> --replace
+```
+
+### The creds file is not a creds file
+
+Stream: stdout, then the hint on stderr. Exit code: 1.
+
+```text
+config    ok
+claude    skip  no claude command found
+creds     FAIL  ~/.config/mash/acme.demo.bob.creds is not a creds file
+server    ok    tls://myserver:4222
+sign-in   skip  needs the creds
+delivery  skip  needs sign-in
+refused   ok    no unverified mail was refused
+
+1 problem.
+hint: mash join <file> --replace
+```
+
+### The creds file can be read by others
+
+Stream: stdout. Exit code: 1.
+
+```text
+config    ok
+claude    skip  no claude command found
+creds     FAIL  ~/.config/mash/acme.demo.bob.creds can be read by others
+server    ok    tls://myserver:4222
+sign-in   skip  needs the creds
+delivery  skip  needs sign-in
+refused   ok    no unverified mail was refused
+
+1 problem.
+```
+
+### The server address is not tls://
+
+Stream: stdout. Exit code: 1.
+
+```text
+config    ok
+claude    skip  no claude command found
+creds     ok
+server    FAIL  the server address is not tls://: nats://myserver:4222
+sign-in   skip  needs the server
+delivery  skip  needs the server
+refused   ok    no unverified mail was refused
+
+1 problem.
+```
+
+### In a session with no endpoint chosen
+
+Stream: the doctor tool's result, an error. Exit code: 1.
+
+```text
+No endpoint is chosen for this session.
+```
+
+### --json: the one hint is a field
+
+Stream: stdout. Exit code: 1.
+
+```text
+{
+ "endpoint": "acme.demo.bob",
+ "problems": 1,
+ "warnings": 1,
+ "checks": [
+  {
+   "name": "config",
+   "state": "ok",
+   "detail": null,
+   "fix": null
+  },
+  {
+   "name": "claude",
+   "state": "ok",
+   "detail": "2.1.320",
+   "fix": null
+  },
+  {
+   "name": "creds",
+   "state": "ok",
+   "detail": null,
+   "fix": null
+  },
+  {
+   "name": "server",
+   "state": "ok",
+   "detail": "tls://myserver:4222",
+   "fix": null
+  },
+  {
+   "name": "sign-in",
+   "state": "fail",
+   "detail": "the server refused these credentials",
+   "fix": "mash join <file> --replace"
+  },
+  {
+   "name": "delivery",
+   "state": "skip",
+   "detail": "needs sign-in",
+   "fix": null
+  },
+  {
+   "name": "refused",
+   "state": "warn",
+   "detail": "3 unverified messages were refused",
+   "fix": null
+  }
+ ],
+ "hint": "mash join <file> --replace"
+}
 ```
 
 ## JSON
@@ -269,7 +456,7 @@ With `--json` the result is this shape. The values are an example.
       "name": "sign-in",
       "state": "fail",
       "detail": "the server refused these credentials",
-      "fix": "mashctl endpoint reissue acme.demo.bob"
+      "fix": "mash join <file> --replace"
     },
     {
       "name": "delivery",
@@ -283,7 +470,8 @@ With `--json` the result is this shape. The values are an example.
       "detail": "3 unverified messages were refused",
       "fix": null
     }
-  ]
+  ],
+  "hint": "mash join <file> --replace"
 }
 ```
 

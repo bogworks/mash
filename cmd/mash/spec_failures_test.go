@@ -108,9 +108,10 @@ func TestMissingCredsMatchesSpec(t *testing.T) {
 
 // doctor after the endpoint was deleted says so in the specification's words, with the fix for a deleted endpoint.
 func TestDoctorDeletedEndpointMatchesSpec(t *testing.T) {
-	c, ok := specCases(t, "doctor")["The endpoint was deleted, seen from another machine"]
+	const name = "The endpoint was deleted, seen from another machine, with one hint"
+	c, ok := specCases(t, "doctor")[name]
 	if !ok {
-		t.Fatal("spec/mash.json no longer has the doctor case \"The endpoint was deleted, seen from another machine\"")
+		t.Fatalf("spec/mash.json no longer has the doctor case %q", name)
 	}
 	w := tlsWorld(t, "a")
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -136,7 +137,7 @@ func TestDoctorDeletedEndpointMatchesSpec(t *testing.T) {
 // doctor on the machine that deleted the endpoint: mashctl set the creds file aside as <creds>.deleted, so the creds row
 // says the endpoint was deleted and the rows that need the creds are skipped, in the specification's words.
 func TestDoctorDeletedOnThisMachineMatchesSpec(t *testing.T) {
-	const name = "The endpoint was deleted, on the machine that deleted it"
+	const name = "The endpoint was deleted, on the machine that deleted it, with one hint"
 	c, ok := specCases(t, "doctor")[name]
 	if !ok {
 		t.Fatalf("spec/mash.json no longer has the doctor case %q", name)

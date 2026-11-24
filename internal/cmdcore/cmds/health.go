@@ -47,8 +47,20 @@ const (
 // gone, and EndpointDeletedFix is its fix: a deleted address is never reused, so the way on is a new endpoint.
 const (
 	ReasonEndpointDeleted = cmdcore.ReasonEndpointDeleted
-	EndpointDeletedFix    = "ask whoever runs your mesh for a join file to a new endpoint"
+	EndpointDeletedFix    = JoinFix
 )
+
+// JoinFix mends a creds file that is missing, or a deleted endpoint: a join file for a new endpoint installs it.
+// JoinReplaceFix is the same for creds that are installed but unusable or refused: join refuses an installed address
+// without --replace. A certificate the server's CA did not sign has no hint: join cannot change a folder's CA.
+// A hint only where the doctor found exactly one of those conditions.
+const (
+	JoinFix        = "mash join <file>"
+	JoinReplaceFix = "mash join <file> --replace"
+)
+
+// CannotWrite begins the delivery row's detail for a folder that cannot be written; the folder follows.
+const CannotWrite = "cannot write "
 
 // The delivery row's words for a session whose hooks have not delivered mail yet (a warning) and for one whose hooks
 // are suspected, degraded or refused (a failure).
@@ -368,8 +380,12 @@ type DoctorResult struct {
 	Problems int           `json:"problems"`
 	Warnings int           `json:"warnings"`
 	Checks   []DoctorCheck `json:"checks"`
+	// HintText is the one hint the doctor ends with, null when there is none: a command of ours that fixes the first
+	// problem. Rows' own fix fields name each row's command, and only this one is offered.
+	HintText *string `json:"hint"`
 
 	strict bool
+	hint   string
 }
 
 // Text is a row per check (the name in 10 columns, the state in 6, then the detail), a blank line, and the count:
@@ -397,6 +413,10 @@ func (r DoctorResult) Text(cmdcore.Opts) string {
 						detail, extra = head+":", "\n"+strings.Repeat(" ", 16)+path
 					}
 				}
+			}
+			// a folder too long for the line goes under the detail column
+			if path, ok := strings.CutPrefix(detail, CannotWrite); ok && c.Name == CheckDelivery && len(line+detail) > 80 {
+				detail, extra = strings.TrimSpace(CannotWrite), "\n"+strings.Repeat(" ", 16)+path
 			}
 			if w, ok := hookRowWraps[detail]; ok && c.Name == CheckDelivery {
 				detail, extra = w[0], "\n"+strings.Repeat(" ", 16)+w[1]
@@ -428,37 +448,14 @@ func plural(n int, word string) string {
 	return fmt.Sprintf("%d %ss", n, word)
 }
 
-// ExitCode is 1 when a check failed. A warning alone is 0, or 1 with --strict.
+// ExitCode is 1 when a check failed (cmdcore.DoctorExitCode). A warning alone is 0, or 1 with --strict.
 func (r DoctorResult) ExitCode() int {
-	if r.Problems > 0 || (r.strict && r.Warnings > 0) {
-		return 1
-	}
-	return 0
+	return cmdcore.DoctorExitCode(r.Problems, r.Warnings, r.strict)
 }
 
-// Hint is the fix of the first problem or, with no problem, of the first warning; none when that row has no fix. A mashctl
-// command is for whoever runs the mesh: "ask whoever runs your mesh to run: mashctl ...". Any other fix is given as it is.
-func (r DoctorResult) Hint() string {
-	var first *DoctorCheck
-	for _, state := range []string{CheckFail, CheckWarn} {
-		for i := range r.Checks {
-			if r.Checks[i].State == state {
-				first = &r.Checks[i]
-				break
-			}
-		}
-		if first != nil {
-			break
-		}
-	}
-	if first == nil || first.Fix == nil {
-		return ""
-	}
-	if strings.HasPrefix(*first.Fix, "mashctl ") {
-		return "ask whoever runs your mesh to run: " + config.Clean(*first.Fix)
-	}
-	return config.Clean(*first.Fix)
-}
+// Hint is the one command that fixes the first problem (cmdcore.DoctorHint): none when that row has no command of ours.
+// With no problem it is the command of the first warning that has one that fixes it, or none.
+func (r DoctorResult) Hint() string { return r.hint }
 
 // Doctor is the doctor command.
 var Doctor = cmdcore.Command[DoctorParams, DoctorResult]{
@@ -482,15 +479,20 @@ var Doctor = cmdcore.Command[DoctorParams, DoctorResult]{
 			}
 			checks = append(append(append([]HealthCheck{}, checks[:at]...), row), checks[at:]...)
 		}
+		var fixes, warnFixes []string
 		for _, c := range checks {
 			switch c.State {
 			case CheckFail:
 				r.Problems++
+				fixes = append(fixes, c.Fix)
 			case CheckWarn:
 				r.Warnings++
+				warnFixes = append(warnFixes, c.Fix)
 			}
 			r.Checks = append(r.Checks, DoctorCheck{Name: c.Name, State: c.State, Detail: strPtr(c.Detail), Fix: strPtr(c.Fix)})
 		}
+		r.hint = cmdcore.DoctorHint(fixes, warnFixes)
+		r.HintText = strPtr(r.hint)
 		return r, nil
 	},
 }

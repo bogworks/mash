@@ -441,7 +441,7 @@
       "name": "sign-in",
       "state": "fail",
       "detail": "the server refused these credentials",
-      "fix": "mashctl endpoint reissue acme.demo.bob"
+      "fix": "mash join <file> --replace"
      },
      {
       "name": "delivery",
@@ -455,7 +455,8 @@
       "detail": "3 unverified messages were refused",
       "fix": null
      }
-    ]
+    ],
+    "hint": "mash join <file> --replace"
    },
    "text": [
     {
@@ -467,14 +468,14 @@
    ],
    "errors": [
     {
-     "case": "A problem and a warning",
-     "text": "config    ok\nclaude    ok    2.1.320\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   FAIL  the server refused these credentials\ndelivery  skip  needs sign-in\nrefused   warn  3 unverified messages were refused\n\n1 problem, 1 warning.\nhint: ask whoever runs your mesh to run: mashctl endpoint reissue acme.demo.bob",
+     "case": "A problem and a warning, with one hint",
+     "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   FAIL  the server refused these credentials\ndelivery  skip  needs sign-in\nrefused   warn  3 unverified messages were refused\n\n1 problem, 1 warning.\nhint: mash join <file> --replace",
      "stream": "stdout",
      "exit": 1
     },
     {
-     "case": "A check that could not run",
-     "text": "config    ok\nclaude    ok    2.1.320\ncreds     ok\nserver    FAIL  the server did not answer: tls://myserver:4222\nsign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no unverified mail was refused\n\n1 problem.",
+     "case": "Server not answering",
+     "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    FAIL  the server did not answer: tls://myserver:4222\nsign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no unverified mail was refused\n\n1 problem.",
      "stream": "stdout",
      "exit": 1
     },
@@ -485,14 +486,20 @@
      "exit": 1
     },
     {
-     "case": "The endpoint was deleted, seen from another machine",
-     "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   FAIL  this endpoint was deleted; its address cannot be used again\ndelivery  skip  needs sign-in\nrefused   ok    no unverified mail was refused\n\n1 problem.\nhint: ask whoever runs your mesh for a join file to a new endpoint",
+     "case": "The endpoint was deleted, seen from another machine, with one hint",
+     "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   FAIL  this endpoint was deleted; its address cannot be used again\ndelivery  skip  needs sign-in\nrefused   ok    no unverified mail was refused\n\n1 problem.\nhint: mash join <file>",
      "stream": "stdout",
      "exit": 1
     },
     {
-     "case": "The endpoint was deleted, on the machine that deleted it",
-     "text": "config    ok\nclaude    skip  no claude command found\ncreds     FAIL  this endpoint was deleted; its address cannot be used again\nserver    ok    tls://myserver:4222\nsign-in   skip  needs the creds\ndelivery  skip  needs sign-in\nrefused   ok    no unverified mail was refused\n\n1 problem.\nhint: ask whoever runs your mesh for a join file to a new endpoint",
+     "case": "The endpoint was deleted, on the machine that deleted it, with one hint",
+     "text": "config    ok\nclaude    skip  no claude command found\ncreds     FAIL  this endpoint was deleted; its address cannot be used again\nserver    ok    tls://myserver:4222\nsign-in   skip  needs the creds\ndelivery  skip  needs sign-in\nrefused   ok    no unverified mail was refused\n\n1 problem.\nhint: mash join <file>",
+     "stream": "stdout",
+     "exit": 1
+    },
+    {
+     "case": "In a session with no endpoint chosen",
+     "text": "No endpoint is chosen for this session.",
      "stream": "stdout",
      "exit": 1
     }

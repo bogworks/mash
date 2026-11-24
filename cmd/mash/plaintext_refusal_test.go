@@ -235,7 +235,7 @@ func TestDoctorCommandPlainWarningOnStderr(t *testing.T) {
 		}
 	}
 	out, _ := doctorRun("nats://127.0.0.1:4222", false)
-	if !strings.Contains(out, "server    FAIL  ") || !strings.Contains(out, "MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION") {
+	if !strings.Contains(out, "server    FAIL  the server address is not tls://: nats://127.0.0.1:4222\n") { // one short line (#1099); status keeps the whole refusal
 		t.Errorf("plain, no override: stdout %q", out)
 	}
 }

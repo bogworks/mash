@@ -82,12 +82,15 @@ The rules every mash command and tool follows.
    row every time, each marked ok, warn, FAIL or skip; a row that cannot run
    because an earlier one failed is skip, with what it needs. 'checks' in
    --json always lists every row, whatever failed. After the rows come one
-   blank line and a count ('No problems.', '1 problem, 1 warning.'). One hint
-   follows when the first problem, or with no problem the first warning, has a
-   command that fixes it; where no command does, there is no hint and the
-   row's own text says what is wrong. Exit 1 when there is a problem; warnings
-   alone exit 0, or 1 with --strict. A server row shows the address as
-   configured.
+   blank line and a count ('No problems.', '1 problem, 1 warning.'). A hint is
+   a command of ours that fixes the problem, or there is no hint and the row's
+   own words say what is wrong. A doctor prints at most one hint. It is never
+   a command that only checks, and never one that replaces credentials, moves
+   a folder or changes permissions unless the doctor found exactly the
+   condition that command fixes. With no problem, the first warning that has a
+   command that fixes it gets one hint. Exit 1 when there is a problem;
+   warnings alone exit 0, or 1 with --strict. A server row shows the address
+   as configured.
 
 15. status and doctor report, they do not fail. Their lines go to stdout
    whatever they find, and they exit 1 when they found a problem. Any hint

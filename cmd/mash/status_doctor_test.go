@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/endpoint"
 	"github.com/bogworks/mash/internal/spool"
 	"github.com/bogworks/mash/internal/testenv"
@@ -313,12 +314,12 @@ func TestDoctorAProblemAndAWarning(t *testing.T) {
 		"refused   warn  3 unverified messages were refused\n" +
 		"\n" +
 		"1 problem, 1 warning.\n"
-	if r.code != 1 || r.out != want || r.errs != "hint: ask whoever runs your mesh to run: mashctl endpoint reissue "+tTo("a")+"\n" {
+	if r.code != 1 || r.out != want || r.errs != "" { // MASH_CREDS is a custom path: no join hint
 		t.Fatalf("doctor:\n%+v\nwant %q", r, want)
 	}
 	j := runMash(env, "doctor", "--json")
 	if j.code != 1 || j.errs != "" || !strings.Contains(j.out, `"problems":1,"warnings":1`) ||
-		!strings.Contains(j.out, `{"name":"sign-in","state":"fail","detail":"the server refused these credentials","fix":"mashctl endpoint reissue `+tTo("a")+`"}`) {
+		!strings.Contains(j.out, `{"name":"sign-in","state":"fail","detail":"the server refused these credentials","fix":null}`) {
 		t.Fatalf("doctor --json: %+v", j)
 	}
 }
@@ -352,8 +353,8 @@ func TestDoctorServerNotAnsweringAndCredsProblems(t *testing.T) {
 	}
 	p := w.env["a"]["MASH_CREDS"]
 	r = runMash(w.env["a"], "doctor")
-	if r.code != 1 || !strings.Contains(r.out, "creds     FAIL  the creds file can be read by other users: "+p+"\n") ||
-		!strings.Contains(r.out, "sign-in   skip  needs the creds\ndelivery  skip  needs sign-in\n") || !strings.Contains(r.out, "refused   ok    ") || r.errs != "hint: chmod 600 "+p+"\n" {
+	if r.code != 1 || !strings.Contains(r.out, "creds     FAIL  "+config.Tilde(p)+" can be read by others\n") ||
+		!strings.Contains(r.out, "sign-in   skip  needs the creds\ndelivery  skip  needs sign-in\n") || !strings.Contains(r.out, "refused   ok    ") || r.errs != "" { // chmod is not a command of ours: the row says what is wrong
 		t.Fatalf("doctor, creds mode: %+v", r)
 	}
 	// not a creds file: its content is never printed
@@ -364,7 +365,7 @@ func TestDoctorServerNotAnsweringAndCredsProblems(t *testing.T) {
 		t.Fatal(err)
 	}
 	r = runMash(w.env["a"], "doctor")
-	if r.code != 1 || !strings.Contains(r.out, "creds     FAIL  the creds file is not a creds file: "+p+"\n") || strings.Contains(r.out+r.errs, credsSecret) {
+	if r.code != 1 || !strings.Contains(r.out, "creds     FAIL  "+config.Tilde(p)+" is not a creds file\n") || strings.Contains(r.out+r.errs, credsSecret) {
 		t.Fatalf("doctor, bad creds: %+v", r)
 	}
 	// missing
@@ -372,7 +373,7 @@ func TestDoctorServerNotAnsweringAndCredsProblems(t *testing.T) {
 		t.Fatal(err)
 	}
 	r = runMash(w.env["a"], "doctor")
-	if r.code != 1 || !strings.Contains(r.out, "creds     FAIL  the creds file is missing: "+p+"\n") {
+	if r.code != 1 || !strings.Contains(r.out, "creds     FAIL  "+config.Tilde(p)+" is missing\n") || r.errs != "" { // a custom creds path: join cannot mend it, no hint
 		t.Fatalf("doctor, missing creds: %+v", r)
 	}
 }
@@ -388,9 +389,9 @@ func TestDoctorPlainURL(t *testing.T) {
 	env := strictEnv(w, "a", nil)
 	delete(env, "MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION")
 	r = runMash(env, "doctor")
-	if r.code != 1 || !strings.Contains(r.out, "server    FAIL  ") || !strings.Contains(r.out, "MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION") ||
+	if r.code != 1 || !strings.Contains(r.out, "server    FAIL  the server address is not tls://: "+w.e.URL+"\n") ||
 		!strings.Contains(r.out, "sign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no unverified mail was refused\n") ||
-		!strings.HasPrefix(r.errs, "hint: use a tls:// server address") {
+		strings.Contains(r.out, "MASH_CA") || r.errs != "" { // no command of ours fixes the address: no hint
 		t.Fatalf("doctor without it: %+v", r)
 	}
 	if s := runMash(env, "status"); s.code != 1 || !strings.HasPrefix(s.out, tTo("a")+": not ready: ") || s.errs != "hint: mash doctor\n" {
@@ -509,7 +510,11 @@ func TestDegradedServeAnswersStatusAndDoctor(t *testing.T) {
 	// exit 1 at a shell, so an error result here: the line, then the hint on the next line, the structured result kept
 	const want = "No endpoint is chosen for this session.\nhint: start the session with MASH_ENDPOINT=<address>"
 	for id, tool := range map[int]string{10: "status", 11: "doctor"} {
-		if r := s.call(t, id, tool, `{}`); r["isError"] != true || resultText(r) != want {
+		w := want
+		if tool == "doctor" { // no command of ours names the endpoint of a session: doctor has no hint
+			w = "No endpoint is chosen for this session."
+		}
+		if r := s.call(t, id, tool, `{}`); r["isError"] != true || resultText(r) != w {
 			t.Fatalf("%s: %v", tool, r)
 		}
 	}
@@ -566,14 +571,13 @@ func TestStatusAndDoctorUntrustedCertificate(t *testing.T) {
 	if j.code != 1 || j.out != `{"endpoint":"`+tTo("a")+`","ready":false,"online":false,"reason":"`+text+`"}`+"\n" {
 		t.Fatalf("status --json: %+v", j)
 	}
-	const fix = `set "ca" or MASH_CA to the PEM file of the CA that signed it`
 	d := runMash(env, "doctor")
 	want := "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    FAIL  " + text + "\nsign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no unverified mail was refused\n\n1 problem.\n"
-	if d.code != 1 || d.out != want || d.errs != "hint: "+fix+"\n" || strings.Contains(d.out, "did not answer") {
+	if d.code != 1 || d.out != want || d.errs != "" || strings.Contains(d.out, "did not answer") {
 		t.Fatalf("doctor:\n%+v\nwant %q", d, want)
 	}
 	dj := runMash(env, "doctor", "--json")
-	if !strings.Contains(dj.out, `{"name":"server","state":"fail","detail":"`+text+`","fix":"set \"ca\" or MASH_CA to the PEM file of the CA that signed it"}`) {
+	if !strings.Contains(dj.out, `{"name":"server","state":"fail","detail":"`+text+`","fix":null}`) || !strings.Contains(dj.out, `"hint":null`) {
 		t.Fatalf("doctor --json: %+v", dj)
 	}
 }
@@ -592,14 +596,13 @@ func TestStatusAndDoctorNotATLSServer(t *testing.T) {
 	if j.code != 1 || j.out != `{"endpoint":"`+tTo("a")+`","ready":false,"online":false,"reason":"`+text+`"}`+"\n" {
 		t.Fatalf("status --json: %+v", j)
 	}
-	const fix = `use the server's plain address with MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1 set, or ask whoever runs your mesh for its tls:// address`
 	d := runMash(env, "doctor")
 	want := "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    FAIL  " + text + "\nsign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no unverified mail was refused\n\n1 problem.\n"
-	if d.code != 1 || d.out != want || d.errs != "hint: "+fix+"\n" || strings.Contains(d.out, "did not answer:") {
+	if d.code != 1 || d.out != want || d.errs != "" || strings.Contains(d.out, "did not answer:") {
 		t.Fatalf("doctor:\n%+v\nwant %q", d, want)
 	}
 	dj := runMash(env, "doctor", "--json")
-	if !strings.Contains(dj.out, `{"name":"server","state":"fail","detail":"`+text+`","fix":"use the server's plain address with MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1 set, or ask whoever runs your mesh for its tls:// address"}`) {
+	if !strings.Contains(dj.out, `{"name":"server","state":"fail","detail":"`+text+`","fix":null}`) {
 		t.Fatalf("doctor --json: %+v", dj)
 	}
 }
@@ -643,7 +646,17 @@ func TestStatusAndDoctorHintsAreOnStderr(t *testing.T) {
 	w := tlsWorld(t, "a")
 	other := testenv.Start(t)
 	creds, _ := other.Mint(t, tAddr("a"))
-	env := strictEnv(w, "a", map[string]string{"MASH_CREDS": creds}) // refused: both commands have a fix to hint
+	// refused, with the creds at the path join writes: both commands have a fix to hint
+	dir := t.TempDir()
+	env := strictEnv(w, "a", map[string]string{"MASH_CONFIG_DIR": dir})
+	delete(env, "MASH_CREDS")
+	b, err := os.ReadFile(creds)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, env["MASH_ENDPOINT"]+".creds"), b, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	for _, cmd := range []string{"status", "doctor"} {
 		r := runMash(env, cmd)
 		if r.code != 1 || !strings.HasPrefix(r.errs, "hint: ") || strings.HasSuffix(strings.TrimSuffix(r.errs, "\n"), "\n") {

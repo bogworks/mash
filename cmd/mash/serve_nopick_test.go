@@ -38,8 +38,12 @@ func TestServeNeverAutoPicksAnEndpoint(t *testing.T) {
 	}
 	const want = "No endpoint is chosen for this session.\nhint: start the session with MASH_ENDPOINT=<address>"
 	for i, tool := range []string{"status", "doctor"} {
-		if got := reportText(t, s, 10+i, tool); got != want {
-			t.Errorf("%s, no endpoint named: %q, want %q", tool, got, want)
+		w := want
+		if tool == "doctor" { // no command of ours names a session's endpoint: doctor has no hint (#1099)
+			w = specCases(t, "doctor")["In a session with no endpoint chosen"].Text
+		}
+		if got := reportText(t, s, 10+i, tool); got != w {
+			t.Errorf("%s, no endpoint named: %q, want %q", tool, got, w)
 		}
 	}
 }
