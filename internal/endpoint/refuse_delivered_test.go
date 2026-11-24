@@ -103,7 +103,7 @@ func TestDeliveredSeqsOfAnotherStreamIgnored(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := filepath.Join(dir, deliveredSeqsFile)
-	if err := writeRefusedSeqs(p, "inbox@old", []uint64{1, 2}); err != nil {
+	if err := writeRefusedSeqs(p, "inbox@old", 0, []uint64{1, 2}); err != nil {
 		t.Fatal(err)
 	}
 	if e.deliveredSeq(1, "inbox@new") || !e.deliveredSeq(1, "inbox@old") {

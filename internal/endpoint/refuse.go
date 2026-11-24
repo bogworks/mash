@@ -27,6 +27,10 @@ import (
 // refusedSeqsFile lists, one decimal stream sequence per line, the inbox messages serve refused. The inbox stream keeps
 // everything the server stored, so the counts mash inbox reports leave these out: the file says which they are. It is a
 // help for the counts only; a missing or damaged file means the counts include the refused mail still stored.
+//
+// The count file (RefusedFile) is the running count, which includes the sequences pruned from this file. The file
+// therefore also records how many it dropped (refusedSeqsPruned), so that count == pruned + recorded sequences holds
+// after every write and a count left low by a kill can be repaired from the file alone.
 const refusedSeqsFile = "refused-unverified.seqs"
 
 // refusedSeqsHeader opens the sequences file: the identity of the inbox stream the sequences belong to (its name and
@@ -35,8 +39,14 @@ const refusedSeqsFile = "refused-unverified.seqs"
 const refusedSeqsHeader = "stream "
 
 // refusedSeqsKeep is the size at which the file is pruned: past twice that, the sequences below the inbox stream's
-// first sequence (gone from the stream) are dropped. A sequence the stream still holds is never dropped.
+// first sequence (gone from the stream) are dropped, and the number dropped is added to the file's pruned marker. A
+// sequence the stream still holds is never dropped.
 var refusedSeqsKeep = 4096
+
+// refusedSeqsPruned opens the marker line "pruned N": N is the decimal count of sequences dropped from this file so far,
+// for the stream identity in its header. A reader that does not know the marker ignores it, as it ignores any line that
+// is not a decimal sequence (ParseUint fails and the line is skipped), so an older mash reads the same sequences.
+const refusedSeqsPruned = "pruned "
 
 // refusedMu serialises the writers of the count and the sequence list, so concurrent arrivals lose no count.
 var refusedMu sync.Mutex
@@ -173,22 +183,26 @@ func (e *Endpoint) refusedFirstSeq(ctx context.Context) (uint64, error) {
 	return info.State.FirstSeq, nil
 }
 
-// writeRefusedSeqs replaces the sequences file with the stream identity id and seqs.
-func writeRefusedSeqs(p, id string, seqs []uint64) error {
+// writeRefusedSeqs replaces the sequences file with the stream identity id, the pruned marker (only when pruned is
+// above 0) and seqs.
+func writeRefusedSeqs(p, id string, pruned int, seqs []uint64) error {
 	var b strings.Builder
 	b.WriteString(refusedSeqsHeader + id + "\n")
+	if pruned > 0 {
+		b.WriteString(refusedSeqsPruned + strconv.Itoa(pruned) + "\n")
+	}
 	for _, s := range seqs {
 		b.WriteString(strconv.FormatUint(s, 10) + "\n")
 	}
 	return replaceFile(p, []byte(b.String()))
 }
 
-// repairRefusedCountLocked raises the count file to the number of recorded sequences when it is lower (every recorded
-// sequence was counted; a kill between the two writes leaves it low) and returns the count as it stands. The caller
-// holds refusedMu.
-func (e *Endpoint) repairRefusedCountLocked(dir string, seqs []uint64) (int, error) {
+// repairRefusedCountLocked raises the count file to pruned plus the number of recorded sequences when it is lower
+// (every pruned and every recorded sequence was counted; a kill between the two writes leaves it low) and returns the
+// count as it stands. The caller holds refusedMu.
+func (e *Endpoint) repairRefusedCountLocked(dir string, pruned int, seqs []uint64) (int, error) {
 	cur := RefusedCount(e.cfg)
-	have := max(cur, len(seqs))
+	have := max(cur, pruned+len(seqs))
 	if have > cur {
 		if err := replaceFile(filepath.Join(dir, RefusedFile), []byte(strconv.Itoa(have)+"\n")); err != nil {
 			return cur, err
@@ -206,11 +220,11 @@ func (e *Endpoint) reconcileRefusedCount(stream string) error {
 	}
 	refusedMu.Lock()
 	defer refusedMu.Unlock()
-	id, seqs := readRefusedSeqs(filepath.Join(dir, refusedSeqsFile))
+	id, seqs, pruned := readRefusedFile(filepath.Join(dir, refusedSeqsFile))
 	if id != stream {
 		return nil
 	}
-	_, err = e.repairRefusedCountLocked(dir, seqs)
+	_, err = e.repairRefusedCountLocked(dir, pruned, seqs)
 	return err
 }
 
@@ -236,13 +250,13 @@ func (e *Endpoint) recordRefusalNew(seq uint64) (n int, added bool, err error) {
 		return 0, false, err
 	}
 	p := filepath.Join(dir, refusedSeqsFile)
-	fid, seqs := readRefusedSeqs(p)
+	fid, seqs, pruned := readRefusedFile(p)
 	if fid != id {
-		seqs = nil // another stream's sequences are not this stream's
+		seqs, pruned = nil, 0 // another stream's sequences are not this stream's
 	}
-	// Every sequence in the file was counted, so the count is never below their number. A kill between the
-	// sequence write and the count write leaves it below: the redelivery repairs it here, before it returns.
-	have, rerr := e.repairRefusedCountLocked(dir, seqs)
+	// Every pruned and every recorded sequence was counted, so the count is never below their number. A kill between
+	// the sequence write and the count write leaves it below: the redelivery repairs it here, before it returns.
+	have, rerr := e.repairRefusedCountLocked(dir, pruned, seqs)
 	if slices.Contains(seqs, seq) {
 		return have, false, rerr
 	}
@@ -262,7 +276,7 @@ func (e *Endpoint) recordRefusalNew(seq uint64) (n int, added bool, err error) {
 				}
 			}
 			if len(kept) < len(seqs) {
-				if err := writeRefusedSeqs(p, id, append(kept, seq)); err != nil {
+				if err := writeRefusedSeqs(p, id, pruned+len(seqs)-len(kept), append(kept, seq)); err != nil {
 					return 0, false, err
 				}
 				wrote = true // written whole, seq included
@@ -317,26 +331,39 @@ func replaceFile(path string, data []byte) error {
 // distinct sequences, in file order. A sequence written twice (two processes appending across a handover) is one
 // refusal, so every count derived from the list is of distinct sequences.
 func readRefusedSeqs(path string) (string, []uint64) {
+	id, seqs, _ := readRefusedFile(path)
+	return id, seqs
+}
+
+// readRefusedFile is readRefusedSeqs with the pruned total of the marker line too (0 when there is none or its number
+// is malformed; the last marker wins).
+func readRefusedFile(path string) (id string, seqs []uint64, pruned int) {
 	f, err := os.Open(path)
 	if err != nil {
-		return "", nil
+		return "", nil, 0
 	}
 	defer f.Close()
-	var out []uint64
 	seen := map[uint64]bool{}
-	id := ""
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
+		if rest, ok := strings.CutPrefix(sc.Text(), refusedSeqsPruned); ok {
+			n, err := strconv.Atoi(strings.TrimSpace(rest))
+			if err != nil || n < 0 {
+				n = 0
+			}
+			pruned = n
+			continue
+		}
 		if rest, ok := strings.CutPrefix(sc.Text(), refusedSeqsHeader); ok {
 			id = strings.TrimSpace(rest)
 			continue
 		}
 		if n, err := strconv.ParseUint(strings.TrimSpace(sc.Text()), 10, 64); err == nil && !seen[n] {
 			seen[n] = true
-			out = append(out, n)
+			seqs = append(seqs, n)
 		}
 	}
-	return id, out
+	return id, seqs, pruned
 }
 
 // refusedStored is how many of the refused messages the inbox stream, whose sequences run from first to last, may still
@@ -408,7 +435,7 @@ func (e *Endpoint) recordDelivered(seq uint64) error {
 	fid, seqs := readRefusedSeqs(p)
 	if fid != id {
 		seqs = nil // another stream's sequences are not this stream's
-		if err := writeRefusedSeqs(p, id, nil); err != nil {
+		if err := writeRefusedSeqs(p, id, 0, nil); err != nil {
 			return err
 		}
 	}
@@ -425,7 +452,7 @@ func (e *Endpoint) recordDelivered(seq uint64) error {
 				}
 			}
 			if len(kept) < len(seqs) {
-				return writeRefusedSeqs(p, id, append(kept, seq))
+				return writeRefusedSeqs(p, id, 0, append(kept, seq))
 			}
 		}
 	}
