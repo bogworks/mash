@@ -1,0 +1,1 @@
+**`mashctl doctor --audit-users` suggests the right fix when it finds unknown users while connections kept changing.** The keys row told you to run `mashctl init --config <file>`. It now gives the hint to revoke the unknown users with the tool that issued them ([#1359](https://github.com/bogworks/mash/issues/1359)).

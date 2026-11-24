@@ -5,3 +5,4 @@
 /buildrelease
 /mash
 .claude/settings.local.json
+/mashctl

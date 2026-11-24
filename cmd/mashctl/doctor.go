@@ -744,15 +744,18 @@ func doctorKeys(rep *doctorReport, ctx context.Context, adm *admin.Admin, cfg co
 	if n := len(revoked); n > 0 {
 		fails = append(fails, finding{text: fmt.Sprintf("%s still connected", count(n, "revoked key")+" "+plural(n, "is", "are")), fix: fix})
 	}
+	audited := auditUsers && len(unrecorded)+keyless > 0
 	if scan.Incomplete != "" {
 		f := finding{incompleteLines(scan.Incomplete), initFix, true} // wrapped or not, it is lines of its own
-		if churn && len(fails) == 0 && len(unrecorded)+keyless == 0 {
+		if churn && len(fails) == 0 {
 			f.fix = "wait a minute, then run mashctl doctor --audit-users again"
+			if audited {
+				f.fix = "" // the audit's own hint (revoke) is the fix that matches what was found
+			}
 		}
 		fails = append(fails, f)
 	}
 	auditText := ""
-	audited := auditUsers && len(unrecorded)+keyless > 0
 	if audited { // last: its keys are lines of their own, so no "; ..." may follow
 		n := len(unrecorded) + keyless
 		auditText = fmt.Sprintf("%s not issued by mashctl:%s", count(n, "connected user")+" "+plural(n, "was", "were"), keyLines(unrecorded, keyless))

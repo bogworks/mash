@@ -1052,6 +1052,39 @@ func TestDoctorAuditUsersFailsOnChurn(t *testing.T) {
 	checkFits80(t, e, "doctor", "--audit-users")
 }
 
+// With --audit-users, churn plus an unknown user: the fix is the audit's revoke hint, not the init command; two
+// unknown users give the plural form. Churn alone keeps the wait hint (TestDoctorAuditUsersFailsOnChurn).
+func TestDoctorAuditUsersChurnWithUnknownUserHintsRevoke(t *testing.T) {
+	e := newXYEnv(t)
+	for _, c := range []struct {
+		keys []string
+		fix  string
+	}{
+		{[]string{"UFOREIGN1"}, "revoke it with the tool that issued it (mashctl revokes only its own)"},
+		{[]string{"UFOREIGN1", "UFOREIGN2"}, "revoke them with the tool that issued them (mashctl revokes only its own)"},
+	} {
+		scriptScans(t, keyScan(true, c.keys...))
+		_, by, code := doctorJSON(t, e.run, "--audit-users")
+		k := by["keys"]
+		if code != 1 || k.State != "fail" || !strings.Contains(k.Detail, "kept changing") || !strings.Contains(k.Detail, "not issued by mashctl") || k.Fix == nil || *k.Fix != c.fix {
+			t.Fatalf("%v: %d %+v", c.keys, code, k)
+		}
+	}
+}
+
+// An incomplete read that is not churn, with an unknown user, keeps the init fix.
+func TestDoctorAuditUsersIncompleteWithUnknownUserKeepsInitFix(t *testing.T) {
+	e := newXYEnv(t)
+	sc := keyScan(false, "UFOREIGN1")
+	sc.Incomplete = "1 server(s) replied of 2 expected"
+	scriptScans(t, sc)
+	_, by, code := doctorJSON(t, e.run, "--audit-users")
+	k := by["keys"]
+	if code != 1 || k.State != "fail" || !strings.Contains(k.Detail, "1 server(s) replied") || !strings.Contains(k.Detail, "not issued by mashctl") || k.Fix == nil || *k.Fix != "mashctl init --config <file>" {
+		t.Fatalf("%d %+v", code, k)
+	}
+}
+
 // A read that settles on the second or third try gives the usual ok line.
 func TestDoctorKeysChurnThatSettlesIsOK(t *testing.T) {
 	e := newXYEnv(t)
