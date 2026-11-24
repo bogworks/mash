@@ -194,7 +194,7 @@ main() {
         echo "warning: gh not found: checked checksums only, not verified" >&2
     else
         ghout=$(gh --version 2>/dev/null) || ghout=
-        ghline=$(printf '%s\n' "$ghout" | head -n 1)
+        ghline=${ghout%%$'\n'*}
         ghver=$(printf '%s\n' "$ghline" | awk '$1 == "gh" && $2 == "version" && $3 ~ /^[0-9]+\.[0-9]+\.[0-9]+/ { split($3, v, /[^0-9]+/); print v[1], v[2], v[3], ($3 ~ /^[0-9.]+-/ ? "pre" : "") }')
         if [ -z "$ghout" ]; then
             echo "warning: gh did not run: checked checksums only, not verified" >&2
