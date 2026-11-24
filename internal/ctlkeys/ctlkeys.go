@@ -208,7 +208,7 @@ type Authority struct {
 func DirFor(cfg config.Config, env func(string) string) (string, error) {
 	if d := env("MASH_KEYS_DIR"); d != "" {
 		if !filepath.IsAbs(d) {
-			return "", fmt.Errorf("mashctl: MASH_KEYS_DIR=%q is not an absolute path", d)
+			return "", errors.New("mashctl: MASH_KEYS_DIR must be an absolute path")
 		}
 		return filepath.Clean(d), nil
 	}

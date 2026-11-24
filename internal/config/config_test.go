@@ -661,6 +661,11 @@ func TestMashDirVariables(t *testing.T) {
 				if err == nil || !strings.Contains(err.Error(), tc.err) {
 					t.Fatalf("err %v, want one naming %s", err, tc.err)
 				}
+				for _, v := range env { // the error names the variable and never echoes its value
+					if v != "" && strings.Contains(err.Error(), v) {
+						t.Fatalf("err %q echoes the value %q", err, v)
+					}
+				}
 				return
 			}
 			if err != nil {

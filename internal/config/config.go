@@ -400,7 +400,7 @@ func explicitDir(env func(string) string, v string) (string, error) {
 		return "", nil
 	}
 	if !filepath.IsAbs(d) {
-		return "", fmt.Errorf("mash: %s=%q is not an absolute path", v, d)
+		return "", fmt.Errorf("mash: %s must be an absolute path", v)
 	}
 	return filepath.Clean(d), nil
 }
