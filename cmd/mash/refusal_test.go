@@ -109,7 +109,7 @@ func TestMalformedEndpointStopsTheSession(t *testing.T) {
 	out.Reset()
 	errb.Reset()
 	if code := run([]string{"doctor"}, envFrom(env), strings.NewReader(""), &out, &errb); code != 1 ||
-		!strings.Contains(out.String(), "config    FAIL  ") || !strings.Contains(errb.String(), "MASH_ENDPOINT") {
+		!strings.Contains(out.String(), "config    FAIL  ") || !strings.Contains(out.String(), "MASH_ENDPOINT") || strings.Contains(errb.String(), "hint:") { // the row says what is wrong; no command of ours fixes it
 		t.Errorf("doctor: exit %d, %q, %q", code, out.String(), errb.String())
 	}
 }

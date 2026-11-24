@@ -92,7 +92,7 @@ func TestStatusToolSaysNotReadyWhileTheRequiredSpoolFails(t *testing.T) {
 		return reportText(t, s, id, "status") == want
 	})
 	id++
-	wantRow := "delivery  FAIL  mail is held: its folder cannot be written:\n                "
+	wantRow := "delivery  FAIL  cannot write\n                "
 	if got := reportText(t, s, id, "doctor"); !strings.Contains(got, wantRow) || strings.Contains(strings.SplitN(got, "\n                ", 2)[0], "spool") || !strings.Contains(got, "1 problem") {
 		t.Errorf("doctor does not show the held folder: %q", got)
 	}

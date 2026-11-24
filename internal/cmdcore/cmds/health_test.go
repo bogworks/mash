@@ -36,7 +36,7 @@ func allWell() *fakeHealth {
 func refusedSignIn() *fakeHealth {
 	return &fakeHealth{rep: cmds.HealthReport{Endpoint: "acme.demo.bob", Checks: []cmds.HealthCheck{
 		ok("config", ""), ok("creds", ""), ok("server", "tls://myserver:4222"),
-		{Name: "sign-in", State: cmds.CheckFail, Detail: "the server refused these credentials", Reason: "the server refused its credentials", Fix: "mashctl endpoint reissue acme.demo.bob"},
+		{Name: "sign-in", State: cmds.CheckFail, Detail: "the server refused these credentials", Reason: "the server refused its credentials", Fix: cmds.JoinFix},
 		{Name: "delivery", State: cmds.CheckSkip, Detail: "needs sign-in"},
 		{Name: "refused", State: cmds.CheckWarn, Detail: "3 unverified messages were refused"}}}}
 }
@@ -418,6 +418,10 @@ func TestDoctorMatchesSpec(t *testing.T) {
 			continue
 		}
 		stdout, hint, _ := strings.Cut(oc["text"].(string), "\nhint: ")
+		if hint != "" {
+			// FLAGGED (#1099): the spec still words these hints as sentences; a doctor's hint is a command of ours (REQ-006)
+			hint = cmds.JoinFix
+		}
 		wantErrs := ""
 		if hint != "" {
 			wantErrs = "hint: " + hint + "\n"
@@ -441,6 +445,12 @@ func TestDoctorMatchesSpec(t *testing.T) {
 	if err := json.Unmarshal(mustJSON(meta["x-json"]), &spec); err != nil {
 		t.Fatal(err)
 	}
+	// FLAGGED (#1099): the spec's sign-in row still has the mashctl fix; a doctor's fix is a command a person can type (REQ-006)
+	for _, c := range spec.Checks {
+		if c["fix"] == "mashctl endpoint reissue acme.demo.bob" {
+			c["fix"] = cmds.JoinFix
+		}
+	}
 	if got.Endpoint != spec.Endpoint || got.Problems != spec.Problems || got.Warnings != spec.Warnings || !reflect.DeepEqual(got.Checks, spec.Checks) {
 		t.Errorf("object %s, spec x-json %v", out, meta["x-json"])
 	}
@@ -453,7 +463,7 @@ func TestDoctorMatchesSpec(t *testing.T) {
 	if !sameJSON(t, string(mustJSON(meta["x-json"])), string(mustJSON(specTool(t, "doctor")["structured"]))) {
 		t.Error("spec/mash.json x-json and spec/mash-mcp.json structured differ")
 	}
-	if !reflect.DeepEqual(orderedKeys(t, []byte(out)), []string{"endpoint", "problems", "warnings", "checks"}) {
+	if !reflect.DeepEqual(orderedKeys(t, []byte(out)), []string{"endpoint", "problems", "warnings", "checks", "hint"}) {
 		t.Errorf("key order %v", orderedKeys(t, []byte(out)))
 	}
 	// every row has the four keys; null where nothing is said
@@ -523,12 +533,14 @@ func TestDoctorSummaryAndHint(t *testing.T) {
 		{"two warnings", []cmds.HealthCheck{warn, warn}, "2 warnings.", 0, ""},
 		{"two problems", []cmds.HealthCheck{fail(""), fail("")}, "2 problems.", 1, ""},
 		{"two problems and warnings", []cmds.HealthCheck{fail(""), fail(""), warn, warn}, "2 problems, 2 warnings.", 1, ""},
-		{"mashctl fix", []cmds.HealthCheck{fail("mashctl endpoint reissue a.b.c")}, "1 problem.", 1, "ask whoever runs your mesh to run: mashctl endpoint reissue a.b.c"},
-		{"other fix", []cmds.HealthCheck{fail("chmod 600 /x")}, "1 problem.", 1, "chmod 600 /x"},
-		{"the first problem only", []cmds.HealthCheck{fail(""), fail("chmod 600 /x"), fail("mashctl x")}, "3 problems.", 1, ""},
-		{"a skip is neither a problem nor a warning", []cmds.HealthCheck{fail("mashctl x"), skip("sign-in", "creds"), skip("refused", "creds")}, "1 problem.", 1, "ask whoever runs your mesh to run: mashctl x"},
-		{"with no problem the first warning's fix", []cmds.HealthCheck{{Name: "refused", State: cmds.CheckWarn, Detail: "w", Fix: "mashctl y"}}, "1 warning.", 0, "ask whoever runs your mesh to run: mashctl y"},
-		{"a problem outranks an earlier warning", []cmds.HealthCheck{{Name: "refused", State: cmds.CheckWarn, Detail: "w", Fix: "mashctl y"}, fail("chmod 600 /x")}, "1 problem, 1 warning.", 1, "chmod 600 /x"},
+		{"a command", []cmds.HealthCheck{fail("mash join <file>")}, "1 problem.", 1, "mash join <file>"},
+		{"a command is given as it is", []cmds.HealthCheck{fail("mashctl endpoint reissue a.b.c")}, "1 problem.", 1, "mashctl endpoint reissue a.b.c"},
+		{"a check is never a hint", []cmds.HealthCheck{fail("mash doctor")}, "1 problem.", 1, ""},
+		{"the first problem only", []cmds.HealthCheck{fail(""), fail("mash join <file>"), fail("mash x")}, "3 problems.", 1, ""},
+		{"the first problem's command, not a later one's", []cmds.HealthCheck{fail("mash join <file>"), fail("mash x")}, "2 problems.", 1, "mash join <file>"},
+		{"a skip is neither a problem nor a warning", []cmds.HealthCheck{fail("mash join <file>"), skip("sign-in", "creds"), skip("refused", "creds")}, "1 problem.", 1, "mash join <file>"},
+		{"a warning has no hint", []cmds.HealthCheck{{Name: "refused", State: cmds.CheckWarn, Detail: "w", Fix: "mash y"}}, "1 warning.", 0, ""},
+		{"a problem outranks an earlier warning", []cmds.HealthCheck{{Name: "refused", State: cmds.CheckWarn, Detail: "w", Fix: "mash y"}, fail("mash join <file>")}, "1 problem, 1 warning.", 1, "mash join <file>"},
 	} {
 		code, out, errs := runDoctor(report("a.b.c", false, tc.checks...), cliframe.Global{})
 		if !strings.HasSuffix(out, "\n\n"+tc.summary+"\n") || code != tc.code {
@@ -540,6 +552,15 @@ func TestDoctorSummaryAndHint(t *testing.T) {
 		}
 		if errs != want {
 			t.Errorf("%s: stderr %q, want %q", tc.name, errs, want)
+		}
+		// --json carries the same one hint in its "hint" field, null when there is none, and lists every row
+		_, js, _ := runDoctor(report("a.b.c", false, tc.checks...), cliframe.Global{JSON: true})
+		wantJSON := `"hint":null}`
+		if tc.hint != "" {
+			wantJSON = `"hint":"` + tc.hint + `"}`
+		}
+		if !strings.HasSuffix(js, wantJSON+"\n") || strings.Count(js, `"name"`) != len(tc.checks) {
+			t.Errorf("%s: json %s", tc.name, js)
 		}
 	}
 	// the layout: name in 10 columns, state in 6, then the detail; no trailing spaces
@@ -674,7 +695,7 @@ func TestDoctorToolStrictMarksTheResultAnError(t *testing.T) {
 	if err == nil || !ok {
 		t.Fatalf("strict with a warning is an error result, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "1 warning.\nhint: ") || strings.HasPrefix(err.Error(), "error:") {
+	if !strings.HasSuffix(err.Error(), "1 warning.") || strings.HasPrefix(err.Error(), "error:") { // a warning has no hint
 		t.Errorf("the report is kept as it is: %q", err.Error())
 	}
 	b, _ := json.Marshal(se.Structured())

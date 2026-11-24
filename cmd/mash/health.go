@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -73,10 +72,6 @@ func urlSecretWarning(cfg config.Config) string {
 // configCheck is the config row: whether the configuration is readable and names an endpoint and a server.
 func (h *healthSvc) configCheck() cmds.HealthCheck {
 	c := cmds.HealthCheck{Name: cmds.CheckConfig, State: cmds.CheckFail}
-	file := "config.json"
-	if h.cfg.Dir != "" {
-		file = filepath.Join(h.cfg.Dir, "config.json")
-	}
 	c.Code = cmds.CodeConfigUnreadable
 	var several *config.SeveralEndpointsError
 	switch {
@@ -85,23 +80,19 @@ func (h *healthSvc) configCheck() cmds.HealthCheck {
 		c.Code = cmds.CodeEndpointsAmbiguous
 	case errors.Is(h.cfgErr, config.ErrGroupMissing):
 		c.Detail = "the endpoint address has no group: " + config.CodeGroupMissing
-		c.Fix = "set MASH_ENDPOINT=<owner.group.name>"
 	case h.cfgErr != nil && !errors.Is(h.cfgErr, config.ErrNoURL) && !errors.Is(h.cfgErr, config.ErrNoOwner):
 		c.Detail = redactText(strings.TrimPrefix(h.cfgErr.Error(), "mash: "))
 		if strings.Contains(c.Detail, "MASH_ENDPOINT") {
-			c.Fix = "set MASH_ENDPOINT=<owner.group.name>"
 		}
 	case h.cfg.Name == "":
 		// only a session reaches here: at a shell Health stops before the rows with "no endpoint is installed here"
-		c.Detail, c.Fix = cmds.ReasonNoSessionEndpoint, cmds.SessionEndpointFix
+		c.Detail = cmds.ReasonNoSessionEndpoint
 		c.Code = cmds.CodeNoEndpoint
 	case func() bool { _, err := h.cfg.Identity(); return err != nil }():
 		_, err := h.cfg.Identity()
 		c.Detail = redactText(strings.TrimPrefix(err.Error(), "mash: "))
-		c.Fix = "set MASH_ENDPOINT=<owner.group.name>"
 	case h.cfg.URL == "":
 		c.Detail = "no server is set"
-		c.Fix = `set "servers" in ` + file + " or MASH_SERVER"
 	default:
 		c.State, c.Code = cmds.CheckOK, ""
 	}
@@ -119,7 +110,6 @@ func setAsideDeleted(p string) bool {
 // its seed. It reads the file to check its shape and prints none of it.
 func (h *healthSvc) credsCheck() cmds.HealthCheck {
 	c := cmds.HealthCheck{Name: cmds.CheckCreds, State: cmds.CheckFail, Code: cmds.CodeCredsMissing}
-	addr := h.cfg.DisplayName()
 	p := credsPath(h.cfg)
 	if p == "" {
 		c.Detail = "no creds file is chosen"
@@ -130,26 +120,28 @@ func (h *healthSvc) credsCheck() cmds.HealthCheck {
 	switch {
 	case errors.Is(err, fs.ErrNotExist) && setAsideDeleted(p):
 		// mashctl endpoint delete set the file aside: the endpoint is gone, and a new creds file would not bring it back
-		c.Detail, c.Fix, c.Code = cmds.ReasonEndpointDeleted, cmds.EndpointDeletedFix, cmds.CodeEndpointDeleted
+		c.Detail, c.Fix, c.Code = cmds.ReasonEndpointDeleted, cmds.JoinFix, cmds.CodeEndpointDeleted
 	case errors.Is(err, fs.ErrNotExist):
-		c.Detail = "the creds file is missing: " + p
-		c.Fix = "mashctl endpoint reissue " + addr
+		// the row names the file with ~; status keeps its longer sentence
+		c.Detail, c.Fix = config.Tilde(p)+" is missing", cmds.JoinFix
+		c.Reason = "the creds file is missing: " + p
 	case err != nil && strings.Contains(err.Error(), "readable by other users"):
-		c.Detail = "the creds file can be read by other users: " + p
-		c.Fix = "chmod 600 " + p
+		c.Detail = p + " can be read by others"
 	case err != nil && strings.Contains(err.Error(), "not a regular file"):
 		c.Detail = "the creds file is not a regular file: " + p
 	case err != nil:
 		c.Detail = "the creds file cannot be read: " + p
 	default:
 		if cerr := natsauth.CheckCreds(p, raw); cerr != nil {
-			c.Detail = "the creds file is not a creds file: " + p
-			c.Fix = "mashctl endpoint reissue " + addr
+			c.Detail = p + " is not a creds file"
+			c.Fix = cmds.JoinReplaceFix
 		} else {
 			c.State, c.Code = cmds.CheckOK, ""
 		}
 	}
-	c.Reason = c.Detail
+	if c.Reason == "" {
+		c.Reason = c.Detail
+	}
 	return c
 }
 
@@ -158,10 +150,10 @@ func (h *healthSvc) serverCheck(ctx context.Context) cmds.HealthCheck {
 	c := cmds.HealthCheck{Name: cmds.CheckServer, State: cmds.CheckFail}
 	url := config.RedactURL(h.cfg.URL)
 	if _, err := endpoint.EndpointTLS(h.cfg); err != nil {
-		c.Detail = redactText(strings.TrimPrefix(err.Error(), "mash: "))
-		c.Fix = `use a tls:// server address (MASH_SERVER or "servers" in config.json)`
+		// the row is one short line; status keeps the whole refusal as its reason
+		c.Detail = "the server address is not tls://: " + url
 		c.Code = cmds.CodeServerNoTLS
-		c.Reason = c.Detail
+		c.Reason = redactText(strings.TrimPrefix(err.Error(), "mash: "))
 		return c
 	}
 	octx, cancel := context.WithTimeout(ctx, openFor(h.cfg))
@@ -171,15 +163,13 @@ func (h *healthSvc) serverCheck(ctx context.Context) cmds.HealthCheck {
 		switch {
 		case errors.Is(err, endpoint.ErrServerCertUntrusted):
 			c.Detail = "the server's certificate is not trusted: " + url
-			c.Fix = `set "ca" or MASH_CA to the PEM file of the CA that signed it`
+			// no hint: join cannot change the CA of a folder that has an endpoint
 			c.Code = cmds.CodeServerUntrusted
 		case errors.Is(err, endpoint.ErrServerNotTLS):
 			c.Detail = "the server did not offer TLS: " + url
-			c.Fix = `use the server's plain address with MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1 set, or ask whoever runs your mesh for its tls:// address`
 			c.Code = cmds.CodeServerNoTLS
 		case errors.Is(err, endpoint.ErrServerRefusedClientCert):
 			c.Detail = "the server refused the client certificate: " + url
-			c.Fix = "set tls_cert and tls_key, or MASH_TLS_CERT and MASH_TLS_KEY, to a certificate the server's CA signed"
 			c.Code = cmds.CodeCredsRefused
 		}
 		c.Reason = c.Detail
@@ -198,7 +188,6 @@ func (h *healthSvc) serverCheck(ctx context.Context) cmds.HealthCheck {
 // whether an agent session holds the endpoint open now (its lease).
 func (h *healthSvc) signInCheck(ctx context.Context) (c cmds.HealthCheck, online bool) {
 	c = cmds.HealthCheck{Name: cmds.CheckSignIn, State: cmds.CheckFail}
-	addr := h.cfg.DisplayName()
 	octx, cancel := context.WithTimeout(ctx, openFor(h.cfg))
 	ep, err := endpoint.OpenClientWith(octx, h.cfg, endpoint.ClientOptions{Lease: true})
 	cancel()
@@ -206,18 +195,18 @@ func (h *healthSvc) signInCheck(ctx context.Context) (c cmds.HealthCheck, online
 		switch msg := err.Error(); {
 		case endpoint.IsAuthFailure(err):
 			c.Detail, c.Reason = "the server refused these credentials", "the server refused its credentials"
-			c.Fix, c.Code = "mashctl endpoint reissue "+addr, cmds.CodeCredsRefused
+			c.Fix, c.Code = cmds.JoinReplaceFix, cmds.CodeCredsRefused
 		case transient(err) || strings.Contains(msg, "no servers available"):
 			c.Detail = "the server did not answer: " + config.RedactURL(h.cfg.URL)
 			c.Reason, c.Code = c.Detail, cmds.CodeServerUnreachable
 		case errors.Is(err, endpoint.ErrCredsMismatch):
-			c.Detail = "the creds file belongs to another endpoint than " + addr
-			c.Fix, c.Code = "mashctl endpoint reissue "+addr, cmds.CodeCredsRefused
+			c.Detail = "the creds file belongs to another endpoint than " + h.cfg.DisplayName()
+			c.Fix, c.Code = cmds.JoinReplaceFix, cmds.CodeCredsRefused
 		case strings.Contains(msg, "the server refused the client certificate"):
 			c.Detail = "the server refused the client certificate: " + config.RedactURL(h.cfg.URL)
-			c.Fix, c.Code = "set tls_cert and tls_key, or MASH_TLS_CERT and MASH_TLS_KEY, to a certificate the server's CA signed", cmds.CodeCredsRefused
+			c.Code = cmds.CodeCredsRefused
 		case errors.Is(err, endpoint.ErrNotProvisioned):
-			c.Detail, c.Fix, c.Code = cmds.ReasonEndpointDeleted, cmds.EndpointDeletedFix, cmds.CodeEndpointDeleted
+			c.Detail, c.Fix, c.Code = cmds.ReasonEndpointDeleted, cmds.JoinFix, cmds.CodeEndpointDeleted
 		default:
 			c.Detail, c.Code = redactText(strings.TrimPrefix(msg, "mash: ")), cmds.CodeUnknown
 		}
@@ -266,9 +255,9 @@ func (h *healthSvc) deliveryCheck() cmds.HealthCheck {
 		return cmds.HealthCheck{Name: cmds.CheckDelivery, State: cmds.CheckFail, Detail: d}
 	}
 	if h.mailHeld != nil && h.mailHeld() {
-		detail := cmds.ReasonMailHeld
+		detail := "cannot write its mail folder"
 		if dir, err := endpoint.SpoolDir(h.cfg); err == nil {
-			detail += ": " + config.Tilde(dir)
+			detail = cmds.CannotWrite + config.Tilde(dir)
 		}
 		return cmds.HealthCheck{Name: cmds.CheckDelivery, State: cmds.CheckFail, Detail: detail}
 	}
