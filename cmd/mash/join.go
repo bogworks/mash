@@ -3,15 +3,18 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"io"
 	"io/fs"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -36,6 +39,7 @@ const maxJoinFile = 1 << 20
 // The rename and remove the install steps and their rollback use; tests replace them to fail a step.
 var (
 	joinRename = os.Rename
+	joinLink   = os.Link
 	joinRemove = os.Remove
 )
 
@@ -402,9 +406,10 @@ func (s joinSvc) Join(_ context.Context, req cmds.JoinRequest) (cmds.JoinOutcome
 	if halfDone && (finishing || req.Replace) {
 		others--
 	}
-	if !haveCA && j.CA != nil && others > 0 {
-		// the folder has no certificate authority and already holds an endpoint: that endpoint trusts the system's
-		// roots, and one that brings a ca would change what it trusts. The first join into an empty folder sets it.
+	if !haveCA && j.CA != nil && (others > 0 || len(have) > 0) {
+		// the folder has no certificate authority and already holds an endpoint, or was already set up (config.json names
+		// servers): that endpoint, or that setup, trusts the system's roots, and a join file that brings a ca would
+		// change what it trusts. Only the first join into an empty folder (no servers, no endpoint) sets it.
 		return cmds.JoinOutcome{}, otherFolder("ca")
 	}
 
@@ -518,13 +523,17 @@ func (s joinSvc) Join(_ context.Context, req cmds.JoinRequest) (cmds.JoinOutcome
 		return fail(err)
 	}
 	var made []string // what this run created, by exact path, removed if a later step fails
+	var wrote *joinWrote
+	if !finishing {
+		wrote = recordJoinWrote(credsPath, creds)
+	}
 	// undo puts the folder back as it was and returns what it could not: the exact paths a rollback step failed on.
 	undo := func() (left []string, kept string) {
 		if finishing {
 			// the creds were there before this run: only what this run wrote is removed
 			return joinRemoveAll(made), ""
 		}
-		left, kept = joinUndo(made, backup, credsPath)
+		left, kept = joinUndo(made, backup, credsPath, wrote)
 		if kept != "" && kept == backup {
 			temps = slices.DeleteFunc(temps, func(t string) bool { return t == backup })
 		}
@@ -586,27 +595,112 @@ func readableCredsEqual(path string, want []byte) bool {
 	return err == nil && bytes.Equal(got, want)
 }
 
+// joinWrote is what a join run installed at the creds path: the file's identity and a hash of its bytes.
+type joinWrote struct {
+	info os.FileInfo
+	sum  [sha256.Size]byte
+}
+
+// recordJoinWrote notes the file now at path, which holds want; nil when it cannot be stat-ed.
+func recordJoinWrote(path string, want []byte) *joinWrote {
+	fi, err := os.Lstat(path)
+	if err != nil {
+		return nil
+	}
+	return &joinWrote{info: fi, sum: sha256.Sum256(want)}
+}
+
+// stillMade reports whether path is still the file this run installed: a regular file (a symlink is not followed),
+// the same file by os.SameFile, with the same bytes. A path that is gone counts as still made, there is nothing to
+// protect (the remove then finds nothing). A nil w is no record and counts as made.
+func (w *joinWrote) stillMade(path string) bool {
+	if w == nil {
+		return true
+	}
+	fi, err := os.Lstat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return true
+	}
+	if err != nil || !fi.Mode().IsRegular() || !os.SameFile(w.info, fi) {
+		return false
+	}
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, io.LimitReader(f, maxJoinFile)); err != nil {
+		return false
+	}
+	return [sha256.Size]byte(h.Sum(nil)) == w.sum
+}
+
 // joinUndo removes what a join run made (by exact path) and puts a replaced creds file back from its backup. It returns
 // the paths it could not clean up. When the backup cannot be restored the new creds stay in place and the old ones are
 // kept: the backup is linked to <creds>.old (never over an existing file), and kept is that path; if that cannot be
 // done the backup keeps its own name and kept is that.
-func joinUndo(made []string, backup, credsPath string) (left []string, kept string) {
+//
+// The creds path is first captured by renaming it to <creds>.join-undo-<random>, so what is checked is what is removed
+// or restored: a file put at the path after the capture is never touched. A captured file that is not the one this run
+// installed (wrote: the same file by os.SameFile and the same bytes) is linked back, never over an existing file; if
+// the path is taken again both stay and the captured one is named in left. A nil wrote means nothing was recorded and
+// the captured file counts as the run's own. The backup is restored by link too, so it never overwrites a file that
+// appeared at the path; then the backup is kept, as for any restore that fails.
+func joinUndo(made []string, backup, credsPath string, wrote *joinWrote) (left []string, kept string) {
 	left = joinRemoveAll(made)
-	if backup == "" {
-		if err := joinRemove(credsPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			left = append(left, credsPath)
+	keep := func() string {
+		if backup == "" {
+			return ""
 		}
-		return left, ""
-	}
-	if err := joinRename(backup, credsPath); err != nil {
-		left = append(left, credsPath)
-		kept = backup
 		if old := credsPath + ".old"; os.Link(backup, old) == nil {
 			os.Remove(backup)
-			kept = old
+			return old
+		}
+		return backup
+	}
+	tmp := credsPath + ".join-undo-" + strconv.FormatUint(rand.Uint64(), 36)
+	captured := true
+	if err := joinRename(credsPath, tmp); errors.Is(err, fs.ErrNotExist) {
+		captured = false
+	} else if err != nil {
+		return append(left, credsPath), keep()
+	}
+	if captured && !wrote.stillMade(tmp) { // not ours: put it back, never over a file that is there now
+		if err := joinLink(tmp, credsPath); err != nil {
+			return append(left, tmp), keep()
+		}
+		if err := joinRemove(tmp); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			left = append(left, tmp)
+		}
+		return append(left, credsPath), keep()
+	}
+	dropOwn := func() {
+		if captured {
+			if err := joinRemove(tmp); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				left = append(left, tmp)
+			}
 		}
 	}
-	return left, kept
+	if backup == "" {
+		dropOwn()
+		return left, ""
+	}
+	if err := joinLink(backup, credsPath); err != nil {
+		if captured && !errors.Is(err, fs.ErrExist) { // the run's own creds stay in place
+			if joinLink(tmp, credsPath) == nil {
+				os.Remove(tmp)
+			} else {
+				left = append(left, tmp)
+			}
+		} else {
+			dropOwn()
+		}
+		return append(left, credsPath), keep()
+	}
+	os.Remove(backup)
+	dropOwn()
+	return left, ""
 }
 
 // undoFailure is the failure for a rollback that left paths behind: it names each by exact path and, when a replaced

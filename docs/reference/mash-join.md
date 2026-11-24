@@ -202,8 +202,9 @@ serves one mesh; a join file for another mesh needs another folder. The
 certificate authority's certificate is kept in the folder as ca.pem, and every
 endpoint in the folder trusts it; a join file that brings a different one, or
 none where the folder has one, or one where the folder has none and already
-holds an endpoint, is refused, with or without --replace. The first join into
-an empty folder sets it; a folder that already holds an endpoint and has no
+holds an endpoint or names servers in config.json, is refused, with or without
+--replace. The first join into an empty folder sets it; a folder that already
+holds an endpoint, or whose config.json already names servers, and has no
 ca.pem refuses a join file that brings one, with the same 'different ca' line.
 A JOIN FILE THAT HOLDS A SEED IS A SECRET FILE, and so is the file --key
 names: the file --key names is checked before it is read, and a join file is
