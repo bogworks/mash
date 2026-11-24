@@ -454,7 +454,7 @@
      },
      {
       "name": "x-release",
-      "value": "0.5.8"
+      "value": "0.5.9"
      },
      {
       "name": "x-output",
@@ -639,7 +639,7 @@
      },
      {
       "name": "x-release",
-      "value": "0.5.8"
+      "value": "0.5.9"
      },
      {
       "name": "x-output",
@@ -1494,7 +1494,7 @@
      },
      {
       "name": "x-release",
-      "value": "0.5.8"
+      "value": "0.5.9"
      },
      {
       "name": "x-output",
@@ -1553,6 +1553,14 @@
         "text": "error: this join file holds no seed; it was made for your own key\nhint: mash join acme.demo.bob.join --key <your seed file>",
         "stream": "stderr",
         "exit": 2
+       },
+       {
+        "case": "The join file's user JWT is named for another address",
+        "text": "error: bob.join names acme.demo.bob but is for acme.demo.carol\nhint: mashctl endpoint reissue acme.demo.bob --out acme.demo.bob.new.join",
+        "stream": "stderr",
+        "exit": 1,
+        "issue": "#1303",
+        "note": "\"names\" is the address in the file; \"is for\" is the address its credentials were made for. When the credentials carry no name: `error: bob.join has no name but names acme.demo.bob`, same hint. The old line `error: mix.join is not a join file this mash can read` stays for every other join-file problem. The hint is run by whoever made the file."
        },
        {
         "case": "The join file can be read by others",
