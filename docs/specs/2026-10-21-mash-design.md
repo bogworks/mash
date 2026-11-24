@@ -175,7 +175,7 @@ Tool errors are MCP tool results with `isError: true`, so Claude sees them as te
 
 - **Service:** a NATS micro service named `agents`, with version = the mash version.
 - **Metadata:** `agent: claude-code`, `owner`, `session: <name>`, `protocol_version: "0.3"`, `user_nkey`, `account`, `id_sig`, `mail_subject`.
-- **`prompt` endpoint:** queue group `agents`; metadata `max_payload "33KB"` (32 KiB of text plus 1 KiB of headers; it was "1MB" until #1536), `attachments_ok false`, `min_sender_trust "signed"`. A request:
+- **`prompt` endpoint:** queue group `agents`; metadata `max_payload "32KB"` (the 32 KiB text cap, `MaxPromptBytes`; it was "1MB" until #1536), `attachments_ok false`, `min_sender_trust "signed"`. A request:
   1. Classify the sender (§13.7). Not verified → `401`. Malformed → `400`.
   2. Reply `{"type":"status","data":"ack"}` at once.
   3. Push a channel event with `meta.request_id` and the sender. Claude answers with the `reply` tool.

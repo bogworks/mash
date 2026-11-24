@@ -24,17 +24,17 @@ decision-makers: mash maintainers (issue #1536)
 
 ## Decision Outcome
 
-Chosen: advertise the enforced cap. The `prompt` endpoint's `max_payload` is `MaxPromptBytes` plus a fixed headroom of 1 KiB for the request's headers and envelope (`PromptEnvelopeHeadroom`), written in SAP's grammar: `33KB`, which is 33792 bytes. The 32768-byte cap on the text is unchanged. The rest of ADR 0030's `prompt` metadata stands.
+Chosen: advertise the enforced cap. The `prompt` endpoint's `max_payload` is `MaxPromptBytes` written in SAP's grammar, `32KB`, which is 32768 bytes. The 32768-byte cap on the text is unchanged. Because SAP counts the whole request on the wire, a request within the advertised size always has text within the cap. The rest of ADR 0030's `prompt` metadata stands.
 
 ### Confirmation
 
-`TestPromptAdvertisedMaxPayloadMatchesTheLimit` (internal/endpoint) reads the registered `max_payload` and checks that it equals `MaxPromptBytes` plus the headroom. It builds a signed request carrying `MaxPromptBytes` of text, the way `mash prompt` does, and checks that its wire size is within the advertised value. It also checks that one byte more is still refused with 413. Changing either number alone fails it.
+`TestPromptAdvertisedMaxPayloadMatchesTheLimit` (internal/endpoint) reads the registered `max_payload` and checks that it is `32KB` and parses to `MaxPromptBytes`. It builds a signed request carrying `MaxPromptBytes+1` bytes of text, the way `mash prompt` does, and checks that it is refused with 413 and that its wire size is over the advertised value, so no refused request fits. It also checks that a signed request sized to exactly the advertised value on the wire is accepted. Changing either number alone fails it.
 
 ### Consequences
 
 * Good, because a caller that trusts `max_payload` is no longer refused for a prompt the endpoint said it accepts.
 * Good, because the channel notice still never cuts a prompt.
-* Bad, because a caller whose envelope inflates the text, such as heavily escaped JSON, can go over 33KB on the wire with less than 32 KiB of text; such a caller refuses locally, which is the safe direction.
+* Bad, because the headers count toward max_payload, so a caller that obeys it can send a few hundred bytes less text than the endpoint accepts.
 
 ## Pros and Cons of the Options
 
@@ -47,7 +47,7 @@ Chosen: advertise the enforced cap. The `prompt` endpoint's `max_payload` is `Ma
 ### Advertise the enforced cap
 
 * Good, because the advertised and enforced numbers come from one constant.
-* Bad, because the advertised value includes a headroom estimate, so it is not exactly the text limit.
+* Bad, because a caller that obeys it gets slightly less text room than the endpoint accepts.
 
 ## More Information
 

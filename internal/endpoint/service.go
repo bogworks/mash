@@ -176,19 +176,13 @@ func (e *Endpoint) promptMetadata() map[string]string {
 	return map[string]string{"max_payload": PromptMaxPayload(), "attachments_ok": "false", "min_sender_trust": "signed"}
 }
 
-// PromptEnvelopeHeadroom is what the advertised max_payload allows on top of MaxPromptBytes. SAP counts the whole
-// request on the wire against max_payload, the Agent-Sender header included (SAP section 5.4). A signed prompt from
-// mash carries about 450 bytes of header (framing, account and user keys, name, subject, timestamp, nonce, signature)
-// and the SAP SDK's own bound for it is about 600; with the subject and reply inbox counted too, and the 13 bytes of
-// a JSON envelope, 1 KiB covers the largest realistic set with room to spare. The text itself is bounded by
-// MaxPromptBytes, which is what the endpoint enforces.
-const PromptEnvelopeHeadroom = 1 << 10
-
 // PromptMaxPayload is the max_payload the prompt endpoint advertises, in the SAP grammar (a count and B, KB, MB or
-// GB, base 1024; SAP section 2.1): MaxPromptBytes of text plus PromptEnvelopeHeadroom, in the largest unit that
-// divides it evenly.
+// GB, base 1024; SAP section 2.1): exactly MaxPromptBytes, the text cap the endpoint enforces. SAP counts the whole
+// request on the wire against max_payload, the Agent-Sender header included (SAP section 5.4), so a request within
+// it carries at most MaxPromptBytes of text and is never refused for size. A caller that obeys the advertisement
+// gets a little less text room than the endpoint accepts (the headers count), which is the safe direction.
 func PromptMaxPayload() string {
-	return formatMaxPayload(MaxPromptBytes + PromptEnvelopeHeadroom)
+	return formatMaxPayload(MaxPromptBytes)
 }
 
 // formatMaxPayload writes n bytes as SAP's \d+(B|KB|MB|GB) with the largest unit that divides n evenly.
