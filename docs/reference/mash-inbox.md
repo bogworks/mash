@@ -136,6 +136,66 @@ NUMBER  FROM  WHEN     STATE  URGENT  KIND      MESSAGE
 2       bob   8s ago   new    yes     question  ready?
 ```
 
+### Counts without serve running
+
+Stream: stdout. Exit code: 0.
+
+```text
+About 2 messages for acme.demo.alice, about 2 new, about 1 urgent.
+
+NUMBER  FROM  WHEN     STATE  URGENT  KIND      MESSAGE
+1       bob   10s ago  new    no      task      lunch at noon?
+2       bob   8s ago   new    yes     question  ready?
+```
+
+### Counts are capped
+
+Stream: stdout. Exit code: 0.
+
+```text
+About 1000 messages for acme.demo.alice, about 90 new, about 4 urgent.
+```
+
+### Counts without serve running, with --detail
+
+Stream: stdout. Exit code: 0.
+
+```text
+About 2 messages for acme.demo.alice, about 2 new, about 1 urgent.
+exact: no (mash serve is not running, so unverified mail is counted)
+
+NUMBER  FROM  WHEN     STATE  URGENT  KIND      MESSAGE
+1       bob   10s ago  new    no      task      lunch at noon?
+2       bob   8s ago   new    yes     question  ready?
+```
+
+### Counts are capped, with --detail
+
+Stream: stdout. Exit code: 0.
+
+```text
+About 1000 messages for acme.demo.alice, about 90 new, about 4 urgent.
+exact: no (only the oldest 1000 messages were checked)
+
+NUMBER  FROM  WHEN     STATE  URGENT  KIND      MESSAGE
+1       bob   10s ago  new    no      task      lunch at noon?
+2       bob   8s ago   new    yes     question  ready?
+```
+
+### Counts are capped and serve is not running, with --detail
+
+Stream: stdout. Exit code: 0.
+
+```text
+About 1000 messages for acme.demo.alice, about 90 new, about 4 urgent.
+exact: no (only the oldest 1000 messages were checked)
+exact: no (mash serve is not running, so unverified mail is counted)
+
+NUMBER  FROM  WHEN     STATE  URGENT  KIND      MESSAGE
+1       bob   10s ago  new    no      task      lunch at noon?
+2       bob   8s ago   new    yes     question  ready?
+```
+
 ## JSON
 
 With `--json` the result is this shape. The values are an example.
