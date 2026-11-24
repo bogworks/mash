@@ -218,6 +218,7 @@ type initResult struct {
 	Changed    bool     `json:"changed"`
 	DryRun     bool     `json:"dry_run,omitempty"`
 	WouldApply *bool    `json:"would_change,omitempty"`
+	SigningKey string   `json:"signing_key,omitempty"`
 }
 
 // isUnreachable reports whether err is a server that did not answer, as opposed to one that answered and refused.
@@ -236,13 +237,13 @@ func runInit(args []string, g cliframe.Global, env func(string) string, lookup c
 		return cliframe.Report(stdout, stderr, err, jsonRequested(args, "--config"))
 	}
 	jsonOut := in.json || g.JSON
-	return cliframe.Report(stdout, stderr, doInit(in.values["--config"], in.flags["--dry-run"], jsonOut, env, lookup, stdout, stderr), jsonOut)
+	return cliframe.Report(stdout, stderr, doInit(in.values["--config"], in.flags["--dry-run"], jsonOut, g.Detail, env, lookup, stdout, stderr), jsonOut)
 }
 
 // step is one thing init would set up; any step means the run changes something.
 type step struct{ label, value string }
 
-func doInit(setupPath string, dry, jsonOut bool, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) error {
+func doInit(setupPath string, dry, jsonOut, detail bool, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) error {
 	sf, err := loadSetup(setupPath, env("HOME"))
 	if err != nil {
 		return err
@@ -471,7 +472,7 @@ func doInit(setupPath string, dry, jsonOut bool, env func(string) string, lookup
 	changed := len(steps) > 0
 
 	if dry {
-		return finishInit(stdout, jsonOut, true, changed, sf, first, signing)
+		return finishInit(stdout, jsonOut, detail, true, changed, sf, first, signing)
 	}
 	if needOp {
 		if pub, _, err := ks.ImportOperator(sf.operatorKey); err != nil {
@@ -541,7 +542,7 @@ func doInit(setupPath string, dry, jsonOut bool, env func(string) string, lookup
 			return failErr(err)
 		}
 	}
-	return finishInit(stdout, jsonOut, false, changed, sf, first, signing)
+	return finishInit(stdout, jsonOut, detail, false, changed, sf, first, signing)
 }
 
 // checkClusterListed refuses a setup file that lists too few servers for the cluster the ping saw: a revocation must be
@@ -625,13 +626,13 @@ func differentSetup(st *initState, what string) error {
 }
 
 // finishInit prints the one line of init or the JSON object.
-func finishInit(stdout io.Writer, jsonOut, dry, changed bool, sf setupFile, first, signPub string) error {
+func finishInit(stdout io.Writer, jsonOut, detail, dry, changed bool, sf setupFile, first, signPub string) error {
 	shown := make([]string, len(sf.servers))
 	for i, s := range sf.servers {
 		shown[i] = maskURL(s)
 	}
 	if jsonOut {
-		r := initResult{Server: shown, Owner: sf.owner, Changed: changed && !dry}
+		r := initResult{Server: shown, Owner: sf.owner, Changed: changed && !dry, SigningKey: signPub}
 		if dry {
 			r.DryRun = true
 			r.WouldApply = &changed
@@ -646,11 +647,11 @@ func finishInit(stdout io.Writer, jsonOut, dry, changed bool, sf setupFile, firs
 	case dry:
 		fmt.Fprintf(stdout, "Would initialize mash on %s for owner %s\n", first, sf.owner)
 	default:
-		line := fmt.Sprintf("Initialized mash on %s for owner %s", first, sf.owner)
-		if signPub != "" {
-			line += "; endpoint users are signed with signing key " + signPub
+		fmt.Fprintf(stdout, "Initialized mash on %s for owner %s\n", first, sf.owner)
+		if detail && signPub != "" {
+			// Its own line: the 56-character public key would take the first past 80 columns.
+			fmt.Fprintln(stdout, "Signing key: "+signPub)
 		}
-		fmt.Fprintln(stdout, line)
 	}
 	if dry {
 		fmt.Fprintln(stdout, "Nothing was changed.")

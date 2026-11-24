@@ -1,0 +1,1 @@
+**`mashctl init` no longer prints the signing key by default.** When you set `signing_key`, the result is the one line `Initialized mash on <server> for owner <owner>`. `--detail` adds a second line, `Signing key: <public key>`, and `--json` has the public key as `signing_key`.

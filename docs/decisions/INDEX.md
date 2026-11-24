@@ -129,7 +129,7 @@
 | [0149](0149-further-departures-of-the-0-5-6-specification-by-the-maintainers-word.md) | Further departures of the 0.5.6 specification, by the maintainer's word (ADR 0147) | accepted | 2026-11-20 |
 | [0150](0150-releases-carry-install-and-local-nats-setup-scripts-as-attested-assets.md) | Releases carry the install and local NATS setup scripts as attested assets | accepted | 2026-11-20 |
 | [0151](0151-a-backlog-over-the-wake-count-or-age-wakes-the-session-whatever-the-kinds.md) | A backlog over the wake count or the wake age wakes the session, whatever the kinds, and listed mail counts as waiting | accepted | 2026-11-20 |
-| [0152](0152-the-release-carries-a-one-time-0-5-5-migration-script.md) | The release carries a one-time 0.5.5 migration script | accepted | 2026-11-20 |
+| [0152](0152-the-release-carries-a-one-time-0-5-5-migration-script.md) | The release carries a one-time 0.5.5 migration script | superseded by ADR-0161 | 2026-11-20 |
 | [0153](0153-the-plugin-is-installed-from-its-marketplace-and-mash-plugin-export-is-removed.md) | The plugin is installed from its marketplace, and `mash plugin export` is removed | accepted | 2026-11-21 |
 | [0154](0154-the-launchers-session-start-prefetch-says-on-stdout-when-no-mash-program-is-installed.md) | The launcher's session-start prefetch says on stdout when no mash program is installed | accepted | 2026-11-21 |
 | [0155](0155-a-listset-endpoint-may-publish-replies-only-under-its-own-owner-inbox-prefix.md) | A listset endpoint may publish replies only under its own owner's inbox prefix | accepted | 2026-11-21 |
@@ -138,7 +138,9 @@
 | [0158](0158-mashctl-carries-the-accounts-plain-signing-keys-and-still-refuses-scoped-ones.md) | mashctl carries the account's plain signing keys and still refuses scoped ones | accepted | 2026-11-22 |
 | [0159](0159-the-0-5-7-gate-rulings-on-scoped-signing-keys-and-on-which-markdown-is-documentation.md) | The 0.5.7 gate rulings on scoped signing keys and on which Markdown is documentation | accepted | 2026-11-23 |
 | [0160](0160-macos-runs-on-tagged-releases-only-and-the-ephemeral-pilot-runs-nightly.md) | macOS runs on tagged releases only, the ephemeral pilot runs nightly, and one pinned table says what runs when | accepted | 2026-11-23 |
+| [0161](0161-0-5-8-removes-the-0-5-5-migration-script-and-the-refusal-of-a-0-5-5-configuration-folder.md) | 0.5.8 removes the 0.5.5 migration script and the refusal of a 0.5.5 configuration folder | accepted | 2026-11-21 |
 | [0163](0163-config-json-records-the-configured-signing-keys-public-key-and-a-lost-signing-key-is-never-replaced-by-the-identity-key.md) | config.json records the configured signing key's public key, and a lost signing key is never replaced by the identity key | accepted | 2026-11-23 |
 | [0164](0164-planned-output-is-written-in-x-output-next-and-spec-next-json-and-rendered-as-the-gate-1-demo.md) | Planned output is written in x-output-next and spec/next.json, and rendered as the Gate 1 demo | accepted | 2026-11-23 |
 | [0165](0165-doctor-takes-keys-issued-elsewhere-from-an-external-keys-allowlist-in-config-json.md) | Doctor takes keys issued elsewhere from an external_keys allowlist in config.json | superseded by ADR-0166 | 2026-11-23 |
 | [0166](0166-doctor-health-covers-mashs-own-users-account-audit-is-explicit-audit-users.md) | Doctor health covers mash's own users; account audit is explicit (--audit-users) | accepted | 2026-11-23 |
+| [0167](0167-the-installers-unauthenticated-warning-is-one-short-line-and-its-planned-cases-stay-in-spec-next-json.md) | The installer's unauthenticated warning is one short line, and its planned cases stay in spec/next.json | accepted | 2026-11-24 |
