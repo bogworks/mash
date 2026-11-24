@@ -597,7 +597,9 @@ mode_remove() {
     if listening; then
         _who=$(port_holders)
         if [ -n "$_who" ]; then
-            die 1 "port $PORT is in use ($_who); nothing was removed" "$SELF --remove"
+            _hint="$SELF --remove"
+            [ "$DIR" = "$HOME_DIR/mash-nats" ] || _hint="$_hint --dir $DIR"
+            die 1 "port $PORT is in use ($_who); nothing was removed" "$_hint"
         fi
         die 1 "something still listens on 127.0.0.1:$PORT; nothing was removed" \
             "stop the program that holds the port (a wrapper script that runs nats-server?), then run $SELF --remove again"

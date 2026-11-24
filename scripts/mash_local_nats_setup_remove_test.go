@@ -52,6 +52,7 @@ type scenario struct {
 	listeners []listener
 	noPid     bool // ss and lsof omit the pid
 	shared    bool // ss shows every pid on one line
+	custom    bool // the folder is not the default $HOME/mash-nats, so the retry hint carries --dir
 }
 
 func plain(args func(e env) []string) listener    { return listener{args: args} }
@@ -84,6 +85,9 @@ func runRemove(t *testing.T, sc scenario) (rc int, out string, e env, pids []int
 	natsBin := filepath.Join(root, "natsbin")
 	home := filepath.Join(root, "home")
 	dir := filepath.Join(home, "mash-nats")
+	if sc.custom {
+		dir = filepath.Join(home, "custom-nats")
+	}
 	other := filepath.Join(root, "other")
 	bare := filepath.Join(root, "bare")
 	for _, d := range []string{bin, natsBin, home, dir, other, bare} {
@@ -261,6 +265,13 @@ func TestRemoveNamesEverySharedSocketPid(t *testing.T) {
 		natsWith(func(e env) []string { return []string{"-c", e.other + "/server.conf"} }),
 		natsWith(func(e env) []string { return []string{"--store_dir", e.dir} })}})
 	wantRefusal(t, rc, out, e, b, inUse(fmt.Sprintf("pids %d, %d", p[0], p[1])), inUseHint)
+}
+
+// a custom folder: the retry hint keeps --dir, the default folder's bare hint does not
+func TestRemoveHintKeepsACustomDir(t *testing.T) {
+	rc, out, e, p, b := runRemove(t, scenario{custom: true, listeners: []listener{
+		natsWith(func(e env) []string { return []string{"-c", e.other + "/server.conf"} })}})
+	wantRefusal(t, rc, out, e, b, inUse(fmt.Sprintf("pid %d", p[0])), inUseHint+" --dir "+e.dir)
 }
 
 // two listener lines, two pids, in tool order
