@@ -64,6 +64,9 @@ type NATS struct {
 	Conn *nats.Conn
 	// Inventory is the operator's server count (--servers; 0 none): the ping stops waiting once that many replied.
 	Inventory int
+	// AckWait overrides how long a known server has to acknowledge a push; 0 means ackWait. Tests on a loaded runner
+	// raise it; production leaves it zero.
+	AckWait time.Duration
 }
 
 // Lookup asks the resolver for the account's JWT; an empty answer is "none".
@@ -192,7 +195,11 @@ func (n NATS) Push(ctx context.Context, token string, expect []string) ([]Server
 		for _, e := range expect {
 			pending[e] = true
 		}
-		deadline := time.Now().Add(ackWait)
+		wait := ackWait
+		if n.AckWait > 0 {
+			wait = n.AckWait
+		}
+		deadline := time.Now().Add(wait)
 		for len(pending) > 0 && ctx.Err() == nil {
 			left := time.Until(deadline)
 			if left <= 0 {

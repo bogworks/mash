@@ -175,7 +175,7 @@ func TestRevokeUsersCutsOffAConnectedUser(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	got, err := RevokeUsers(ctx, RevokeParams{Keys: ks, Resolver: NATS{Conn: sysNC, Inventory: 1}, Servers: 1}, []string{userPub})
+	got, err := RevokeUsers(ctx, RevokeParams{Keys: ks, Resolver: NATS{Conn: sysNC, Inventory: 1, AckWait: 15 * time.Second}, Servers: 1}, []string{userPub})
 	if err != nil {
 		t.Fatalf("RevokeUsers: %v", err)
 	}
