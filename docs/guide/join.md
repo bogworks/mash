@@ -25,6 +25,8 @@ Joined as acme.demo.carol.
 acme.demo.carol: ready, offline
 ```
 
+If a join is interrupted part way, run the same command again: it finishes the install and says so.
+
 If the private key must never leave the joining machine, make the key there:
 
 ```sh

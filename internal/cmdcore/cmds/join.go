@@ -23,6 +23,7 @@ type JoinOutcome struct {
 	Servers   []string
 	Creds     string
 	CredsPath string
+	Finished  bool // an earlier join here stopped part way and this run finished it
 }
 
 // Joiner is the service Join needs from Env.Svc: it installs the join file into the configuration folder.
@@ -47,6 +48,7 @@ type JoinResult struct {
 	servers   []string
 	creds     string // as shown, for the text
 	credsPath string // absolute, for --detail --json
+	finished  bool   // this run finished a half-done join
 }
 
 // JoinDetail is join's fuller object: the endpoint, the servers and the creds file's absolute path.
@@ -61,6 +63,9 @@ type JoinDetail struct {
 func (r JoinResult) Text(cmdcore.Opts) string {
 	if r.DryRun {
 		return "Would join as " + r.Endpoint + "."
+	}
+	if r.finished {
+		return "Joined as " + r.Endpoint + ". An earlier join here stopped part way; this finished it."
 	}
 	return "Joined as " + r.Endpoint + "."
 }
@@ -95,6 +100,6 @@ var Join = cmdcore.Command[JoinParams, JoinResult]{
 		if err != nil {
 			return JoinResult{}, err
 		}
-		return JoinResult{Endpoint: o.Endpoint, DryRun: p.DryRun, servers: append([]string{}, o.Servers...), creds: o.Creds, credsPath: o.CredsPath}, nil
+		return JoinResult{Endpoint: o.Endpoint, DryRun: p.DryRun, servers: append([]string{}, o.Servers...), creds: o.Creds, credsPath: o.CredsPath, finished: o.Finished}, nil
 	},
 }

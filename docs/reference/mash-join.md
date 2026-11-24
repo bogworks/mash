@@ -72,6 +72,14 @@ error: acme.demo.bob is already installed here
 hint: mash join acme.demo.bob.join --replace
 ```
 
+### Finishing a half-done join
+
+Stream: stdout. Exit code: 0.
+
+```text
+Joined as acme.demo.bob. An earlier join here stopped part way; this finished it.
+```
+
 ### This folder already belongs to another mesh
 
 Stream: stderr. Exit code: 1.
@@ -204,13 +212,6 @@ installed: it must be a plain file, owned by you, readable by you alone, or
 join refuses with the two cases above. A join file that holds only a user JWT
 is not checked for owner or mode, but any join file that is not a plain file
 (a directory, a FIFO, a device) gets the 'not a plain file of your own' line.
-A join interrupted after the creds were installed but before the server
-addresses and ca.pem were written leaves a folder that refuses a plain retry
-and that --replace does not finish, because --replace touches only the creds.
-In 0.5.6 this is a known issue, with the workaround: move the configuration
-folder you joined into (~/.config/mash, or the folder MASH_CONFIG_DIR or
---config-dir names) aside and join again. Planned for 0.6.0: a retry finishes
-a half-done join when the creds match the join file.
 
 ## What it replaces
 

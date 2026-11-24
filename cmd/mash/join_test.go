@@ -179,6 +179,10 @@ func TestJoinMatchesSpec(t *testing.T) {
 		}
 		c.check(t, w.run("join", "acme.demo.bob.join"))
 	})
+	do("Finishing a half-done join", func(w *joinWorld, c specCase) {
+		w.halfDone(true, true)
+		c.check(t, w.run("join", "acme.demo.bob.join"))
+	})
 	do("This folder already belongs to another mesh", func(w *joinWorld, c specCase) {
 		os.MkdirAll(w.cfg, 0o700)
 		os.WriteFile(filepath.Join(w.cfg, "config.json"), []byte(`{"servers":["tls://other:4222"]}`), 0o600)
@@ -1221,4 +1225,193 @@ func TestJoinRefusesDuplicateKeysAndTrailingObjects(t *testing.T) {
 	if _, err := os.Stat(w.cfg); err == nil {
 		t.Error("a refused join made the configuration folder")
 	}
+}
+
+// halfDone leaves the folder as a join killed after the creds step does: the creds a normal join installs, and then
+// config.json and ca.pem removed as asked. It returns what a complete install holds, for comparing.
+func (w *joinWorld) halfDone(noCfg, noCA bool) (cfg, ca []byte) {
+	w.t.Helper()
+	if r := w.run("join", "acme.demo.bob.join"); r.code != 0 {
+		w.t.Fatal(r)
+	}
+	cfg, _ = os.ReadFile(filepath.Join(w.cfg, "config.json"))
+	ca, _ = os.ReadFile(filepath.Join(w.cfg, "ca.pem"))
+	if noCfg {
+		os.Remove(filepath.Join(w.cfg, "config.json"))
+	}
+	if noCA {
+		os.Remove(filepath.Join(w.cfg, "ca.pem"))
+	}
+	return cfg, ca
+}
+
+func (w *joinWorld) noJoinLeftovers() {
+	w.t.Helper()
+	if m, _ := filepath.Glob(filepath.Join(w.cfg, ".join-*")); len(m) != 0 {
+		w.t.Errorf("leftovers: %v", m)
+	}
+}
+
+const finishedLine = "Joined as acme.demo.bob. An earlier join here stopped part way; this finished it.\n"
+
+func TestJoinFinishesAHalfDoneJoin(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		noCfg, ca bool
+	}{{"no config.json and no ca.pem", true, true}, {"only config.json missing", true, false}} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := newJoinWorld(t)
+			wantCfg, wantCA := w.halfDone(tc.noCfg, tc.ca)
+			before, _ := os.ReadFile(w.credsFile())
+			stBefore, _ := os.Stat(w.credsFile())
+			r := w.run("join", "acme.demo.bob.join")
+			if r.code != 0 || r.out != finishedLine || r.errs != "" {
+				t.Fatalf("%+v", r)
+			}
+			if gotCfg, _ := os.ReadFile(filepath.Join(w.cfg, "config.json")); !bytes.Equal(gotCfg, wantCfg) {
+				t.Errorf("config.json: %s, want %s", gotCfg, wantCfg)
+			}
+			if gotCA, _ := os.ReadFile(filepath.Join(w.cfg, "ca.pem")); !bytes.Equal(gotCA, wantCA) {
+				t.Errorf("ca.pem: %s", gotCA)
+			}
+			now, _ := os.ReadFile(w.credsFile())
+			stNow, _ := os.Stat(w.credsFile())
+			if !bytes.Equal(now, before) || !os.SameFile(stBefore, stNow) {
+				t.Error("the creds were touched")
+			}
+			w.noJoinLeftovers()
+			// the folder is whole now: another run is the plain refusal
+			if r := w.run("join", "acme.demo.bob.join"); r.code != 1 || !strings.Contains(r.errs, "already installed here") {
+				t.Errorf("after finishing: %+v", r)
+			}
+		})
+	}
+}
+
+func TestJoinFinishDetailAndDryRun(t *testing.T) {
+	w := newJoinWorld(t)
+	w.halfDone(true, true)
+	r := w.run("join", "acme.demo.bob.join", "--dry-run")
+	if r.code != 0 || r.out != "Would join as acme.demo.bob.\n" {
+		t.Errorf("--dry-run: %+v", r)
+	}
+	if _, err := os.Stat(filepath.Join(w.cfg, "config.json")); err == nil {
+		t.Error("--dry-run wrote config.json")
+	}
+	r = w.run("join", "acme.demo.bob.join", "--detail")
+	if r.code != 0 || !strings.HasPrefix(r.out, strings.TrimSuffix(finishedLine, "\n")+"\nservers: tls://myserver:4222\ncreds:   ") {
+		t.Errorf("--detail: %+v", r)
+	}
+}
+
+func TestJoinHalfDoneWithOtherCredsIsRefused(t *testing.T) {
+	w := newJoinWorld(t)
+	w.halfDone(true, true)
+	before, _ := os.ReadFile(w.credsFile())
+	other := newJoinMaterial(t, "acme.demo.bob")
+	ca := testCAPEM
+	writeJoin(t, "acme.demo.bob.join", joinfile.File{MashJoin: 1, Address: "acme.demo.bob", Servers: []string{"tls://myserver:4222"}, CA: &ca, Creds: string(other.creds)})
+	r := w.run("join", "acme.demo.bob.join")
+	if r.code != 1 || r.out != "" {
+		t.Errorf("%+v", r)
+	}
+	for _, f := range []string{"config.json", "ca.pem"} {
+		if _, err := os.Stat(filepath.Join(w.cfg, f)); err == nil {
+			t.Errorf("%s was written", f)
+		}
+	}
+	if now, _ := os.ReadFile(w.credsFile()); !bytes.Equal(now, before) {
+		t.Error("creds changed")
+	}
+	// only config.json missing: the plain refusal
+	w2 := newJoinWorld(t)
+	w2.halfDone(true, false)
+	writeJoin(t, "acme.demo.bob.join", joinfile.File{MashJoin: 1, Address: "acme.demo.bob", Servers: []string{"tls://myserver:4222"}, CA: &ca, Creds: string(other.creds)})
+	r = w2.run("join", "acme.demo.bob.join")
+	if r.code != 1 || r.errs != "error: acme.demo.bob is already installed here\nhint: mash join acme.demo.bob.join --replace\n" {
+		t.Errorf("%+v", r)
+	}
+	if _, err := os.Stat(filepath.Join(w2.cfg, "config.json")); err == nil {
+		t.Error("config.json was written")
+	}
+}
+
+func TestJoinCompleteInstallIsStillRefused(t *testing.T) {
+	w := newJoinWorld(t)
+	w.halfDone(false, false)
+	r := w.run("join", "acme.demo.bob.join")
+	if r.code != 1 || r.errs != "error: acme.demo.bob is already installed here\nhint: mash join acme.demo.bob.join --replace\n" {
+		t.Errorf("%+v", r)
+	}
+}
+
+func TestJoinReplaceFinishesAHalfDoneJoin(t *testing.T) {
+	w := newJoinWorld(t)
+	wantCfg, wantCA := w.halfDone(true, true)
+	fresh := newJoinMaterial(t, "acme.demo.bob")
+	ca := testCAPEM
+	writeJoin(t, "acme.demo.bob.join", joinfile.File{MashJoin: 1, Address: "acme.demo.bob", Servers: []string{"tls://myserver:4222"}, CA: &ca, Creds: string(fresh.creds)})
+	r := w.run("join", "acme.demo.bob.join", "--replace")
+	if r.code != 0 || r.out != "Joined as acme.demo.bob.\n" {
+		t.Fatalf("%+v", r)
+	}
+	if now, _ := os.ReadFile(w.credsFile()); !bytes.Equal(now, fresh.creds) {
+		t.Error("the creds were not replaced")
+	}
+	if got, _ := os.ReadFile(filepath.Join(w.cfg, "config.json")); !bytes.Equal(got, wantCfg) {
+		t.Errorf("config.json: %s", got)
+	}
+	if got, _ := os.ReadFile(filepath.Join(w.cfg, "ca.pem")); !bytes.Equal(got, wantCA) {
+		t.Errorf("ca.pem: %s", got)
+	}
+	w.noJoinLeftovers()
+}
+
+func TestJoinDoesNotFinishOverUnsafeCreds(t *testing.T) {
+	for _, kind := range []string{"symlink", "mode 0644"} {
+		t.Run(kind, func(t *testing.T) {
+			w := newJoinWorld(t)
+			w.halfDone(true, true)
+			creds, _ := os.ReadFile(w.credsFile())
+			if kind == "symlink" {
+				target := filepath.Join(w.home, "elsewhere.creds")
+				os.WriteFile(target, creds, 0o600)
+				os.Remove(w.credsFile())
+				if err := os.Symlink(target, w.credsFile()); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := os.Chmod(w.credsFile(), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			r := w.run("join", "acme.demo.bob.join")
+			if r.code != 1 || !strings.Contains(r.errs, "already installed here") || strings.Contains(r.out, "finished") {
+				t.Errorf("%+v", r)
+			}
+			for _, f := range []string{"config.json", "ca.pem"} {
+				if _, err := os.Stat(filepath.Join(w.cfg, f)); err == nil {
+					t.Errorf("%s was written", f)
+				}
+			}
+		})
+	}
+}
+
+func TestJoinFinishRollsBackOnlyWhatItWrote(t *testing.T) {
+	w := newJoinWorld(t)
+	w.halfDone(true, true)
+	before, _ := os.ReadFile(w.credsFile())
+	failJoinSteps(t, "config.json", "")
+	r := w.run("join", "acme.demo.bob.join")
+	if r.code != 1 || !strings.HasPrefix(r.errs, "error: cannot write into ") {
+		t.Errorf("%+v", r)
+	}
+	if now, err := os.ReadFile(w.credsFile()); err != nil || !bytes.Equal(now, before) {
+		t.Errorf("creds: %v", err)
+	}
+	for _, f := range []string{"config.json", "ca.pem"} {
+		if _, err := os.Stat(filepath.Join(w.cfg, f)); err == nil {
+			t.Errorf("%s left behind", f)
+		}
+	}
+	w.noJoinLeftovers()
 }

@@ -7,11 +7,13 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nkeys"
@@ -360,28 +362,48 @@ func (s joinSvc) Join(_ context.Context, req cmds.JoinRequest) (cmds.JoinOutcome
 	if haveCA && (j.CA == nil || !slices.Equal(folderDers, joinDers)) {
 		return cmds.JoinOutcome{}, otherFolder("ca")
 	}
-	if !haveCA && j.CA != nil && len(config.InstalledEndpoints(dir)) > 0 {
+	address := j.Address
+	credsPath := filepath.Join(dir, address+".creds")
+	// This address's own creds, when they are an installed endpoint (a regular file of ours, mode 0600): a half-done
+	// join left them, and they do not count as another endpoint that trusts the system's roots when this run is to
+	// finish or replace them.
+	endpoints := config.InstalledEndpoints(dir)
+	ownCreds := slices.Contains(endpoints, address)
+	missCA := j.CA != nil && !haveCA
+	// half-done: the creds are installed and config.json is missing (or holds no servers), which is where a join that
+	// stopped after the creds step leaves it (ca.pem and config.json come after the creds, config.json last). A folder
+	// whose config.json has servers was set up as it is: a ca the join file brings is not added to it.
+	halfDone := ownCreds && len(have) == 0
+	sameCreds := false
+	if halfDone && !req.Replace {
+		sameCreds = readableCredsEqual(credsPath, creds)
+	}
+	finishing := halfDone && sameCreds
+	others := len(endpoints)
+	if halfDone && (finishing || req.Replace) {
+		others--
+	}
+	if !haveCA && j.CA != nil && others > 0 {
 		// the folder has no certificate authority and already holds an endpoint: that endpoint trusts the system's
 		// roots, and one that brings a ca would change what it trusts. The first join into an empty folder sets it.
 		return cmds.JoinOutcome{}, otherFolder("ca")
 	}
 
-	address := j.Address
-	credsPath := filepath.Join(dir, address+".creds")
-	out := cmds.JoinOutcome{Endpoint: address, Servers: slices.Clone(j.Servers), Creds: s.shown(credsPath), CredsPath: absPath(credsPath)}
+	out := cmds.JoinOutcome{Endpoint: address, Servers: slices.Clone(j.Servers), Creds: s.shown(credsPath), CredsPath: absPath(credsPath), Finished: finishing}
 	_, lerr := os.Lstat(credsPath)
 	credsExist := lerr == nil
-	if credsExist && !req.Replace {
+	if credsExist && !req.Replace && !finishing {
 		return cmds.JoinOutcome{}, cliframe.Failf("%s is already installed here", address).WithHint("mash join " + req.File + " --replace")
 	}
 
-	// What else is written: --replace of installed creds replaces the creds and nothing else.
+	// What else is written: --replace of installed creds replaces the creds and writes only what a half-done join
+	// left out (config.json, ca.pem); a finish writes only that and leaves the creds as they are.
 	caPath := filepath.Join(dir, joinCAFile)
 	// An existing creds path that is not an installed endpoint (a symlink, a wrong mode) is replaced all the same, but
 	// the join then writes the rest as a first join does: the new creds would be unusable without it.
 	replaceCreds := credsExist
-	replacing := credsExist && slices.Contains(config.InstalledEndpoints(dir), address)
-	writeCA := j.CA != nil && !haveCA && !replacing
+	replacing := credsExist && ownCreds
+	writeCA := j.CA != nil && !haveCA
 	newCfg := cloneConfig(cfg)
 	if len(have) == 0 {
 		b, _ := json.Marshal(j.Servers)
@@ -391,7 +413,11 @@ func (s joinSvc) Join(_ context.Context, req cmds.JoinRequest) (cmds.JoinOutcome
 		b, _ := json.Marshal(joinCAFile)
 		newCfg["ca"] = b
 	}
-	writeCfg := !replacing && (len(have) == 0 || len(cfg["ca"]) == 0 && j.CA != nil)
+	writeCfg := len(have) == 0 || len(cfg["ca"]) == 0 && j.CA != nil
+	if replacing {
+		writeCA = halfDone && missCA
+		writeCfg = halfDone
+	}
 
 	if req.DryRun {
 		return out, nil
@@ -447,15 +473,19 @@ func (s joinSvc) Join(_ context.Context, req cmds.JoinRequest) (cmds.JoinOutcome
 			return fail(err)
 		}
 	}
-	credsTmp, err := stage(creds, 0o600)
-	if err != nil {
-		return fail(err)
+	var credsTmp string
+	if !finishing {
+		if credsTmp, err = stage(creds, 0o600); err != nil {
+			return fail(err)
+		}
 	}
 
 	// The creds first. A replaced creds file is kept under a temporary name until the run is whole, so a later failure
 	// can put it back.
 	var backup string
-	if replaceCreds {
+	if finishing {
+		// the creds stay as they are
+	} else if replaceCreds {
 		backup = filepath.Join(dir, ".join-backup-"+filepath.Base(credsTmp))
 		if err := os.Link(credsPath, backup); err != nil {
 			return fail(err)
@@ -471,6 +501,10 @@ func (s joinSvc) Join(_ context.Context, req cmds.JoinRequest) (cmds.JoinOutcome
 	var made []string // what this run created, by exact path, removed if a later step fails
 	// undo puts the folder back as it was and returns what it could not: the exact paths a rollback step failed on.
 	undo := func() (left []string, kept string) {
+		if finishing {
+			// the creds were there before this run: only what this run wrote is removed
+			return joinRemoveAll(made), ""
+		}
 		left, kept = joinUndo(made, backup, credsPath)
 		if kept != "" && kept == backup {
 			temps = slices.DeleteFunc(temps, func(t string) bool { return t == backup })
@@ -507,16 +541,38 @@ func cloneConfig(m map[string]json.RawMessage) map[string]json.RawMessage {
 	return c
 }
 
-// joinUndo removes what a join run made (by exact path) and puts a replaced creds file back from its backup. It returns
-// the paths it could not clean up. When the backup cannot be restored the new creds stay in place and the old ones are
-// kept: the backup is linked to <creds>.old (never over an existing file), and kept is that path; if that cannot be
-// done the backup keeps its own name and kept is that.
-func joinUndo(made []string, backup, credsPath string) (left []string, kept string) {
+// joinRemoveAll removes the exact paths a run made and returns the ones it could not remove.
+func joinRemoveAll(made []string) (left []string) {
 	for _, m := range made {
 		if err := joinRemove(m); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			left = append(left, m)
 		}
 	}
+	return left
+}
+
+// readableCredsEqual reports whether the file at path is a regular file (never followed through a symlink) whose bytes
+// equal want. The caller has already checked that it is an installed endpoint: ours and mode 0600.
+func readableCredsEqual(path string, want []byte) bool {
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	if fi, err := f.Stat(); err != nil || !fi.Mode().IsRegular() {
+		return false
+	}
+	got, err := io.ReadAll(io.LimitReader(f, int64(len(want))+1))
+	defer clear(got)
+	return err == nil && bytes.Equal(got, want)
+}
+
+// joinUndo removes what a join run made (by exact path) and puts a replaced creds file back from its backup. It returns
+// the paths it could not clean up. When the backup cannot be restored the new creds stay in place and the old ones are
+// kept: the backup is linked to <creds>.old (never over an existing file), and kept is that path; if that cannot be
+// done the backup keeps its own name and kept is that.
+func joinUndo(made []string, backup, credsPath string) (left []string, kept string) {
+	left = joinRemoveAll(made)
 	if backup == "" {
 		if err := joinRemove(credsPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			left = append(left, credsPath)
