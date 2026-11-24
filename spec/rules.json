@@ -234,7 +234,7 @@
  "coming_in_0_6_0": [
   {
    "change": "mash prompt becomes mash sap prompt",
-   "meaning": "And the MCP tool reply moves with it. 0.5.6 prints a note on every use."
+   "meaning": "And the MCP tool reply moves with it."
   },
   {
    "change": "A mesh holds many owners",

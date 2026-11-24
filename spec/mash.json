@@ -1959,12 +1959,6 @@
         "text": "(what it prints today; unchanged in 0.5.6)",
         "stream": "stdout",
         "exit": 0
-       },
-       {
-        "case": "Added: every use, on stderr",
-        "text": "note: 'mash prompt' moves to 'mash sap prompt' in 0.6.0",
-        "stream": "stderr",
-        "exit": 0
        }
       ]
      },
@@ -1977,7 +1971,7 @@
      },
      {
       "name": "x-today",
-      "value": "Unchanged from 0.5.5, except for the note on stderr about the move to mash sap prompt. Only a verified sender that is a known endpoint is accepted."
+      "value": "Unchanged from 0.5.5. Only a verified sender that is a known endpoint is accepted."
      }
     ]
    },
