@@ -472,7 +472,7 @@ func TestBarrierSerialisesSendsOnTheSubject(t *testing.T) {
 				t.Fatalf("send %d: %v", i, g.err)
 			}
 			defer g.rel(true)
-		case <-time.After(2 * time.Second):
+		case <-time.After(30 * time.Second):
 			t.Fatalf("send %d never registered", i)
 		}
 	}

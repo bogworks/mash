@@ -26,6 +26,10 @@ import (
 // Owner is the SAP owner used in tests.
 const Owner = "o"
 
+// connectTimeout bounds a test client's connect handshake. nats.go's default is 2 s, which a loaded CI runner can
+// exceed ("read tcp ...: i/o timeout", #1084); the tests' other local connects use 15 s too.
+const connectTimeout = 15 * time.Second
+
 // Env is one running test server and its keys.
 type Env struct {
 	URL         string
@@ -169,6 +173,7 @@ func (e *Env) start() error {
 		NoLog:            true,
 		NoSigs:           true,
 		MaxPayload:       e.maxPay,
+		AuthTimeout:      30, // seconds; the default 2 s drops a CONNECT that a loaded runner is slow to send
 	}
 	if e.tls {
 		tc, err := server.GenTLSConfig(&server.TLSConfigOpts{CertFile: e.serverCert, KeyFile: e.serverKey, CaFile: e.CAFile, Verify: e.verify, Timeout: 5})
@@ -255,7 +260,7 @@ func (e *Env) MintEndpoint(a sap.Address) (creds, userPub string, err error) {
 // Conn connects with a creds file; it is closed when the test ends.
 func (e *Env) Conn(t *testing.T, creds string) *nats.Conn {
 	t.Helper()
-	nc, err := nats.Connect(e.URL, append(natsauth.TLSOptions(e.CAFile, e.ClientCert, e.ClientKey), natsauth.UserCredentials(creds))...)
+	nc, err := nats.Connect(e.URL, append(natsauth.TLSOptions(e.CAFile, e.ClientCert, e.ClientKey), natsauth.UserCredentials(creds), nats.Timeout(connectTimeout))...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,7 +275,7 @@ func (e *Env) ConnAs(t *testing.T, creds, name string) *nats.Conn {
 	if a, err := sap.AddressFromFlat(name); err == nil {
 		prefix = a.InboxPrefix()
 	}
-	nc, err := nats.Connect(e.URL, append(natsauth.TLSOptions(e.CAFile, e.ClientCert, e.ClientKey), natsauth.UserCredentials(creds), nats.CustomInboxPrefix(prefix))...)
+	nc, err := nats.Connect(e.URL, append(natsauth.TLSOptions(e.CAFile, e.ClientCert, e.ClientKey), natsauth.UserCredentials(creds), nats.CustomInboxPrefix(prefix), nats.Timeout(connectTimeout))...)
 	if err != nil {
 		t.Fatal(err)
 	}

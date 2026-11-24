@@ -1084,7 +1084,7 @@ func fakeShiftingConnz(t *testing.T, recorded string) *nats.Conn {
 		t.Fatal("server not ready")
 	}
 	t.Cleanup(srv.Shutdown)
-	nc, err := nats.Connect(srv.ClientURL())
+	nc, err := nats.Connect(srv.ClientURL(), nats.Timeout(15*time.Second))
 	if err != nil {
 		t.Fatal(err)
 	}
