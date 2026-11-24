@@ -344,8 +344,8 @@ func (g *gen) run() (map[string][]byte, error) {
 // the commands that are planned for the next one.
 func (g *gen) tree(n *node) error {
 	if n.plan != "" {
-		if n.plan == "now" && g.now == "" {
-			return fmt.Errorf("%s: x-plan now needs x-now-release in the tool file's info", n.full())
+		if err := g.checkPlanned(n); err != nil {
+			return err
 		}
 		g.coming = append(g.coming, n)
 		return nil
@@ -361,9 +361,31 @@ func (g *gen) tree(n *node) error {
 			}
 		}
 	case nextRelease: // the old form; see isOldPlannedRelease
+		if err := g.checkPlanned(n); err != nil {
+			return err
+		}
 		g.coming = append(g.coming, n)
 	default:
 		return fmt.Errorf("%s: release %q is neither %s, %s nor %s", n.full(), n.release, g.current, closeRelease, nextRelease)
+	}
+	return nil
+}
+
+// checkPlanned applies to n and every descendant the rules tree applies at
+// the top level, since tree stops at a planned parent: x-plan now needs
+// x-now-release, and an entry with no plan must name the current release or
+// the next one.
+func (g *gen) checkPlanned(n *node) error {
+	if n.plan == "now" && g.now == "" {
+		return fmt.Errorf("%s: x-plan now needs x-now-release in the tool file's info", n.full())
+	}
+	if n.plan == "" && n.release != g.current && n.release != nextRelease {
+		return fmt.Errorf("%s: release %q is neither %s nor %s", n.full(), n.release, g.current, nextRelease)
+	}
+	for _, s := range n.subs {
+		if err := g.checkPlanned(s); err != nil {
+			return err
+		}
 	}
 	return nil
 }

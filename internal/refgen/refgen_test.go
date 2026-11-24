@@ -679,6 +679,21 @@ func TestOldPlannedFormStillRenders(t *testing.T) {
 	}
 }
 
+func TestPlannedDescendantsValidated(t *testing.T) {
+	kid := func(meta string) string {
+		return `{"name":"future","description":"Comes later.","metadata":[{"name":"x-plan","value":"later"}],
+    "commands":[{"name":"kid","description":"Kid.","metadata":[` + meta + `]}]}`
+	}
+	_, err := Generate(planFixture(t, kid(`{"name":"x-release","value":"0.7.0"}`)))
+	if err == nil || err.Error() != `mash future kid: release "0.7.0" is neither 1.0.0 nor 0.6.0` {
+		t.Errorf("nested x-release 0.7.0: err = %v", err)
+	}
+	_, err = Generate(planFixture(t, kid(`{"name":"x-plan","value":"now"}`)))
+	if err == nil || err.Error() != "mash future kid: x-plan now needs x-now-release in the tool file's info" {
+		t.Errorf("nested x-plan now: err = %v", err)
+	}
+}
+
 func TestPlanInherits(t *testing.T) {
 	entry := `{"name":"future","description":"Comes later.","metadata":[{"name":"x-plan","value":"later"}],
     "commands":[{"name":"kid","description":"Inherits."},
