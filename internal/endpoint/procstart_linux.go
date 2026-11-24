@@ -24,3 +24,20 @@ func procStart(pid int) (string, error) {
 	}
 	return f[19], nil
 }
+
+// procZombie reports whether pid is a zombie: it has exited and only waits for its parent to reap it. Where nothing
+// reaps (a container whose first process is not an init), a killed serve stays one, and kill(pid, 0) still succeeds
+// for it. An unreadable state is not a zombie.
+func procZombie(pid int) bool {
+	b, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if err != nil {
+		return false
+	}
+	s := string(b)
+	i := strings.LastIndexByte(s, ')')
+	if i < 0 {
+		return false
+	}
+	f := strings.Fields(s[i+1:])
+	return len(f) > 0 && f[0] == "Z"
+}
