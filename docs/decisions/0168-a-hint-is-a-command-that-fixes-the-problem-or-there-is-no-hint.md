@@ -16,7 +16,7 @@ The 0.5.9 Gate 1 ruling on REQ-006 (contract 0.5.9 revision 6; the planner's rul
 
 * A person can copy and run every hint line.
 * One rule for both doctors, with no named exceptions.
-* An error may send the person to the doctor, which says what is wrong.
+* An error's hint is the next command to run: the doctor, `--help`, or a retry once the named condition is cleared.
 * What is wrong is said once, in the error or the row, not again in the hint.
 
 ## Considered Options
@@ -26,7 +26,7 @@ The 0.5.9 Gate 1 ruling on REQ-006 (contract 0.5.9 revision 6; the planner's rul
 
 ## Decision Outcome
 
-Chosen option: the ruled rule, with no exceptions. It binds the hint a doctor prints (the specification's rule "Both doctors work the same way"). Any other command's error hint is a command of ours. That command fixes the problem, or it is the doctor, which says what is wrong. The planned cases in `x-output-next` and `spec/next.json` follow this.
+Chosen option: the ruled rule, with no exceptions. It binds the hint a doctor prints (the specification's rule "Both doctors work the same way"). An error's hint follows the specification's error rule instead: one command of ours to run next. That can be the doctor, which says what is wrong; `--help`; or the same command once the condition the error names is cleared, as in the setup script's port-held refusal. Gate 1 accepted each of these cases. The planned cases in `x-output-next` and `spec/next.json` follow this.
 
 * Amends ADR 0163: the signing refusals print `error: <what>` and `hint: mashctl init --config <file>`, for example `error: signing.nk and signing.pub are missing in <dir>`. The hint no longer repeats "the same signing_key": the setup file the command reads is the one that names it, and `<dir>` is the key folder as resolved. The long keys are not printed, neither in default output nor under `--detail` or `--json`.
 * Amends ADR 0166: `mashctl doctor --audit-users` prints no hint. Its `keys` FAIL row already says what is wrong: `1 connected user was not issued by mashctl:`, then each key. mashctl has no command that revokes a user it did not issue, so there is no command to give.
