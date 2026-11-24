@@ -9,12 +9,14 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/apply"
+	"github.com/bogworks/mash/internal/cellwidth"
 	"github.com/bogworks/mash/internal/cliframe"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/ctl"
@@ -757,39 +759,50 @@ func doctorKeys(rep *doctorReport, ctx context.Context, adm *admin.Admin, cfg co
 	}
 }
 
-// incompleteLines is a scan's Incomplete text, one clean line for each of its lines, each at most detailWidth columns
-// (continued on the next line when longer; a word longer than that is split, between characters, never inside one).
+// incompleteLines is a scan's Incomplete text, one clean line for each of its lines, each at most detailWidth terminal
+// cells wide (continued on the next line when longer; a word wider than that is split, between characters, never
+// inside one, and a wide character that would overflow starts the next piece).
 func incompleteLines(s string) string {
 	var out []string
 	for _, l := range strings.Split(s, "\n") {
-		line, n := "", 0 // the line so far and its width in characters
+		line, n := "", 0 // the line so far and its width in cells
 		for _, w := range strings.Fields(oneLine(l)) {
-			r := []rune(w)
-			if line != "" && n+1+len(r) > detailWidth {
+			ww := cellwidth.String(w)
+			if line != "" && n+1+ww > detailWidth {
 				out = append(out, line)
 				line, n = "", 0
 			}
-			for len(r) > detailWidth { // a word longer than a line is split
+			for ww > detailWidth { // a word wider than a line is split
 				if line != "" {
 					out = append(out, line)
 					line, n = "", 0
 				}
-				out = append(out, string(r[:detailWidth]))
-				r = r[detailWidth:]
+				cut, cells := 0, 0
+				for i, r := range w {
+					rw := cellwidth.Rune(r)
+					if cells+rw > detailWidth {
+						break
+					}
+					cells += rw
+					cut = i + utf8.RuneLen(r)
+				}
+				out = append(out, w[:cut])
+				w = w[cut:]
+				ww -= cells
 			}
 			if line != "" {
 				line += " "
 				n++
 			}
-			line += string(r)
-			n += len(r)
+			line += w
+			n += ww
 		}
 		out = append(out, line)
 	}
 	return strings.Join(out, "\n")
 }
 
-// detailWidth is the columns a row's detail has in an 80-column terminal: 80 less the name and state columns.
+// detailWidth is the terminal cells a row's detail has in an 80-column terminal: 80 less the name and state columns.
 const detailWidth = 63
 
 // churnIsMashs reports whether mashctl's users came or went between the reads: some key the issue record holds has a
