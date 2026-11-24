@@ -368,13 +368,10 @@ func waitWakeRead(t *testing.T, e *Endpoint) {
 	t.Fatal("the wake's read did not finish")
 }
 
-// stubWakeRead replaces the wake's read for one test; the stub counts its calls.
-func stubWakeRead(t *testing.T, fn func(n int) (waitingReading, bool)) *atomic.Int32 {
-	t.Helper()
+// stubWakeRead replaces the wake's read on e, before its first tick; the stub counts its calls.
+func stubWakeRead(e *Endpoint, fn func(n int) (waitingReading, bool)) *atomic.Int32 {
 	var calls atomic.Int32
-	old := wakeRead
-	wakeRead = func(e *Endpoint, now time.Time) (waitingReading, bool) { return fn(int(calls.Add(1))) }
-	t.Cleanup(func() { wakeRead = old })
+	e.wakeRead = func(*Endpoint, time.Time) (waitingReading, bool) { return fn(int(calls.Add(1))) }
 	return &calls
 }
 
@@ -404,10 +401,10 @@ func connectedRig(t *testing.T, count, held int) (*backlogRig, func(deliver Deli
 // Every held message is from a dropped sender: the reading says over, nothing is shown, and the count is not read again
 // on every tick but after wakeRecount.
 func TestBacklogAllHeldDroppedDoesNotReadEveryTick(t *testing.T) {
-	calls := stubWakeRead(t, func(int) (waitingReading, bool) {
+	r, check := connectedRig(t, 3, 4)
+	calls := stubWakeRead(r.e, func(int) (waitingReading, bool) {
 		return waitingReading{waiting: 9, oldest: time.Now(), dropped: map[uint64]bool{1: true, 2: true, 3: true, 4: true}}, true
 	})
-	r, check := connectedRig(t, 3, 4)
 	woke := false
 	deliver := func(string, map[string]string) error { woke = true; return nil }
 	check(deliver, wakeCooldown)
@@ -432,8 +429,8 @@ func TestBacklogAllHeldDroppedDoesNotReadEveryTick(t *testing.T) {
 
 // A failed deliver records the no too, so the retry waits for wakeRecount and is not repeated every tick.
 func TestBacklogDeliverFailureSetsWakeNoAt(t *testing.T) {
-	stubWakeRead(t, func(int) (waitingReading, bool) { return waitingReading{waiting: 9, oldest: time.Now()}, true })
 	r, check := connectedRig(t, 3, 4)
+	stubWakeRead(r.e, func(int) (waitingReading, bool) { return waitingReading{waiting: 9, oldest: time.Now()}, true })
 	fails := 0
 	deliver := func(string, map[string]string) error { fails++; return errors.New("down") }
 	check(deliver, wakeCooldown)
@@ -451,10 +448,10 @@ func TestBacklogDeliverFailureSetsWakeNoAt(t *testing.T) {
 // A partial reading (count not usable) still gives its dropped set: four held, one dropped, WakeCount 3, is three
 // shown, not over, no wake.
 func TestBacklogPartialReadingFiltersHeldByItsDroppedSet(t *testing.T) {
-	stubWakeRead(t, func(int) (waitingReading, bool) {
+	r, check := connectedRig(t, 3, 4)
+	stubWakeRead(r.e, func(int) (waitingReading, bool) {
 		return waitingReading{dropped: map[uint64]bool{1: true}}, false
 	})
-	r, check := connectedRig(t, 3, 4)
 	woke := false
 	deliver := func(string, map[string]string) error { woke = true; return nil }
 	check(deliver, wakeCooldown)
@@ -467,10 +464,10 @@ func TestBacklogPartialReadingFiltersHeldByItsDroppedSet(t *testing.T) {
 
 // A dropped sequence of another stream is not the endpoint's own: only own-stream sequences are filtered.
 func TestBacklogDroppedFiltersOnlyTheOwnStream(t *testing.T) {
-	stubWakeRead(t, func(int) (waitingReading, bool) {
+	r, check := connectedRig(t, 3, 0)
+	stubWakeRead(r.e, func(int) (waitingReading, bool) {
 		return waitingReading{waiting: 9, oldest: time.Now(), dropped: map[uint64]bool{1: true}}, true
 	})
-	r, check := connectedRig(t, 3, 0)
 	for _, ref := range []spool.Ref{{Seq: 1}, {Stream: "other", Seq: 1}, {Seq: 2}, {Seq: 3}} {
 		r.h.msgs[ref] = pending{msg: &dblAck{}, mail: render.Mail{Seq: ref.Seq, From: "c", Kind: kind.Task, At: r.now, Body: []byte("x")}}
 	}
@@ -488,11 +485,11 @@ func TestBacklogDroppedFiltersOnlyTheOwnStream(t *testing.T) {
 // started, and the result is used once it lands.
 func TestBacklogTickDoesNotBlockOnTheRead(t *testing.T) {
 	release := make(chan struct{})
-	calls := stubWakeRead(t, func(int) (waitingReading, bool) {
+	r, check := connectedRig(t, 3, 4)
+	calls := stubWakeRead(r.e, func(int) (waitingReading, bool) {
 		<-release
 		return waitingReading{waiting: 9, oldest: time.Now()}, true
 	})
-	r, check := connectedRig(t, 3, 4)
 	woke := 0
 	deliver := func(string, map[string]string) error { woke++; return nil }
 	done := make(chan struct{})

@@ -592,9 +592,6 @@ type wakeResult struct {
 	at time.Time // when the read started, on the backlog clock
 }
 
-// wakeRead reads the inbox for the wake; a package var so tests can stall or fake it.
-var wakeRead = func(e *Endpoint, now time.Time) (waitingReading, bool) { return e.waitingNow(now) }
-
 // wakeReading is the cached reading of the inbox when one was read within wakeRecount (fresh). Otherwise it starts one
 // read in the background, at most one at a time, and reports not fresh: the caller skips this tick and the next one
 // uses the result. It never blocks on the read.
@@ -607,7 +604,11 @@ func (e *Endpoint) wakeReading(now time.Time) (rd waitingReading, ok, fresh bool
 	if !e.wakeInFlight {
 		e.wakeInFlight = true
 		go func() {
-			rd, ok := wakeRead(e, now)
+			read := e.wakeRead
+			if read == nil {
+				read = (*Endpoint).waitingNow
+			}
+			rd, ok := read(e, now)
 			e.wakeMu.Lock()
 			e.wakeCached = wakeResult{rd: rd, ok: ok, at: now}
 			e.wakeInFlight = false
