@@ -518,6 +518,10 @@ func TestInboxAndReadMatchesSpec(t *testing.T) {
 			got = tablePart(got)
 		case "A deleted endpoint here":
 			continue // a stderr failure: cmd/mash/deleted_here_test.go (TestEverydayCommandsDeletedHereMatchSpec) compares it
+		case "Counts include mail read out of order, with --detail":
+			b.view.OutOfOrder, b.view.Waiting = true, 1 // message 2 was read out of order: the server holds 1 waiting
+			_, got, _ = runInbox(b, cliframe.Global{Detail: true})
+			got = strings.TrimRight(got, "\n")
 		default:
 			t.Errorf("unknown spec case %v", oc["case"])
 			continue
@@ -589,6 +593,7 @@ func TestReadQuotesEveryLineWithASpace(t *testing.T) {
 func TestInboxCountExactness(t *testing.T) {
 	const capped = "the count stopped at its limit of 1000 messages"
 	const noServe = "mash serve is not running, so mail it has not verified is still counted"
+	const outOfOrder = "mail read out of order may still be counted as urgent"
 	table := "\n\nNUMBER  FROM  WHEN     STATE  URGENT  KIND      MESSAGE\n" +
 		"1       bob   10s ago  new    no      task      lunch at noon?\n" +
 		"2       bob   8s ago   new    yes     question  ready?\n"
@@ -596,17 +601,20 @@ func TestInboxCountExactness(t *testing.T) {
 		name        string
 		capped      string
 		noServe     bool
+		outOfOrder  bool
 		summary     string
 		exact       bool
 		detailExtra string
 	}{
-		{"exact", "", false, "2 messages for acme.demo.alice, 2 new, 1 urgent.", true, ""},
-		{"capped", capped, false, "About 2 messages for acme.demo.alice, about 2 new, about 1 urgent.", false, "exact: no (" + capped + ")"},
-		{"serve not running", "", true, "About 2 messages for acme.demo.alice, about 2 new, about 1 urgent.", false, "exact: no (" + noServe + ")"},
-		{"both, said once, the cap first", capped, true, "About 2 messages for acme.demo.alice, about 2 new, about 1 urgent.", false, "exact: no (" + capped + "; " + noServe + ")"},
+		{"exact", "", false, false, "2 messages for acme.demo.alice, 2 new, 1 urgent.", true, ""},
+		{"capped", capped, false, false, "About 2 messages for acme.demo.alice, about 2 new, about 1 urgent.", false, "exact: no (" + capped + ")"},
+		{"serve not running", "", true, false, "About 2 messages for acme.demo.alice, about 2 new, about 1 urgent.", false, "exact: no (" + noServe + ")"},
+		{"both, said once, the cap first", capped, true, false, "About 2 messages for acme.demo.alice, about 2 new, about 1 urgent.", false, "exact: no (" + capped + "; " + noServe + ")"},
+		{"read out of order", "", false, true, "About 2 messages for acme.demo.alice, about 2 new, about 1 urgent.", false, "exact: no (" + outOfOrder + ")"},
+		{"all three, in order", capped, true, true, "About 2 messages for acme.demo.alice, about 2 new, about 1 urgent.", false, "exact: no (" + capped + "; " + noServe + "; " + outOfOrder + ")"},
 	} {
 		b := specBox()
-		b.view.Capped, b.view.NoServe = c.capped, c.noServe
+		b.view.Capped, b.view.NoServe, b.view.OutOfOrder = c.capped, c.noServe, c.outOfOrder
 		code, out, errs := runInbox(b, cliframe.Global{})
 		if code != 0 || out != c.summary+table || errs != "" {
 			t.Errorf("%s: text %d %q %q", c.name, code, out, errs)

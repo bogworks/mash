@@ -53,8 +53,10 @@ type InboxView struct {
 	OldestWaiting time.Time
 	// Capped is why the counting pass did not read all the waiting mail ("" when it did): the counts are then upper
 	// bounds. NoServe: mash serve is not running, so mail it has not verified cannot have been refused yet.
-	Capped      string
-	NoServe     bool
+	Capped  string
+	NoServe bool
+	// OutOfOrder: mail above the oldest new one was read out of order, so the urgent count may still include it (#1399).
+	OutOfOrder  bool
 	Messages    []MailItem
 	WakeCount   int
 	WakeAge     time.Duration
@@ -260,9 +262,9 @@ var Inbox = cmdcore.Command[InboxParams, InboxResult]{
 		if r.WakeAge == "" {
 			r.WakeAge = "0"
 		}
-		r.Exact = v.Capped == "" && !(v.NoServe && v.Total > 0)
+		r.Exact = v.Capped == "" && !(v.NoServe && v.Total > 0) && !v.OutOfOrder
 		if !r.Exact {
-			r.why = strings.Join(nonEmpty(v.Capped, noServe(v)), "; ")
+			r.why = strings.Join(nonEmpty(v.Capped, noServe(v), outOfOrder(v)), "; ")
 		}
 		r.OverWakeCount = v.WakeCount > 0 && v.Waiting > v.WakeCount
 		if v.Waiting > 0 && !v.OldestWaiting.IsZero() {
@@ -295,6 +297,16 @@ const NoServeWhy = "mash serve is not running, so mail it has not verified is st
 func noServe(v InboxView) string {
 	if v.NoServe {
 		return NoServeWhy
+	}
+	return ""
+}
+
+// OutOfOrderWhy is the reason of a count made while mail read out of order may still be counted as urgent (#1399).
+const OutOfOrderWhy = "mail read out of order may still be counted as urgent"
+
+func outOfOrder(v InboxView) string {
+	if v.OutOfOrder {
+		return OutOfOrderWhy
 	}
 	return ""
 }
