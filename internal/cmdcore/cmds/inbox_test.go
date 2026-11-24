@@ -591,8 +591,8 @@ func TestReadQuotesEveryLineWithASpace(t *testing.T) {
 // #958, REQ-011: a count that is not exact says so in the count itself, "about", with no separate line. --detail gives the
 // reason, --json carries "exact". An exact count prints what it always did.
 func TestInboxCountExactness(t *testing.T) {
-	const capped = "the count stopped at its limit of 1000 messages"
-	const noServe = "mash serve is not running, so mail it has not verified is still counted"
+	const capped = "only the oldest 1000 messages were checked"
+	const noServe = "mash serve is not running, so unverified mail is counted"
 	const outOfOrder = "mail read out of order may still be counted as urgent"
 	table := "\n\nNUMBER  FROM  WHEN     STATE  URGENT  KIND      MESSAGE\n" +
 		"1       bob   10s ago  new    no      task      lunch at noon?\n" +
@@ -609,9 +609,9 @@ func TestInboxCountExactness(t *testing.T) {
 		{"exact", "", false, false, "2 messages for acme.demo.alice, 2 new, 1 urgent.", true, ""},
 		{"capped", capped, false, false, "About 2 messages for acme.demo.alice, about 2 new, about 1 urgent.", false, "exact: no (" + capped + ")"},
 		{"serve not running", "", true, false, "About 2 messages for acme.demo.alice, about 2 new, about 1 urgent.", false, "exact: no (" + noServe + ")"},
-		{"both, said once, the cap first", capped, true, false, "About 2 messages for acme.demo.alice, about 2 new, about 1 urgent.", false, "exact: no (" + capped + "; " + noServe + ")"},
+		{"both, one line each, the cap first", capped, true, false, "About 2 messages for acme.demo.alice, about 2 new, about 1 urgent.", false, "exact: no (" + capped + ")\nexact: no (" + noServe + ")"},
 		{"read out of order", "", false, true, "About 2 messages for acme.demo.alice, about 2 new, about 1 urgent.", false, "exact: no (" + outOfOrder + ")"},
-		{"all three, in order", capped, true, true, "About 2 messages for acme.demo.alice, about 2 new, about 1 urgent.", false, "exact: no (" + capped + "; " + noServe + "; " + outOfOrder + ")"},
+		{"all three, one line each, in order", capped, true, true, "About 2 messages for acme.demo.alice, about 2 new, about 1 urgent.", false, "exact: no (" + capped + ")\nexact: no (" + noServe + ")\nexact: no (" + outOfOrder + ")"},
 	} {
 		b := specBox()
 		b.view.Capped, b.view.NoServe, b.view.OutOfOrder = c.capped, c.noServe, c.outOfOrder
@@ -629,6 +629,11 @@ func TestInboxCountExactness(t *testing.T) {
 		}
 		if out != want {
 			t.Errorf("%s: --detail %q, want %q", c.name, out, want)
+		}
+		for _, l := range strings.Split(out, "\n") { // #1415: no printed line runs past 80 columns
+			if n := len([]rune(l)); n > 80 {
+				t.Errorf("%s: --detail line of %d columns: %q", c.name, n, l)
+			}
 		}
 		_, out, _ = runInbox(b, cliframe.Global{JSON: true})
 		var got map[string]any
