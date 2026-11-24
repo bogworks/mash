@@ -373,6 +373,7 @@ func doctorStorage(rep *doctorReport, ctx context.Context, adm *admin.Admin, cfg
 // finding is one thing the endpoints or keys check found: a sentence and the command that fixes it.
 type finding struct {
 	text, fix string
+	own       bool // the text starts a line of its own (and a text of several lines ends one): no "; " joins it
 }
 
 // dotted is the address a flat key names, else the key cleaned.
@@ -424,10 +425,19 @@ func addFindings(rep *doctorReport, name, okDetail string, fails, warns []findin
 		rep.add(name, stateOK, okDetail, "")
 		return
 	}
-	var parts []string
+	var detail strings.Builder
 	fix := ""
-	for _, f := range all {
-		parts = append(parts, f.text)
+	prevOwn := false
+	for i, f := range all {
+		if i > 0 {
+			if f.own || prevOwn {
+				detail.WriteString("\n")
+			} else {
+				detail.WriteString("; ")
+			}
+		}
+		detail.WriteString(f.text)
+		prevOwn = f.own
 		if fix == "" {
 			fix = f.fix
 		}
@@ -436,7 +446,7 @@ func addFindings(rep *doctorReport, name, okDetail string, fails, warns []findin
 	if len(fails) > 0 {
 		state = stateFail
 	}
-	rep.add(name, state, strings.Join(parts, "; "), fix)
+	rep.add(name, state, detail.String(), fix)
 }
 
 // doctorEndpoints is the endpoints check: every directory record has an inbox and every inbox a record, no inbox lost
@@ -472,22 +482,22 @@ func doctorEndpoints(rep *doctorReport, snap admin.AuditSnapshot) {
 	}
 	show := func(first string) string { return "mashctl endpoint show " + first }
 	if n := len(bad); n > 0 {
-		fails = append(fails, finding{fmt.Sprintf("%s unreadable: %s", count(n, "endpoint record")+" "+plural(n, "is", "are"), names(bad)), "mashctl endpoint list"})
+		fails = append(fails, finding{fmt.Sprintf("%s unreadable: %s", count(n, "endpoint record")+" "+plural(n, "is", "are"), names(bad)), "mashctl endpoint list", false})
 	}
 	if n := len(orphan); n > 0 {
-		fails = append(fails, finding{fmt.Sprintf("%s no endpoint record: %s", count(n, "inbox")+" "+plural(n, "has", "have"), names(orphan)), show(orphan[0])})
+		fails = append(fails, finding{fmt.Sprintf("%s no endpoint record: %s", count(n, "inbox")+" "+plural(n, "has", "have"), names(orphan)), show(orphan[0]), false})
 	}
 	if n := len(noInbox); n > 0 {
-		fails = append(fails, finding{fmt.Sprintf("%s no inbox: %s", count(n, "endpoint record")+" "+plural(n, "has", "have"), names(noInbox)), show(noInbox[0])})
+		fails = append(fails, finding{fmt.Sprintf("%s no inbox: %s", count(n, "endpoint record")+" "+plural(n, "has", "have"), names(noInbox)), show(noInbox[0]), false})
 	}
 	if n := len(lost); n > 0 {
-		fails = append(fails, finding{fmt.Sprintf("%s lost mail unread: %s", count(n, "inbox")+" "+plural(n, "has", "have"), names(lost)), "mashctl endpoint inbox " + lost[0]})
+		fails = append(fails, finding{fmt.Sprintf("%s lost mail unread: %s", count(n, "inbox")+" "+plural(n, "has", "have"), names(lost)), "mashctl endpoint inbox " + lost[0], false})
 	}
 	if n := len(pending); n > 0 {
-		fails = append(fails, finding{fmt.Sprintf("%s not finished: %s", count(n, "retirement")+" "+plural(n, "is", "are"), names(pending)), "mashctl endpoint delete " + pending[0]})
+		fails = append(fails, finding{fmt.Sprintf("%s not finished: %s", count(n, "retirement")+" "+plural(n, "is", "are"), names(pending)), "mashctl endpoint delete " + pending[0], false})
 	}
 	if n := len(otherRetired); n > 0 {
-		fails = append(fails, finding{fmt.Sprintf("retired-name bucket: %s", otherRetiredErr), ""})
+		fails = append(fails, finding{fmt.Sprintf("retired-name bucket: %s", otherRetiredErr), "", false})
 	}
 	var near []string
 	for _, r := range a.Records {
@@ -496,17 +506,17 @@ func doctorEndpoints(rep *doctorReport, snap admin.AuditSnapshot) {
 		}
 	}
 	if n := len(near); n > 0 {
-		warns = append(warns, finding{fmt.Sprintf("%s %d%% full or more: %s", count(n, "inbox")+" "+plural(n, "is", "are"), int(store.InboxNearFullPercent), names(near)), "mashctl limits apply " + near[0]})
+		warns = append(warns, finding{fmt.Sprintf("%s %d%% full or more: %s", count(n, "inbox")+" "+plural(n, "is", "are"), int(store.InboxNearFullPercent), names(near)), "mashctl limits apply " + near[0], false})
 	}
 	if rt := a.Retired; rt != nil && rt.Alarm {
-		warns = append(warns, finding{fmt.Sprintf("the retired-name bucket is %.0f%% full", rt.PercentUsed), ""})
+		warns = append(warns, finding{fmt.Sprintf("the retired-name bucket is %.0f%% full", rt.PercentUsed), "", false})
 	}
 	if n := len(a.Orphans.Leases); n > 0 {
 		var keys []string
 		for _, l := range a.Orphans.Leases {
 			keys = append(keys, dotted(l.Key))
 		}
-		warns = append(warns, finding{fmt.Sprintf("%s no endpoint record: %s", count(n, "lease")+" "+plural(n, "has", "have"), names(keys)), show(keys[0])})
+		warns = append(warns, finding{fmt.Sprintf("%s no endpoint record: %s", count(n, "lease")+" "+plural(n, "has", "have"), names(keys)), show(keys[0]), false})
 	}
 	addFindings(rep, "endpoints", fmt.Sprintf("%s, %s", count(len(a.Records), "record"), count(len(snap.Streams), "inbox")), fails, warns)
 }
@@ -565,9 +575,9 @@ func scanConnections(ctx context.Context, nc *nats.Conn, account string, servers
 	}
 	if len(unreconciled) > 0 {
 		sc.Unsettled = sc.Incomplete == ""
-		why := strings.Join(unreconciled, "; ")
+		why := strings.Join(unreconciled, "\n") // one line for each server
 		if sc.Incomplete != "" {
-			why = sc.Incomplete + "; " + why
+			why = sc.Incomplete + "\n" + why
 		}
 		sc.Incomplete = why
 	}
@@ -693,12 +703,12 @@ func doctorKeys(rep *doctorReport, ctx context.Context, adm *admin.Admin, cfg co
 		if !auditUsers {
 			// Churn among users mashctl did not issue is not a finding; churn of one of mashctl's users is.
 			if churnIsMashs(attempts, recs) {
-				warns = append(warns, finding{"mashctl's users kept connecting and leaving; " + reads, "wait a minute, then run mashctl doctor again"})
+				warns = append(warns, finding{"mashctl's users kept connecting and leaving; " + reads, "wait a minute, then run mashctl doctor again", true})
 			}
 			scan.Incomplete = ""
 		} else {
 			churn = true
-			scan.Incomplete = fmt.Sprintf("%s; %s", scan.Incomplete, reads)
+			scan.Incomplete = scan.Incomplete + "\n" + reads
 		}
 	}
 	unrecorded, keyless, revoked := connectedFindings(scan.Conns, recs)
@@ -719,10 +729,10 @@ func doctorKeys(rep *doctorReport, ctx context.Context, adm *admin.Admin, cfg co
 		auditFix = "revoke them with the tool that issued them (mashctl revokes only its own)"
 	}
 	if n := len(revoked); n > 0 {
-		fails = append(fails, finding{fmt.Sprintf("%s still connected", count(n, "revoked key")+" "+plural(n, "is", "are")), fix})
+		fails = append(fails, finding{text: fmt.Sprintf("%s still connected", count(n, "revoked key")+" "+plural(n, "is", "are")), fix: fix})
 	}
 	if scan.Incomplete != "" {
-		f := finding{oneLine(scan.Incomplete), initFix}
+		f := finding{incompleteLines(scan.Incomplete), initFix, strings.Contains(scan.Incomplete, "\n")}
 		if churn && len(fails) == 0 && len(unrecorded)+keyless == 0 {
 			f.fix = "wait a minute, then run mashctl doctor --audit-users again"
 		}
@@ -733,7 +743,7 @@ func doctorKeys(rep *doctorReport, ctx context.Context, adm *admin.Admin, cfg co
 	if audited { // last: its keys are lines of their own, so no "; ..." may follow
 		n := len(unrecorded) + keyless
 		auditText = fmt.Sprintf("%s not issued by mashctl:%s", count(n, "connected user")+" "+plural(n, "was", "were"), keyLines(unrecorded, keyless))
-		fails = append(fails, finding{auditText, auditFix})
+		fails = append(fails, finding{auditText, auditFix, true})
 	}
 	okDetail := "every connected user was issued by mashctl"
 	other := ""
@@ -742,13 +752,34 @@ func doctorKeys(rep *doctorReport, ctx context.Context, adm *admin.Admin, cfg co
 		okDetail = "mashctl's users ok; " + other
 	}
 	addFindings(rep, "keys", okDetail, fails, warns)
-	if c := &rep.Checks[len(rep.Checks)-1]; audited && len(fails) > 1 { // the audit sentence starts a line of its own
-		c.Detail = strings.Replace(c.Detail, "; "+auditText, "\n"+auditText, 1)
-	}
 	if c := &rep.Checks[len(rep.Checks)-1]; other != "" && (c.State == stateFail || c.State == stateWarn) { // the count stays on a line of its own
 		c.Detail += "\n" + other
 	}
 }
+
+// incompleteLines is a scan's Incomplete text, one clean line for each of its lines, each at most detailWidth columns
+// (continued on the next line when longer).
+func incompleteLines(s string) string {
+	var out []string
+	for _, l := range strings.Split(s, "\n") {
+		line := ""
+		for _, w := range strings.Fields(oneLine(l)) {
+			if line != "" && len(line)+1+len(w) > detailWidth {
+				out = append(out, line)
+				line = ""
+			}
+			if line != "" {
+				line += " "
+			}
+			line += w
+		}
+		out = append(out, line)
+	}
+	return strings.Join(out, "\n")
+}
+
+// detailWidth is the columns a row's detail has in an 80-column terminal: 80 less the name and state columns.
+const detailWidth = 63
 
 // churnIsMashs reports whether mashctl's users came or went between the reads: some key the issue record holds has a
 // different set of connection ids in two reads (a recorded key appearing or disappearing counts). Foreign keys,
