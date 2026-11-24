@@ -103,8 +103,9 @@ type setupFile struct {
 	signingKey                                       string // optional: the account SIGNING seed, for an operator with strict_signing_key_usage
 }
 
-// secretSeed matches an nkey seed: S, then O, A or U, then base32 letters, 20 characters or more in all.
-var secretSeed = regexp.MustCompile(`^S[OAU][A-Z2-7]{18,}$`)
+// secretSeed matches an nkey seed: S, then the type letter of any nkey (O operator, A account, U user, N server,
+// C cluster, P private, X curve), then base32 letters, 20 characters or more in all.
+var secretSeed = regexp.MustCompile(`^S[OAUNCPX][A-Z2-7]{18,}$`)
 
 // looksLikeSecret reports whether a setup file value that should be a path is a key: an nkey seed or PEM text. It is
 // checked before the value is used in any message, so no secret is ever echoed.
@@ -203,6 +204,9 @@ func loadSetup(path, home string) (setupFile, error) {
 			return sf, cliframe.Failf("%s: servers must be a list of server addresses", shown)
 		}
 		s = strings.TrimSpace(s)
+		if looksLikeSecret(s) {
+			return sf, cliframe.Failf("%s: servers holds a key, not a server address", shown)
+		}
 		if config.HasUserinfo(s) {
 			return sf, cliframe.Failf("%s: servers must not hold credentials (write the address only, and give the credentials as files)", shown)
 		}
