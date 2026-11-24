@@ -234,11 +234,27 @@
       "value": [
        {
         "case": "A signing key is set",
+        "text": "Initialized mash on tls://localhost:4222 for owner acme",
+        "stream": "stdout",
+        "exit": 0,
+        "issue": "#1260 / #1299",
+        "note": "The current Set up case stays: the default result does not show the key. Dry-run unchanged."
+       },
+       {
+        "case": "A signing key is set, with --detail",
         "text": "Initialized mash on tls://localhost:4222 for owner acme\nSigning key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
         "stream": "stdout",
         "exit": 0,
         "issue": "#1260 / #1299",
-        "note": "The current Set up case stays. The key is a clearly fake placeholder of 56 characters (a public account key starts with A). Dry-run and --json unchanged."
+        "note": "The key is a clearly fake placeholder of 56 characters (a public account key starts with A). Not shown in dry-run."
+       },
+       {
+        "case": "A signing key is set, with --json",
+        "text": "{\"server\":[\"tls://localhost:4222\"],\"owner\":\"acme\",\"changed\":true,\"signing_key\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"}",
+        "stream": "stdout",
+        "exit": 0,
+        "issue": "#1260 / #1299",
+        "note": "signing_key is the signing key's public key, never the seed; it is left out when no signing key is set."
        },
        {
         "case": "A strict operator and no signing_key",

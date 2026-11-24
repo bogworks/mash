@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -216,16 +217,8 @@ func TestInitSigningKeyImport(t *testing.T) {
 	a.vals["signing_key"] = seedFile(t, filepath.Join(a.root, "in"), "signing.seed", sk)
 	if out, errb, code := a.init(); code != 0 {
 		t.Fatalf("init: %d\n%s\n%s", code, out, errb)
-	} else if !strings.Contains(out, "\nSigning key: "+skPub+"\n") {
-		t.Fatalf("init output does not name the signing key on its own line: %q", out)
-	} else if strings.Contains(out, "signed with signing key") {
-		t.Fatalf("init still puts the key on the first line: %q", out)
-	} else {
-		for _, l := range strings.Split(out, "\n") {
-			if strings.HasPrefix(l, "Signing key: ") && len(l) > 80 {
-				t.Fatalf("the signing key line is %d columns: %q", len(l), l)
-			}
-		}
+	} else if strings.Contains(out, "Signing key") || strings.Contains(out, skPub) {
+		t.Fatalf("the default init output shows the signing key: %q", out)
 	}
 	stored := filepath.Join(a.env["MASH_KEYS_DIR"], "signing.nk")
 	if mustPub(t, stored) != skPub {
@@ -253,6 +246,51 @@ func TestInitSigningKeyImport(t *testing.T) {
 	tok2, _ := ac2.Encode(opKP)
 	pushAccountJWT(t, e, tok2)
 	a.refuses(1, []string{"different signing key", skPub, "MASH_KEYS_DIR"}, map[string]any{"signing_key": seedFile(t, filepath.Join(a.root, "in"), "signing2.seed", sk2)})
+}
+
+// The signing key is shown only on request: --detail adds a line of its own, --json has it as signing_key.
+func TestInitSigningKeyOutput(t *testing.T) {
+	for _, mode := range []string{"--detail", "--json"} {
+		t.Run(mode, func(t *testing.T) {
+			e := newApplyEnv(t)
+			sk, _ := nkeys.CreateAccount()
+			skPub, _ := sk.PublicKey()
+			opKP, _, err := e.ks.Operator()
+			if err != nil {
+				t.Fatal(err)
+			}
+			ac := e.claims()
+			ac.SigningKeys.Add(skPub)
+			tok, err := ac.Encode(opKP)
+			if err != nil {
+				t.Fatal(err)
+			}
+			pushAccountJWT(t, e, tok)
+			a := newIniter(t, e)
+			a.vals["signing_key"] = seedFile(t, filepath.Join(a.root, "in"), "signing.seed", sk)
+			out, errb, code := a.init(mode)
+			if code != 0 {
+				t.Fatalf("init %s: %d\n%s\n%s", mode, code, out, errb)
+			}
+			if mode == "--json" {
+				var r struct {
+					SigningKey string `json:"signing_key"`
+				}
+				if err := json.Unmarshal([]byte(out), &r); err != nil || r.SigningKey != skPub {
+					t.Fatalf("--json signing_key: %v %q", err, out)
+				}
+				return
+			}
+			if !strings.Contains(out, "\nSigning key: "+skPub+"\n") {
+				t.Fatalf("--detail does not name the signing key on its own line: %q", out)
+			}
+			for _, l := range strings.Split(out, "\n") {
+				if len(l) > 80 {
+					t.Fatalf("a line is %d columns: %q", len(l), l)
+				}
+			}
+		})
+	}
 }
 
 // pushAccountJWT updates the account JWT of the env's resolver through the system account.

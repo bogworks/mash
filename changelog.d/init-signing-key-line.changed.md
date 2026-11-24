@@ -1,1 +1,1 @@
-**`mashctl init` prints the signing key on a line of its own.** When you set `signing_key`, the result used to put the key's 56-character public key on the first line, which ran past 80 columns. It is now a second line, `Signing key: <public key>`.
+**`mashctl init` no longer prints the signing key by default.** When you set `signing_key`, the result is the one line `Initialized mash on <server> for owner <owner>`. `--detail` adds a second line, `Signing key: <public key>`, and `--json` has the public key as `signing_key`.
