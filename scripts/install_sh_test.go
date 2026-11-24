@@ -1081,8 +1081,7 @@ func TestInstallSh_noGhMeansNoCommitLookup(t *testing.T) {
 	}
 }
 
-// A hard kill between the two renames leaves mash and mashctl at different versions. A rerun says so and
-// installs the requested pair over both.
+// A hard kill between the two renames leaves mash and mashctl at different versions. A rerun installs the requested pair over both.
 func TestInstallSh_aSplitPairIsRepairedOnRerun(t *testing.T) {
 	rel, _, _ := fakeRelease(t)
 	home := tempHome(t)
@@ -1099,8 +1098,9 @@ func TestInstallSh_aSplitPairIsRepairedOnRerun(t *testing.T) {
 	if r.err != nil {
 		t.Fatalf("rerun failed: %v\n%s", r.err, r.out)
 	}
-	if !strings.Contains(r.out, "mash 0.5.5 and mashctl 0.5.6 in ") || !strings.Contains(r.out, "differ: installing v0.5.6 of both\n") {
-		t.Errorf("no split note:\n%s", r.out)
+	// The old programs are never run, so a version difference in the old pair is not noted, only repaired.
+	if strings.Contains(r.out, "differ") || strings.Contains(r.out, "only one") {
+		t.Errorf("a note for an old pair at two versions:\n%s", r.out)
 	}
 	for _, want := range []string{"Installed " + fakeMashVersion + " in ~/bin", "Installed " + fakeCtlVersion + " in ~/bin"} {
 		if !strings.Contains(r.out, want+"\n") {
@@ -1112,7 +1112,7 @@ func TestInstallSh_aSplitPairIsRepairedOnRerun(t *testing.T) {
 		t.Fatal(err)
 	}
 	r = runInstallIn(t, rel, installTools(t, nil), home, dest, "install.sh")
-	if r.err != nil || !strings.Contains(r.out, "only one of mash and mashctl is in ") {
+	if r.err != nil || !strings.Contains(r.out, "only one of mash and mashctl is in ") || !strings.Contains(r.out, ": installing v0.5.6 of both\n") {
 		t.Fatalf("missing-program rerun: err=%v\n%s", r.err, r.out)
 	}
 	if _, err := os.Stat(filepath.Join(dest, "mashctl")); err != nil {
@@ -1125,17 +1125,39 @@ func TestInstallSh_aSplitPairIsRepairedOnRerun(t *testing.T) {
 	}
 }
 
-// A release whose two programs report different versions is refused after the install, naming both.
+// A release whose two programs report different versions is refused before either rename: the previous install
+// is left byte for byte as it was.
 func TestInstallSh_refusesAPairAtDifferentVersions(t *testing.T) {
 	rel, _, _ := fakeReleaseVersions(t, fakeMashVersion, "mashctl 0.5.7")
-	r := runInstall(t, rel, installTools(t, nil))
+	home := tempHome(t)
+	dest := filepath.Join(home, "bin")
+	if err := os.Mkdir(dest, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old := map[string]string{"mash": "#!/bin/sh\necho 'mash v0.5.4 (aaaaaaa)'\n", "mashctl": "#!/bin/sh\necho 'mashctl 0.5.4'\n"}
+	for n, body := range old {
+		if err := os.WriteFile(filepath.Join(dest, n), []byte(body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := runInstallIn(t, rel, installTools(t, nil), home, dest, "install.sh")
 	if r.err == nil {
 		t.Fatalf("want a refusal:\n%s", r.out)
 	}
-	if !strings.Contains(r.out, "error: mash is 0.5.6 but mashctl is 0.5.7: reinstall to fix\n") {
+	if !strings.Contains(r.out, "error: mash is 0.5.6 but mashctl is 0.5.7: nothing was installed\n") {
 		t.Errorf("refusal does not name both versions:\n%s", r.out)
 	}
 	if strings.Contains(r.out, "Installed ") {
 		t.Errorf("success was reported:\n%s", r.out)
+	}
+	for n, body := range old {
+		got, err := os.ReadFile(filepath.Join(dest, n))
+		if err != nil || string(got) != body {
+			t.Errorf("%s changed by a refused install: err=%v got %q", n, err, got)
+		}
+	}
+	ents, _ := os.ReadDir(dest)
+	if len(ents) != 2 {
+		t.Errorf("staged files left in the folder: %v", ents)
 	}
 }
