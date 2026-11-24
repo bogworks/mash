@@ -30,6 +30,7 @@ type fakeWorld struct {
 	latestErr       error  // what VerifyNotLatest says
 	notMarkedLatest error  // what VerifyLatest says
 	keyless         bool   // the tag is at or above the cutover: its tag is pushed by the minting service
+	downloadsErr    error  // what VerifyLatestDownloads says
 }
 
 func newFake() *fakeWorld { return &fakeWorld{release: relNone, now: time.Unix(1000, 0)} }
@@ -88,6 +89,10 @@ func (f *fakeWorld) VerifyNotLatest(tag string) error {
 func (f *fakeWorld) VerifyLatest(tag string) error {
 	f.calls = append(f.calls, "latest")
 	return f.notMarkedLatest
+}
+func (f *fakeWorld) VerifyLatestDownloads(tag string) error {
+	f.calls = append(f.calls, "latestdownloads")
+	return f.downloadsErr
 }
 func (f *fakeWorld) Now() time.Time        { return f.now }
 func (f *fakeWorld) Sleep(d time.Duration) { f.calls = append(f.calls, "sleep"); f.now = f.now.Add(d) }

@@ -1,0 +1,1 @@
+**`release-check publish` now checks the addresses people download from.** After the latest marker, it fetches every `releases/latest/download` asset and compares it with the same asset of the tagged release by digest, and for a keyless release verifies the attestation of the downloaded `SHA256SUMS` against the tag and its commit. A mismatch fails the publish and names the asset.

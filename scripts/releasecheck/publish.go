@@ -53,6 +53,9 @@ type world interface {
 	VerifyNotLatest(tag string) error
 	// VerifyLatest reads the release list back: the published tag must be the one marked latest.
 	VerifyLatest(tag string) error
+	// VerifyLatestDownloads resolves every latest-download address of the release and holds each file to the same
+	// asset of the tagged release by digest, and the attested source commit (REQ-034, AT-13). Only the latest path runs it.
+	VerifyLatestDownloads(tag string) error
 	Now() time.Time
 	Sleep(d time.Duration)
 }
@@ -230,6 +233,13 @@ func runPublish(o Options, w world, x string) error {
 			hint = fmt.Sprintf("if this is the newest release: gh release edit %s --latest; if it is older: rerun with --not-latest", tag)
 		}
 		return stepErr(op(fmt.Errorf("%s is published; rerun to re-verify, or %s: %w", tag, hint, err)))
+	}
+	if !o.NotLatest {
+		// The marker can be right while the address people download from is not. Judged like the marker: the release
+		// is published, so a failure is exit 4. No hint: no command fixes a mismatch.
+		if err := w.VerifyLatestDownloads(tag); err != nil {
+			return stepErr(op(fmt.Errorf("%s is published, but its latest-download addresses do not match it: %w", tag, err)))
+		}
 	}
 	if err := w.Assets(); err != nil {
 		return stepErr(err)
@@ -537,6 +547,23 @@ func verifyLatest(o Options, tag string, sleep func(time.Duration)) error {
 }
 
 func (r realWorld) VerifyLatest(tag string) error    { return verifyLatest(r.o, tag, r.Sleep) }
+func (r realWorld) VerifyLatestDownloads(tag string) error {
+	exists, commit, err := r.RemoteTag(tag)
+	if err != nil {
+		return op(err)
+	}
+	if !exists {
+		return op(fmt.Errorf("the remote tag %s does not exist", tag))
+	}
+	msg, err := verifyLatestDownloads(r.ctx, r.o, tag, commit, r.Sleep)
+	if err != nil {
+		return err
+	}
+	if r.o.Out != nil {
+		fmt.Fprintln(r.o.Out, msg)
+	}
+	return nil
+}
 func (r realWorld) VerifyNotLatest(tag string) error { return verifyNotLatest(r.o, tag, r.Sleep) }
 
 func (r realWorld) Now() time.Time        { return time.Now() }
