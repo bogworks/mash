@@ -48,10 +48,11 @@ What `install.sh` does on its own:
 To check the script and the attestation yourself, with a current `gh`:
 
 ```sh
-BASE=https://github.com/bogworks/mash/releases/download/v0.5.8   # use the tag of the release you want; for another repository (MASH_REPO) change bogworks/mash here and in -R and --signer-workflow
+BASE=https://github.com/bogworks/mash/releases/download/v0.5.8   # use the tag of the release you want, on every line; for another repository (MASH_REPO) change bogworks/mash on every line too
 curl -fsSLO $BASE/install.sh -O $BASE/SHA256SUMS -O $BASE/mash.intoto.jsonl &&
+COMMIT=$(curl -fsSL -H 'Accept: application/vnd.github.sha' https://api.github.com/repos/bogworks/mash/commits/v0.5.8) &&
 gh attestation verify SHA256SUMS -R bogworks/mash --bundle mash.intoto.jsonl \
-  --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/v0.5.8 &&
+  --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/v0.5.8 --source-digest "$COMMIT" &&
 grep ' install.sh$' SHA256SUMS | sha256sum -c - &&           # macOS: shasum -a 256 -c -
 less install.sh && bash install.sh
 ```

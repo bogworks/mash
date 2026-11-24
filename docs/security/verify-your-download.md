@@ -41,7 +41,7 @@ Each line should end in `OK`. This shows the file matches `SHA256SUMS`. It does 
 ## 3. Check the attestation
 
 ```sh
-COMMIT=$(curl -fsSL -H 'Accept: application/vnd.github.sha' https://api.github.com/repos/bogworks/mash/commits/$MASH_VERSION)
+COMMIT=${COMMIT:-$(curl -fsSL -H 'Accept: application/vnd.github.sha' https://api.github.com/repos/bogworks/mash/commits/$MASH_VERSION)}
 gh attestation verify SHA256SUMS -R bogworks/mash --bundle mash.intoto.jsonl \
   --signer-workflow bogworks/mash/.github/workflows/release.yml \
   --source-ref refs/tags/$MASH_VERSION --source-digest "$COMMIT"
@@ -60,7 +60,7 @@ gh attestation verify mashctl-$OS-$ARCH -R bogworks/mash --bundle mash.intoto.js
   --source-ref refs/tags/$MASH_VERSION --source-digest "$COMMIT"
 ```
 
-`install.sh` pins the repository, the signer workflow, the tag ref and the commit the tag points to. It reads that commit from GitHub at install time (with `gh api`, or the public GitHub API if gh is not logged in), so a release attested from some other commit is refused; if it cannot read the commit it installs nothing. That is the same source as the download, so for a stronger check, take the commit from somewhere else, for example your own reviewed clone (`git rev-parse "$MASH_VERSION^{commit}"`), and set `COMMIT` to it before the checks above.
+`install.sh` pins the repository, the signer workflow, the tag ref and the commit the tag points to. It reads that commit from GitHub at install time (with `gh api`, or the public GitHub API if gh is not logged in), so a release attested from some other commit is refused; if it cannot read the commit it installs nothing. That is the same source as the download, so for a stronger check, take the commit from somewhere else, for example your own reviewed clone (`git rev-parse "$MASH_VERSION^{commit}"`), and set `COMMIT` to it before the checks above; the first line keeps a `COMMIT` that is already set.
 
 What this does not show: the release jobs run on self-hosted runners that the maintainers operate. The attestation says the maintainers' workflow built these bytes. You still decide whether to trust the maintainers. The build level is SLSA build level 2, not 3. See [docs/release.md](../release.md) for the reasoning.
 
