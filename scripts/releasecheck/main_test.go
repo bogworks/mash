@@ -988,13 +988,20 @@ func TestCheck_pluginRunsAgainstTheCandidateToo(t *testing.T) {
 }
 
 // Without the seam the binary comes from gh release download; a gh that cannot is the gate failing, not a refusal.
+// That is the plugin step's verdict. The whole check refuses as well since the latency step has no baseline to compare
+// with and says so as a finding (#1387): the missing baseline is a consequence, and the cause is still named.
 func TestCheck_aFailedDownloadOfThePreviousReleaseIsFour(t *testing.T) {
 	f := newFixture(t)
 	gitT(t, f.repo, "tag", "v0.0.9", f.x)
 	gitT(t, f.repo, "push", "-q", "origin", "v0.0.9")
-	err := f.check() // the fixture's gh has no assets.json to serve
-	if err == nil || exitCode(err) != 4 {
-		t.Fatalf("exit %d, want 4: %v", exitCode(err), err)
+	err := pluginCompat(context.Background(), f.o, f.o.X, &binaries{}) // the fixture's gh has no assets.json to serve
+	var oe opError
+	if !errors.As(err, &oe) || !strings.Contains(err.Error(), "no assets match") {
+		t.Fatalf("the plugin step: want an operational error for the failed download, got %v", err)
+	}
+	err = f.check()
+	if err == nil || !strings.Contains(err.Error(), "no assets match") {
+		t.Fatalf("check: want a failure naming the failed download, got %v (exit %d)", err, exitCode(err))
 	}
 	log, _ := os.ReadFile(filepath.Join(filepath.Dir(f.o.GH), "gh.log"))
 	if want := "release download v0.0.9 "; !strings.Contains(string(log), want) || !strings.Contains(string(log), "-p mash-") {
@@ -1640,8 +1647,8 @@ func TestCheck_docsOnlyCandidateOverATestedCommit(t *testing.T) {
 		want string // empty: the CI step passes
 	}{
 		{"a docs-only head", "docs/faq.md", ""},
-		{"a head that touches .github is code", ".github/pull_request_template.md", "not docs-only"},
-		{"a head that touches scripts is code", "scripts/notes.md", "not docs-only"},
+		{"a head that touches .github is code", ".github/CODEOWNERS", "not docs-only"},
+		{"a head that touches scripts is code", "scripts/notes.sh", "not docs-only"},
 	} {
 		f := newFixture(t)
 		tested := f.x

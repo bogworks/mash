@@ -25,9 +25,11 @@ runs:
       run: go vet ./...
     # -timeout 20m: under -race, scripts/releasecheck takes about 150 s on a Linux runner, past go test's default 10 m
     # on a slow one. A real hang still fails.
+    # -count=1: the self-hosted runner keeps Go's test cache, which replays a stale pass for tests that read files Go
+    # does not track (fixture repos, scripts/ci-changes, binaries they build), as scripts/releasecheck did (#1387).
     - name: go test
       shell: bash
       env:
         # The words internal to the maintainers (data through env): the standalone source scan in cmd/mash fails on any of them.
         MASH_FORBIDDEN_WORDS: ${{ inputs.forbidden-words }}
-      run: go test -race -timeout 20m ./...
+      run: go test -count=1 -race -timeout 20m ./...
