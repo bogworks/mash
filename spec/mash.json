@@ -360,6 +360,43 @@
       ]
      },
      {
+      "name": "x-output-next",
+      "value": [
+       {
+        "case": "The signing is refused (TO-8)",
+        "text": "error: not sent: could not sign: your name is too long",
+        "stream": "stderr",
+        "exit": 1,
+        "issue": "#1142",
+        "note": "Contract 0.6.0 SDK adoption r8, TO-8 (CHG-8): nothing is sent. One line, no hint: no command shows a signing failure. The cause after the second colon is one of `your account is not valid`, `the subject is not valid`, `your name is too long`, `the message id is not valid`; any other refusal by the SDK prints `error: not sent: could not sign`, and the SDK's own text is never printed. The MCP `send` tool returns the same words as its error and sends nothing. Promoted with W."
+       },
+       {
+        "case": "The signing is refused, with --reply-to (TO-8)",
+        "text": "error: not sent: could not sign: your name is too long",
+        "stream": "stderr",
+        "exit": 1,
+        "issue": "#1142",
+        "note": "Contract 0.6.0 SDK adoption r8, TO-8: the stored-mail reply, which on main is `mash send` with `--reply-to` (there is no `mash reply` command). Same line as the case above. The MCP `send` tool with `reply_to` returns the same words; MCP `reply` is not signed and its result stays `Answered.`. Promoted with W."
+       },
+       {
+        "case": "The signing is refused, no cause named (TO-8)",
+        "text": "error: not sent: could not sign",
+        "stream": "stderr",
+        "exit": 1,
+        "issue": "#1142",
+        "note": "Contract 0.6.0 SDK adoption r8, TO-8: the form for any refusal by the SDK that mash cannot tell apart. The SDK's own text is never printed. Promoted with W."
+       },
+       {
+        "case": "No subject can be built for the address (TO-9)",
+        "text": "error: not sent: no subject can be built for acme.demo.bob",
+        "stream": "stderr",
+        "exit": 1,
+        "issue": "#1142",
+        "note": "Contract 0.6.0 SDK adoption r8, TO-9 (REQ-004, S3). The SDK builder refuses an address after mash's own parser accepted it; reachable only where the two disagree. No hint: no command shows more. A typed bad address never reaches it: it is refused first as a usage error (the `An address in another form` case). The MCP `send` tool returns the same words as its error. Promoted with S3."
+       }
+      ]
+     },
+     {
       "name": "x-json",
       "value": {
        "to": "acme.demo.alice",
@@ -558,6 +595,35 @@
       ]
      },
      {
+      "name": "x-output-next",
+      "value": [
+       {
+        "case": "One refused message (TO-1)",
+        "text": "3 messages for acme.demo.alice, 1 new, 0 urgent, 1 refused.\n\nNUMBER  FROM  WHEN     STATE    URGENT  KIND  MESSAGE\n1       bob   2h ago   read     no      task  lunch at noon?\n2       bob   10s ago  new      no      task  ready?\n3       ?     1h ago   refused  -       -     control character in name",
+        "stream": "stdout",
+        "exit": 0,
+        "issue": "#1142",
+        "note": "Contract 0.6.0 SDK adoption r8, TO-1. The header counts the refused messages in the total, and `refused` is the last count; with no refused message the header has no `, N refused` part, as today. `-` marks a field a refused message does not have. FROM is `?`: the sender of a refused message is never shown (REQ-017). The MESSAGE cell holds the class alone; where an endpoint name or a column makes the row wider, the cell is cut with `…` at 79 columns as a preview is. Promoted with W."
+       },
+       {
+        "case": "Every kind of message side by side (TO-1)",
+        "text": "17 messages for o.dev.bob, 0 new, 0 urgent, 12 refused.\n\nNUMBER  FROM       WHEN    STATE    URGENT  KIND  MESSAGE\n1       alice      3m ago  read     no      task  verified: real mash send fro…\n2       UCNY…4UHK  3m ago  read     no      task  claimed: header without a si…\n3       UCVG…3VVW  3m ago  read     no      task  unknown-signer: signed by a …\n4       ?          3m ago  read     no      task  absent: no Agent-Sender head…\n5       frank      3m ago  read     no      task  stale: signed an hour before…\n6       ?          2m ago  refused  -       -     not verified\n7       ?          2m ago  refused  -       -     header too long\n8       ?          2m ago  refused  -       -     time not in UTC\n9       ?          2m ago  refused  -       -     control character in name\n10      ?          2m ago  refused  -       -     name too long\n11      ?          2m ago  refused  -       -     broken character in name\n12      ?          1m ago  refused  -       -     a field appears twice\n13      ?          1m ago  refused  -       -     space in subject\n14      ?          1m ago  refused  -       -     signature unreadable\n15      ?          1m ago  refused  -       -     empty sender header\n16      ?          1m ago  refused  -       -     two sender headers\n17      ?          1m ago  refused  -       -     unreadable sender header",
+        "stream": "stdout",
+        "exit": 0,
+        "issue": "#1142",
+        "note": "Contract 0.6.0 SDK adoption r8, TO-1. Rows 1 to 5 are the five trust kinds main prints (captures-main-2, item 2.1) and appear only on an endpoint with MASH_ACCEPT_UNVERIFIED=1; row 6 is a message refused as not verified, on an endpoint that had the default when it arrived; rows 7 to 17 are one refused message for each header class, in the order of the frozen class list. Every refused row is `refused` in the STATE column and FROM is `?`; --wide adds TRUST as on main. `refused` widens the STATE column by two, so the previews are cut two characters shorter than captures-main-2's mock-up. The longest line is 79 columns. Promoted with W."
+       },
+       {
+        "case": "--json, a refused entry (TO-2)",
+        "text": "{\n \"number\": 3,\n \"from\": \"?\",\n \"sent\": \"2026-11-24T21:10:00Z\",\n \"state\": \"refused\",\n \"urgent\": false,\n \"kind\": \"\",\n \"trust\": \"refused\",\n \"preview\": \"\",\n \"reason\": \"control character in name\"\n}",
+        "stream": "stdout",
+        "exit": 0,
+        "issue": "#1142",
+        "note": "Contract 0.6.0 SDK adoption r8, TO-2: one entry of the list. The object gains \"refused\": 1: `refused` (an integer) is always present on the object, 0 when none. `reason` (a string, one of the frozen classes) is present on refused entries only. `state` gains the value `refused` and `trust` gains the value `refused`. Nothing becomes null: `from` is the string `?`, `kind` and `preview` are empty strings, `urgent` is false, `sent` is the time the message was stored, as RFC 3339. No existing field changes type. The MCP `inbox` tool returns the same structured result. Promoted with W."
+       }
+      ]
+     },
+     {
       "name": "x-json",
       "value": {
        "endpoint": "acme.demo.alice",
@@ -681,6 +747,35 @@
         "text": "error: acme.dev.bob: this endpoint was deleted; its address cannot be used again\nhint: mash doctor",
         "stream": "stderr",
         "exit": 1
+       }
+      ]
+     },
+     {
+      "name": "x-output-next",
+      "value": [
+       {
+        "case": "A message refused for its header (TO-3)",
+        "text": "error: message 3 was refused: control character in name\nhint: mash doctor",
+        "stream": "stderr",
+        "exit": 1,
+        "issue": "#1142",
+        "note": "Contract 0.6.0 SDK adoption r8, TO-3. The frame is the current case's. The class is the whole reason. The MCP `read` tool gives the same words as its error. `mash doctor` shows the count of each class. Promoted with W."
+       },
+       {
+        "case": "A message that was not verified, on a default endpoint (TO-1)",
+        "text": "error: message 6 was refused: it was not verified\nhint: mash doctor",
+        "stream": "stderr",
+        "exit": 1,
+        "issue": "#1142",
+        "note": "Contract 0.6.0 SDK adoption r8, TO-1: the form main already prints for such a message (captures-main-2, item 1.4), kept. Promoted with W."
+       },
+       {
+        "case": "A message refused for a header class, in the every-kind inbox (TO-1)",
+        "text": "error: message 9 was refused: control character in name\nhint: mash doctor",
+        "stream": "stderr",
+        "exit": 1,
+        "issue": "#1142",
+        "note": "Contract 0.6.0 SDK adoption r8, TO-1: message 9 of the every-kind inbox. Promoted with W."
        }
       ]
      },
@@ -867,6 +962,35 @@
       ]
      },
      {
+      "name": "x-output-next",
+      "value": [
+       {
+        "case": "An answer that fails verification, the table (TO-12)",
+        "text": "ADDRESS          STATE\nacme.demo.alice  online\nacme.demo.bob    online\nacme.demo.carol  offline",
+        "stream": "stdout",
+        "exit": 0,
+        "issue": "#1142",
+        "note": "Contract 0.6.0 SDK adoption r8, TO-12 (REQ-016, CHG-12). `who` keeps the header and the one-word cells main prints and shows each endpoint by its valid answers only; an answer that fails is never attributed to the endpoint it names. Carol shows `offline` because she has no valid answer, as on main today. Exit status 0. Promoted with W."
+       },
+       {
+        "case": "An answer that fails verification, the warning (TO-12)",
+        "text": "warning: 1 discovery answer could not be verified",
+        "stream": "stderr",
+        "exit": 0,
+        "issue": "#1142",
+        "note": "Contract 0.6.0 SDK adoption r8, TO-12: said once on standard error when there are any, `2 discovery answers could not be verified` for two. No pointer to a command: nothing shows the answers themselves, and the count is in --json. Promoted with W."
+       },
+       {
+        "case": "An answer that fails verification, --json (TO-12)",
+        "text": " \"answers_not_verified\": 1",
+        "stream": "stdout",
+        "exit": 0,
+        "issue": "#1142",
+        "note": "Contract 0.6.0 SDK adoption r8, TO-12: the one new member, next to the list, in the layout --json prints. An integer, always present, 0 when none. `online` stays a boolean on every entry and no entry gains a state. The MCP `who` tool carries the same. Promoted with W."
+       }
+      ]
+     },
+     {
       "name": "x-json",
       "value": {
        "endpoints": [
@@ -1027,6 +1151,51 @@
         "text": "error: no endpoint is installed here\nhint: mash join <file>",
         "stream": "stderr",
         "exit": 2
+       }
+      ]
+     },
+     {
+      "name": "x-output-next",
+      "value": [
+       {
+        "case": "With --detail, one refused message (TO-4)",
+        "text": "acme.demo.alice: ready, online\nholds endpoint: yes\nhooks:          ran\nstorage:        ok\nrefused:        1 message: time not in UTC",
+        "stream": "stdout",
+        "exit": 0,
+        "issue": "#1142",
+        "note": "Contract 0.6.0 SDK adoption r8, TO-4. One new row. `mash status`, the one line, is unchanged (TO-15, option a). With one class and several messages the row reads `refused:        3 messages: time not in UTC`. Promoted with W."
+       },
+       {
+        "case": "With --detail, no refused message (TO-4)",
+        "text": "acme.demo.alice: ready, online\nholds endpoint: yes\nhooks:          ran\nstorage:        ok\nrefused:        none",
+        "stream": "stdout",
+        "exit": 0,
+        "issue": "#1142",
+        "note": "Contract 0.6.0 SDK adoption r8, TO-4: r8 draws the row `refused:        none`; the other four lines are the current case's. Promoted with W."
+       },
+       {
+        "case": "With --detail, several classes (TO-4)",
+        "text": "acme.demo.alice: ready, online\nholds endpoint: yes\nhooks:          ran\nstorage:        ok\nrefused:        4 messages\n                2 not verified\n                1 time not in UTC\n                1 two sender headers",
+        "stream": "stdout",
+        "exit": 0,
+        "issue": "#1142",
+        "note": "Contract 0.6.0 SDK adoption r8, TO-4: with several classes the row gives the total and then one line per class, largest count first, ties by class name. Promoted with W."
+       },
+       {
+        "case": "With --detail --json, the new fields (TO-4)",
+        "text": " \"refused\": 4,\n \"refused_by_class\": {\n  \"not verified\": 2,\n  \"time not in UTC\": 1,\n  \"two sender headers\": 1\n }",
+        "stream": "stdout",
+        "exit": 0,
+        "issue": "#1142",
+        "note": "Contract 0.6.0 SDK adoption r8, TO-4: the two new members of the object, shown in the layout --json prints. `refused` (an integer) and `refused_by_class` (an object, `{}` when none) are always present with --detail, and absent without it. Nothing becomes null and no existing field changes type. Promoted with W."
+       },
+       {
+        "case": "The first start after the upgrade is still checking stored mail (TO-14)",
+        "text": "acme.demo.alice: not ready: mail is waiting while stored mail is checked\nhint: mash doctor",
+        "stream": "stdout",
+        "exit": 1,
+        "issue": "#1142",
+        "note": "Contract 0.6.0 SDK adoption r8, TO-14 (planner #3608, option 1). The first start of the switched-on build waits for one pass of the stream (up to 16 MiB) before it delivers mail (REQ-006 item 3, CHG-16); no view shows a partial count. The form is the current `not ready` case's, with one new reason; the hint goes to stderr as in that case. The MCP `status` tool gives the same words. Promoted with W."
        }
       ]
      },
@@ -1301,6 +1470,46 @@
         "exit": 1,
         "text": "{\n \"endpoint\": \"acme.demo.bob\",\n \"problems\": 1,\n \"warnings\": 1,\n \"checks\": [\n  {\n   \"name\": \"config\",\n   \"state\": \"ok\",\n   \"detail\": null,\n   \"fix\": null\n  },\n  {\n   \"name\": \"claude\",\n   \"state\": \"ok\",\n   \"detail\": \"2.1.320\",\n   \"fix\": null\n  },\n  {\n   \"name\": \"creds\",\n   \"state\": \"ok\",\n   \"detail\": null,\n   \"fix\": null\n  },\n  {\n   \"name\": \"server\",\n   \"state\": \"ok\",\n   \"detail\": \"tls://myserver:4222\",\n   \"fix\": null\n  },\n  {\n   \"name\": \"sign-in\",\n   \"state\": \"fail\",\n   \"detail\": \"the server refused these credentials\",\n   \"fix\": \"mash join <file> --replace\"\n  },\n  {\n   \"name\": \"delivery\",\n   \"state\": \"skip\",\n   \"detail\": \"needs sign-in\",\n   \"fix\": null\n  },\n  {\n   \"name\": \"refused\",\n   \"state\": \"warn\",\n   \"detail\": \"3 unverified messages were refused\",\n   \"fix\": null\n  }\n ],\n \"hint\": \"mash join <file> --replace\"\n}",
         "note": "REQ-006, core #1403. The example above with the sign-in fix 'mash join <file> --replace' and a top-level \"hint\": the one hint the text prints, null when there is none. Each row's \"fix\" stays."
+       }
+      ]
+     },
+     {
+      "name": "x-output-next",
+      "value": [
+       {
+        "case": "The refused row, several messages and classes (TO-5)",
+        "text": "refused   ok    4 messages were refused\n                2 not verified\n                1 time not in UTC\n                1 two sender headers",
+        "stream": "stdout",
+        "exit": 0,
+        "issue": "#1142",
+        "replaces": "A problem and a warning, with one hint",
+        "note": "Contract 0.6.0 SDK adoption r8, TO-5, CHG-14: the refused row only; the other rows and the summary line are as in the current cases. The row is `ok` whatever the count: it does not turn the verdict to `warn` and does not change the exit status. The classes are counted as in `status --detail`. The JSON carries the same `refused` and `refused_by_class` members as `status --detail --json`, always present, 0 and `{}` when none; the `refused` entry of `checks` has state `ok`, detail `4 messages were refused` (`no mail was refused` with none) and `fix` null. Promoted with W."
+       },
+       {
+        "case": "The refused row, one message (TO-5)",
+        "text": "refused   ok    1 message was refused\n                time not in UTC",
+        "stream": "stdout",
+        "exit": 0,
+        "issue": "#1142",
+        "replaces": "A problem and a warning, with one hint",
+        "note": "Contract 0.6.0 SDK adoption r8, TO-5: the refused row only. Promoted with W."
+       },
+       {
+        "case": "The refused row, none (TO-5)",
+        "text": "refused   ok    no mail was refused",
+        "stream": "stdout",
+        "exit": 0,
+        "issue": "#1142",
+        "replaces": "All well",
+        "note": "Contract 0.6.0 SDK adoption r8, TO-5: the refused row only (today: \"no unverified mail was refused\"). Promoted with W."
+       },
+       {
+        "case": "The first start after the upgrade is still checking stored mail (TO-14)",
+        "text": "delivery  FAIL  mail is waiting while stored mail is checked",
+        "stream": "stdout",
+        "exit": 1,
+        "issue": "#1142",
+        "note": "Contract 0.6.0 SDK adoption r8, TO-14: the delivery row only, as for a held mail folder; `fix` is null in the JSON (nothing to do: it happens once, on the first start after the upgrade). The MCP `doctor` tool gives the same words. Promoted with W."
        }
       ]
      },
@@ -1865,6 +2074,19 @@
       ]
      },
      {
+      "name": "x-output-next",
+      "value": [
+       {
+        "case": "No subject can be built for the endpoint's own address (TO-9)",
+        "text": "error: the endpoint could not start: no subject can be built for acme.demo.alice",
+        "stream": "stderr",
+        "exit": 1,
+        "issue": "#1142",
+        "note": "Contract 0.6.0 SDK adoption r8, TO-9 (REQ-004, S3): the endpoint start, naming its own address. No hint. Reachable only where mash's parser and the SDK builder disagree. Promoted with S3."
+       }
+      ]
+     },
+     {
       "name": "x-mcp",
       "value": {
        "tool": null,
@@ -2001,6 +2223,35 @@
         "text": "(what it prints today; unchanged in 0.5.6)",
         "stream": "stdout",
         "exit": 0
+       }
+      ]
+     },
+     {
+      "name": "x-output-next",
+      "value": [
+       {
+        "case": "The signing is refused (TO-8)",
+        "text": "error: not sent: could not sign: your name is too long",
+        "stream": "stderr",
+        "exit": 1,
+        "issue": "#1142",
+        "note": "Contract 0.6.0 SDK adoption r8, TO-8, style A as ruled in planner #3612: `error:` where main prints a plain `mash: ` line. Nothing is sent. Promoted with W."
+       },
+       {
+        "case": "A peer refuses the prompt (TO-10)",
+        "text": "error: prompt refused: 400 malformed Agent-Sender header",
+        "stream": "stderr",
+        "exit": 1,
+        "issue": "#1142",
+        "note": "Contract 0.6.0 SDK adoption r8, TO-10 (CHG-5, CHG-6, CHG-17). Seen by a sender that is not mash, or by a mash sender with a test-made header. Main prints `mash: prompt refused: 400 malformed Agent-Sender header` (captures-main, case 1a). At the switch-on the prefix becomes `error: `; the status code and the reason words stay, and there is no hint because no command shows the peer's reason. The codes move for shapes 8 and 9 (CHG-6, `401` to `400`) and for a replay from an unlisted sender (CHG-13, `401` to `403`). Promoted with W."
+       },
+       {
+        "case": "A peer refuses a prompt past a nonce cap (TO-11)",
+        "text": "error: prompt refused: 401 too many recent prompts: try again shortly",
+        "stream": "stderr",
+        "exit": 1,
+        "issue": "#1142",
+        "note": "Contract 0.6.0 SDK adoption r8, TO-11 (CHG-7, CHG-17). Same style-A frame as above, status `401`, with its own text: main's text for the `401` it has, `a signed Agent-Sender header is required (min_sender_trust=signed)`, is the wrong reason for a correctly signed sender. The missing-header `401` keeps today's text. The line is 69 columns. Promoted with W."
        }
       ]
      },
