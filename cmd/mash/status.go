@@ -82,9 +82,9 @@ func leaseCause(cfg config.Config, err error) string {
 	case errors.As(err, &deleted):
 		return cmdcore.ReasonEndpointDeleted
 	case endpoint.IsAuthFailure(err):
-		return "the server refused its credentials"
+		return cmds.CauseCredsRefused
 	case transient(err) || strings.Contains(msg, "no servers available"):
-		return "the server did not answer: " + config.RedactURL(cfg.URL)
+		return cmds.CauseServerSilent + ": " + config.RedactURL(cfg.URL)
 	default:
 		return redactText(strings.TrimPrefix(msg, "mash: "))
 	}
