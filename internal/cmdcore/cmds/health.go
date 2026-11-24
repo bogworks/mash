@@ -43,6 +43,26 @@ const (
 	ReasonCouldNotTake   = "this session could not take this endpoint"
 )
 
+// The words a session gives for why it could not take its endpoint (the cause after ReasonCouldNotTake). The code of a
+// failed take follows the cause: a server that did not answer is server_unreachable, refused credentials creds_refused.
+const (
+	CauseServerSilent = "the server did not answer"
+	CauseCredsRefused = "the server refused its credentials"
+)
+
+// leaseCode is the reason_code of a session that could not take its endpoint, from the cause it gave.
+func leaseCode(cause string) string {
+	switch {
+	case strings.HasPrefix(cause, CauseServerSilent):
+		return CodeServerUnreachable
+	case cause == CauseCredsRefused:
+		return CodeCredsRefused
+	case cause == ReasonEndpointDeleted:
+		return CodeEndpointDeleted
+	}
+	return CodeEndpointNotTaken
+}
+
 // ReasonEndpointDeleted is the sign-in row's detail (and status's reason) for an endpoint whose directory record is
 // gone, and EndpointDeletedFix is its fix: a deleted address is never reused, so the way on is a new endpoint.
 const (
@@ -349,7 +369,7 @@ var Status = cmdcore.Command[StatusParams, StatusResult]{
 		// a row that fails is the first thing to mend and is what both doors say; the session's own state comes next
 		if reason := leaseReason(rep.Lease, rep.LeaseCause); r.Ready && reason != "" {
 			r.Ready, r.Reason = false, &reason
-			r.reasonCode = map[string]string{LeaseOther: CodeEndpointHeldElsewhere, LeaseLost: CodeEndpointLost, LeaseFailed: CodeEndpointNotTaken}[rep.Lease]
+			r.reasonCode = map[string]string{LeaseOther: CodeEndpointHeldElsewhere, LeaseLost: CodeEndpointLost, LeaseFailed: leaseCode(rep.LeaseCause)}[rep.Lease]
 		}
 		if r.Ready && rep.MailHeld {
 			reason := ReasonMailHeld
