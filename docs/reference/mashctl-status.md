@@ -58,6 +58,15 @@ tls://localhost:4222: not ok: the server did not answer
 hint: mashctl doctor
 ```
 
+### No server is configured
+
+Stream: stderr. Exit code: 1.
+
+```text
+error: no server is configured
+hint: mashctl init --config <file>
+```
+
 ## JSON
 
 With `--json` the result is this shape. The values are an example.

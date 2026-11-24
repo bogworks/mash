@@ -102,6 +102,22 @@ keys       FAIL  1 connected user was not issued by mashctl:
 hint: revoke it with the tool that issued it (mashctl revokes only its own)
 ```
 
+### No server is configured
+
+Stream: stdout, then the hint on stderr. Exit code: 1.
+
+```text
+config     FAIL  no server is configured
+server     skip  needs the config
+sign-in    skip  needs the server
+storage    skip  needs sign-in
+endpoints  skip  needs the storage
+keys       skip  needs sign-in
+
+1 problem.
+hint: mashctl init --config <file>
+```
+
 ## JSON
 
 With `--json` the result is this shape. The values are an example.
