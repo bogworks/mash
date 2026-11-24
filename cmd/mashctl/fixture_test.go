@@ -60,7 +60,7 @@ func newFleetEnv(t *testing.T) *fleetEnv {
 		"MASH_CONFIG_DIR": dir, "MASH_KEYS_DIR": filepath.Join(dir, "keys"),
 	}}
 	makeStorageFor(t, e)
-	ka, err := ctlkeys.Open(h.env["MASH_KEYS_DIR"])
+	ka, err := ctlkeys.Open(h.env["MASH_KEYS_DIR"], "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func (h *fleetEnv) run(args ...string) (string, string, int) {
 }
 
 func (h *fleetEnv) keys() *ctlkeys.Authority {
-	ka, err := ctlkeys.Open(h.env["MASH_KEYS_DIR"])
+	ka, err := ctlkeys.Open(h.env["MASH_KEYS_DIR"], "")
 	if err != nil {
 		h.t.Fatal(err)
 	}

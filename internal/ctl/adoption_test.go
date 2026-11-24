@@ -16,7 +16,7 @@ import (
 // HeldPublicKeys includes the account signing key, so a planned rotation's next submitter cannot be it.
 func TestHeldPublicKeysIncludesTheSigningKey(t *testing.T) {
 	dir := t.TempDir()
-	ks, err := ctlkeys.Open(filepath.Join(dir, "keys"))
+	ks, err := ctlkeys.Open(filepath.Join(dir, "keys"), "")
 	if err != nil {
 		t.Fatal(err)
 	}

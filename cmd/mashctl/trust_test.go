@@ -20,7 +20,7 @@ import (
 func otherOperatorStore(t *testing.T, e *applyEnv) *ctlkeys.Authority {
 	t.Helper()
 	dir := filepath.Join(e.root, "keys2")
-	ks, err := ctlkeys.Open(dir)
+	ks, err := ctlkeys.Open(dir, "")
 	if err != nil {
 		t.Fatal(err)
 	}

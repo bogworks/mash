@@ -37,7 +37,7 @@ type env struct {
 func newEnv(t *testing.T) *env {
 	t.Helper()
 	e := testenv.Start(t)
-	ka, err := ctlkeys.Open(filepath.Join(t.TempDir(), "keys"))
+	ka, err := ctlkeys.Open(filepath.Join(t.TempDir(), "keys"), "")
 	if err != nil {
 		t.Fatal(err)
 	}

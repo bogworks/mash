@@ -71,10 +71,14 @@ type Config struct {
 	WakeAgeText  string
 	AdminTimeout time.Duration // total deadline of one `mashctl` command (zero = 30s)
 	AdminCreds   string        // admin credentials for `mashctl`
-	SysCreds     string        // config.json "system_creds": the system account's creds file, for `mashctl` (empty = none set)
-	TLSCA        string        // MASH_CA / "ca": PEM file of the CA that signed the server's certificate (empty = system roots)
-	TLSCert      string        // MASH_TLS_CERT / "tls_cert": PEM client certificate, for a server that requires one; set with TLSKey
-	TLSKey       string        // MASH_TLS_KEY / "tls_key": PEM private key of TLSCert
+	// SigningKeyPub is config.json "signing_key_pub": the PUBLIC key of the account signing key `mashctl init` was given
+	// (never a seed), "" when none was configured. A key store that has lost signing.nk and signing.pub is told apart
+	// from one that never had a signing key by it.
+	SigningKeyPub string
+	SysCreds      string // config.json "system_creds": the system account's creds file, for `mashctl` (empty = none set)
+	TLSCA         string // MASH_CA / "ca": PEM file of the CA that signed the server's certificate (empty = system roots)
+	TLSCert       string // MASH_TLS_CERT / "tls_cert": PEM client certificate, for a server that requires one; set with TLSKey
+	TLSKey        string // MASH_TLS_KEY / "tls_key": PEM private key of TLSCert
 	// SkipEncryption is the one override of the TLS requirement (REQ-014): every connection mash and mashctl make
 	// uses tls:// or wss://, to any host (loopback included), unless it is set. Then a plain nats:// or ws:// URL is
 	// connected. It comes from the environment variable SkipEncryptionEnv only: no flag, no config.json key. Every
@@ -141,6 +145,7 @@ type file struct {
 
 	AdminCreds string `json:"admin_creds"`
 	SysCreds   string `json:"system_creds"`
+	SigningPub string `json:"signing_key_pub"` // the public key of the configured signing key; written by mashctl init
 	Host       string `json:"host"`
 
 	CA      string `json:"ca"`
@@ -558,6 +563,7 @@ func loadPicking(lookup Lookup, home string, autoPick bool) (Config, error) {
 	// Relative paths in the file are relative to the config directory, not to wherever mash was started.
 	f.AdminCreds = inDir(dir, ExpandHome(f.AdminCreds, home))
 	c.SysCreds = inDir(dir, ExpandHome(f.SysCreds, home))
+	c.SigningKeyPub = f.SigningPub
 	f.CA, f.TLSCert, f.TLSKey = inDir(dir, f.CA), inDir(dir, f.TLSCert), inDir(dir, f.TLSKey)
 	fileServers, err := serverList(f.Servers)
 	if err != nil {

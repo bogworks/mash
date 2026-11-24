@@ -15,7 +15,7 @@ func TestHeldKeys(t *testing.T) {
 	if err := os.Chmod(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	a, err := Open(dir)
+	a, err := Open(dir, "")
 	if err != nil {
 		t.Fatal(err)
 	}
