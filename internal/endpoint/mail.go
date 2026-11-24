@@ -746,9 +746,9 @@ func (e *Endpoint) SendDetailed(ctx context.Context, to, text string, o SendOpti
 			return SendResult{}, err
 		}
 	}
-	h, err := e.id.Sign(rec.MailSubject, data, e.key, time.Now(), SendNonce(e.key, to, key))
+	h, err := e.sid.Sign(rec.MailSubject, data, e.key, time.Now(), SendNonce(e.key, to, key))
 	if err != nil {
-		return SendResult{}, err
+		return SendResult{}, notSent(err) // TO-8: nothing is sent
 	}
 	msg := nats.NewMsg(rec.MailSubject)
 	msg.Data = data

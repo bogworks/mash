@@ -14,8 +14,9 @@ import (
 
 // The unlinked step (standing order 16): no policy-engine package is linked into the released programs. internal/policy,
 // the size constants, is allowed; every other package of the engine is refused wherever it appears in the dependencies
-// of cmd/mash or cmd/mashctl. The same step refuses the synadia-agents.go identity, caller and host packages and mash's
-// internal/sapsdk (with subpackages) in 0.5.x; the SDK root package is allowed.
+// of cmd/mash or cmd/mashctl. The same step refuses the synadia-agents.go caller and host packages (not linked before
+// S5); the SDK root package and the SDK identity package, which mash's internal/sapsdk links from the switch-on
+// release, are allowed.
 
 // policyPrefix: every package whose path starts with it and is longer than it is refused (internal/policydoc,
 // internal/policyfoo, internal/policy/sub). internal/policy itself is allowed.
@@ -35,19 +36,12 @@ var policyNamedElsewhere = []string{
 // is allowed. Each entry matches the package and its subpackages, by whole path: .../identity/x is refused, while
 // .../identityx and .../synadia-agents.go itself are not.
 var sdkRefused = []string{
-	"github.com/bogworks/synadia-agents.go/identity",
 	"github.com/bogworks/synadia-agents.go/caller",
 	"github.com/bogworks/synadia-agents.go/host",
 }
 
-// moduleRefused lists, relative to the candidate's module, the new SDK adapter package (S4) no 0.5.x release links.
-// It matches the package and its subpackages.
-var moduleRefused = []string{
-	"internal/sapsdk",
-}
-
 // linkedPolicyPackages returns, sorted and without duplicates, the refused packages named in `go list -deps` output:
-// engine and SDK-adapter packages of module as module-relative paths, SDK packages as full import paths. module is the
+// engine packages of module as module-relative paths, SDK packages as full import paths. module is the
 // candidate's own module path, without a trailing slash.
 func linkedPolicyPackages(module, listOutput string) []string {
 	prefix := module + "/"
@@ -58,7 +52,7 @@ func linkedPolicyPackages(module, listOutput string) []string {
 		name := path
 		if rel, ok := strings.CutPrefix(path, prefix); ok {
 			name = rel
-			if !isPolicyPackage(rel) && !matchesAny(rel, moduleRefused) {
+			if !isPolicyPackage(rel) {
 				continue
 			}
 		} else if !matchesAny(path, sdkRefused) {
@@ -85,11 +79,8 @@ func matchesAny(path string, list []string) bool {
 
 // refusalReason says why a refused package may not be linked.
 func refusalReason(pkg string) string {
-	switch {
-	case matchesAny(pkg, sdkRefused):
-		return "the SDK identity, caller and host packages are not part of any 0.5.x release"
-	case matchesAny(pkg, moduleRefused):
-		return "the SAP SDK adapter is not part of any 0.5.x release"
+	if matchesAny(pkg, sdkRefused) {
+		return "the SDK caller and host packages are not part of any 0.5.x release"
 	}
 	return "the policy engine is not part of any 0.5.x release"
 }
