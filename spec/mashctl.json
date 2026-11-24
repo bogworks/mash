@@ -258,19 +258,35 @@
        },
        {
         "case": "A strict operator and no signing_key",
-        "text": "warning: no signing_key is set but the account lists signing keys",
+        "text": "warning: no signing_key in mash-setup.yaml; the account requires one",
         "stream": "stderr",
         "exit": 0,
         "issue": "#1255",
-        "note": "PROPOSED. One warning line before the result; exit stays 0; printed once; not with signing_key set. Applies to init only."
+        "note": "PROPOSED. One warning line before the result; exit stays 0; printed once; not with signing_key set. Applies to init only. Condition: the account lists signing keys. Words to confirm with ctl (draft 3 read \"the account lists signing keys\", which is NATS jargon)."
        },
        {
         "case": "The owner is too long",
-        "text": "mash-setup.yaml: owner is not a valid name: use lower-case letters, digits and\n  single hyphens, starting with a letter, up to 32 characters",
+        "text": "error: mash-setup.yaml: owner is longer than 32 characters",
         "stream": "stderr",
         "exit": 1,
         "issue": "#1172",
-        "note": "Today the text says 48 and the server refuses over 32. Wrapped here to fit the 80-column limit; as one line it is 138 columns. Wording to be settled: shorter words or this wrapping."
+        "note": "Today the text says 48 and the server refuses over 32. One line, no hint (a config value is not a command). The other owner faults read the same way, for example \"error: mash-setup.yaml: owner must start with a letter\"."
+       },
+       {
+        "case": "A strict operator with a signing_key",
+        "issue": "#1255",
+        "stream": "stderr",
+        "exit": 0,
+        "text": "(no warning line; the result line is as in \"A signing key is set\")",
+        "note": "PROPOSED, not yet in the specification (REQ-038 acceptance: the case with signing_key prints no warning). A case in round brackets is a description: the conformance test skips it. The code PR for #1255 adds the executable check (init with a signing_key writes nothing to stderr) when this case lands."
+       },
+       {
+        "case": "An unknown key in the setup file",
+        "issue": "#1065",
+        "stream": "stderr",
+        "exit": 1,
+        "text": "error: mash-setup.yaml line 7: unknown key",
+        "note": "PROPOSED, not yet in the specification (REQ-015, #1065: name the position of the unknown key, not its text). Form is file, then line, as other file errors read. Today: \"error: mash-setup.yaml: unknown key <the key as typed>\"."
        }
       ]
      }
@@ -475,11 +491,20 @@
        },
        {
         "case": "Server not answering",
-        "text": "config     ok\nserver     FAIL  the server did not answer\nsign-in    skip  needs the server\nstorage    skip  needs sign-in\nendpoints  skip  needs the storage\nkeys       skip  needs sign-in\n\n1 problem.\nhint: start the NATS server; if the local script set it up:\n  mash-local-nats-setup.sh --start",
-        "stream": "stdout, then the hint on stderr",
+        "text": "config     ok\nserver     FAIL  the server did not answer: tls://localhost:4222\nsign-in    skip  needs the server\nstorage    skip  needs sign-in\nendpoints  skip  needs the storage\nkeys       skip  needs sign-in\n\n1 problem.",
+        "stream": "stdout",
         "exit": 1,
         "issue": "#1099",
-        "note": "Wrapped here to fit the 80-column limit; as one line it is 92 columns. Wording to be settled: shorter words or this wrapping."
+        "note": "Exit 1. The server row shows the address; the rule \"Both doctors work the same way\" says: \"A server row shows the address as configured.\" (today the row has no address). No hint: the one command that starts a local server is a script that is not on the PATH, and a hint is a command of ours (planner ruling on REQ-006). Wording as mash doctor's row. Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors."
+       },
+       {
+        "case": "--audit-users finds a user mashctl did not issue",
+        "text": "config     ok\nserver     ok    tls://localhost:4222\nsign-in    ok\nstorage    ok\nendpoints  ok    3 records, 3 inboxes\nkeys       FAIL  1 connected user was not issued by mashctl:\n                 UDXU4RCSJNZOIQHZNWXHXORDPRTGNJAHAHFRGZNEEJCPQTT2M7NLCNF4\n\n1 problem.",
+        "stream": "stdout",
+        "exit": 1,
+        "issue": "#1393",
+        "note": "ADR 0168 (REQ-006, Gate 1 ruling): a hint is a command that fixes the problem, or there is no hint. mashctl has no command that revokes a user it did not issue, so there is no hint; the keys FAIL row says what is wrong. v0.5.8 printed 'hint: revoke it with the tool that issued it (mashctl revokes only its own)' on stderr.",
+        "replaces": "--audit-users finds a user mashctl did not issue"
        }
       ]
      }
@@ -938,94 +963,102 @@
         "name": "x-output-next",
         "value": [
          {
-          "case": "Cancelled everywhere, then a later step failed: a. the server's lock on this endpoint was lost",
-          "text": "error: deleted acme.demo.bob, but the removal did not finish: the server's lock\n  on this endpoint was lost\nhint: mashctl endpoint delete acme.demo.bob",
+          "case": "Cancelled everywhere, then a later step failed: a. its lock was lost",
+          "text": "error: acme.demo.bob is partly deleted: its lock was lost\nhint: mashctl endpoint delete acme.demo.bob",
           "stream": "stderr",
           "exit": 1,
           "issue": "#1081",
           "replaces": "Cancelled everywhere, then a later step failed (0.5.6 as built)",
-          "note": "Its credentials already no longer work; running the command again is safe. PROPOSED plain words (the cause part only). Wrapped here to fit the 80-column limit; as one line it is 105 columns. Wording to be settled: shorter words or this wrapping."
+          "note": "One frame for all ten causes: \"error: <address> is partly deleted: <cause>\", the cause 28 characters or fewer, then the command that finishes the job. Its credentials already no longer work and running the command again is safe; that does not fit on the line, so it is here and in --detail and --json (\"credentials_revoked\": true). PROPOSED plain words for the cause. Draft 3 wording for this cause: \"the server's lock on this endpoint was lost\"."
          },
          {
-          "case": "Cancelled everywhere, then a later step failed: b. its directory record could not be read",
-          "text": "error: deleted acme.demo.bob, but the removal did not finish: its directory\n  record could not be read\nhint: mashctl endpoint delete acme.demo.bob",
+          "case": "Cancelled everywhere, then a later step failed: b. its record could not be read",
+          "text": "error: acme.demo.bob is partly deleted: its record could not be read\nhint: mashctl endpoint delete acme.demo.bob",
           "stream": "stderr",
           "exit": 1,
           "issue": "#1081",
           "replaces": "Cancelled everywhere, then a later step failed (0.5.6 as built)",
-          "note": "Wrapped here to fit the 80-column limit; as one line it is 100 columns. Wording to be settled: shorter words or this wrapping."
+          "note": "Same frame, hint and exit as a. Cause in plain words; the draft 3 wording was \"its directory record could not be read\"."
          },
          {
-          "case": "Cancelled everywhere, then a later step failed: c. its directory record was changed by someone else",
-          "text": "error: deleted acme.demo.bob, but the removal did not finish: its directory\n  record was changed by someone else\nhint: mashctl endpoint delete acme.demo.bob",
+          "case": "Cancelled everywhere, then a later step failed: c. its record changed meanwhile",
+          "text": "error: acme.demo.bob is partly deleted: its record changed meanwhile\nhint: mashctl endpoint delete acme.demo.bob",
           "stream": "stderr",
           "exit": 1,
           "issue": "#1081",
           "replaces": "Cancelled everywhere, then a later step failed (0.5.6 as built)",
-          "note": "Wrapped here to fit the 80-column limit; as one line it is 110 columns. Wording to be settled: shorter words or this wrapping."
+          "note": "Same frame, hint and exit as a. Cause in plain words; the draft 3 wording was \"its directory record was changed by someone else\"."
          },
          {
-          "case": "Cancelled everywhere, then a later step failed: d. the server did not confirm that its directory record was removed",
-          "text": "error: deleted acme.demo.bob, but the removal did not finish: the server did not\n  confirm that its directory record was removed\nhint: mashctl endpoint delete acme.demo.bob",
+          "case": "Cancelled everywhere, then a later step failed: d. record removal not confirmed",
+          "text": "error: acme.demo.bob is partly deleted: record removal not confirmed\nhint: mashctl endpoint delete acme.demo.bob",
           "stream": "stderr",
           "exit": 1,
           "issue": "#1081",
           "replaces": "Cancelled everywhere, then a later step failed (0.5.6 as built)",
-          "note": "Wrapped here to fit the 80-column limit; as one line it is 126 columns. Wording to be settled: shorter words or this wrapping."
+          "note": "Same frame, hint and exit as a. Cause in plain words; the draft 3 wording was \"the server did not confirm that its directory record was removed\"."
          },
          {
-          "case": "Cancelled everywhere, then a later step failed: e. its name could not be released",
-          "text": "error: deleted acme.demo.bob, but the removal did not finish: its name could not\n  be released\nhint: mashctl endpoint delete acme.demo.bob",
+          "case": "Cancelled everywhere, then a later step failed: e. its name was not freed",
+          "text": "error: acme.demo.bob is partly deleted: its name was not freed\nhint: mashctl endpoint delete acme.demo.bob",
           "stream": "stderr",
           "exit": 1,
           "issue": "#1081",
           "replaces": "Cancelled everywhere, then a later step failed (0.5.6 as built)",
-          "note": "Wrapped here to fit the 80-column limit; as one line it is 92 columns. Wording to be settled: shorter words or this wrapping."
+          "note": "Same frame, hint and exit as a. Cause in plain words; the draft 3 wording was \"its name could not be released\"."
          },
          {
-          "case": "Cancelled everywhere, then a later step failed: f. its address could not be closed to new sessions",
-          "text": "error: deleted acme.demo.bob, but the removal did not finish: its address could\n  not be closed to new sessions\nhint: mashctl endpoint delete acme.demo.bob",
+          "case": "Cancelled everywhere, then a later step failed: f. its address was not closed",
+          "text": "error: acme.demo.bob is partly deleted: its address was not closed\nhint: mashctl endpoint delete acme.demo.bob",
           "stream": "stderr",
           "exit": 1,
           "issue": "#1081",
           "replaces": "Cancelled everywhere, then a later step failed (0.5.6 as built)",
-          "note": "Wrapped here to fit the 80-column limit; as one line it is 109 columns. Wording to be settled: shorter words or this wrapping."
+          "note": "Same frame, hint and exit as a. Cause in plain words; the draft 3 wording was \"its address could not be closed to new sessions\"."
          },
          {
-          "case": "Cancelled everywhere, then a later step failed: g. its inbox could not be removed",
-          "text": "error: deleted acme.demo.bob, but the removal did not finish: its inbox could\n  not be removed\nhint: mashctl endpoint delete acme.demo.bob",
+          "case": "Cancelled everywhere, then a later step failed: g. its inbox is still there",
+          "text": "error: acme.demo.bob is partly deleted: its inbox is still there\nhint: mashctl endpoint delete acme.demo.bob",
           "stream": "stderr",
           "exit": 1,
           "issue": "#1081",
           "replaces": "Cancelled everywhere, then a later step failed (0.5.6 as built)",
-          "note": "Wrapped here to fit the 80-column limit; as one line it is 92 columns. Wording to be settled: shorter words or this wrapping."
+          "note": "Same frame, hint and exit as a. Cause in plain words; the draft 3 wording was \"its inbox could not be removed\"."
          },
          {
-          "case": "Cancelled everywhere, then a later step failed: h. an earlier, unfinished removal could not be completed",
-          "text": "error: deleted acme.demo.bob, but the removal did not finish: an earlier,\n  unfinished removal could not be completed\nhint: mashctl endpoint delete acme.demo.bob",
+          "case": "Cancelled everywhere, then a later step failed: h. an earlier removal is stuck",
+          "text": "error: acme.demo.bob is partly deleted: an earlier removal is stuck\nhint: mashctl endpoint delete acme.demo.bob",
           "stream": "stderr",
           "exit": 1,
           "issue": "#1081",
           "replaces": "Cancelled everywhere, then a later step failed (0.5.6 as built)",
-          "note": "Wrapped here to fit the 80-column limit; as one line it is 115 columns. Wording to be settled: shorter words or this wrapping."
+          "note": "Same frame, hint and exit as a. Cause in plain words; the draft 3 wording was \"an earlier, unfinished removal could not be completed\"."
          },
          {
-          "case": "Cancelled everywhere, then a later step failed: i. its credentials file could not be set aside",
-          "text": "error: deleted acme.demo.bob, but the removal did not finish: its credentials\n  file could not be set aside\nhint: mashctl endpoint delete acme.demo.bob",
+          "case": "Cancelled everywhere, then a later step failed: i. its creds file was not moved",
+          "text": "error: acme.demo.bob is partly deleted: its creds file was not moved\nhint: mashctl endpoint delete acme.demo.bob",
           "stream": "stderr",
           "exit": 1,
           "issue": "#1081",
           "replaces": "Cancelled everywhere, then a later step failed (0.5.6 as built)",
-          "note": "Wrapped here to fit the 80-column limit; as one line it is 105 columns. Wording to be settled: shorter words or this wrapping."
+          "note": "Same frame, hint and exit as a. Cause in plain words; the draft 3 wording was \"its credentials file could not be set aside\"."
          },
          {
-          "case": "Cancelled everywhere, then a later step failed: j. its credentials path is not a regular file and was left in place",
-          "text": "error: deleted acme.demo.bob, but the removal did not finish: its credentials\n  path is not a regular file and was left in place\nhint: mashctl endpoint delete acme.demo.bob",
+          "case": "Cancelled everywhere, then a later step failed: j. its creds path is not a file",
+          "text": "error: acme.demo.bob is partly deleted: its creds path is not a file\nhint: mashctl endpoint delete acme.demo.bob",
           "stream": "stderr",
           "exit": 1,
           "issue": "#1081",
           "replaces": "Cancelled everywhere, then a later step failed (0.5.6 as built)",
-          "note": "Wrapped here to fit the 80-column limit; as one line it is 126 columns. Wording to be settled: shorter words or this wrapping."
+          "note": "Same frame, hint and exit as a. Cause in plain words; the draft 3 wording was \"its credentials path is not a regular file and was left in place\"."
+         },
+         {
+          "case": "Deleting without a terminal",
+          "issue": "#1161",
+          "stream": "stderr",
+          "exit": 2,
+          "text": "error: mashctl endpoint delete needs a terminal to type the address\nhint: mashctl endpoint delete --help",
+          "note": "PROPOSED, not yet in the specification (REQ-002, #1161: the error must not advertise --yes, so an agent does not skip the confirmation; --help still documents it). Today: \"error: deleting needs a terminal to confirm, or --yes\", same hint, exit 2. Nothing is attempted; a script uses --yes, which --help documents."
          }
         ]
        }

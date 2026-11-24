@@ -44,7 +44,7 @@ go run ./scripts/gate1demo [-spec spec] [-out demo.md]
 ```
 
 Prints Markdown: for each case, the command (or item id) and issue, the
-"Today" text when `replaces` matches, the "0.5.8" text, stream and exit. The
+"Today" text when `replaces` matches, the new text (headed with the release number, here 0.5.9), stream and exit. The
 output is deterministic. A new-text line over 69 columns is flagged with a
 width line; over 80 columns is an error (case and item texts; an amended rule's prose is not width-checked). The renderer refuses, writing
 nothing, if any text looks like a secret (an nkey seed, a PEM header, a JWT,

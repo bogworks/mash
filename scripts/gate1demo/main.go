@@ -129,6 +129,7 @@ func cases(c *command, name string) ([]outCase, error) {
 }
 
 type renderer struct {
+	rel    string
 	b      strings.Builder
 	errs   []string
 	nflag  int
@@ -145,6 +146,27 @@ func streamLine(c outCase) string {
 		s = "stdout"
 	}
 	return fmt.Sprintf("stream: %s, exit: %d", s, c.Exit)
+}
+
+// description reports whether the case text is wholly in round brackets: the
+// rules reserve those for a description, which is not output.
+func description(text string) (string, bool) {
+	t := strings.TrimSpace(text)
+	if len(t) >= 2 && t[0] == '(' && t[len(t)-1] == ')' {
+		return t[1 : len(t)-1], true
+	}
+	return "", false
+}
+
+// body writes a case's text and its stream line, or, for a description, a
+// plain line with no code block and no stream.
+func body(b *strings.Builder, c outCase) {
+	if d, ok := description(c.Text); ok {
+		b.WriteString("Description (not output): " + d + "\n")
+		return
+	}
+	fence(b, c.Text)
+	b.WriteString(streamLine(c) + "\n")
 }
 
 func (r *renderer) widths(where, text string) {
@@ -182,9 +204,8 @@ func (r *renderer) entry(where, issue string, c outCase, today *outCase, todaySt
 		}
 		r.b.WriteString("\n")
 	}
-	r.b.WriteString("0.5.8:\n\n")
-	fence(&r.b, c.Text)
-	r.b.WriteString(streamLine(c) + "\n")
+	r.b.WriteString(r.rel + ":\n\n")
+	body(&r.b, c)
 	r.widths(where, c.Text)
 	if c.Note != "" {
 		r.b.WriteString("\nNote: " + c.Note + "\n")
@@ -252,7 +273,7 @@ func render(dir string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("next.json: %w", err)
 	}
-	r := &renderer{}
+	r := &renderer{rel: rel}
 	r.b.WriteString("# Gate 1 demo: planned " + rel + " output\n\nGenerated from the specification (x-output-next, spec/next.json). Not yet implemented.\n")
 	for _, f := range []string{"mash.json", "mashctl.json"} {
 		var t toolSpec
@@ -300,7 +321,7 @@ func render(dir string) (string, error) {
 				return "", fmt.Errorf("rule %q replaces %q, which is not a rule in rules.json", rn.Rule, rn.Replaces)
 			}
 		}
-		r.b.WriteString("0.5.8:\n\n")
+		r.b.WriteString(rel + ":\n\n")
 		fence(&r.b, rn.Detail)
 	}
 	out := r.b.String()
