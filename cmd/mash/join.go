@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
@@ -402,9 +403,10 @@ func (s joinSvc) Join(_ context.Context, req cmds.JoinRequest) (cmds.JoinOutcome
 	if halfDone && (finishing || req.Replace) {
 		others--
 	}
-	if !haveCA && j.CA != nil && others > 0 {
-		// the folder has no certificate authority and already holds an endpoint: that endpoint trusts the system's
-		// roots, and one that brings a ca would change what it trusts. The first join into an empty folder sets it.
+	if !haveCA && j.CA != nil && (others > 0 || len(have) > 0) {
+		// the folder has no certificate authority and already holds an endpoint, or was already set up (config.json names
+		// servers): that endpoint, or that setup, trusts the system's roots, and a join file that brings a ca would
+		// change what it trusts. Only the first join into an empty folder (no servers, no endpoint) sets it.
 		return cmds.JoinOutcome{}, otherFolder("ca")
 	}
 
@@ -518,13 +520,17 @@ func (s joinSvc) Join(_ context.Context, req cmds.JoinRequest) (cmds.JoinOutcome
 		return fail(err)
 	}
 	var made []string // what this run created, by exact path, removed if a later step fails
+	var wrote *joinWrote
+	if !finishing {
+		wrote = recordJoinWrote(credsPath, creds)
+	}
 	// undo puts the folder back as it was and returns what it could not: the exact paths a rollback step failed on.
 	undo := func() (left []string, kept string) {
 		if finishing {
 			// the creds were there before this run: only what this run wrote is removed
 			return joinRemoveAll(made), ""
 		}
-		left, kept = joinUndo(made, backup, credsPath)
+		left, kept = joinUndo(made, backup, credsPath, wrote)
 		if kept != "" && kept == backup {
 			temps = slices.DeleteFunc(temps, func(t string) bool { return t == backup })
 		}
@@ -586,13 +592,61 @@ func readableCredsEqual(path string, want []byte) bool {
 	return err == nil && bytes.Equal(got, want)
 }
 
+// joinWrote is what a join run installed at the creds path: the file's identity and a hash of its bytes.
+type joinWrote struct {
+	info os.FileInfo
+	sum  [sha256.Size]byte
+}
+
+// recordJoinWrote notes the file now at path, which holds want; nil when it cannot be stat-ed.
+func recordJoinWrote(path string, want []byte) *joinWrote {
+	fi, err := os.Lstat(path)
+	if err != nil {
+		return nil
+	}
+	return &joinWrote{info: fi, sum: sha256.Sum256(want)}
+}
+
+// stillMade reports whether path is still the file this run installed: a regular file (a symlink is not followed),
+// the same file by os.SameFile, with the same bytes. A path that is gone counts as still made, there is nothing to
+// protect (the remove then finds nothing). A nil w is no record and counts as made.
+func (w *joinWrote) stillMade(path string) bool {
+	if w == nil {
+		return true
+	}
+	fi, err := os.Lstat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return true
+	}
+	if err != nil || !fi.Mode().IsRegular() || !os.SameFile(w.info, fi) {
+		return false
+	}
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, io.LimitReader(f, maxJoinFile)); err != nil {
+		return false
+	}
+	return [sha256.Size]byte(h.Sum(nil)) == w.sum
+}
+
 // joinUndo removes what a join run made (by exact path) and puts a replaced creds file back from its backup. It returns
 // the paths it could not clean up. When the backup cannot be restored the new creds stay in place and the old ones are
 // kept: the backup is linked to <creds>.old (never over an existing file), and kept is that path; if that cannot be
 // done the backup keeps its own name and kept is that.
-func joinUndo(made []string, backup, credsPath string) (left []string, kept string) {
+//
+// With no backup the creds path is removed only if it is still the file this run installed (wrote: the same file by
+// os.SameFile and the same bytes); a path someone replaced since is left in place and reported in left, like any other
+// path the rollback did not remove. A nil wrote means nothing was recorded and the path is removed by name.
+func joinUndo(made []string, backup, credsPath string, wrote *joinWrote) (left []string, kept string) {
 	left = joinRemoveAll(made)
 	if backup == "" {
+		if !wrote.stillMade(credsPath) {
+			return append(left, credsPath), ""
+		}
 		if err := joinRemove(credsPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			left = append(left, credsPath)
 		}

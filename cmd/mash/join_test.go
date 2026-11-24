@@ -257,7 +257,7 @@ func TestJoinMatchesSpec(t *testing.T) {
 		os.WriteFile(creds, []byte("new"), 0o600)
 		os.WriteFile(backup, []byte("old"), 0o600)
 		failJoinSteps(t, "acme.demo.bob.creds", "")
-		left, kept := joinUndo(nil, backup, creds)
+		left, kept := joinUndo(nil, backup, creds, nil)
 		e := joinSvc{home: w.home}.undoFailure(left, kept)
 		got := ran{code: e.Code, errs: "error: " + e.Msg + "\nhint: " + e.Hint + "\n"}
 		c.check(t, got)
@@ -474,11 +474,12 @@ func TestJoinKeepsOtherConfigKeysAndAcceptsAServerString(t *testing.T) {
 	w := newJoinWorld(t)
 	os.MkdirAll(w.cfg, 0o700)
 	os.WriteFile(filepath.Join(w.cfg, "config.json"), []byte(`{"host":"codex","servers":"tls://myserver:4222"}`), 0o640)
-	if r := w.run("join", "acme.demo.bob.join"); r.code != 0 {
+	w.joinFor("none.join", w.m, "acme.demo.bob", nil) // a folder that names servers takes no ca (#1062)
+	if r := w.run("join", "none.join"); r.code != 0 {
 		t.Fatal(r)
 	}
 	cfg := w.configJSON()
-	if cfg["host"] != "codex" || cfg["servers"] != "tls://myserver:4222" || cfg["ca"] != "ca.pem" {
+	if cfg["host"] != "codex" || cfg["servers"] != "tls://myserver:4222" || cfg["ca"] != nil {
 		t.Errorf("config.json: %v", cfg)
 	}
 	if st, _ := os.Stat(filepath.Join(w.cfg, "config.json")); st.Mode().Perm() != 0o640 {
@@ -1144,7 +1145,7 @@ func TestJoinUndoKeepsTheOldCredsAsDotOld(t *testing.T) {
 	read := func(p string) string { b, _ := os.ReadFile(p); return string(b) }
 	t.Run("renamed to .old", func(t *testing.T) {
 		w, creds, backup := setup(t)
-		left, kept := joinUndo(nil, backup, creds)
+		left, kept := joinUndo(nil, backup, creds, nil)
 		if len(left) != 1 || left[0] != creds || kept != creds+".old" {
 			t.Fatalf("left %v, kept %q", left, kept)
 		}
@@ -1162,7 +1163,7 @@ func TestJoinUndoKeepsTheOldCredsAsDotOld(t *testing.T) {
 	t.Run("an existing .old is never overwritten", func(t *testing.T) {
 		w, creds, backup := setup(t)
 		os.WriteFile(creds+".old", []byte("EARLIER"), 0o600)
-		left, kept := joinUndo(nil, backup, creds)
+		left, kept := joinUndo(nil, backup, creds, nil)
 		if len(left) != 1 || kept != backup {
 			t.Fatalf("left %v, kept %q", left, kept)
 		}
@@ -1423,4 +1424,96 @@ func TestJoinFinishRollsBackOnlyWhatItWrote(t *testing.T) {
 		}
 	}
 	w.noJoinLeftovers()
+}
+
+// A folder whose config.json already names servers was set up before: a join file that brings a ca is refused with the
+// same line as for a folder that holds an endpoint, and nothing is changed. An empty folder, or a config.json with no
+// servers, still takes it.
+func TestJoinCARefusedWhereTheFolderNamesServersAndHasNoCA(t *testing.T) {
+	w := newJoinWorld(t)
+	if err := os.MkdirAll(w.cfg, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := filepath.Join(w.cfg, "config.json")
+	cfgBytes := []byte("{\n  \"servers\": [\"tls://myserver:4222\"]\n}\n")
+	if err := os.WriteFile(cfgPath, cfgBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"join", "acme.demo.bob.join"}, {"join", "acme.demo.bob.join", "--replace"}} {
+		r := w.run(args...)
+		if r.code != 1 || !strings.Contains(r.errs, " was set up with a different ca;\n       nothing was changed\n") {
+			t.Errorf("%v: %+v", args, r)
+		}
+	}
+	if got, _ := os.ReadFile(cfgPath); !bytes.Equal(got, cfgBytes) {
+		t.Errorf("config.json changed: %q", got)
+	}
+	ents, _ := os.ReadDir(w.cfg)
+	if len(ents) != 1 {
+		t.Errorf("the folder changed: %v", ents)
+	}
+}
+
+func TestJoinCAAcceptedByAFreshFolderOrOneWithoutServers(t *testing.T) {
+	for name, cfg := range map[string]string{"fresh": "", "no servers": "{\"other\": 1}\n"} {
+		t.Run(name, func(t *testing.T) {
+			w := newJoinWorld(t)
+			if cfg != "" {
+				os.MkdirAll(w.cfg, 0o700)
+				if err := os.WriteFile(filepath.Join(w.cfg, "config.json"), []byte(cfg), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if r := w.run("join", "acme.demo.bob.join"); r.code != 0 {
+				t.Fatalf("%+v", r)
+			}
+			if _, err := os.Stat(filepath.Join(w.cfg, "ca.pem")); err != nil {
+				t.Errorf("ca.pem: %v", err)
+			}
+		})
+	}
+}
+
+// A rollback with no backup removes the creds path only if it is still the file the join made.
+func TestJoinRollbackLeavesACredsFileSomeoneReplaced(t *testing.T) {
+	for _, replace := range []bool{true, false} {
+		name := "untouched"
+		if replace {
+			name = "replaced"
+		}
+		t.Run(name, func(t *testing.T) {
+			w := newJoinWorld(t)
+			oldRename := joinRename
+			t.Cleanup(func() { joinRename = oldRename })
+			joinRename = func(from, to string) error {
+				if strings.HasSuffix(to, "config.json") {
+					if replace { // the window: after the install, before the rollback
+						creds := w.credsFile()
+						if err := os.Remove(creds); err != nil {
+							t.Error(err)
+						}
+						if err := os.WriteFile(creds, []byte("someone else's"), 0o600); err != nil {
+							t.Error(err)
+						}
+					}
+					return &os.LinkError{Op: "rename", Old: from, New: to, Err: errors.New("injected failure")}
+				}
+				return oldRename(from, to)
+			}
+			r := w.run("join", "acme.demo.bob.join")
+			got, err := os.ReadFile(w.credsFile())
+			if !replace {
+				if r.code != 1 || !strings.Contains(r.errs, "nothing was installed") || !errors.Is(err, fs.ErrNotExist) {
+					t.Errorf("%+v %v", r, err)
+				}
+				return
+			}
+			if err != nil || string(got) != "someone else's" {
+				t.Errorf("the replaced file did not survive: %q %v", got, err)
+			}
+			if r.code != 1 || !strings.Contains(r.errs, "could not finish and could not undo: ~/.config/mash/acme.demo.bob.creds left") {
+				t.Errorf("%+v", r)
+			}
+		})
+	}
 }
