@@ -1335,6 +1335,81 @@
         "replaces": "The server does not offer encryption",
         "text": "config    ok\ncreds     ok\nserver    FAIL  the server did not offer TLS: tls://myserver:4222\nsign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no unverified mail was refused\n\n1 problem.",
         "note": "PROPOSED, not yet in the specification (REQ-006). The count line follows the rows and any hint goes to stderr. Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors. No hint: nothing the reader can run fixes a server that offers no TLS."
+       },
+       {
+        "case": "A problem and a warning, with one hint",
+        "issue": "#1099",
+        "stream": "stdout, then the hint on stderr",
+        "exit": 1,
+        "replaces": "A problem and a warning",
+        "text": "config    ok\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   FAIL  the server refused these credentials\ndelivery  skip  needs sign-in\nrefused   warn  3 unverified messages were refused\n\n1 problem, 1 warning.\nhint: mash join <file>",
+        "note": "PROPOSED, not yet in the specification (REQ-006, core #1403). The hint is a command of ours that fixes the first problem: a new join file brings new credentials. v0.5.8 printed a sentence ('ask whoever runs your mesh to run: mashctl endpoint reissue ...'); ADR 0168 says a hint is a command or there is none."
+       },
+       {
+        "case": "The endpoint was deleted, seen from another machine, with one hint",
+        "issue": "#1099",
+        "stream": "stdout, then the hint on stderr",
+        "exit": 1,
+        "replaces": "The endpoint was deleted, seen from another machine",
+        "text": "config    ok\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   FAIL  this endpoint was deleted; its address cannot be used again\ndelivery  skip  needs sign-in\nrefused   ok    no unverified mail was refused\n\n1 problem.\nhint: mash join <file>",
+        "note": "PROPOSED, not yet in the specification (REQ-006, core #1403). The hint is a command: a join file to a new endpoint. v0.5.8 printed the sentence 'ask whoever runs your mesh for a join file to a new endpoint'."
+       },
+       {
+        "case": "The endpoint was deleted, on the machine that deleted it, with one hint",
+        "issue": "#1099",
+        "stream": "stdout, then the hint on stderr",
+        "exit": 1,
+        "replaces": "The endpoint was deleted, on the machine that deleted it",
+        "text": "config    ok\ncreds     FAIL  this endpoint was deleted; its address cannot be used again\nserver    ok    tls://myserver:4222\nsign-in   skip  needs the creds\ndelivery  skip  needs sign-in\nrefused   ok    no unverified mail was refused\n\n1 problem.\nhint: mash join <file>",
+        "note": "PROPOSED, not yet in the specification (REQ-006, core #1403). As on another machine: the hint is a join file to a new endpoint."
+       },
+       {
+        "case": "The server refused the credentials",
+        "issue": "#1099",
+        "stream": "stdout, then the hint on stderr",
+        "exit": 1,
+        "text": "config    ok\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   FAIL  the server refused these credentials\ndelivery  skip  needs sign-in\nrefused   ok    no unverified mail was refused\n\n1 problem.\nhint: mash join <file>",
+        "note": "PROPOSED, not yet in the specification (REQ-006, core #1403). Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors. Also the hint for a creds file that belongs to another endpoint. The person needs a new join file from whoever runs the mesh; over creds already installed, mash join then asks for --replace."
+       },
+       {
+        "case": "The creds file is not a creds file",
+        "issue": "#1099",
+        "stream": "stdout, then the hint on stderr",
+        "exit": 1,
+        "text": "config    ok\ncreds     FAIL  ~/.config/mash/acme.demo.bob.creds is not a creds file\nserver    ok    tls://myserver:4222\nsign-in   skip  needs the creds\ndelivery  skip  needs sign-in\nrefused   ok    no unverified mail was refused\n\n1 problem.\nhint: mash join <file>",
+        "note": "PROPOSED, not yet in the specification (REQ-006, core #1403). Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors. The file's content is never printed. Same shape as 'A creds file is missing' (the file, with ~, then what is wrong), so the row fits in 80 columns; status keeps its longer sentence as the reason."
+       },
+       {
+        "case": "The creds file can be read by others",
+        "issue": "#1099",
+        "stream": "stdout",
+        "exit": 1,
+        "text": "config    ok\ncreds     FAIL  ~/.config/mash/acme.demo.bob.creds can be read by others\nserver    ok    tls://myserver:4222\nsign-in   skip  needs the creds\ndelivery  skip  needs sign-in\nrefused   ok    no unverified mail was refused\n\n1 problem.",
+        "note": "PROPOSED, not yet in the specification (REQ-006, core #1403). Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors. No hint: no command of ours changes a file's permissions (v0.5.8 printed 'hint: chmod 600 <file>'). Same shape as 'A creds file is missing', so the row fits in 80 columns."
+       },
+       {
+        "case": "The server address is not tls://",
+        "issue": "#1099",
+        "stream": "stdout",
+        "exit": 1,
+        "text": "config    ok\ncreds     ok\nserver    FAIL  the server address is not tls://: nats://myserver:4222\nsign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no unverified mail was refused\n\n1 problem.",
+        "note": "PROPOSED, not yet in the specification (REQ-006, core #1403). Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors. A plain nats:// address without MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1. One short row; no hint, since no command of ours changes the address (v0.5.8 printed the whole refusal and a sentence hint). mash status keeps the whole refusal as its reason."
+       },
+       {
+        "case": "In a session with no endpoint chosen",
+        "issue": "#1099",
+        "stream": "the doctor tool's result, an error",
+        "exit": 1,
+        "text": "No endpoint is chosen for this session.",
+        "note": "PROPOSED, not yet in the specification (REQ-006, core #1403). The doctor tool's answer in a session whose mash serve has no endpoint (an error result; 1 is the exit code of the same answer from mash doctor). No hint: no command of ours names a session's endpoint. The status tool keeps 'hint: start the session with MASH_ENDPOINT=<address>'; mash serve's note changes to match when the code lands."
+       },
+       {
+        "case": "--json: the one hint is a field",
+        "issue": "#1099",
+        "stream": "stdout",
+        "exit": 1,
+        "text": "{\n \"endpoint\": \"acme.demo.bob\",\n \"problems\": 1,\n \"warnings\": 1,\n \"checks\": [\n  {\n   \"name\": \"config\",\n   \"state\": \"ok\",\n   \"detail\": null,\n   \"fix\": null\n  },\n  {\n   \"name\": \"creds\",\n   \"state\": \"ok\",\n   \"detail\": null,\n   \"fix\": null\n  },\n  {\n   \"name\": \"server\",\n   \"state\": \"ok\",\n   \"detail\": \"tls://myserver:4222\",\n   \"fix\": null\n  },\n  {\n   \"name\": \"sign-in\",\n   \"state\": \"fail\",\n   \"detail\": \"the server refused these credentials\",\n   \"fix\": \"mash join <file>\"\n  },\n  {\n   \"name\": \"delivery\",\n   \"state\": \"skip\",\n   \"detail\": \"needs sign-in\",\n   \"fix\": null\n  },\n  {\n   \"name\": \"refused\",\n   \"state\": \"warn\",\n   \"detail\": \"3 unverified messages were refused\",\n   \"fix\": null\n  }\n ],\n \"hint\": \"mash join <file>\"\n}",
+        "note": "PROPOSED, not yet in the specification (REQ-006, core #1403). The example above with the sign-in fix 'mash join <file>' and a top-level \"hint\": the one hint the text prints, null when there is none. Each row's \"fix\" stays."
        }
       ]
      }
