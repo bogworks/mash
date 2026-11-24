@@ -1,0 +1,1 @@
+**A bad argument keeps its own error after the endpoint is deleted in the session.** A `send` with an invalid `id` said the endpoint was deleted; it now reports the bad id. Only calls that fail to reach the server say deleted (#1396).
