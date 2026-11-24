@@ -361,14 +361,11 @@ func archiveNoReplace(src, dest string) (string, error) {
 }
 
 // restoreOwnership puts own back at src, only if src does not exist: a hard link fails if src is taken, so a
-// replacement is never clobbered. If src is taken own stays, for a retry to find.
+// replacement is never clobbered. If src is taken, or the filesystem refuses hard links, own stays where it is for a
+// retry to find: a rename after an existence check could overwrite a file put at src in between.
 func restoreOwnership(own, src string) {
 	if err := os.Link(own, src); err == nil {
 		os.Remove(own)
-	} else if errors.Is(err, os.ErrExist) {
-		return
-	} else if _, err := os.Lstat(src); errors.Is(err, os.ErrNotExist) {
-		os.Rename(own, src)
 	}
 }
 
