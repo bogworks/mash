@@ -60,5 +60,5 @@ Chosen option: allow-list one file. This amends the guard that ADR 0131 introduc
 
 ## More Information
 
-* Requirement: contract 0.5.9 revision 6, REQ-017 (planner's Gate 1 ruling, 2026-11-24; lead's approval of the allow-list, 2026-11-24).
+* Requirement: contract 0.5.9 revision 6, REQ-017 (planner's Gate 1 ruling, 2026-11-24).
 * Issue #1130; amends ADR 0131.
