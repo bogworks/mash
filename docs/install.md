@@ -11,7 +11,7 @@ This walks through one machine running Claude Code sessions with mash. Provision
 
 ## 1. The binary
 
-Supported platforms: Linux and macOS (amd64, arm64), the release targets (`mash-` and `mashctl-` for `{linux,darwin}-{amd64,arm64}`, each with a `.cdx.json`, next to `install.sh`, `mash-local-nats-setup.sh` and `SHA256SUMS`; `mash-migrate-0.5.5.sh` is an asset of 0.5.7 and earlier only; see [release.md](release.md)). Native Windows is not supported: the spool lock and the hooks need Unix file locking and a POSIX shell. WSL 2 with the Linux binary is expected to work but has not been tested.
+Supported platforms: Linux and macOS (amd64, arm64), the release targets (`mash-` and `mashctl-` for `{linux,darwin}-{amd64,arm64}`, each with a `.cdx.json`, next to `install.sh`, `mash-local-nats-setup.sh`, `mash-migrate-0.5.5.sh` and `SHA256SUMS`; see [release.md](release.md)). Native Windows is not supported: the spool lock and the hooks need Unix file locking and a POSIX shell. WSL 2 with the Linux binary is expected to work but has not been tested.
 
 mash is one static Go binary, and `install.sh` is the install: it puts `mash` and `mashctl` on your machine, checked. **Install it first (below) until your plugin release is pinned**: the plugin fetches and verifies its own copy only once it carries a `mash.pins` file from a release (the post-release commit described next), and an unpinned plugin, which is what a checkout of the repository gives you, uses the `mash` on your `PATH` and does not start without one. With a pinned plugin there is nothing to install by hand: no `go install`, no `PATH` edit, no root.
 

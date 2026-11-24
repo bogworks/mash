@@ -80,6 +80,11 @@ func runVerbs(args []string, env func(string) string, lookup config.Lookup, stdo
 	}
 	args = rest0
 	env, lookup = global.Shadow(spec, env, lookup)
+	// A folder mash 0.5.5 left is named for what it is, before any command runs (version and init included).
+	home := config.HomeDir(env) // as cmd/mash: the folder is found the same way in both tools
+	if code, refused := cliframe.RefuseLegacy055(stdout, stderr, env, home, global.JSON || jsonRequested(args[1:])); refused {
+		return code
+	}
 	if skipErr := config.CheckSkipEncryption(lookup, config.HomeDir(env)); skipErr != nil { // a --config-dir flag may point at a file with the removed key: refusal only, the warning is out
 		return cliframe.Report(stdout, stderr, cliframe.Usagef("%s", skipErr.Msg()).WithHint(skipErr.Hint()), jsonRequested(args[1:]) || global.JSON)
 	}
