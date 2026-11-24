@@ -71,7 +71,7 @@ func message(subject string, payload []byte, value string) identity.Message {
 type verdict struct {
 	h     sap.SenderHeader
 	trust sap.Trust
-	class string // the malformed class, ClassNotVerified, or empty (verified)
+	class string // the malformed class, ClassNotVerified (forged only), or empty
 }
 
 func fromSender(s *identity.Sender, err error, value string) verdict {
@@ -95,15 +95,15 @@ func fromSender(s *identity.Sender, err error, value string) verdict {
 	case identity.TrustVerified:
 		return verdict{h: fromSDK(s.Header), trust: sap.TrustVerified}
 	case identity.TrustClaimed:
-		return verdict{h: fromSDK(s.Header), trust: sap.TrustClaimed, class: ClassNotVerified}
+		return verdict{h: fromSDK(s.Header), trust: sap.TrustClaimed}
 	}
-	return verdict{trust: sap.TrustAbsent, class: ClassNotVerified}
+	return verdict{trust: sap.TrustAbsent}
 }
 
 func stored(values []string, subject string, payload []byte) verdict {
 	value, class, absent := readValue(values)
 	if absent {
-		return verdict{trust: sap.TrustAbsent, class: ClassNotVerified}
+		return verdict{trust: sap.TrustAbsent}
 	}
 	if class != "" {
 		return verdict{trust: sap.TrustMalformed, class: class}
@@ -120,8 +120,10 @@ func VerifyStored(values []string, arrivalSubject string, payload []byte) (sap.S
 }
 
 // Classify is the pure form of VerifyStored: the trust class and the refusal class of a stored message. The class is
-// empty for a verified sender, a malformed class (see the package doc) for a malformed header and ClassNotVerified for
-// every other trust class. It reads no file, writes no log, counts nothing and records no nonce.
+// a malformed class (see the package doc) for a malformed header, ClassNotVerified for a forged one and empty for
+// every other trust (verified, claimed, absent; this package never produces unknown-signer or stale). Claimed and
+// absent mail keeps its trust kind and has no class: the caller decides which unverified mail it refuses and gives it
+// the reason ClassNotVerified. It reads no file, writes no log, counts nothing and records no nonce.
 func Classify(subject string, values []string, payload []byte) (sap.Trust, string) {
 	v := stored(values, subject, payload)
 	return v.trust, v.class

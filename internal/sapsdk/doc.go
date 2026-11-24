@@ -48,8 +48,11 @@
 // And the two catch-alls:
 //
 //	unreadable sender header      any other SDK parse refusal
-//	not verified                  the sender could not be proved: a forged, replayed or stale signature, a claim (no
-//	                              signature) or no header (not malformed; the trust class says which)
+//	not verified                  a reason for refusing, not a trust kind: Classify gives it only for a forged sender
+//	                              (a failed or replayed signature, a wrong subject or time). A claim (no signature)
+//	                              and no header have an empty class and keep their trust kind; the caller that
+//	                              refuses such mail gives it this reason. Verified, claimed, absent, unknown-signer
+//	                              and stale all have an empty class.
 //
 // An unknown v is the absent class, as in mash's parser.
 //

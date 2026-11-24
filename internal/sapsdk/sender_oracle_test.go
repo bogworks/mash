@@ -288,6 +288,14 @@ func wantClass(c compatCase) string {
 	return "not verified"
 }
 
+// wantStoredClass is what Classify gives: the live class, except that claimed and absent have no class.
+func wantStoredClass(c compatCase) string {
+	if c.expectSDK == sap.TrustClaimed || c.expectSDK == sap.TrustAbsent {
+		return ""
+	}
+	return wantClass(c)
+}
+
 func TestCorpusIsTheWholeCorpus(t *testing.T) {
 	if n := len(newCompatKit(t).cases()); n != 46 {
 		t.Fatalf("%d cases, the corpus has 46", n)
@@ -323,7 +331,7 @@ func TestStrictColumn(t *testing.T) {
 			if ct != c.expectSDK {
 				t.Errorf("Classify trust %s, strict column %s", ct, c.expectSDK)
 			}
-			if want := wantClass(c); class != want {
+			if want := wantStoredClass(c); class != want {
 				t.Errorf("class %q, want %q", class, want)
 			}
 			if c.expectMash != c.expectSDK {
