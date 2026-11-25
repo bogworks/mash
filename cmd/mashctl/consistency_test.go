@@ -40,7 +40,7 @@ func TestUsageErrorsExit2(t *testing.T) {
 		{[]string{"init", "extra"}, "error: too many arguments\nhint: mashctl init --help\n"},
 		{[]string{"init"}, "error: mashctl init needs --config <file>\nhint: mashctl init --help\n"},
 		{[]string{"limits"}, "usage: mashctl limits <command>"},
-		{[]string{"adopt"}, "error: unknown command \"adopt\"\nhint: mashctl --help\n"},
+		{[]string{"adopt"}, "error: unknown command \"adopt\"\n"},
 	}
 	for _, c := range cases {
 		out, errb, code := ctlRun(t, e, c.args...)

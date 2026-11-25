@@ -113,7 +113,12 @@ func runVerbs(args []string, env func(string) string, lookup config.Lookup, stdo
 	case "endpoint":
 		return runEndpoint(args[1:], global, env, lookup, stdout, stderr)
 	default:
-		return cliframe.Report(stdout, stderr, cliframe.Usagef("unknown command %q", config.Clean(args[0])).WithHint("mashctl --help"), jsonRequested(args[1:]))
+		// Neither error carries a hint (ADR 0168): a hint is a command that fixes the problem, or there is none.
+		if strings.HasPrefix(args[0], "-") && args[0] != "-" { // a flag that does not exist: its name only, never a value after `=`
+			name, _, _ := strings.Cut(args[0], "=")
+			return cliframe.Report(stdout, stderr, cliframe.Usagef("unknown flag %s", config.Clean(name)), jsonRequested(args[1:]) || global.JSON)
+		}
+		return cliframe.Report(stdout, stderr, cliframe.Usagef("unknown command %q", config.Clean(args[0])), jsonRequested(args[1:]) || global.JSON)
 	}
 }
 

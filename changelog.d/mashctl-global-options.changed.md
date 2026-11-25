@@ -1,0 +1,1 @@
+**`mashctl` now accepts global options before the verb (`mashctl --json status`), and reports an unknown flag as `error: unknown flag --verbose` instead of an unknown command; neither it nor an unknown command prints a hint** ([#1047](https://github.com/bogworks/mash/issues/1047)).

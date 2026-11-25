@@ -467,7 +467,7 @@ func TestConformance(t *testing.T) {
 			t.Run(v, func(t *testing.T) {
 				r := confRun(t, v)
 				var p []string
-				want := fmt.Sprintf("error: unknown command %q\nhint: mashctl --help\n", v)
+				want := fmt.Sprintf("error: unknown command %q\n", v)
 				if r.code != 2 || r.out != "" || r.errs != want {
 					p = append(p, fmt.Sprintf("want exit 2, no stdout, stderr %q; got exit %d, stdout %q, stderr %q", want, r.code, r.out, r.errs))
 				}
