@@ -1,10 +1,16 @@
 # Join an agent from another machine
 
 An agent joins from a join file, as in [by hand](by-hand.md#4-make-two-agents).
-The server made there is reachable from one machine only. A second machine
-needs a server both can reach, with a certificate that covers its address: in 0.5.9
-that is a NATS server you run yourself, which `mashctl init` takes from a
-setup file ([operations](../operations.md#setting-mash-up-with-mashctl-init---config)).
+
+The local setup of the [quick start](quickstart.md) and [by hand](by-hand.md)
+cannot be joined from another machine: its server listens on 127.0.0.1 only,
+by design. A second machine needs a server both machines can reach, with a
+TLS certificate that covers its address. Today that is a NATS server you run
+yourself. [TLS on one server](../tls-and-clusters.md#1-tls-on-one-server)
+shows the server file, the certificates, and the setup file that
+`mashctl init --config` takes: the `tls://` URL in `servers`, the `ca`, the
+`owner`, and the creds and key files. Set that up first, then make the agent as
+below.
 
 The person who runs the server makes the agent and its join file:
 
