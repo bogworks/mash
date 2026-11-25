@@ -14,7 +14,7 @@ import (
 // byte-identical across releases: a later release reads the spool this one wrote and must render it the same way. The
 // golden is the output of v0.5.0 for the five shown spool entries pinned by internal/spool/testdata/compat. Forged
 // and malformed mail is never shown (ADR 0019), so those entries are not in the golden; the golden test asserts that
-// neither label nor body appears in the rendered output (the endpoint drops them before the spool: see classify). Regenerate it deliberately with UPDATE_GOLDEN=1; the default run only reads.
+// neither label nor body appears in the rendered output (the endpoint drops them before the spool; internal/endpoint TestCompatForgedAndMalformedAreDropped feeds forged and malformed mail through the real classification and checks they are not listed). Regenerate it deliberately with UPDATE_GOLDEN=1; the default run only reads.
 func compatEntries(t *testing.T, labels ...string) []spool.Entry {
 	t.Helper()
 	var in []spool.Entry
@@ -38,6 +38,7 @@ func TestCompatRenderGolden(t *testing.T) {
 	p := Presentation{Name: "ag.team.me", Owner: "team", Event: "PostToolUse", BatchMsgs: 10, BatchBytes: 6000}
 	got, _ := Claude{}.Present(p, in)
 
+	// Belt and braces only: the input has no forged or malformed entry, the endpoint test above is the real gate.
 	for _, bad := range []string{"[forged]", "[malformed]", "hello forged", "hello malformed"} {
 		if strings.Contains(string(got), bad) {
 			t.Errorf("%q is shown in the rendered output, against ADR 0019", bad)

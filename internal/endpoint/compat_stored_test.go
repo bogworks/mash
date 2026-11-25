@@ -2,7 +2,9 @@ package endpoint
 
 import (
 	"context"
+	"strings"
 	"testing"
+	"time"
 
 	sdkid "github.com/bogworks/synadia-agents.go/identity"
 	"github.com/nats-io/nats.go"
@@ -106,4 +108,59 @@ func TestCompatStoredNewFormInbox(t *testing.T) {
 	}
 	mash, sdk := compatStoredLabels(t, f, sap.InboxStream(rcv.Flat()), 4)
 	requireCompatVerified(t, mash, sdk)
+}
+
+// Forged and malformed mail is never shown (ADR 0019). They are published raw to a's inbox between two real mails and
+// read back through the endpoint's own classification (toMail, which ReadInbox uses to build every listed row): the
+// forged and the malformed message are dropped, the two real ones are listed, and neither text is in what is listed.
+func TestCompatForgedAndMalformedAreDropped(t *testing.T) {
+	f := newFixture(t, "a", "b")
+	ctx := context.Background()
+	b := f.client(t, "b")
+	subj := taddr("a").Subjects().Mail
+	nc := f.e.ConnAs(t, f.creds["b"], tkey("b"))
+	id := identity(t, f.creds["b"])
+
+	if _, err := b.Send(ctx, tdot("a"), "hello verified one", 0); err != nil {
+		t.Fatal(err)
+	}
+	h, _ := id.Sign(subj, []byte("hello forged"), tkey("b"), time.Now(), "")
+	h.Sig = strings.Repeat("A", len(h.Sig))
+	publishRaw(t, nc, subj, h.Encode(), "hello forged")
+	publishRaw(t, nc, subj, "not json", "hello malformed")
+	if _, err := b.Send(ctx, tdot("a"), "hello verified two", 0); err != nil {
+		t.Fatal(err)
+	}
+
+	a := f.client(t, "a")
+	for seq, want := range map[uint64]sap.Trust{2: sap.TrustForged, 3: sap.TrustMalformed} {
+		raw, err := mustStream(t, a).GetMsg(ctx, seq)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if m, ok := a.toMail(raw); ok || m.Trust != want {
+			t.Errorf("#%d: shown=%v trust %q, want dropped as %q", seq, ok, m.Trust, want)
+		}
+	}
+	r, err := a.ReadInbox(ctx, InboxQuery{Limit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Mail) != 2 || r.Mail[0].Seq != 1 || r.Mail[1].Seq != 4 {
+		t.Fatalf("listed: %+v", r.Mail)
+	}
+	for _, m := range r.Mail {
+		if m.Trust != sap.TrustVerified || strings.Contains(string(m.Body), "forged") || strings.Contains(string(m.Body), "malformed") {
+			t.Errorf("listed #%d: %q %q", m.Seq, m.Trust, m.Body)
+		}
+	}
+}
+
+func mustStream(t *testing.T, e *Endpoint) jetstream.Stream {
+	t.Helper()
+	s, err := e.inbox(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
 }
