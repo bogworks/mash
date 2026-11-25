@@ -61,6 +61,8 @@ type Endpoint struct {
 	wakeStart, lastWake time.Time
 	// wakeNoAt is when the inbox count last found no backlog for the backlog wake (hook.go, wakeBacklog).
 	wakeNoAt time.Time
+	// wakeNo is the no kept for a held set while it stands (hook.go, wakeBacklog).
+	wakeNo wakeNo
 	// wakeMu guards the wake's cached reading of the inbox and its one in-flight read (hook.go, wakeReading).
 	wakeMu       sync.Mutex
 	wakeCached   wakeResult

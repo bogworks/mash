@@ -939,11 +939,16 @@ func (e *Endpoint) inbox(ctx context.Context) (jetstream.Stream, error) {
 }
 
 func (e *Endpoint) toMail(raw *jetstream.RawStreamMsg) (render.Mail, bool) {
+	return e.toMailWith(raw, e.refusedSnapshot())
+}
+
+// toMailWith is toMail with the refused-sequences file already read (refusedSnapshot), for a reader of many messages.
+func (e *Endpoint) toMailWith(raw *jetstream.RawStreamMsg, refused refusedSnap) (render.Mail, bool) {
 	from, trust, h, ok := e.classify(raw.Subject, raw.Header, raw.Data, raw.Time)
 	if !ok {
 		return render.Mail{Seq: raw.Sequence, From: "?", Trust: trust, At: raw.Time}, false
 	}
-	if id := e.inboxID.Load(); id != nil && e.refusedSeq(raw.Sequence, *id) { // refused earlier: stays refused
+	if id := e.inboxID.Load(); id != nil && refused.has(raw.Sequence, *id) { // refused earlier: stays refused
 		return render.Mail{Seq: raw.Sequence, From: from, Trust: trust, At: raw.Time}, false
 	}
 	if e.refuses(trust) && !e.shownAtShell(raw.Sequence) { // stored, but not shown: serve counted and dropped it (refuse.go)
@@ -1107,9 +1112,10 @@ func (e *Endpoint) readInbox(ctx context.Context, q InboxQuery) (InboxRead, erro
 	dropped := map[uint64]bool{}
 	out.dropped = dropped
 	id := e.inboxID.Load()
+	refused := e.refusedSnapshot() // read once for the whole pass, not once per message
 	drop := func(n uint64) {
 		dropped[n] = true
-		if id != nil && e.refusedSeq(n, *id) {
+		if id != nil && refused.has(n, *id) {
 			return
 		}
 		out.State.Total = max(out.State.Total-1, 0)
@@ -1146,7 +1152,7 @@ func (e *Endpoint) readInbox(ctx context.Context, q InboxQuery) (InboxRead, erro
 				if raws[i] == nil {
 					continue
 				}
-				m, ok := e.toMail(raws[i])
+				m, ok := e.toMailWith(raws[i], refused)
 				if !ok {
 					drop(n)
 					continue
@@ -1358,6 +1364,7 @@ func (e *Endpoint) collect(ctx context.Context, get getMsg, seqs seqRange, limit
 func (e *Endpoint) collectDropped(ctx context.Context, get getMsg, seqs seqRange, limit int) ([]render.Mail, []uint64, error) {
 	var out []render.Mail
 	var dropped []uint64 // the seqs read that toMail refused
+	refused := e.refusedSnapshot()
 	// Seqs are read a batch at a time, many requests in flight at once. A batch is no larger than what is still
 	// wanted, so the limit is never passed; seqs that turn out to be gone or forged leave the next batch to top up.
 	// A batch is judged in the order given, so the result is what a read one seq at a time would have been.
@@ -1383,7 +1390,7 @@ func (e *Endpoint) collectDropped(ctx context.Context, get getMsg, seqs seqRange
 			if errs[i] != nil {
 				return out, dropped, fmt.Errorf("mash: inbox: read #%s: %w", FormatMsgRef(MsgRef{Seq: seq}), errs[i])
 			}
-			if m, ok := e.toMail(raws[i]); ok {
+			if m, ok := e.toMailWith(raws[i], refused); ok {
 				out = append(out, m)
 			} else {
 				dropped = append(dropped, seq)

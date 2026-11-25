@@ -330,10 +330,11 @@ func TestBacklogWakeDecidesOnTheInboxCountAndRecountsAfterAMinute(t *testing.T) 
 	if line != "" || ep.wakeNoAt.IsZero() {
 		t.Fatalf("woke on a count of three, or did not record the no: %q", line)
 	}
-	for range 2 { // two more waiting: the count would now say five
+	for n := uint64(5); n <= 6; n++ { // two more arrive, held as serve holds them: the count would now say five
 		if _, err := cc.Send(ctx, tdot("a"), "from c", 0); err != nil {
 			t.Fatal(err)
 		}
+		r.h.msgs[spool.Ref{Seq: n}] = pending{msg: &dblAck{}, mail: render.Mail{Seq: n, From: "c", Kind: kind.Task, At: r.now, Body: []byte("x")}}
 	}
 	check(10 * time.Second)
 	if line != "" {
@@ -345,10 +346,10 @@ func TestBacklogWakeDecidesOnTheInboxCountAndRecountsAfterAMinute(t *testing.T) 
 	if line == "" {
 		t.Fatal("no wake after wakeRecount with five waiting")
 	}
-	if !strings.HasPrefix(line, "3 messages") || meta["count"] != "3" {
-		t.Fatalf("line %q, count %q: want the filtered held three", line, meta["count"])
+	if !strings.HasPrefix(line, "5 messages") || meta["count"] != "5" {
+		t.Fatalf("line %q, count %q: want the filtered held five", line, meta["count"])
 	}
-	if meta["seqs"] != "2,3,4" {
+	if meta["seqs"] != "2,3,4,5,6" {
 		t.Fatalf("seqs %q: want 2,3,4 without the dropped #1", meta["seqs"])
 	}
 }
@@ -422,8 +423,14 @@ func TestBacklogAllHeldDroppedDoesNotReadEveryTick(t *testing.T) {
 	}
 	check(deliver, wakeRecount)
 	waitWakeRead(t, r.e)
+	if n := calls.Load(); n != 1 {
+		t.Fatalf("reads %d after wakeRecount with the held set unchanged: want 1", n)
+	}
+	r.h.msgs[spool.Ref{Seq: 5}] = pending{msg: &dblAck{}, mail: render.Mail{Seq: 5, From: "c", Kind: kind.Task, At: r.now, Body: []byte("x")}}
+	check(deliver, wakeRecount) // a new arrival: the held set changed, counted again
+	waitWakeRead(t, r.e)
 	if n := calls.Load(); n != 2 {
-		t.Fatalf("reads %d after wakeRecount: want 2", n)
+		t.Fatalf("reads %d after the held set changed: want 2", n)
 	}
 }
 
@@ -637,5 +644,147 @@ func TestReadInboxAfterEviction(t *testing.T) {
 				t.Fatalf("%+v: listed %v, want %v", c.q, got, c.want)
 			}
 		}
+	}
+}
+
+// Held mail from senders no longer verified keeps the held set over WakeCount while the count says no. The no stands
+// while the held set is the same, however many wakeRecount intervals pass: the inbox is not read again every minute.
+func TestBacklogNoStandsWhileTheHeldSetIsUnchanged(t *testing.T) {
+	r, check := connectedRig(t, 3, 4)
+	calls := stubWakeRead(r.e, func(int) (waitingReading, bool) {
+		return waitingReading{waiting: 3, oldest: r.now, dropped: map[uint64]bool{1: true}}, true
+	})
+	woke := false
+	deliver := func(string, map[string]string) error { woke = true; return nil }
+	check(deliver, wakeCooldown)
+	waitWakeRead(t, r.e)
+	check(deliver, 0)
+	for range 10 {
+		check(deliver, wakeRecount)
+		waitWakeRead(t, r.e)
+	}
+	if n := calls.Load(); n != 1 || woke {
+		t.Fatalf("reads %d, woke %v: want 1 read over ten minutes and no wake", n, woke)
+	}
+}
+
+// The same holds when every held message is from a dropped sender.
+func TestBacklogAllDroppedNoStandsWhileTheHeldSetIsUnchanged(t *testing.T) {
+	r, check := connectedRig(t, 3, 4)
+	calls := stubWakeRead(r.e, func(int) (waitingReading, bool) {
+		return waitingReading{waiting: 9, oldest: r.now, dropped: map[uint64]bool{1: true, 2: true, 3: true, 4: true}}, true
+	})
+	deliver := func(string, map[string]string) error { return nil }
+	check(deliver, wakeCooldown)
+	waitWakeRead(t, r.e)
+	check(deliver, 0)
+	for range 10 {
+		check(deliver, wakeRecount)
+		waitWakeRead(t, r.e)
+	}
+	if n := calls.Load(); n != 1 {
+		t.Fatalf("reads %d: want 1", n)
+	}
+}
+
+// A changed held set is counted again after wakeRecount: a new arrival (the highest sequence rises) and an
+// acknowledged message (the count falls) each re-check, and the wake fires once the count says over.
+func TestBacklogChangedHeldSetRechecks(t *testing.T) {
+	r, check := connectedRig(t, 3, 4)
+	waiting := 3
+	calls := stubWakeRead(r.e, func(int) (waitingReading, bool) {
+		return waitingReading{waiting: waiting, oldest: r.now}, true
+	})
+	woke := 0
+	deliver := func(string, map[string]string) error { woke++; return nil }
+	step := func(d time.Duration) {
+		check(deliver, d)
+		waitWakeRead(t, r.e)
+		check(deliver, 0)
+	}
+	step(wakeCooldown)
+	step(wakeRecount)
+	if n := calls.Load(); n != 1 || woke != 0 {
+		t.Fatalf("reads %d, woke %d: want 1 and 0 with the held set unchanged", n, woke)
+	}
+	r.h.msgs[spool.Ref{Seq: 5}] = pending{msg: &dblAck{}, mail: render.Mail{Seq: 5, From: "c", Kind: kind.Task, At: r.now, Body: []byte("x")}}
+	step(wakeRecount) // a new arrival: counted again, still no
+	if n := calls.Load(); n != 2 || woke != 0 {
+		t.Fatalf("reads %d, woke %d after an arrival: want 2 and 0", n, woke)
+	}
+	delete(r.h.msgs, spool.Ref{Seq: 2}) // one gone: the count of the set falls, same highest
+	step(wakeRecount)
+	if n := calls.Load(); n != 3 {
+		t.Fatalf("reads %d after a removal: want 3", n)
+	}
+	waiting = 9
+	r.h.msgs[spool.Ref{Seq: 6}] = pending{msg: &dblAck{}, mail: render.Mail{Seq: 6, From: "c", Kind: kind.Task, At: r.now, Body: []byte("x")}}
+	step(wakeRecount)
+	if woke != 1 {
+		t.Fatalf("woke %d: want the wake once the count says over", woke)
+	}
+}
+
+// WakeAge is time-based: a no given while the oldest waiting message was under the age stands only until it could pass
+// it. The held set is unchanged, and the count is read again then and the wake fires.
+func TestBacklogNoRechecksWhenTheAgeCouldHaveFlipped(t *testing.T) {
+	r, check := connectedRig(t, 3, 2)
+	r.e.cfg.WakeAge = 5 * time.Minute
+	for ref, p := range r.h.msgs {
+		p.mail.At = r.now.Add(-10 * time.Minute) // the held set looks old; the count's oldest is younger
+		r.h.msgs[ref] = p
+	}
+	start := r.now
+	calls := stubWakeRead(r.e, func(int) (waitingReading, bool) {
+		return waitingReading{waiting: 2, oldest: start.Add(wakeCooldown - 4*time.Minute)}, true
+	})
+	woke := false
+	deliver := func(string, map[string]string) error { woke = true; return nil }
+	check(deliver, wakeCooldown)
+	waitWakeRead(t, r.e)
+	check(deliver, 0) // oldest is 4 minutes old: under the age, a no
+	if woke || calls.Load() != 1 {
+		t.Fatalf("woke %v, reads %d: want a no after one read", woke, calls.Load())
+	}
+	check(deliver, 30*time.Second)
+	check(deliver, wakeRecount) // 1.5 minutes on: 5.5 minutes old, past the age: read again
+	waitWakeRead(t, r.e)
+	check(deliver, 0)
+	if calls.Load() != 2 || !woke {
+		t.Fatalf("reads %d, woke %v: want a second read and the wake once the oldest passed WakeAge", calls.Load(), woke)
+	}
+}
+
+// The refused-sequences file is read once per inbox read, not once per message: a read of twenty messages opens it as
+// often as a read of one.
+func TestInboxReadParsesTheRefusedSeqsOncePerRead(t *testing.T) {
+	f := newFixture(t, "a", "c")
+	ctx := context.Background()
+	cc := f.client(t, "c")
+	send := func(n int) {
+		for range n {
+			if _, err := cc.Send(ctx, tdot("a"), "from c", 0); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	ep, err := Open(ctx, f.cfgState("a", t.TempDir(), false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(ep.Close)
+	reads := func() int64 {
+		before := refusedFileReads.Load()
+		r, err := ep.readInbox(ctx, InboxQuery{OnlyNew: true})
+		if err != nil || r.State.Waiting == 0 {
+			t.Fatalf("read: %v, %+v", err, r.State)
+		}
+		return refusedFileReads.Load() - before
+	}
+	send(1)
+	one := reads()
+	send(19)
+	if twenty := reads(); twenty != one {
+		t.Fatalf("sequences file read %d times for twenty messages, %d for one: want the same", twenty, one)
 	}
 }
