@@ -49,7 +49,7 @@ Out of scope, because mash does not try to defend against them:
 
 ## Known limits
 
-These are known and not yet fixed. They are not vulnerabilities to report privately. The full list for this release is the GitHub issues labelled [known-0.5.8](https://github.com/bogworks/mash/issues?q=label%3Aknown-0.5.8). The main ones:
+These are known and not yet fixed. They are not vulnerabilities to report privately. The full list for this release is the GitHub issues labelled [known-0.5.9](https://github.com/bogworks/mash/issues?q=label%3Aknown-0.5.9). The main ones:
 
 - **An endpoint of the same owner can fill another endpoint's inbox.** An endpoint's NATS user may send mail to any endpoint of its owner, and each inbox stream holds 16 MiB. The stream discards the oldest messages when full, and deleting and purging are denied. So a flood evicts older mail, including mail not yet read, and no endpoint can purge the stream. `mashctl doctor` reports an inbox that lost mail unread as a problem and a nearly full inbox (90% or more) as a warning. `mashctl endpoint suspend` stops new mail to an inbox. `mashctl endpoint delete` removes the inbox and the name for good.
 - **One administrator at a time is mash's stated limit.** `mashctl` does not coordinate two administrators (two operators, or two machines holding the keys) who write the account or reissue one endpoint at the same moment, and there is no lock. Known under it: [#199](https://github.com/bogworks/mash/issues/199), [#627](https://github.com/bogworks/mash/issues/627), [#767](https://github.com/bogworks/mash/issues/767) and [#872](https://github.com/bogworks/mash/issues/872). See [docs/operations.md](docs/operations.md#one-administrator-at-a-time).
