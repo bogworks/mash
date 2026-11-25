@@ -5,8 +5,9 @@
 # mash-linux-amd64 is downloaded and checked against its digest, each release's own `mash` writes stored mail, and this
 # tree's endpoint code and `mash inbox` read it (zero refusals, every message delivered once, X1 to X3 count 0); then the
 # duplicate cases of AT-018 run on a copy of origin/main and on this tree, and their outcomes must be identical.
-# Nothing runs on the host: it makes a `git archive` of origin/main into a directory it creates (and removes by name),
-# starts the container and prints the receipt. The released binaries are downloaded and run only inside the container.
+# Nothing is created on the host, no directory and no file: `git archive origin/main` is streamed into the container on
+# stdin and extracted there, the container is started and the receipt is printed. The released binaries are downloaded
+# and run only inside the container.
 # Env: AT006_TAGS      space-separated tags replacing the derived list; debugging only, the run exits non-zero.
 #      AT006_DIRTY=1   run on a tree with uncommitted changes (the receipt says so; not a proof run).
 set -uo pipefail
@@ -14,12 +15,10 @@ set -uo pipefail
 root=$(cd "$(dirname "$0")/../.." && pwd)
 image=golang:1.27
 name=mash-at006-$$-$RANDOM
-oracle=""
 rc=0
 
 cleanup() {
-	# only the paths this run created: the oracle directory, recorded when made, and the container by its own name
-	if [ -n "$oracle" ] && [ -d "$oracle" ]; then rm -rf -- "$oracle"; fi
+	# the run creates nothing on the host; remove only the container, by its own recorded name
 	docker rm -f "$name" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
@@ -32,9 +31,6 @@ if [ -n "$(git -C "$root" status --porcelain)" ]; then
 	if [ "${AT006_DIRTY:-}" != 1 ]; then echo "the tree has uncommitted changes; commit them or set AT006_DIRTY=1 for a trial run" >&2; exit 1; fi
 	rc=1
 fi
-oracle=$(mktemp -d)
-echo "oracle directory (made by this run): $oracle"
-git -C "$root" archive origin/main | tar -x -C "$oracle" || { echo "git archive of origin/main failed" >&2; exit 1; }
 docker image inspect "$image" >/dev/null 2>&1 || docker pull -q "$image" >/dev/null
 digest=$(docker image inspect "$image" --format '{{.Id}} {{join .RepoDigests ","}}')
 
@@ -44,11 +40,12 @@ echo "oracle (origin/main): $main"
 echo "venue:               container from $image, image $digest, name $name, docker run --rm --init"
 echo
 
-docker run --rm --init --name "$name" -e AT006_TAGS="${AT006_TAGS:-}" \
-	-v "$root":/src:ro -v "$oracle":/oracle-src:ro "$image" bash -c '
+git -C "$root" archive origin/main | docker run -i --rm --init --name "$name" -e AT006_TAGS="${AT006_TAGS:-}" \
+	-v "$root":/src:ro "$image" bash -c '
 	set -uo pipefail
 	fail=0
-	mkdir /work /oracle /out
+	mkdir /oracle && tar -x -C /oracle || { echo "FAIL: extracting git archive of origin/main from stdin"; exit 1; }
+	mkdir /work /out
 	oracle_test() { # dir out: run the AT-018 test in dir, write its outcomes to out, and return the test exit code
 		(cd "$1" && MASH_AT018_OUT="$2" go test ./internal/endpoint -run "^TestStoredDuplicateOracle\$" -count=1 -v >/out/test.log 2>&1)
 		local c=$?
@@ -56,7 +53,6 @@ docker run --rm --init --name "$name" -e AT006_TAGS="${AT006_TAGS:-}" \
 		return $c
 	}
 	tar -C /src --exclude=./.git --exclude=./mash -cf - . | tar -C /work -xf -
-	cp -a /oracle-src/. /oracle/
 	cp /work/internal/endpoint/stored_dup_oracle_test.go /oracle/internal/endpoint/
 	echo "== AT-018 on origin/main (the oracle) =="
 	oracle_test /oracle /out/main.json || { echo "FAIL: the oracle test did not pass on origin/main"; fail=1; }

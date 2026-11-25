@@ -467,7 +467,7 @@ func matchLedger(k *kit.Kit, stored map[string][]*storedMsg, rep *report) {
 	}
 	for _, n := range []string{"Urgent", "In-Reply-To", "Via", "Sender-Instance"} {
 		if rep.headers[n] == 0 {
-			rep.notes = append(rep.notes, "no stored message carries Mash-"+n+" (this release does not write it, or the send was refused)")
+			rep.failures = append(rep.failures, "no stored message carries Mash-"+n+": AT-006 needs every Mash-* signature in each release's mail")
 		}
 	}
 }
