@@ -236,7 +236,7 @@ func (e *Endpoint) dropHeld(h *held) {
 		return
 	}
 	if e.spool != nil {
-		u, err := e.spool.Lock()
+		u, err := e.spool.LockContext(h.lockCtx())
 		if err != nil {
 			e.log.Printf("spool: %v", err)
 			return // retried at the next tick

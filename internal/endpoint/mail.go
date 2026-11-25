@@ -474,6 +474,17 @@ func (e *Endpoint) deliverLoop(deliver Deliverer, queue <-chan pending, quit <-c
 	h := &held{msgs: map[spool.Ref]pending{}, at: map[spool.Ref]time.Time{}, rung: map[spool.Ref]bool{}, fails: map[spool.Ref]int{}, seen: seen}
 	tick := time.NewTicker(SpoolCheck)
 	defer tick.Stop()
+	// The spool lock waits of this loop follow serve's context and end with quit too: stop joins this loop.
+	lctx, lcancel := context.WithCancel(e.serveCtx())
+	defer lcancel()
+	go func() {
+		select {
+		case <-quit:
+			lcancel()
+		case <-lctx.Done():
+		}
+	}()
+	h.ctx = lctx
 	for {
 		var batch []pending
 		select {
@@ -542,6 +553,10 @@ func (e *Endpoint) releaseOnQuit(h *held, batch []pending, queue <-chan pending)
 		return
 	}
 	e.dropUnleased(batch)
+	// Cleanup after quit: a fresh short bound, so a stalled hook holding the lock cannot keep serve from exiting.
+	ctx, cancel := context.WithTimeout(context.Background(), cleanupLockWait)
+	defer cancel()
+	h.ctx = ctx
 	for {
 		select {
 		case p := <-queue:

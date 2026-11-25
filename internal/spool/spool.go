@@ -15,6 +15,7 @@
 package spool
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -694,6 +695,45 @@ func (s Spool) Lock() (unlock func(), err error) {
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
 		f.Close()
 		return nil, err
+	}
+	return func() {
+		syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		f.Close()
+	}, nil
+}
+
+// lockPoll is the longest LockContext sleeps between attempts.
+const lockPoll = 20 * time.Millisecond
+
+// LockContext is Lock that gives up when ctx ends, returning ctx's error: it tries the lock without blocking and
+// waits a short interval between attempts, so a holder that never lets go cannot hold the caller past its context.
+func (s Spool) LockContext(ctx context.Context) (unlock func(), err error) {
+	f, err := os.OpenFile(filepath.Join(s.Dir, ".lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	var timer *time.Timer
+	for {
+		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if err == nil {
+			break
+		}
+		if err != syscall.EWOULDBLOCK && err != syscall.EAGAIN && err != syscall.EINTR {
+			f.Close()
+			return nil, err
+		}
+		if timer == nil {
+			timer = time.NewTimer(lockPoll)
+			defer timer.Stop()
+		} else {
+			timer.Reset(lockPoll)
+		}
+		select {
+		case <-ctx.Done():
+			f.Close()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
 	}
 	return func() {
 		syscall.Flock(int(f.Fd()), syscall.LOCK_UN)

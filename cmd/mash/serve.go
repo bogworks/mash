@@ -271,7 +271,7 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 	// restarted session meeting a broker blip) is retried the same way; any other failure is terminal.
 	// Recorded before the first attempt: a resumed copy's hook can run while it is still in progress (ADR 0043).
 	// Removed on every exit, and at once when the first attempt binds (the bind also removes it).
-	clearWaiter, noteHeld := noteWaiting(cfg)
+	clearWaiter, noteHeld, clearWaitState := noteWaiting(ctx, cfg)
 	defer clearWaiter()
 	startPPID := getppid()
 	openCtx, openCancel := context.WithTimeout(ctx, openBound(cfg))
@@ -337,6 +337,9 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 				return
 			}
 			clearWaiter() // this serve now holds the lease
+			// The cleanup above gives up after spoolLockStep when a hook holds the lock: the bind below removes the
+			// lease-wait state under the lock it takes anyway (ADR 0092).
+			ep.OnSpoolBound(clearWaitState)
 		}
 		closeEP := sync.OnceFunc(ep.Close)
 		defer closeEP()
@@ -784,42 +787,96 @@ func pingClient(ctx context.Context, srv *mcp.Server, ep *endpoint.Endpoint) {
 // noteWaiting records this serve in its endpoint's spool as waiting for the lease (spool.NoteWaiter), so a hook of the
 // same session that descends from this process is told it is another launch (ADR 0043). It returns the function that
 // removes the record, and the function that records who holds the lease (the spool's lease-wait state, which a hook of
-// this session turns into a notice, ADR 0092); the removal removes that state too. A spool that cannot be written costs
+// this session turns into a notice, ADR 0092); the removal removes that state too. The third function removes the state alone, for a caller that already holds
+// the spool lock (the bind). A spool that cannot be written costs
 // only these.
-func noteWaiting(cfg config.Config) (clear func(), noteHeld func(*endpoint.LeaseHeldError)) {
+func noteWaiting(ctx context.Context, cfg config.Config) (clear func(), noteHeld func(*endpoint.LeaseHeldError), clearWaitState func()) {
+	none := func() {}
 	dir, err := endpoint.SpoolDir(cfg)
 	if err != nil {
-		return func() {}, func(*endpoint.LeaseHeldError) {}
+		return none, func(*endpoint.LeaseHeldError) {}, none
 	}
 	s := spool.Spool{Dir: dir}
 	ppid := os.Getppid()
 	session := os.Getenv("CLAUDE_CODE_SESSION_ID")
 	if s.Init() != nil {
-		return func() {}, func(*endpoint.LeaseHeldError) {}
+		return none, func(*endpoint.LeaseHeldError) {}, none
 	}
-	if unlock, err := s.Lock(); err == nil {
-		_ = s.NoteWaiter(spool.WaiterRecord{PID: ppid, Session: session})
-		unlock()
+	// Both waits here run before the MCP server reads stdin, so closing stdin cannot end them: each is bounded by ctx or
+	// spoolLockStep, whichever ends first. A record not written now is retried (below) and written by noteHeld.
+	var noted atomic.Bool
+	noteWaiter := func() {
+		wctx, cancel := context.WithTimeout(ctx, spoolLockStep)
+		defer cancel()
+		if unlock, err := s.LockContext(wctx); err == nil {
+			defer unlock()
+			if !noted.Load() && s.NoteWaiter(spool.WaiterRecord{PID: ppid, Session: session}) == nil {
+				noted.Store(true)
+			}
+		}
 	}
+	noteWaiter()
+	// A lock held through the first attempt leaves no record until the next lease retry, and a hook of a second launch
+	// of this session could drain this serve's mail meanwhile (ADR 0043): keep trying until the record is written, serve
+	// binds or exits (stop), or ctx ends.
+	stop := make(chan struct{})
+	retried := make(chan struct{})
+	if noted.Load() {
+		close(retried)
+	} else {
+		go func() {
+			defer close(retried)
+			for !noted.Load() {
+				select {
+				case <-stop:
+					return
+				case <-ctx.Done():
+					return
+				case <-time.After(waiterRetry):
+				}
+				noteWaiter()
+			}
+		}()
+	}
+	var stopOnce sync.Once
 	// instance tells this serve's state from another serve's (the files are shared, and a pid can be reused or, in a test,
 	// shared): the state is removed only if it still names this serve.
 	var rb [8]byte
 	_, _ = rand.Read(rb[:])
 	instance := hex.EncodeToString(rb[:])
 	return func() {
-			if unlock, err := s.Lock(); err == nil {
+			// Runs as serve exits: stop the retry first, so it cannot write the record after this removes it. A retry
+			// in its lock wait ends within spoolLockStep. Then a fresh short bound, so a stalled hook holding the lock
+			// cannot keep serve from exiting.
+			stopOnce.Do(func() { close(stop) })
+			<-retried
+			cctx, cancel := context.WithTimeout(context.Background(), spoolLockStep)
+			defer cancel()
+			if unlock, err := s.LockContext(cctx); err == nil {
 				_ = s.ClearWaiter(ppid)
 				_ = s.ClearWaitState(os.Getpid(), instance)
 				unlock()
 			}
 		}, func(h *endpoint.LeaseHeldError) {
-			if unlock, err := s.Lock(); err == nil {
+			wctx, cancel := context.WithTimeout(ctx, spoolLockStep)
+			defer cancel()
+			if unlock, err := s.LockContext(wctx); err == nil {
+				if !noted.Load() && s.NoteWaiter(spool.WaiterRecord{PID: ppid, Session: session}) == nil {
+					noted.Store(true)
+				}
 				_ = s.NoteWaitState(spool.WaitState{HolderPID: h.PID, HolderHost: h.Host, HolderSince: h.Since,
 					ServePID: os.Getpid(), Instance: instance, ParentPID: ppid, Session: session, Updated: time.Now().UTC()})
 				unlock()
 			}
-		}
+		}, func() { _ = s.ClearWaitState(os.Getpid(), instance) }
 }
+
+// waiterRetry is the pause between tries to write the waiter record while the spool lock is held.
+var waiterRetry = 200 * time.Millisecond
+
+// spoolLockStep is the longest one of serve's startup or exit spool lock waits that runs outside the MCP server's
+// reading of stdin (the waiter record, the lease-wait state, the exit cleanup) lasts, unless its context ends first.
+var spoolLockStep = time.Second
 
 // leaseRollupWarned makes the lease bucket warning appear at most once per process.
 var leaseRollupWarned sync.Once

@@ -86,7 +86,9 @@ func (e *Endpoint) StorageState() string {
 // RecordHookState writes the detectors' state to the spool when it differs from what was last written (the mail
 // folder's state with it). It does nothing before the spool is bound. A folder that cannot be written cannot take the
 // record either, so a failed write is not an error.
-func (e *Endpoint) RecordHookState() {
+func (e *Endpoint) RecordHookState() { e.recordHookState(e.serveCtx()) }
+
+func (e *Endpoint) recordHookState(ctx context.Context) {
 	e.hl.mu.Lock()
 	sp, since, bound := e.hl.sp, e.hl.since, e.hl.bound
 	e.hl.mu.Unlock()
@@ -100,7 +102,7 @@ func (e *Endpoint) RecordHookState() {
 		e.hookRecorded.Store(nil)
 		return
 	}
-	unlock, err := sp.Lock()
+	unlock, err := sp.LockContext(ctx)
 	if err != nil {
 		return
 	}
@@ -146,6 +148,26 @@ func (e *Endpoint) RecordHookState() {
 // the lease is reported lost (a flag, no round trip).
 func (e *Endpoint) holdsLease() bool { return !e.leaseGone.Load() }
 
+// cleanupLockWait is the longest serve's shutdown cleanup waits for the spool lock.
+var cleanupLockWait = time.Second
+
+// serveCtx is the context of the Run in progress (Background before one): the spool lock waits that happen while serve
+// runs follow it.
+func (e *Endpoint) serveCtx() context.Context {
+	if p := e.runCtx.Load(); p != nil {
+		return *p
+	}
+	return context.Background()
+}
+
+// lockCtx is the context a held-mail spool lock wait follows.
+func (h *held) lockCtx() context.Context {
+	if h.ctx == nil {
+		return context.Background()
+	}
+	return h.ctx
+}
+
 // recordEvery is how often serve looks for a change in what it records (a hook run is read from the spool itself).
 var recordEvery = 2 * time.Second
 
@@ -154,7 +176,7 @@ func (e *Endpoint) recordHookStates(ctx context.Context) {
 	defer t.Stop()
 	defer e.clearHookState() // serve stops here when it no longer holds the endpoint (lease lost) or is shutting down
 	for {
-		e.RecordHookState()
+		e.recordHookState(ctx)
 		select {
 		case <-ctx.Done():
 			return
@@ -172,7 +194,12 @@ func (e *Endpoint) clearHookState() {
 	if !bound {
 		return
 	}
-	unlock, err := sp.Lock()
+	// Runs once serve is stopping, so the wait is bounded and not the run's: a hook stalled holding the lock must not keep
+	// serve from exiting. A wait that times out leaves the record as a crash would, and a reader already tolerates it
+	// (SessionOnDisk checks that the recorded pid still exists).
+	ctx, cancel := context.WithTimeout(context.Background(), cleanupLockWait)
+	defer cancel()
+	unlock, err := sp.LockContext(ctx)
 	if err != nil {
 		return
 	}

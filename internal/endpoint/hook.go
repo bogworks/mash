@@ -75,7 +75,7 @@ func (e *Endpoint) SetSpoolContext(ctx context.Context, s spool.Spool, owner str
 	}
 	// Hooks are excluded while the spool changes hands: one that passed its owner check before this rebind must not
 	// drain the new session's mail (codex H1 on #21, round 7).
-	unlock, err := s.Lock()
+	unlock, err := s.LockContext(ctx)
 	if err != nil {
 		return err
 	}
@@ -112,11 +112,19 @@ func (e *Endpoint) SetSpoolContext(ctx context.Context, s spool.Spool, owner str
 	if err := s.Own(owner); err != nil {
 		return err
 	}
+	if e.onSpoolBound != nil {
+		e.onSpoolBound() // under the lock this bind holds
+	}
 	e.spool, e.since = &s, time.Now()
 	e.wakeStart = backlogClock()
 	e.hl.bind(s, e.since)
 	return nil
 }
+
+// OnSpoolBound sets fn to run inside SetSpoolContext while it holds the spool lock, once the spool is bound to this
+// session: serve uses it to remove its lease-wait state at the moment it owns the spool (ADR 0092). Call it before
+// SetSpoolContext.
+func (e *Endpoint) OnSpoolBound(fn func()) { e.onSpoolBound = fn }
 
 // SpoolFromStart counts the session as hooked from the start: with a spool set, mail is spooled from the first message,
 // as if a hook had already run, and nothing is acked unless a hook drained it. Call it only once SetSpool has succeeded
@@ -143,6 +151,7 @@ func hold(batch []pending) {
 
 // held is what the spool holds unacked, by (stream, sequence).
 type held struct {
+	ctx        context.Context // what the spool lock waits follow: ends with serve (nil: never, as in a test)
 	msgs       map[spool.Ref]pending
 	at         map[spool.Ref]time.Time // when each was spooled
 	bytes      int
@@ -819,7 +828,7 @@ func (e *Endpoint) healHeld(h *held) {
 	if len(bad) == 0 {
 		return
 	}
-	unlock, err := e.spool.Lock()
+	unlock, err := e.spool.LockContext(h.lockCtx())
 	if err != nil {
 		e.log.Printf("spool: %v", err)
 		return
