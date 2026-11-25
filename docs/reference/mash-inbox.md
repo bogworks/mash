@@ -47,9 +47,9 @@ Stream: stdout. Exit code: 0.
 ```text
 2 messages for acme.demo.alice, 2 new, 1 urgent.
 
-NUMBER  FROM  WHEN     STATE  URGENT  KIND      MESSAGE
-1       bob   10s ago  new    no      task      lunch at noon?
-2       bob   8s ago   new    yes     question  ready?
+NUMBER  FROM           WHEN     STATE  URGENT  KIND      MESSAGE
+1       acme.demo.bob  10s ago  new    no      task      lunch at noon?
+2       acme.demo.bob  8s ago   new    yes     question  ready?
 ```
 
 ### A long message, or one of several lines
@@ -57,8 +57,8 @@ NUMBER  FROM  WHEN     STATE  URGENT  KIND      MESSAGE
 Stream: stdout. Exit code: 0.
 
 ```text
-NUMBER  FROM  WHEN    STATE  URGENT  KIND    MESSAGE
-3       bob   1m ago  new    no      result  The build passed on all four runn…
+NUMBER  FROM           WHEN    STATE  URGENT  KIND    MESSAGE
+3       acme.demo.bob  1m ago  new    no      result  The build passed on all …
 ```
 
 ### With --wide
@@ -89,7 +89,7 @@ Stream: stdout. Exit code: 0.
 3 messages for acme.demo.alice, 3 new, 0 urgent.
 The oldest has waited 1h 12m.
 
-NUMBER  FROM  WHEN  STATE  URGENT  KIND  MESSAGE
+NUMBER  FROM           WHEN  STATE  URGENT  KIND  MESSAGE
 ...
 ```
 
@@ -131,9 +131,9 @@ Stream: stdout. Exit code: 0.
 About 2 messages for acme.demo.alice, about 1 new, about 1 urgent.
 exact: no (mail read out of order may still be counted as urgent)
 
-NUMBER  FROM  WHEN     STATE  URGENT  KIND      MESSAGE
-1       bob   10s ago  new    no      task      lunch at noon?
-2       bob   8s ago   new    yes     question  ready?
+NUMBER  FROM           WHEN     STATE  URGENT  KIND      MESSAGE
+1       acme.demo.bob  10s ago  new    no      task      lunch at noon?
+2       acme.demo.bob  8s ago   new    yes     question  ready?
 ```
 
 ### Counts without serve running
@@ -143,9 +143,9 @@ Stream: stdout. Exit code: 0.
 ```text
 About 2 messages for acme.demo.alice, about 2 new, about 1 urgent.
 
-NUMBER  FROM  WHEN     STATE  URGENT  KIND      MESSAGE
-1       bob   10s ago  new    no      task      lunch at noon?
-2       bob   8s ago   new    yes     question  ready?
+NUMBER  FROM           WHEN     STATE  URGENT  KIND      MESSAGE
+1       acme.demo.bob  10s ago  new    no      task      lunch at noon?
+2       acme.demo.bob  8s ago   new    yes     question  ready?
 ```
 
 ### Counts are capped
@@ -164,9 +164,9 @@ Stream: stdout. Exit code: 0.
 About 2 messages for acme.demo.alice, about 2 new, about 1 urgent.
 exact: no (mash serve is not running, so unverified mail is counted)
 
-NUMBER  FROM  WHEN     STATE  URGENT  KIND      MESSAGE
-1       bob   10s ago  new    no      task      lunch at noon?
-2       bob   8s ago   new    yes     question  ready?
+NUMBER  FROM           WHEN     STATE  URGENT  KIND      MESSAGE
+1       acme.demo.bob  10s ago  new    no      task      lunch at noon?
+2       acme.demo.bob  8s ago   new    yes     question  ready?
 ```
 
 ### Counts are capped, with --detail
@@ -177,9 +177,9 @@ Stream: stdout. Exit code: 0.
 About 1000 messages for acme.demo.alice, about 90 new, about 4 urgent.
 exact: no (only the oldest 1000 messages were checked)
 
-NUMBER  FROM  WHEN     STATE  URGENT  KIND      MESSAGE
-1       bob   10s ago  new    no      task      lunch at noon?
-2       bob   8s ago   new    yes     question  ready?
+NUMBER  FROM           WHEN     STATE  URGENT  KIND      MESSAGE
+1       acme.demo.bob  10s ago  new    no      task      lunch at noon?
+2       acme.demo.bob  8s ago   new    yes     question  ready?
 ```
 
 ### Counts are capped and serve is not running, with --detail
@@ -191,9 +191,9 @@ About 1000 messages for acme.demo.alice, about 90 new, about 4 urgent.
 exact: no (only the oldest 1000 messages were checked)
 exact: no (mash serve is not running, so unverified mail is counted)
 
-NUMBER  FROM  WHEN     STATE  URGENT  KIND      MESSAGE
-1       bob   10s ago  new    no      task      lunch at noon?
-2       bob   8s ago   new    yes     question  ready?
+NUMBER  FROM           WHEN     STATE  URGENT  KIND      MESSAGE
+1       acme.demo.bob  10s ago  new    no      task      lunch at noon?
+2       acme.demo.bob  8s ago   new    yes     question  ready?
 ```
 
 ## JSON
@@ -233,11 +233,11 @@ With `--json` the result is this shape. The values are an example.
 
 ## Notes
 
-FROM shows only the name when the sender is in your own owner and group.
-MESSAGE is the sender's words, as untrusted as the full text; it is not quoted
-because the column already marks it. It shows the first line of the text, cut
-to fit 80 columns and ending in … when there is more; mash read shows all of
-it. The JSON carries the same cut text as 'preview'.
+FROM is the sender's full address. MESSAGE is the sender's words, as untrusted
+as the full text; it is not quoted because the column already marks it. It
+shows the first line of the text, cut to fit 80 columns and ending in … when
+there is more; mash read shows all of it. The JSON carries the same cut text
+as 'preview'.
 
 ## What it replaces
 

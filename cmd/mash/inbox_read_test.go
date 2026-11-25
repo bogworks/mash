@@ -48,7 +48,7 @@ func TestInboxAndReadDoorsOnARealEndpoint(t *testing.T) {
 	num := itoa(int(e.Seq))
 
 	cli, code := w.cli(t, "a", "inbox")
-	if code != 0 || !strings.HasPrefix(cli, "1 message for o.dev.a, 1 new, 0 urgent.\n\nNUMBER  FROM  WHEN") || !strings.Contains(cli, " new    no      task  the body\n") {
+	if code != 0 || !strings.HasPrefix(cli, "1 message for o.dev.a, 1 new, 0 urgent.\n\nNUMBER  FROM     WHEN") || !strings.Contains(cli, "o.dev.b  ") || !strings.Contains(cli, "  new    no      task  the body\n") {
 		t.Fatalf("cli inbox: %d %q", code, cli)
 	}
 	cliJSON, _ := w.cli(t, "a", "inbox", "--json")

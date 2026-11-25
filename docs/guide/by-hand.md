@@ -109,8 +109,8 @@ MASH_ENDPOINT=acme.demo.alice mash read 1
 Mail sent (number 1).
 1 message for acme.demo.alice, 1 new, 0 urgent.
 
-NUMBER  FROM  WHEN      STATE  URGENT  KIND  MESSAGE
-1       bob   just now  new    no      task  lunch at noon?
+NUMBER  FROM           WHEN      STATE  URGENT  KIND  MESSAGE
+1       acme.demo.bob  just now  new    no      task  lunch at noon?
 number:   1
 from:     acme.demo.bob
 sent:     just now

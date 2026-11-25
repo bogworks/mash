@@ -99,9 +99,9 @@ func tablePart(s string) string {
 func TestInboxText(t *testing.T) {
 	code, out, errs := runInbox(specBox(), cliframe.Global{})
 	want := "2 messages for acme.demo.alice, 2 new, 1 urgent.\n\n" +
-		"NUMBER  FROM  WHEN     STATE  URGENT  KIND      MESSAGE\n" +
-		"1       bob   10s ago  new    no      task      lunch at noon?\n" +
-		"2       bob   8s ago   new    yes     question  ready?\n"
+		"NUMBER  FROM           WHEN     STATE  URGENT  KIND      MESSAGE\n" +
+		"1       acme.demo.bob  10s ago  new    no      task      lunch at noon?\n" +
+		"2       acme.demo.bob  8s ago   new    yes     question  ready?\n"
 	if code != 0 || out != want || errs != "" {
 		t.Errorf("messages: %d %q %q", code, out, errs)
 	}
@@ -125,7 +125,7 @@ func TestInboxText(t *testing.T) {
 	b.view.OldestWaiting = time.Time{}
 	b.view.Messages[1].New, b.view.Messages[0].New = false, false
 	_, out, _ = runInbox(b, cliframe.Global{})
-	if !strings.HasPrefix(out, "2 messages for acme.demo.alice, 0 new, 0 urgent.\n\n") || !strings.Contains(out, "2       bob   8s ago   read   yes") {
+	if !strings.HasPrefix(out, "2 messages for acme.demo.alice, 0 new, 0 urgent.\n\n") || !strings.Contains(out, "2       acme.demo.bob  8s ago   read   yes") {
 		t.Errorf("read: %q", out)
 	}
 	// empty
@@ -145,7 +145,7 @@ func TestInboxLongMessageAndOutsideGroup(t *testing.T) {
 	b := &fakeBox{view: cmds.InboxView{Endpoint: "acme.demo.alice", Total: 1, Waiting: 1, OldestWaiting: ago(time.Minute), WakeCount: 15, WakeAge: time.Hour, WakeAgeText: "1h",
 		Messages: []cmds.MailItem{{Number: 3, From: "acme.demo.bob", Sent: ago(time.Minute), New: true, Kind: "result", Trust: "verified", Body: long + "\nsecond line"}}}}
 	_, out, _ := runInbox(b, cliframe.Global{})
-	want := "NUMBER  FROM  WHEN    STATE  URGENT  KIND    MESSAGE\n3       bob   1m ago  new    no      result  The build passed on all four runn\u2026"
+	want := "NUMBER  FROM           WHEN    STATE  URGENT  KIND    MESSAGE\n3       acme.demo.bob  1m ago  new    no      result  The build passed on all \u2026"
 	if tablePart(out) != want {
 		t.Errorf("long: %q", tablePart(out))
 	}
@@ -156,7 +156,7 @@ func TestInboxLongMessageAndOutsideGroup(t *testing.T) {
 	}
 	// only the first line shows, and the JSON carries the same cut text
 	_, js, _ := runInbox(b, cliframe.Global{JSON: true})
-	if !strings.Contains(js, `"preview":"The build passed on all four runn\u2026"`) && !strings.Contains(js, `"preview":"The build passed on all four runn…"`) {
+	if !strings.Contains(js, `"preview":"The build passed on all \u2026"`) && !strings.Contains(js, `"preview":"The build passed on all …"`) {
 		t.Errorf("preview: %s", js)
 	}
 	// a wide terminal shows more of it
@@ -610,9 +610,9 @@ func TestInboxCountExactness(t *testing.T) {
 	const capped = "only the oldest 1000 messages were checked"
 	const noServe = "mash serve is not running, so unverified mail is counted"
 	const outOfOrder = "mail read out of order may still be counted as urgent"
-	table := "\n\nNUMBER  FROM  WHEN     STATE  URGENT  KIND      MESSAGE\n" +
-		"1       bob   10s ago  new    no      task      lunch at noon?\n" +
-		"2       bob   8s ago   new    yes     question  ready?\n"
+	table := "\n\nNUMBER  FROM           WHEN     STATE  URGENT  KIND      MESSAGE\n" +
+		"1       acme.demo.bob  10s ago  new    no      task      lunch at noon?\n" +
+		"2       acme.demo.bob  8s ago   new    yes     question  ready?\n"
 	for _, c := range []struct {
 		name        string
 		capped      string

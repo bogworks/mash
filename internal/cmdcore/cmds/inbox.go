@@ -146,10 +146,10 @@ type inboxRow struct {
 const previewCols = 79
 
 // inboxPrefixWidth is the display width of the columns before MESSAGE of the table without --wide, for the rows.
-func inboxPrefixWidth(endpoint string, rows []inboxRow) int {
+func inboxPrefixWidth(rows []inboxRow) int {
 	w := [6]int{len("NUMBER"), len("FROM"), len("WHEN"), len("STATE"), len("URGENT"), len("KIND")}
 	for _, r := range rows {
-		for i, c := range []string{r.number, shortFrom(endpoint, r.from), r.when, r.state, r.urgent, r.kind} {
+		for i, c := range []string{r.number, r.from, r.when, r.state, r.urgent, r.kind} {
 			if l := render.DisplayWidth(c); l > w[i] {
 				w[i] = l
 			}
@@ -160,17 +160,6 @@ func inboxPrefixWidth(endpoint string, rows []inboxRow) int {
 		n += x + 2
 	}
 	return n
-}
-
-// shortFrom is the sender as the table shows it: the name alone when it is in the caller's own owner and group, else
-// the full address.
-func shortFrom(endpoint, from string) string {
-	own := strings.Split(endpoint, ".")
-	got := strings.Split(from, ".")
-	if len(own) == 3 && len(got) == 3 && own[0] == got[0] && own[1] == got[1] {
-		return got[2]
-	}
-	return from
 }
 
 func yesNo(b bool) string {
@@ -214,11 +203,7 @@ func (r InboxResult) Text(o cmdcore.Opts) string {
 	cols = append(cols, "message")
 	rows := make([][]string, len(r.rows))
 	for i, x := range r.rows {
-		from := shortFrom(r.Endpoint, x.from)
-		if r.wide {
-			from = x.from
-		}
-		row := []string{x.number, from, x.when, x.state, x.urgent, x.kind}
+		row := []string{x.number, x.from, x.when, x.state, x.urgent, x.kind}
 		if r.wide {
 			row = append(row, x.trust, x.size)
 		}
@@ -283,7 +268,7 @@ var Inbox = cmdcore.Command[InboxParams, InboxResult]{
 			r.rows = append(r.rows, inboxRow{number: strconv.Itoa(m.Number), from: m.From, when: render.RelTime(at, m.Sent), state: state,
 				urgent: yesNo(m.Urgent), kind: m.Kind, trust: m.Trust, size: strconv.Itoa(m.Size) + " B", line: firstLine(m.Body)})
 		}
-		cut := previewCols - inboxPrefixWidth(r.Endpoint, r.rows)
+		cut := previewCols - inboxPrefixWidth(r.rows)
 		for i, m := range v.Messages {
 			x := r.rows[i]
 			r.Messages = append(r.Messages, InboxMessage{Number: m.Number, From: m.From, Sent: m.Sent.UTC().Format(time.RFC3339), State: x.state,
