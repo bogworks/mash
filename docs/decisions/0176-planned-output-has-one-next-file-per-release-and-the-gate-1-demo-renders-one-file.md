@@ -8,7 +8,7 @@ decision-makers: Randy Bias (mash maintainer)
 
 ## Context and Problem Statement
 
-[ADR 0164](0164-planned-output-is-written-in-x-output-next-and-spec-next-json-and-rendered-as-the-gate-1-demo.md) keeps planned cases that have no `x-output` home in one file, `spec/next.json`, and renders them as the Gate 1 demo. The SDK adoption contract (revision 8) plans 17 cases for 0.6.0 while the 0.5.9 installer and setup cases are still planned. In one file the two releases are mixed, and the demo cannot say which release it shows.
+[ADR 0164](0164-planned-output-is-written-in-x-output-next-and-spec-next-json-and-rendered-as-the-gate-1-demo.md) keeps planned cases that have no `x-output` home in one file, `spec/next.json`, and renders them as the Gate 1 demo. The SDK adoption contract (revision 8) plans 17 cases for 0.6.0 (eight of them are already held by `spec/next.json` or an `x-output`, so `spec/next-0.6.0.json` holds nine) while the 0.5.9 cases are still planned. In one file the two releases are mixed, and the demo cannot say which release it shows.
 
 ## Decision Drivers
 
