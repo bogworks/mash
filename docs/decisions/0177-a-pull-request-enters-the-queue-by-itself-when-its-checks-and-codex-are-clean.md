@@ -11,8 +11,8 @@ Amends: ADR-0116
 ## Context and Problem Statement
 
 [ADR 0116](0116-the-maintainers-review-is-a-commit-status-on-the-exact-head-and-the-queue-requires-it-beside-the-label-for-one-week.md)
-made the maintainer's review a commit status, `lead-review`, on the exact head, required in `queue_conditions` beside the
-approval-or-`lead-approved` gate of [ADR 0078](0078-queue-entry-needs-an-approval-or-the-lead-approved-label-that-a-push-removes.md).
+made the maintainer's review a commit status, `lead-review`, on the exact head, required in `queue_conditions` beside the <!-- adrlint:allow vocabulary -->
+approval-or-`lead-approved` gate of [ADR 0078](0078-queue-entry-needs-an-approval-or-the-lead-approved-label-that-a-push-removes.md). <!-- adrlint:allow vocabulary -->
 Every pull request therefore waited for a person to approve it after codex-review and the checks had already passed. The
 wait is a queue stall with no new information in it: the independent review has run, the checks are green, and the
 status proved only that someone posted it. The question is whether a person's approval should still stand between a clean
@@ -28,7 +28,7 @@ pull request and the queue.
 
 ## Considered Options
 
-* Keep lead approval as a queue condition.
+* Keep lead approval as a queue condition. <!-- adrlint:allow vocabulary -->
 * Let a pull request enter by itself when its checks and codex are clean, with `hold` as the only brake.
 
 ## Decision Outcome
@@ -36,13 +36,13 @@ pull request and the queue.
 Chosen option: a pull request enters the queue by itself, with `hold` as the only brake.
 
 * **Entry.** `queue_conditions` of the default queue are `base = main`, `-draft`, `-conflict`, `label != hold`,
-  `check-success = codex-review`, and the app-qualified `pr-check`, `adr-lint` and `label-reset`. No lead approval is needed.
-* **Removed.** The `lead-review` status and the `approved-reviews-by` / `lead-approved` or-group leave the queue
+  `check-success = codex-review`, and the app-qualified `pr-check`, `adr-lint` and `label-reset`. No lead approval is needed. <!-- adrlint:allow vocabulary -->
+* **Removed.** The `lead-review` status and the `approved-reviews-by` / `lead-approved` or-group leave the queue <!-- adrlint:allow vocabulary -->
   conditions, and the approval group leaves the merge protection. The rule is renamed "not held before merge" and its one
   success condition is `label != hold`.
 * **`hold` is a deliberate brake.** It is set with its reason written on the pull request. It is kept for: contract
   requirements, ADRs that change one, spec files, CI and queue configuration, and order-16 code (0.6.0 policy code).
-* **Unchanged.** `scripts/lead-approve` stays as an optional tool; `label-reset` still strips `lead-approved` and
+* **Unchanged.** `scripts/lead-approve` stays as an optional tool; `label-reset` still strips `lead-approved` and <!-- adrlint:allow vocabulary -->
   `decision-confirmed`; the rule that dismisses an outside author's approvals on push stays.
 
 Source: Randy, via the planner ("No holding"), dev-process 0.14.0 rule 27.
@@ -58,14 +58,14 @@ Source: Randy, via the planner ("No holding"), dev-process 0.14.0 rule 27.
 
 ### Confirmation
 
-* `internal/release/mergify_test.go`: `TestMergify_entryNeedsNoApproval` (no `lead-review`, approval or or-group in
+* `internal/release/mergify_test.go`: `TestMergify_entryNeedsNoApproval` (no `lead-review`, approval or or-group in <!-- adrlint:allow vocabulary -->
   `queue_conditions`; `label != hold` in them and in `auto_merge_conditions`), `TestMergify_mergeProtectionsMirrorsQueueEntry`
   (the rule is "not held before merge" with `success_conditions` exactly `label != hold`),
   `TestMergify_mergeProtectionsHoldNoCheckConditions` and `TestMergify_actionsChecksAreAppQualified`.
 
 ## Pros and Cons of the Options
 
-### Keep lead approval as a queue condition
+### Keep lead approval as a queue condition <!-- adrlint:allow vocabulary -->
 
 * Good, because a person sees every pull request before it merges.
 * Bad, because it stalls clean pull requests, and the status is as spoofable as the label it replaced.
@@ -78,6 +78,6 @@ Source: Randy, via the planner ("No holding"), dev-process 0.14.0 rule 27.
 ## More Information
 
 * Amends [ADR 0116](0116-the-maintainers-review-is-a-commit-status-on-the-exact-head-and-the-queue-requires-it-beside-the-label-for-one-week.md)
-  and departs from the approval gate of [ADR 0078](0078-queue-entry-needs-an-approval-or-the-lead-approved-label-that-a-push-removes.md);
+  and departs from the approval gate of [ADR 0078](0078-queue-entry-needs-an-approval-or-the-lead-approved-label-that-a-push-removes.md); <!-- adrlint:allow vocabulary -->
   neither file is changed.
 * `.mergify.yml`, `docs/branch-protection.md`, `docs/release.md`, `docs/security/threat-model.md`.
