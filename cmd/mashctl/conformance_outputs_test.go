@@ -150,11 +150,18 @@ func (w *confWorld) do(args ...string) {
 // message waiting) and acme.ops.carol (suspended).
 func (w *confWorld) fleet() {
 	w.t.Helper()
+	w.do("endpoint", "create", "acme.ops.carol")
+	w.do("endpoint", "suspend", "acme.ops.carol")
+	w.pair()
+}
+
+// pair is acme.demo.alice (online, with a label) and acme.demo.bob (one message waiting): the two endpoints of the
+// specification's list.
+func (w *confWorld) pair() {
+	w.t.Helper()
 	w.do("endpoint", "create", "acme.demo.alice")
 	w.do("endpoint", "create", "acme.demo.bob")
-	w.do("endpoint", "create", "acme.ops.carol")
 	w.do("endpoint", "set", "acme.demo.alice", "label.team=blue")
-	w.do("endpoint", "suspend", "acme.ops.carol")
 	w.messages("acme.demo.bob", 1)
 	kv, err := w.js.KeyValue(w.ctx, store.LeaseBucket)
 	if err != nil {
@@ -483,12 +490,12 @@ func init() {
 
 	reg("endpoint list Endpoints", func(t *testing.T) confOutRun {
 		w := newConfWorld(t, true)
-		w.fleet()
+		w.pair()
 		return confOutRun{ran: w.run("endpoint", "list")}
 	})
 	reg("endpoint list With --wide", func(t *testing.T) confOutRun {
 		w := newConfWorld(t, true)
-		w.fleet()
+		w.pair()
 		return confOutRun{ran: w.run("endpoint", "list", "--wide")}
 	})
 	reg("endpoint list None", func(t *testing.T) confOutRun {

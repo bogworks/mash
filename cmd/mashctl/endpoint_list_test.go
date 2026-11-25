@@ -25,18 +25,18 @@ func seedTree(h *fleetEnv) {
 	h.seed(addr3("zed", "demo", "dave"))
 }
 
-func TestEndpointListBlanksARepeatedOwnerAndGroup(t *testing.T) {
+func TestEndpointListPrintsOwnerAndGroupOnEveryRow(t *testing.T) {
 	h := newFleetEnv(t)
 	seedTree(h)
 	if _, _, code := h.run("endpoint", "suspend", "acme.ops.carol"); code != 0 {
 		t.Fatal(code)
 	}
 	out, errb, code := h.run("endpoint", "list")
-	want := "OWNER  GROUP  NAME   STATE\n" +
-		"acme   demo   alice  offline\n" +
-		"              bob    offline\n" +
-		"       ops    carol  suspended\n" +
-		"zed    demo   dave   offline\n"
+	want := "OWNER  GROUP  NAME   ADDRESS          STATE\n" +
+		"acme   demo   alice  acme.demo.alice  offline\n" +
+		"acme   demo   bob    acme.demo.bob    offline\n" +
+		"acme   ops    carol  acme.ops.carol   suspended\n" +
+		"zed    demo   dave   zed.demo.dave    offline\n"
 	if code != 0 || out != want || errb != "" {
 		t.Fatalf("%d %q %q\nwant %q", code, out, errb, want)
 	}
@@ -47,10 +47,10 @@ func TestEndpointListPrefix(t *testing.T) {
 	h := newFleetEnv(t)
 	seedTree(h)
 	cases := []struct{ prefix, want string }{
-		{"acme", "OWNER  GROUP  NAME   STATE\nacme   demo   alice  offline\n              bob    offline\n       ops    carol  offline\n"},
-		{"acme.demo", "OWNER  GROUP  NAME   STATE\nacme   demo   alice  offline\n              bob    offline\n"},
-		{"acme.ops", "OWNER  GROUP  NAME   STATE\nacme   ops    carol  offline\n"},
-		{"zed", "OWNER  GROUP  NAME  STATE\nzed    demo   dave  offline\n"},
+		{"acme", "OWNER  GROUP  NAME   ADDRESS          STATE\nacme   demo   alice  acme.demo.alice  offline\nacme   demo   bob    acme.demo.bob    offline\nacme   ops    carol  acme.ops.carol   offline\n"},
+		{"acme.demo", "OWNER  GROUP  NAME   ADDRESS          STATE\nacme   demo   alice  acme.demo.alice  offline\nacme   demo   bob    acme.demo.bob    offline\n"},
+		{"acme.ops", "OWNER  GROUP  NAME   ADDRESS         STATE\nacme   ops    carol  acme.ops.carol  offline\n"},
+		{"zed", "OWNER  GROUP  NAME  ADDRESS        STATE\nzed    demo   dave  zed.demo.dave  offline\n"},
 		{"nobody", "No endpoints.\n"},
 		{"acme.nothing", "No endpoints.\n"},
 		{"ac", "No endpoints.\n"}, // a prefix is a whole owner, not the start of a word
@@ -92,19 +92,19 @@ func TestEndpointListWide(t *testing.T) {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
 	lines := strings.Split(strings.TrimSuffix(out, "\n"), "\n")
-	re := regexp.MustCompile(`^(\S*)\s+(\S*)\s+(\S+)\s+(\S+)\s+(\d{4}-\d\d-\d\d \d\d:\d\d)\s+(\d+)\s+(\S+)$`)
-	if len(lines) != 3 || lines[0] != "OWNER  GROUP  NAME   STATE    CREATED           WAITING  LABELS" {
+	re := regexp.MustCompile(`^(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\d{4}-\d\d-\d\d \d\d:\d\d)\s+(\d+)\s+(\S+)$`)
+	if len(lines) != 3 || lines[0] != "OWNER  GROUP  ADDRESS          STATE    CREATED           WAITING  LABELS" {
 		t.Fatalf("%q", out)
 	}
 	alice, bob := re.FindStringSubmatch(lines[1]), re.FindStringSubmatch(lines[2])
 	if alice == nil || bob == nil {
 		t.Fatalf("rows do not match %s:\n%s", re, out)
 	}
-	if alice[3] != "alice" || alice[6] != "0" || alice[7] != "team=blue" || bob[1] != "" && bob[1] != "acme" || bob[3] != "bob" || bob[6] != "2" || bob[7] != "-" {
+	if alice[3] != "acme.demo.alice" || alice[6] != "0" || alice[7] != "team=blue" || bob[1] != "acme" || bob[2] != "demo" || bob[3] != "acme.demo.bob" || bob[6] != "2" || bob[7] != "-" {
 		t.Errorf("alice %q bob %q", alice, bob)
 	}
-	if !strings.HasPrefix(lines[2], "              bob") {
-		t.Errorf("the repeated owner and group are blank in --wide too: %q", lines[2])
+	if !strings.HasPrefix(lines[2], "acme   demo   acme.demo.bob") {
+		t.Errorf("owner and group are printed on every row in --wide too: %q", lines[2])
 	}
 	// without --wide the waiting count is not read, and the columns are the four
 	if out, _, _ := h.run("endpoint", "list", "acme.demo"); strings.Contains(out, "CREATED") || strings.Contains(out, "WAITING") {

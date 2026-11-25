@@ -224,13 +224,13 @@ mashctl endpoint list [PREFIX] [--wide] [--json]
 mashctl endpoint show ADDRESS [--json]
 ```
 
-`list` prints a table of the endpoints in the directory, sorted by address. PREFIX is an owner (`acme`) or an owner and group (`acme.demo`); only endpoints under it are listed. An owner or group that repeats the row above is left blank. STATE is `online` (a session holds the endpoint's lease), `offline`, or `suspended`. `--wide` adds CREATED (UTC), WAITING (messages not yet delivered) and LABELS (`-` when there are none). With no endpoint it prints `No endpoints.` It exits 0, also when there are none.
+`list` prints a table of the endpoints in the directory, sorted by address. PREFIX is an owner (`acme`) or an owner and group (`acme.demo`); only endpoints under it are listed. Every row prints its owner, group and ADDRESS, so a line stands on its own. STATE is `online` (a session holds the endpoint's lease), `offline`, or `suspended`. `--wide` shows ADDRESS in place of NAME and adds CREATED (UTC), WAITING (messages not yet delivered) and LABELS (`-` when there are none). With no endpoint it prints `No endpoints.` It exits 0, also when there are none.
 
 ```text
-OWNER  GROUP  NAME   STATE
-acme   demo   alice  online
-              bob    offline
-       ops    carol  suspended
+OWNER  GROUP  NAME   ADDRESS          STATE
+acme   demo   alice  acme.demo.alice  online
+acme   demo   bob    acme.demo.bob    offline
+acme   ops    carol  acme.ops.carol   suspended
 ```
 
 `show` prints one endpoint:

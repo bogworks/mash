@@ -38,7 +38,7 @@ func TestMashctlVerbs(t *testing.T) {
 	e := testenv.Start(t)
 	makeStorageFor(t, e)
 	provisionAs(t, e, "c", admin.Meta{Role: "r"})
-	if out, _, code := ctlRun(t, e, "endpoint", "list"); code != 0 || out != "OWNER  GROUP  NAME  STATE\no      g      c     offline\n" {
+	if out, _, code := ctlRun(t, e, "endpoint", "list"); code != 0 || out != "OWNER  GROUP  NAME  ADDRESS  STATE\no      g      c     o.g.c    offline\n" {
 		t.Fatalf("endpoint list: %d %q", code, out)
 	}
 	if out, errb, code := ctlRun(t, e, "endpoint", "set", "o.g.c", "host=h1"); code != 0 || out != "Updated endpoint o.g.c\n" {

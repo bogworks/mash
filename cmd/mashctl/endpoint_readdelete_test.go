@@ -196,7 +196,7 @@ func TestEndpointListZeroAndTwo(t *testing.T) {
 	h.seed(ad("b"))
 	h.seed(ad("a"))
 	out, errb, code = h.run("endpoint", "list")
-	if code != 0 || out != "OWNER  GROUP  NAME  STATE\no      g      a     offline\n              b     offline\n" || errb != "" {
+	if code != 0 || out != "OWNER  GROUP  NAME  ADDRESS  STATE\no      g      a     o.g.a    offline\no      g      b     o.g.b    offline\n" || errb != "" {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
 	noSecrets(t, out, errb)
