@@ -79,7 +79,7 @@ type Options struct {
 	hostGOOS        string                                                                                    // test seam: the host's GOOS, which decides whether the candidate's host build serves the linux container; default runtime.GOOS
 }
 
-var versionRE = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
+var versionRE = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`) // no leading zeros: internal/release reads the version the same way
 
 func main() { os.Exit(mainRun(os.Args[1:], os.Stdout)) }
 

@@ -520,7 +520,7 @@ func TestCheck_aTruncatedOrMalformedCIResponseCannotPass(t *testing.T) {
 
 func TestRun_usageAndExitCodes(t *testing.T) {
 	var out bytes.Buffer
-	for _, args := range [][]string{{}, {"onlyone"}, {"--assets", "0.1.0"}, {"a", "0.1"}, {"a", "v0.1.0"}, {"a", "0.1.0-rc1"}, {"--assets", "01", "x"}} {
+	for _, args := range [][]string{{}, {"onlyone"}, {"--assets", "0.1.0"}, {"a", "0.1"}, {"a", "v0.1.0"}, {"a", "0.1.0-rc1"}, {"--assets", "01", "x"}, {"--assets", "x", "0.5.09"}, {"x", "0.05.9"}} {
 		if got := mainRun(args, &out); got != 2 {
 			t.Errorf("%v: exit %d, want 2", args, got)
 		}
