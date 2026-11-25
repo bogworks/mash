@@ -175,8 +175,8 @@ func firstReason(out string) string {
 	return strings.TrimSpace(out)
 }
 
-// Send has the release write one message. A basic send must succeed (its failure is returned by BasicErr); a send that
-// uses a flag the release lacks is counted, noted and skipped. The message is recorded in Ledger when it was written.
+// Send has the release write one message. A basic send must succeed (its failure is returned by BasicErr); an optional send that
+// fails because the release lacks its flag is counted, noted and skipped; any other failure fails the run too. The message is recorded in Ledger when it was written.
 func (k *Kit) Send(basic bool, s Sent) {
 	args := []string{"send", k.To(s.To)}
 	stdin := ""
@@ -210,12 +210,25 @@ func (k *Kit) Send(basic bool, s Sent) {
 			}
 			return
 		}
-		note := fmt.Sprintf("%s send (%s) refused: %v", k.Tag, strings.Join(args[2:], " "), err)
+		if !LacksFlag(err) { // any other failure of a supported send is a broken send path: the run fails
+			if k.basicErr == nil {
+				k.basicErr = fmt.Errorf("send %v failed: %w", args[2:], err)
+			}
+			return
+		}
+		note := fmt.Sprintf("%s send (%s): this release lacks the flag: %v", k.Tag, strings.Join(args[2:], " "), err)
 		k.Notes = append(k.Notes, note)
 		fmt.Fprintln(os.Stderr, "note: "+note)
 		return
 	}
 	k.Ledger = append(k.Ledger, s)
+}
+
+// LacksFlag is true when a send failed because the release does not know a flag (the only reason an optional send is skipped).
+func LacksFlag(err error) bool {
+	m := strings.ToLower(err.Error())
+	return strings.Contains(m, "unknown flag") || strings.Contains(m, "unknown option") ||
+		strings.Contains(m, "flag provided but not defined") || strings.Contains(m, "unrecognized")
 }
 
 // BasicErr is the first failed basic send, or nil.

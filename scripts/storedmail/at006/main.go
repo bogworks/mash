@@ -429,10 +429,9 @@ func sendSet(k *kit.Kit) {
 	k.Send(false, kit.Sent{From: "carol", To: "bob", Body: "carol, instance only"})
 	k.Send(false, kit.Sent{From: "carol", To: "bob", Body: "carol, every mark", Kind: "task", Urgent: true, ReplyTo: 1, Relay: 1})
 	k.Send(false, kit.Sent{From: "carol", To: "alice", Body: "carol, urgent", Urgent: true, Kind: "blocker"})
-	// non-ASCII where mash carries it: the body, and the send id (the nonce) if the release lets it
+	// non-ASCII where mash carries it: the body (a send id is ASCII only, so it is not a non-ASCII case)
 	k.Send(false, kit.Sent{From: "alice", To: "bob", Body: "é ​‍ zero-width, combining, CJK 日本語, Arabic مرحبا, emoji 👩‍💻"})
 	k.Send(false, kit.Sent{From: "bob", To: "alice", Body: "multi-line\nпривет\n世界\n\ttabbed\n"})
-	k.Send(false, kit.Sent{From: "alice", To: "bob", Body: "unicode id", ID: "ключ-é世"})
 	// names at the length limits, as sender and as recipient
 	k.Send(true, kit.Sent{From: "longA", To: "longB", Body: "limit: longA to longB"})
 	k.Send(true, kit.Sent{From: "longB", To: "longA", Body: "limit: longB to longA"})
