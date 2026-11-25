@@ -24,4 +24,4 @@ row:
   `url`, `owner` and `tls_ca`: they are ignored (`TestOldSettingNamesAreIgnored` in `internal/config`).
 - `-h` for `--help` is a short flag, not a deprecated alias.
 - The one-time 0.5.5 migration script and the refusal of a 0.5.5 configuration folder: removed in 0.5.10 together, with
-  no replacement ([ADR 0180](decisions/0180-the-0-5-5-migration-script-and-the-refusal-of-a-0-5-5-configuration-folder-are-removed-in-0-5-10.md)).
+  no replacement ([ADR 0181](decisions/0181-the-0-5-5-migration-script-and-the-refusal-of-a-0-5-5-configuration-folder-are-removed-in-0-5-10.md)).

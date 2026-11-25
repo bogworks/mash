@@ -45,7 +45,7 @@ Chosen option: "Remove the script, the refusal and its hint together in 0.5.10",
   `curl | bash` migration command, #1458) and the regenerated reference pages.
 * A 0.5.5 configuration folder is then not specially detected: the tools read it as any other folder, and the old keys
   are ignored.
-* This record supersedes ADR 0170. ADR 0170 stays in the history with the status "superseded by ADR-0180".
+* This record supersedes ADR 0170. ADR 0170 stays in the history with the status "superseded by ADR-0181".
 
 ### Consequences
 

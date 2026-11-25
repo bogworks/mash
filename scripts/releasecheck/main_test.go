@@ -556,7 +556,7 @@ func TestAssets_passWithOurBuildsAndASignedTagAtX(t *testing.T) {
 }
 
 // fixtureAt0510 moves the fixture to a candidate that releases 0.5.10, the first release without the 0.5.5 migration script
-// (ADR 0180): the manifests say 0.5.10, the script is gone from scripts/, and v0.5.10 is a signed tag on the new X.
+// (ADR 0181): the manifests say 0.5.10, the script is gone from scripts/, and v0.5.10 is a signed tag on the new X.
 func fixtureAt0510(t *testing.T) *fixture {
 	t.Helper()
 	f := newFixture(t)

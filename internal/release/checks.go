@@ -130,7 +130,7 @@ func Binaries() []Binary {
 const ProvenanceName = "mash.intoto.jsonl"
 
 // MigrationScriptName is the one-time 0.5.5 configuration migration script that releases up to and including
-// MigrationScriptLastVersion carried as a third script (ADR 0152). From 0.5.10 on it is not a release asset (ADR 0180),
+// MigrationScriptLastVersion carried as a third script (ADR 0152). From 0.5.10 on it is not a release asset (ADR 0181),
 // and scripts/ no longer holds it; the published releases that carry it are still re-verified, so they are still held to it.
 // Every version up to and including 0.5.9 is held to the third script, also those before 0.5.5, which shipped no scripts
 // at all: the check does not tell them apart.
