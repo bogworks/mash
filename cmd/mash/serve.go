@@ -797,10 +797,20 @@ func noteWaiting(ctx context.Context, cfg config.Config) (clear func(), noteHeld
 	if s.Init() != nil {
 		return func() {}, func(*endpoint.LeaseHeldError) {}
 	}
-	if unlock, err := s.LockContext(ctx); err == nil {
-		_ = s.NoteWaiter(spool.WaiterRecord{PID: ppid, Session: session})
-		unlock()
+	// Both waits here run before the MCP server reads stdin, so closing stdin cannot end them: each is bounded by ctx or
+	// spoolLockStep, whichever ends first. A record not written now is written by noteHeld.
+	var noted atomic.Bool
+	noteWaiter := func() {
+		wctx, cancel := context.WithTimeout(ctx, spoolLockStep)
+		defer cancel()
+		if unlock, err := s.LockContext(wctx); err == nil {
+			defer unlock()
+			if !noted.Load() && s.NoteWaiter(spool.WaiterRecord{PID: ppid, Session: session}) == nil {
+				noted.Store(true)
+			}
+		}
 	}
+	noteWaiter()
 	// instance tells this serve's state from another serve's (the files are shared, and a pid can be reused or, in a test,
 	// shared): the state is removed only if it still names this serve.
 	var rb [8]byte
@@ -808,7 +818,7 @@ func noteWaiting(ctx context.Context, cfg config.Config) (clear func(), noteHeld
 	instance := hex.EncodeToString(rb[:])
 	return func() {
 			// Runs as serve exits: a fresh short bound, so a stalled hook holding the lock cannot keep serve from exiting.
-			cctx, cancel := context.WithTimeout(context.Background(), cleanupLockWait)
+			cctx, cancel := context.WithTimeout(context.Background(), spoolLockStep)
 			defer cancel()
 			if unlock, err := s.LockContext(cctx); err == nil {
 				_ = s.ClearWaiter(ppid)
@@ -816,7 +826,12 @@ func noteWaiting(ctx context.Context, cfg config.Config) (clear func(), noteHeld
 				unlock()
 			}
 		}, func(h *endpoint.LeaseHeldError) {
-			if unlock, err := s.LockContext(ctx); err == nil {
+			wctx, cancel := context.WithTimeout(ctx, spoolLockStep)
+			defer cancel()
+			if unlock, err := s.LockContext(wctx); err == nil {
+				if !noted.Load() && s.NoteWaiter(spool.WaiterRecord{PID: ppid, Session: session}) == nil {
+					noted.Store(true)
+				}
 				_ = s.NoteWaitState(spool.WaitState{HolderPID: h.PID, HolderHost: h.Host, HolderSince: h.Since,
 					ServePID: os.Getpid(), Instance: instance, ParentPID: ppid, Session: session, Updated: time.Now().UTC()})
 				unlock()
@@ -824,8 +839,9 @@ func noteWaiting(ctx context.Context, cfg config.Config) (clear func(), noteHeld
 		}
 }
 
-// cleanupLockWait is the longest serve's exit cleanup waits for the spool lock.
-var cleanupLockWait = time.Second
+// spoolLockStep is the longest one of serve's startup or exit spool lock waits that runs outside the MCP server's
+// reading of stdin (the waiter record, the lease-wait state, the exit cleanup) lasts, unless its context ends first.
+var spoolLockStep = time.Second
 
 // leaseRollupWarned makes the lease bucket warning appear at most once per process.
 var leaseRollupWarned sync.Once
