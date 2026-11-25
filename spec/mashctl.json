@@ -919,7 +919,7 @@
         "value": [
          {
           "case": "Asked, then deleted",
-          "text": "This deletes acme.demo.bob and the 1 message in its inbox. It cannot be undone.\nType the address to confirm: acme.demo.bob\nDeleted endpoint acme.demo.bob",
+          "text": "This deletes acme.demo.bob and the 1 message in its inbox.\nMail that arrives before it is gone is lost too. It cannot be undone.\nType the address to confirm: acme.demo.bob\nDeleted endpoint acme.demo.bob",
           "stream": "stdout",
           "exit": 0
          },

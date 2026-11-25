@@ -50,7 +50,8 @@ mashctl endpoint delete acme.demo.bob
 Stream: stdout. Exit code: 0.
 
 ```text
-This deletes acme.demo.bob and the 1 message in its inbox. It cannot be undone.
+This deletes acme.demo.bob and the 1 message in its inbox.
+Mail that arrives before it is gone is lost too. It cannot be undone.
 Type the address to confirm: acme.demo.bob
 Deleted endpoint acme.demo.bob
 ```
