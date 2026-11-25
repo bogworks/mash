@@ -326,7 +326,7 @@ func (e *Endpoint) scanStored(ctx context.Context) error {
 		for i := range raws {
 			seq := from + uint64(i)
 			if e.leaseGone.Load() { // a replacement serve may scan now: this one writes nothing more
-				return errors.New("mash: stored mail check: the endpoint lost its lease")
+				return nil // stopped, not finished: nothing is marked done, and a replacement serve scans
 			}
 			if e.scanStep != nil {
 				if err := e.scanStep(seq); err != nil {
@@ -356,7 +356,7 @@ func (e *Endpoint) scanStored(ctx context.Context) error {
 	refusedMu.Lock()
 	defer refusedMu.Unlock()
 	if e.leaseGone.Load() {
-		return errors.New("mash: stored mail check: the endpoint lost its lease")
+		return nil // stopped, not finished: nothing is marked done, and a replacement serve scans
 	}
 	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 		return err

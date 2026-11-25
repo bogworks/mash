@@ -415,7 +415,7 @@ func malformedLines(log string) int {
 	return n
 }
 
-// An endpoint that lost its lease stops the scan: the error says so, the refused-malformed list is not marked Done (a
+// An endpoint that lost its lease stops the scan quietly: the refused-malformed list is not marked Done (a
 // replacement serve may be scanning), and a later serve rescans.
 func TestScanStopsOnLeaseLoss(t *testing.T) {
 	f := newFixture(t, "a", "b")
@@ -433,13 +433,12 @@ func TestScanStopsOnLeaseLoss(t *testing.T) {
 			return nil
 		}
 	})
+	waitFor(t, "the scan to reach its 2nd step", 10*time.Second, func() bool { return steps >= 2 })
+	time.Sleep(500 * time.Millisecond) // a scan that did not stop would take more steps and write Done
 	select {
 	case err := <-runErr:
-		if err == nil || !strings.Contains(err.Error(), "lost its lease") {
-			t.Fatalf("Run returned %v, want the lease error", err)
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("the scan did not stop on the lost lease")
+		t.Fatalf("Run ended: %v (a lost lease stops the scan, it does not fail startup)", err)
+	default:
 	}
 	if steps != 2 {
 		t.Fatalf("the scan took %d steps, want it to stop at the 2nd", steps)
