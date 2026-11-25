@@ -3,12 +3,15 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -234,15 +237,24 @@ func retireAddress(addr sap.Address, opts retireOpts, env func(string) string, l
 	// (2) the creds file, last, renamed aside; a symlink or anything but a regular file is left alone.
 	if credsPath != "" {
 		fi, err := os.Lstat(credsPath)
+		archive := false
 		switch {
 		case errors.Is(err, os.ErrNotExist):
+			// A crash after the rename leaves the creds at a staging name; rerunning finishes it.
+			left, lerr := leftovers(credsPath)
+			if lerr != nil {
+				return retireResult{}, partial("its creds file was not moved")
+			}
+			archive = len(left) > 0
 		case err != nil:
 			return retireResult{}, partial("its creds file was not moved")
 		case !fi.Mode().IsRegular():
 			return retireResult{}, partial("its creds path is not a file")
 		default:
-			dest := credsPath + ".deleted"
-			final, err := archiveNoReplace(credsPath, dest)
+			archive = true
+		}
+		if archive {
+			final, err := archiveNoReplace(credsPath, credsPath+".deleted")
 			if err != nil {
 				return retireResult{}, partial("its creds file was not moved")
 			}
@@ -255,16 +267,148 @@ func retireAddress(addr sap.Address, opts retireOpts, env func(string) string, l
 	return res, nil
 }
 
+// archiveHook is a test seam: called by archiveNoReplace right after it has taken ownership of src (renamed it to
+// a unique src+".deleting.<id>" name) and before it reads it, so a test can replace src at that moment. Nil in
+// production.
+var archiveHook func()
+
+// renameHook is a test seam: called by archiveNoReplace between its Lstat of src and the rename of src to its
+// staging name, so a test can swap the file at src at that moment. Nil in production.
+var renameHook func()
+
+var stageSeq atomic.Uint64
+
+// stageName is a staging name for src that no other attempt uses: the process id, a counter and random bytes.
+func stageName(src string) string {
+	var r [6]byte
+	rand.Read(r[:])
+	return fmt.Sprintf("%s.deleting.%d.%d.%x", src, os.Getpid(), stageSeq.Add(1), r)
+}
+
+// stagedSuffix matches what follows src+".deleting." in a name stageName makes: pid, counter, 12 hex digits.
+var stagedSuffix = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9a-f]{12}$`)
+
+// leftovers lists the staging files of src, the names stageName makes, left by interrupted or running attempts,
+// sorted. Any other file with the src+".deleting." prefix is not ours and is left alone.
+// A directory that cannot be listed is an error, not "none": a staged creds file may be in it. A missing one has none.
+func leftovers(src string) ([]string, error) {
+	ents, err := os.ReadDir(filepath.Dir(src))
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("cannot list %s to look for staged creds files: %w", filepath.Dir(src), err)
+	}
+	pre := filepath.Base(src) + ".deleting."
+	var out []string
+	for _, e := range ents {
+		if strings.HasPrefix(e.Name(), pre) && stagedSuffix.MatchString(strings.TrimPrefix(e.Name(), pre)) {
+			out = append(out, filepath.Join(filepath.Dir(src), e.Name()))
+		}
+	}
+	return out, nil
+}
+
 // archiveNoReplace sets src aside at dest as a marker that keeps the endpoint's name and its JWT block and no key:
 // a new file, never replacing an existing one (dest, then dest.1 to dest.100), with src's mode bits, written, synced
-// and its directory synced before src is removed. It returns the marker's path. If every name is taken, or the
-// marker cannot be made durable, src is left in place. The seed may remain in disk blocks after src is removed.
+// and its directory synced before the creds file is removed. It returns the marker's path.
+//
+// It first takes ownership of src with an atomic rename to a name unique to this attempt,
+// src+".deleting.<pid>.<n>.<random>", which no other attempt uses, so a rename never overwrites a file. It reads,
+// stats and removes only that file, never src again, so a creds file put at src meanwhile is neither read nor
+// removed. After the rename it checks that the file it took is the one it examined (os.SameFile); if src was
+// replaced between the Lstat and the rename, the replacement is put back at src (never overwriting) and nothing is
+// archived or removed. Staging files left by an interrupted run (the names stageName makes, regular files only) are each claimed by a
+// rename to a fresh unique name, which only one attempt can win, and archived first, each to its own marker; if src
+// is then missing, the last of those markers' path is returned, otherwise src is archived too and its marker's path
+// is returned. If every name is taken, or the marker cannot be made durable, the half marker is deleted and src is
+// restored, or left under its staging name if the name src was taken meanwhile (a retry finds it). The seed may
+// remain in disk blocks after removal.
 func archiveNoReplace(src, dest string) (string, error) {
-	fi, err := os.Stat(src)
+	left := ""
+	staged, err := leftovers(src)
 	if err != nil {
 		return "", err
 	}
-	raw, err := os.ReadFile(src)
+	for _, l := range staged {
+		fi, err := os.Lstat(l)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return "", err
+		}
+		if !fi.Mode().IsRegular() {
+			return "", fmt.Errorf("%s is not a file", l)
+		}
+		claimed := stageName(src)
+		if err := os.Rename(l, claimed); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue // another attempt took it
+			}
+			return "", err
+		}
+		m, err := archiveOwned(src, claimed, dest)
+		if err != nil {
+			return "", err
+		}
+		left = m
+	}
+	fi, err := os.Lstat(src)
+	if err != nil {
+		if left != "" && errors.Is(err, os.ErrNotExist) {
+			return left, nil
+		}
+		return "", err
+	}
+	if !fi.Mode().IsRegular() {
+		return "", fmt.Errorf("%s is not a regular file", src)
+	}
+	own := stageName(src)
+	if renameHook != nil {
+		renameHook()
+	}
+	if err := os.Rename(src, own); err != nil {
+		return "", err
+	}
+	ownInfo, err := os.Lstat(own)
+	if err != nil {
+		restoreOwnership(own, src)
+		return "", err
+	}
+	if !os.SameFile(fi, ownInfo) {
+		restoreOwnership(own, src)
+		return "", fmt.Errorf("%s changed while it was being moved; nothing was removed", src)
+	}
+	if !ownInfo.Mode().IsRegular() {
+		restoreOwnership(own, src)
+		return "", fmt.Errorf("%s is not a regular file", src)
+	}
+	if archiveHook != nil {
+		archiveHook()
+	}
+	m, err := archiveOwned(src, own, dest)
+	if err != nil {
+		restoreOwnership(own, src)
+		return "", err
+	}
+	return m, nil
+}
+
+// restoreOwnership puts own back at src, only if src does not exist: a hard link fails if src is taken, so a
+// replacement is never clobbered. If src is taken, or the filesystem refuses hard links, own stays where it is for a
+// retry to find: a rename after an existence check could overwrite a file put at src in between.
+func restoreOwnership(own, src string) {
+	if err := os.Link(own, src); err == nil {
+		os.Remove(own)
+	}
+}
+
+// archiveOwned writes the marker for the creds file own (named src in errors) at the first free name of dest, dest.1
+// to dest.100, and removes own once the marker is durable. On failure own is left where it is.
+func archiveOwned(src, own, dest string) (string, error) {
+	fi, err := os.Stat(own)
+	if err != nil {
+		return "", err
+	}
+	raw, err := os.ReadFile(own)
 	if err != nil {
 		return "", err
 	}
@@ -281,7 +425,7 @@ func archiveNoReplace(src, dest string) (string, error) {
 			}
 			return "", err
 		}
-		if err := writeMarkerAndRemove(src, out, marker, fi.Mode().Perm()); err != nil {
+		if err := writeMarkerAndRemove(own, out, marker, fi.Mode().Perm()); err != nil {
 			return "", err
 		}
 		return d, nil
@@ -335,8 +479,9 @@ func syncDir(dir string) error {
 }
 
 // writeMarkerAndRemove writes marker into out, makes it durable (file, then its directory), and only then removes
-// src. On any failure before removal the half-written marker is deleted and src is left in place.
-func writeMarkerAndRemove(src string, out *os.File, marker []byte, mode os.FileMode) error {
+// own, the creds file archiveNoReplace took ownership of. On any failure before removal the half-written marker is
+// deleted and own is left in place.
+func writeMarkerAndRemove(own string, out *os.File, marker []byte, mode os.FileMode) error {
 	fail := func(err error) error {
 		out.Close()
 		os.Remove(out.Name())
@@ -360,7 +505,7 @@ func writeMarkerAndRemove(src string, out *os.File, marker []byte, mode os.FileM
 		os.Remove(out.Name())
 		return err
 	}
-	if err := os.Remove(src); err != nil {
+	if err := os.Remove(own); err != nil {
 		return err
 	}
 	// Best effort: the marker is already durable, and failing here must not make the caller delete it.

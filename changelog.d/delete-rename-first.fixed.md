@@ -1,0 +1,1 @@
+**`mashctl endpoint delete` no longer removes a creds file that was replaced while it was being archived.** It now takes the file aside first and archives that one, so a new file at the same path is left alone.
