@@ -102,6 +102,40 @@ keys       FAIL  1 connected user was not issued by mashctl:
 hint: revoke it with the tool that issued it (mashctl revokes only its own)
 ```
 
+### A revoked key is connected and mashctl's users keep connecting and leaving
+
+Stream: stdout. Exit code: 1.
+
+```text
+config     ok
+server     ok    tls://localhost:4222
+sign-in    ok
+storage    ok
+endpoints  ok    3 records, 3 inboxes
+keys       FAIL  1 revoked key is still connected
+                 mashctl's users kept connecting and leaving; read 3 times
+                 wait a minute and run it again
+
+1 problem.
+```
+
+### --audit-users: two servers whose users keep changing
+
+Stream: stdout. Exit code: 1.
+
+```text
+config     ok
+server     ok    tls://localhost:4222
+sign-in    ok
+storage    ok
+endpoints  ok    3 records, 3 inboxes
+keys       FAIL  server s1's connected users kept changing
+                 server NABCDEFGHI...LMNOPQRSTUV's connected users kept changing
+                 read 3 times; wait a minute and run it again
+
+1 problem.
+```
+
 ### No server is configured
 
 Stream: stdout, then the hint on stderr. Exit code: 1.

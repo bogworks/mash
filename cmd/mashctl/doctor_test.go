@@ -12,6 +12,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats-server/v2/server"
@@ -21,6 +22,7 @@ import (
 
 	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/apply"
+	"github.com/bogworks/mash/internal/cellwidth"
 	"github.com/bogworks/mash/internal/natsauth"
 	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/store"
@@ -679,13 +681,13 @@ func TestDoctorRevokedStillConnectedFailsWithoutAudit(t *testing.T) {
 	rogueKey(t, e, "tool-a")
 	for _, args := range [][]string{{}, {"--strict"}} {
 		_, by, code := doctorJSON(t, e.run, args...)
-		if c := by["keys"]; code != 1 || c.State != "fail" || c.Detail != "1 revoked key is still connected\n1 other user, not issued by mashctl" || c.Fix == nil || *c.Fix != "mashctl endpoint list" {
+		if c := by["keys"]; code != 1 || c.State != "fail" || c.Detail != "1 revoked key is still connected\n1 other user, not issued by mashctl" || c.Fix != nil {
 			t.Fatalf("%v: %d %+v", args, code, c)
 		}
 	}
 	_, by, code := doctorJSON(t, e.run, "--audit-users")
 	c := by["keys"]
-	if code != 1 || !strings.HasPrefix(c.Detail, "1 revoked key is still connected\n1 connected user was not issued by mashctl:\nU") || c.Fix == nil || *c.Fix != "mashctl endpoint list" {
+	if code != 1 || !strings.HasPrefix(c.Detail, "1 revoked key is still connected\n1 connected user was not issued by mashctl:\nU") || c.Fix != nil {
 		t.Fatalf("audit: %d %+v", code, c)
 	}
 }
@@ -828,6 +830,124 @@ func TestDoctorAuditUsersRevokedKeyLinesFit80Columns(t *testing.T) {
 	}
 }
 
+// maxLine is the longest line of a rendered doctor output, and the line itself.
+func maxLine(out string) (int, string) {
+	n, at := 0, ""
+	for _, l := range strings.Split(out, "\n") {
+		if len(l) > n {
+			n, at = len(l), l
+		}
+	}
+	return n, at
+}
+
+// A revoked key still connected plus churn of mashctl's own users: the failure and the warning are lines of their own,
+// in the text and in the JSON detail, and none passes 80 columns.
+func TestDoctorKeysRevokedAndMashChurnLinesFit80Columns(t *testing.T) {
+	e := newXYEnv(t)
+	_, xKey := credsSubject(t, e.credsPath(xy("x").String()))
+	adm, ctx, closeAdm := e.admin()
+	defer closeAdm()
+	if err := adm.MarkRevoked(ctx, xKey, time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+	calls := scriptScans(t, keyScan(true, xKey), keyScan(true), keyScan(true, xKey))
+	_, by, code := doctorJSON(t, e.run)
+	*calls = 0
+	const want = "1 revoked key is still connected\nmashctl's users kept connecting and leaving; read 3 times\nwait a minute and run it again"
+	if c := by["keys"]; code != 1 || c.State != "fail" || c.Detail != want || c.Fix != nil {
+		t.Fatalf("%d %+v", code, c)
+	}
+	out, errb, _ := e.run("doctor")
+	text := cleanText(e, out)
+	if !strings.Contains(text, "keys       FAIL  1 revoked key is still connected\n                 mashctl's users kept connecting and leaving; read 3 times\n                 wait a minute and run it again\n") {
+		t.Fatalf("%q", text)
+	}
+	if n, l := maxLine(text + errb); n > 80 {
+		t.Fatalf("%d columns: %q", n, l)
+	}
+}
+
+// With --audit-users, two servers whose lists kept changing, one of them unnamed (known by its 56-character id), are one
+// line each; no line passes 80 columns and the long id is shortened.
+func TestDoctorAuditUsersChurnOfTwoServersLinesFit80Columns(t *testing.T) {
+	e := newXYEnv(t)
+	id := strings.Repeat("N", 56)
+	short := id[:10] + "..." + id[:11]
+	sc := keyScan(true)
+	sc.Incomplete = "server s1's connected users kept changing\nserver " + short + "'s connected users kept changing"
+	scriptScans(t, sc)
+	_, by, code := doctorJSON(t, e.run, "--audit-users")
+	want := "server s1's connected users kept changing\nserver " + short + "'s connected users kept changing\nread 3 times; wait a minute and run it again"
+	if c := by["keys"]; code != 1 || c.State != "fail" || c.Detail != want {
+		t.Fatalf("%d %+v", code, c)
+	}
+	out, errb, _ := e.run("doctor", "--audit-users")
+	text := cleanText(e, out)
+	if n, l := maxLine(text + errb); n > 80 {
+		t.Fatalf("%d columns: %q", n, l)
+	}
+	for _, l := range []string{"server s1's connected", "server " + short + "'s connected"} {
+		if strings.Count(text, l) != 1 {
+			t.Fatalf("%q once: %q", l, text)
+		}
+	}
+	// Other incomplete reasons that run long are continued on lines of their own.
+	long := "2 server(s) replied, and they name different clusters (first seen: " + strings.Repeat("c", 30) + "): membership cannot be verified from here"
+	sc.Incomplete, sc.Unsettled = long, false
+	scriptScans(t, sc)
+	out, errb, _ = e.run("doctor", "--audit-users")
+	if n, l := maxLine(cleanText(e, out) + errb); n > 80 {
+		t.Fatalf("%d columns: %q", n, l)
+	}
+}
+
+// An incomplete reason that wraps, or holds a word longer than a line, still fits 80 columns beside a revoked key.
+func TestDoctorKeysLongIncompleteReasonWithRevokedKeyFits80Columns(t *testing.T) {
+	word := ""
+	for i := 0; i < 100; i++ {
+		word += string(rune('a' + i%26))
+	}
+	for name, reason := range map[string]string{
+		"wraps":    "2 server(s) replied, and they name different clusters (first seen: " + strings.Repeat("c", 30) + "): membership cannot be verified",
+		"longword": "server " + word + " did not reply",
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newXYEnv(t)
+			_, xKey := credsSubject(t, e.credsPath(xy("x").String()))
+			adm, ctx, closeAdm := e.admin()
+			defer closeAdm()
+			if err := adm.MarkRevoked(ctx, xKey, time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)); err != nil {
+				t.Fatal(err)
+			}
+			sc := keyScan(false, xKey)
+			sc.Incomplete = reason
+			scriptScans(t, sc)
+			out, errb, _ := e.run("doctor", "--audit-users")
+			text := cleanText(e, out)
+			if n, l := maxLine(text + errb); n > 80 {
+				t.Fatalf("%d columns: %q", n, l)
+			}
+			if !strings.Contains(text, "1 revoked key is still connected") {
+				t.Fatalf("%q", text)
+			}
+			if name == "longword" {
+				var got strings.Builder
+				for _, l := range strings.Split(text, "\n") {
+					for _, c := range strings.Fields(l) {
+						if len(c) > 0 && strings.Contains(word, c) {
+							got.WriteString(c)
+						}
+					}
+				}
+				if !strings.Contains(got.String(), word) {
+					t.Fatalf("word lost: %q", text)
+				}
+			}
+		})
+	}
+}
+
 // scriptScans makes the keys check read the scripted scans in order (the last one repeats) and returns the number of
 // reads made. churnPause is 0 for the test.
 func scriptScans(t *testing.T, scans ...connScan) *int {
@@ -868,14 +988,18 @@ func cidScan(unsettled bool, cids map[string]uint64) connScan {
 	return sc
 }
 
-func checkFits80(t *testing.T, e *applyEnv, args ...string) {
+// checkFits80 runs doctor with args and fails if any line passes 80 columns; it returns the text so the caller can
+// assert the line it meant to measure is there. The caller resets the scripted read counter first.
+func checkFits80(t *testing.T, e *applyEnv, args ...string) string {
 	t.Helper()
 	out, errb, _ := e.run(args...)
-	for _, l := range strings.Split(cleanText(e, out)+errb, "\n") {
+	text := cleanText(e, out) + errb
+	for _, l := range strings.Split(text, "\n") {
 		if len(l) > 80 {
 			t.Errorf("%v: %d columns: %q", args, len(l), l)
 		}
 	}
+	return text
 }
 
 // Churn only among users mashctl did not issue is not a finding: ok in both modes, the count shown.
@@ -889,7 +1013,10 @@ func TestDoctorKeysChurnOfForeignUsersIsNotAFinding(t *testing.T) {
 			t.Fatalf("%v: %d %+v", args, code, c)
 		}
 	}
-	checkFits80(t, e, "doctor")
+	*calls = 0
+	if text := checkFits80(t, e, "doctor"); !strings.Contains(text, "mashctl's users ok; 2 other users") {
+		t.Fatalf("not measuring the ok line: %q", text)
+	}
 }
 
 // Persistent churn of one of mashctl's users warns after three reads: exit 0, and 1 with --strict.
@@ -905,7 +1032,7 @@ func TestDoctorKeysChurnOfMashUsersWarns(t *testing.T) {
 		*calls = 0
 		_, by, code := doctorJSON(t, e.run, c.args...)
 		k := by["keys"]
-		if code != c.exit || k.State != "warn" || !strings.HasPrefix(k.Detail, line) || k.Fix == nil || *k.Fix != "wait a minute, then run mashctl doctor again" || *calls != 3 {
+		if code != c.exit || k.State != "warn" || !strings.HasPrefix(k.Detail, line) || k.Fix != nil || *calls != 3 {
 			t.Fatalf("%v: %d calls %d %+v", c.args, code, *calls, k)
 		}
 	}
@@ -914,7 +1041,40 @@ func TestDoctorKeysChurnOfMashUsersWarns(t *testing.T) {
 	if !strings.Contains(cleanText(e, out), "keys       warn  "+line) {
 		t.Fatalf("%q", cleanText(e, out))
 	}
-	checkFits80(t, e, "doctor")
+	*calls = 0
+	if text := checkFits80(t, e, "doctor"); !strings.Contains(text, "keys       warn  "+line) {
+		t.Fatalf("not measuring the warn line: %q", text)
+	}
+}
+
+// A row with a revoked key still connected prints no hint, even when a churn warning follows it: rerunning doctor does
+// not end the connection. The churn warning alone has no hint either: waiting is not a fix.
+func TestDoctorKeysRevokedAndChurnHasNoHint(t *testing.T) {
+	e := newXYEnv(t)
+	_, xKey := credsSubject(t, e.credsPath(xy("x").String()))
+	adm, ctx, closeAdm := e.admin()
+	defer closeAdm()
+	if err := adm.MarkRevoked(ctx, xKey, time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+	calls := scriptScans(t, keyScan(true, xKey), keyScan(true), keyScan(true, xKey))
+	out, errb, code := e.run("doctor")
+	if code != 1 || !strings.Contains(cleanText(e, out), "FAIL") || strings.Contains(errb, "hint:") {
+		t.Fatalf("revoked and churn: %d %q %q", code, out, errb)
+	}
+	*calls = 0
+	_, by, _ := doctorJSON(t, e.run)
+	if c := by["keys"]; c.State != "fail" || c.Fix != nil {
+		t.Fatalf("json: %+v", c)
+	}
+	// Churn alone, with no revoked key, has no hint.
+	e2 := newXYEnv(t)
+	_, x2 := credsSubject(t, e2.credsPath(xy("x").String()))
+	scriptScans(t, keyScan(true, x2), keyScan(true), keyScan(true, x2))
+	out, errb, code = e2.run("doctor")
+	if code != 0 || !strings.Contains(cleanText(e2, out), "warn") || strings.Contains(errb, "hint:") {
+		t.Fatalf("churn alone: %d %q %q", code, out, errb)
+	}
 }
 
 // With --audit-users an unsettled read fails in plain words, and never names the scan's inner workings.
@@ -923,13 +1083,15 @@ func TestDoctorAuditUsersFailsOnChurn(t *testing.T) {
 	scriptScans(t, keyScan(true))
 	_, by, code := doctorJSON(t, e.run, "--audit-users")
 	k := by["keys"]
-	if code != 1 || k.State != "fail" || k.Detail != "server s1's connected users kept changing; read 3 times" || k.Fix == nil || *k.Fix != "wait a minute, then run mashctl doctor --audit-users again" {
+	if code != 1 || k.State != "fail" || k.Detail != "server s1's connected users kept changing\nread 3 times; wait a minute and run it again" || k.Fix != nil {
 		t.Fatalf("%d %+v", code, k)
 	}
 	if low := strings.ToLower(k.Detail); strings.Contains(low, "connz") || strings.Contains(low, "nats") || strings.Contains(low, "scans") {
 		t.Fatalf("%q", k.Detail)
 	}
-	checkFits80(t, e, "doctor", "--audit-users")
+	if text := checkFits80(t, e, "doctor", "--audit-users"); !strings.Contains(text, "kept changing") {
+		t.Fatalf("not measuring the churn line: %q", text)
+	}
 }
 
 // A read that settles on the second or third try gives the usual ok line.
@@ -992,7 +1154,7 @@ func TestDoctorKeysRevokedSeenInEarlierReadFails(t *testing.T) {
 	for _, args := range [][]string{{}, {"--strict"}} {
 		*calls = 0
 		_, by, code := doctorJSON(t, e.run, args...)
-		if c := by["keys"]; code != 1 || c.State != "fail" || !strings.HasPrefix(c.Detail, "1 revoked key is still connected") || c.Fix == nil || *c.Fix != "mashctl endpoint list" {
+		if c := by["keys"]; code != 1 || c.State != "fail" || !strings.HasPrefix(c.Detail, "1 revoked key is still connected") || c.Fix != nil {
 			t.Fatalf("%v: %d %+v", args, code, c)
 		}
 	}
@@ -1030,7 +1192,7 @@ func TestDoctorKeysRecordedCIDChangeWarns(t *testing.T) {
 	_, xKey := credsSubject(t, e.credsPath(xy("x").String()))
 	calls := scriptScans(t, cidScan(true, map[string]uint64{xKey: 1}), cidScan(true, map[string]uint64{xKey: 2}), cidScan(true, map[string]uint64{xKey: 2}))
 	runBoth(t, e, calls, "warn", 1, func(c doctorCheck) {
-		if !strings.HasPrefix(c.Detail, "mashctl's users kept connecting and leaving; read 3 times") || c.Fix == nil || *c.Fix != "wait a minute, then run mashctl doctor again" {
+		if !strings.HasPrefix(c.Detail, "mashctl's users kept connecting and leaving; read 3 times") || c.Fix != nil {
 			t.Fatalf("%+v", c)
 		}
 	})
@@ -1043,11 +1205,15 @@ func TestDoctorKeysDeadlineAfterOneRead(t *testing.T) {
 	oldScan, oldPause := scanConns, churnPause
 	t.Cleanup(func() { scanConns, churnPause = oldScan, oldPause })
 	churnPause = 0
+	oldDeadline := applyDeadline
+	t.Cleanup(func() { applyDeadline = oldDeadline })
+	applyDeadline = 300 * time.Millisecond
 	calls := 0
 	scanConns = func(ctx context.Context, _ *nats.Conn, _ string, _ int) (connScan, error) {
 		calls++
 		if calls > 1 {
-			return connScan{}, context.DeadlineExceeded
+			<-ctx.Done() // doctor's own deadline ends the read
+			return connScan{}, ctx.Err()
 		}
 		return keyScan(true), nil
 	}
@@ -1057,7 +1223,7 @@ func TestDoctorKeysDeadlineAfterOneRead(t *testing.T) {
 	}
 	calls = 0
 	_, by, code = doctorJSON(t, e.run, "--audit-users")
-	if c := by["keys"]; code != 1 || c.State != "fail" || c.Detail != "server s1's connected users kept changing; read once" {
+	if c := by["keys"]; code != 1 || c.State != "fail" || c.Detail != "server s1's connected users kept changing\nread once; wait a minute and run it again" {
 		t.Fatalf("%d %+v", code, c)
 	}
 	// An error on the first read still fails.
@@ -1066,6 +1232,65 @@ func TestDoctorKeysDeadlineAfterOneRead(t *testing.T) {
 	}
 	if _, by, code := doctorJSON(t, e.run); code != 1 || by["keys"].State != "fail" {
 		t.Fatalf("%d %+v", code, by["keys"])
+	}
+}
+
+// A scan whose pages never reconcile is unsettled (worth another read) only when the server set is complete and every
+// server answered: with a server missing it is incomplete, not churn, and the keys row fails with the init hint after
+// one read.
+func TestDoctorKeysIncompleteServerSetWithShiftingPagesIsNotChurn(t *testing.T) {
+	e := newXYEnv(t)
+	_, xKey := credsSubject(t, e.credsPath(xy("x").String()))
+	fake := fakeShiftingConnz(t, xKey)
+	// The scan itself: one server expected (complete) is unsettled; two expected (one answered) is not.
+	sc, err := scanConnections(context.Background(), fake, "A", 1)
+	if err != nil || !sc.Unsettled || !strings.Contains(sc.Incomplete, "kept changing") {
+		t.Fatalf("complete set: %v %+v", err, sc)
+	}
+	sc, err = scanConnections(context.Background(), fake, "A", 2)
+	if err != nil || sc.Unsettled || sc.Incomplete == "" || !strings.Contains(sc.Incomplete, "kept changing") {
+		t.Fatalf("incomplete set: %v %+v", err, sc)
+	}
+	// Through doctor: the same incomplete scan fails, once, with the init hint.
+	oldScan, oldPause := scanConns, churnPause
+	t.Cleanup(func() { scanConns, churnPause = oldScan, oldPause })
+	churnPause = 0
+	reads := 0
+	scanConns = func(ctx context.Context, _ *nats.Conn, account string, _ int) (connScan, error) {
+		reads++
+		return scanConnections(ctx, fake, account, 2)
+	}
+	_, by, code := doctorJSON(t, e.run)
+	k := by["keys"]
+	if code != 1 || k.State != "fail" || reads != 1 || !strings.Contains(k.Detail, "kept changing") || k.Fix == nil || *k.Fix != "mashctl init --config <file>" {
+		t.Fatalf("%d reads %d: %+v", code, reads, k)
+	}
+}
+
+// The deadline arriving during the pause between reads stops the loop: the row is decided from the reads so far.
+func TestDoctorKeysDeadlineDuringPauseBetweenReads(t *testing.T) {
+	e := newXYEnv(t)
+	oldScan, oldPause, oldDeadline := scanConns, churnPause, applyDeadline
+	t.Cleanup(func() { scanConns, churnPause, applyDeadline = oldScan, oldPause, oldDeadline })
+	churnPause = time.Minute // far longer than the deadline
+	applyDeadline = 200 * time.Millisecond
+	calls := 0
+	scanConns = func(context.Context, *nats.Conn, string, int) (connScan, error) {
+		calls++
+		return keyScan(true), nil
+	}
+	start := time.Now()
+	_, by, code := doctorJSON(t, e.run)
+	if c := by["keys"]; code != 0 || c.State != "warn" || !strings.HasPrefix(c.Detail, "mashctl's users kept connecting and leaving; read once") || calls != 1 {
+		t.Fatalf("%d calls %d %+v", code, calls, c)
+	}
+	if time.Since(start) > 30*time.Second {
+		t.Fatalf("the pause was not cut short: %v", time.Since(start))
+	}
+	calls = 0
+	_, by, code = doctorJSON(t, e.run, "--audit-users")
+	if c := by["keys"]; code != 1 || c.State != "fail" || c.Detail != "server s1's connected users kept changing\nread once; wait a minute and run it again" || calls != 1 {
+		t.Fatalf("%d calls %d %+v", code, calls, c)
 	}
 }
 
@@ -1163,5 +1388,111 @@ func TestDoctorKeysRealUnsettledScanOfForeignChurnIsOK(t *testing.T) {
 	_, by, code := doctorJSON(t, e.run)
 	if c := by["keys"]; code != 0 || c.State != "ok" || reads < 2 {
 		t.Fatalf("%d reads, exit %d: %+v", reads, code, c)
+	}
+}
+
+// A long word of multibyte characters is split between characters: every line is valid UTF-8 within the width, and the
+// text is kept whole and in order.
+func TestIncompleteLinesSplitsBetweenCharacters(t *testing.T) {
+	word := strings.Repeat("é世🙂", 50) // 150 characters, 2, 3 and 4 bytes each
+	in := "server " + word + " did not reply\nsecond " + strings.Repeat("世", 64)
+	got := incompleteLines(in)
+	var all strings.Builder
+	for _, l := range strings.Split(got, "\n") {
+		if !utf8.ValidString(l) {
+			t.Fatalf("invalid UTF-8: %q", l)
+		}
+		if n := utf8.RuneCountInString(l); n > 80 || n > detailWidth {
+			t.Fatalf("%d columns: %q", n, l)
+		}
+		all.WriteString(strings.ReplaceAll(l, " ", ""))
+	}
+	if want := strings.ReplaceAll(strings.ReplaceAll(in, " ", ""), "\n", ""); all.String() != want {
+		t.Fatalf("text changed: %q", got)
+	}
+}
+
+// Widths are terminal cells, not characters: words of wide (CJK, fullwidth, emoji) characters wrap so no line is wider
+// than the detail's 63 cells, and the text is kept whole and in order.
+func TestIncompleteLinesCountsCells(t *testing.T) {
+	in := "server " + strings.Repeat("世界", 20) + " did not reply " + strings.Repeat("界", 10) + " " +
+		strings.Repeat("🙂", 40) + " " + strings.Repeat("🚀", 24) + " " + strings.Repeat("ａ", 70) + "\nnext " + strings.Repeat("한국어 ", 30)
+	got := incompleteLines(in)
+	var all strings.Builder
+	for _, l := range strings.Split(got, "\n") {
+		if n := cellwidth.String(l); n > detailWidth {
+			t.Fatalf("%d cells: %q", n, l)
+		}
+		all.WriteString(strings.ReplaceAll(l, " ", ""))
+	}
+	if want := strings.ReplaceAll(strings.ReplaceAll(in, " ", ""), "\n", ""); all.String() != want {
+		t.Fatalf("text changed: %q", got)
+	}
+}
+
+// A page request's own timeout is not doctor's deadline: with the doctor context still alive, the error fails the row
+// even after an earlier complete read, with or without --audit-users.
+func TestDoctorKeysPageTimeoutIsNotTheDeadline(t *testing.T) {
+	e := newXYEnv(t)
+	oldScan, oldPause := scanConns, churnPause
+	t.Cleanup(func() { scanConns, churnPause = oldScan, oldPause })
+	churnPause = 0
+	for _, args := range [][]string{{}, {"--audit-users"}} {
+		calls := 0
+		scanConns = func(context.Context, *nats.Conn, string, int) (connScan, error) {
+			calls++
+			if calls > 1 {
+				return connScan{}, fmt.Errorf("server s1: the next CONNZ page: %w", context.DeadlineExceeded)
+			}
+			return keyScan(true), nil
+		}
+		_, by, code := doctorJSON(t, e.run, args...)
+		if c := by["keys"]; code != 1 || c.State != "fail" || !strings.Contains(c.Detail, "the next CONNZ page") {
+			t.Fatalf("%v: %d %+v", args, code, c)
+		}
+	}
+}
+
+// A connection of mashctl's own that changed between a server's inner page scans is churn, though the reads agree.
+func TestDoctorKeysInnerScanChangeOfMashUserWarns(t *testing.T) {
+	e := newXYEnv(t)
+	_, xKey := credsSubject(t, e.credsPath(xy("x").String()))
+	sc := keyScan(true, xKey)
+	sc.Conns[0].Changed = []apply.ConnzConn{{Key: xKey, CID: 7}}
+	scriptScans(t, sc)
+	_, by, code := doctorJSON(t, e.run)
+	if c := by["keys"]; code != 0 || c.State != "warn" || !strings.HasPrefix(c.Detail, "mashctl's users kept connecting and leaving") {
+		t.Fatalf("%d %+v", code, c)
+	}
+	// The same change of a foreign key is not a finding.
+	f := keyScan(true, "UFOREIGN1")
+	f.Conns[0].Changed = []apply.ConnzConn{{Key: "UFOREIGN1", CID: 7}}
+	scriptScans(t, f, f, f)
+	if _, by, code := doctorJSON(t, e.run); code != 0 || by["keys"].State != "ok" {
+		t.Fatalf("%d %+v", code, by["keys"])
+	}
+}
+
+// A revoked key seen only in some of a server's page scans (its Changed list) still fails; a foreign key there does not.
+func TestDoctorKeysRevokedOnlyInChangedFails(t *testing.T) {
+	e := newXYEnv(t)
+	_, xKey := credsSubject(t, e.credsPath(xy("x").String()))
+	adm, ctx, closeAdm := e.admin()
+	defer closeAdm()
+	if err := adm.MarkRevoked(ctx, xKey, time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+	sc := keyScan(false)
+	sc.Conns[0].Changed = []apply.ConnzConn{{Key: xKey, CID: 7}}
+	scriptScans(t, sc)
+	_, by, code := doctorJSON(t, e.run)
+	if c := by["keys"]; code != 1 || c.State != "fail" || !strings.HasPrefix(c.Detail, "1 revoked key is still connected") {
+		t.Fatalf("%d %+v", code, c)
+	}
+	f := keyScan(false)
+	f.Conns[0].Changed = []apply.ConnzConn{{Key: "UFOREIGN1", CID: 7}}
+	scriptScans(t, f)
+	if _, by, code := doctorJSON(t, e.run); code != 0 || by["keys"].State != "ok" {
+		t.Fatalf("%d %+v", code, by["keys"])
 	}
 }

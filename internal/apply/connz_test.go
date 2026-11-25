@@ -11,6 +11,8 @@ import (
 
 	"github.com/nats-io/nats-server/v2/server"
 	"github.com/nats-io/nats.go"
+
+	"github.com/bogworks/mash/internal/cellwidth"
 )
 
 // fakeConnz answers the CONNZ ping and the server's direct subject like one server with the connection ids in pages(call,
@@ -198,5 +200,104 @@ func TestConnzStableMultiPageNeedsTwoIdenticalPasses(t *testing.T) {
 	}
 	if f.calls != 3 {
 		t.Errorf("%d follow-up requests, want 3 (two passes)", f.calls)
+	}
+}
+
+// A server with no name is known by its 56-character id: the "kept changing" sentence shortens it so the line fits the
+// 63 columns an 80-column doctor row has for its detail.
+func TestElideNameKeepsTheChurnLineShort(t *testing.T) {
+	id := strings.Repeat("N", 56)
+	for _, name := range []string{"s1", strings.Repeat("a", maxShownName), id} {
+		line := fmt.Sprintf("server %s's connected users kept changing", elideName(name))
+		if len(line) > 63 {
+			t.Errorf("%d columns: %q", len(line), line)
+		}
+	}
+	if got := elideName("s1"); got != "s1" {
+		t.Fatalf("%q", got)
+	}
+	if got := elideName(id); got != id[:10]+"..."+id[len(id)-11:] {
+		t.Fatalf("%q", got)
+	}
+}
+
+// Two long names that share a long prefix and differ only at the end stay distinguishable, within the width.
+func TestElideNameKeepsTheTail(t *testing.T) {
+	p := strings.Repeat("p", 40)
+	a, b := elideName(p+"-one"), elideName(p+"-two")
+	if a == b {
+		t.Fatalf("both are %q", a)
+	}
+	for _, n := range []string{a, b} {
+		if len(n) > maxShownName {
+			t.Errorf("%q is %d columns", n, len(n))
+		}
+	}
+	if got := elideName(strings.Repeat("é", 40)); len([]rune(got)) != maxShownName {
+		t.Errorf("%q", got)
+	}
+}
+
+// A long name of wide characters is cut by terminal cells, not characters: at most maxShownName cells, ends still
+// distinguishable, and the whole doctor row (17-column indent plus the sentence) stays within 80 cells.
+func TestElideNameCountsCells(t *testing.T) {
+	p := strings.Repeat("世", 30)
+	a, b := elideName(p+"一二三"), elideName(p+"四五六")
+	if a == b {
+		t.Fatalf("both are %q", a)
+	}
+	for _, n := range []string{a, b, elideName(strings.Repeat("🙂", 40)), elideName(strings.Repeat("🚀", 24)), elideName(strings.Repeat("a", 9) + strings.Repeat("世", 30))} {
+		if w := cellwidth.String(n); w > maxShownName {
+			t.Errorf("%q is %d cells", n, w)
+		}
+		line := strings.Repeat(" ", 17) + fmt.Sprintf("server %s's connected users kept changing", n)
+		if w := cellwidth.String(line); w > 80 {
+			t.Errorf("%d cells: %q", w, line)
+		}
+	}
+	if got := elideName(strings.Repeat("世", 12)); got != strings.Repeat("世", 12) {
+		t.Errorf("24-cell name changed: %q", got)
+	}
+}
+
+// Connections that opened or closed between a server's own page scans are passed up in Changed, each once.
+func TestConnzChangedConnectionsArePassedUp(t *testing.T) {
+	nc, _ := startFakeConnz(t, func(call, offset int) ([]uint64, int) {
+		if offset == 0 {
+			return []uint64{1, 2}, 4
+		}
+		return []uint64{3, uint64(10 + call)}, 4 // a different last connection in every scan
+	})
+	got, err := NATS{Conn: nc}.Connz(context.Background(), "A", nil, 2)
+	if err != nil || len(got) != 1 || got[0].Incomplete == "" {
+		t.Fatalf("%v %+v", err, got)
+	}
+	if len(got[0].Changed) != connzScanTries {
+		t.Fatalf("changed: %+v", got[0].Changed)
+	}
+	for _, c := range got[0].Changed {
+		if c.CID < 10 || c.Key != fmt.Sprintf("U%d", c.CID) {
+			t.Errorf("unexpected change %+v", c)
+		}
+	}
+	// A stable list changes nothing.
+	all := []uint64{1, 2, 3, 4}
+	nc2, _ := startFakeConnz(t, func(call, offset int) ([]uint64, int) { return all[offset : offset+2], 4 })
+	if got, err := (NATS{Conn: nc2}).Connz(context.Background(), "A", nil, 2); err != nil || len(got[0].Changed) != 0 {
+		t.Fatalf("%v %+v", err, got)
+	}
+}
+
+// The wait for a server that never answers stops at the caller's deadline, not connzTotal after it.
+func TestConnzWaitStopsAtTheContextDeadline(t *testing.T) {
+	all := []uint64{1, 2}
+	nc, _ := startFakeConnz(t, func(call, offset int) ([]uint64, int) { return all, 2 })
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err := NATS{Conn: nc}.Connz(ctx, "A", []string{"s1", "s2"}, 0)
+	// What matters is that the wait ends with the context, not how it reports it (an error, or a short server set).
+	if el := time.Since(start); el > time.Second {
+		t.Fatalf("took %v, err %v", el, err)
 	}
 }

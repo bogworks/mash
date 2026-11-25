@@ -1,0 +1,1 @@
+**`mashctl doctor` keys lines stay within 80 columns.** A revoked key together with churn among mashctl's own users, and `--audit-users` with servers whose lists kept changing, printed lines wider than 80 columns. The warning now has a line of its own, each server has its own line, and a long server id is shortened.

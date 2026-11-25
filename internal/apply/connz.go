@@ -1,6 +1,7 @@
 package apply
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,6 +13,7 @@ import (
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats.go"
 
+	"github.com/bogworks/mash/internal/cellwidth"
 	"github.com/bogworks/mash/internal/config"
 )
 
@@ -68,6 +70,9 @@ type ConnzServer struct {
 	// scan read, each connection once, and the list is NOT the whole list: a caller must treat the server like one
 	// that did not answer.
 	Incomplete string
+	// Changed holds the connections that were in some of this server's scans and not in all of them: connections that
+	// opened or closed while the server was read (each once, by id). Conns is the last scan's list.
+	Changed []ConnzConn
 }
 
 type connzReply struct {
@@ -135,6 +140,9 @@ func (n NATS) Connz(ctx context.Context, account string, expect []string, page i
 	start := time.Now()
 	wait := connzTotal
 	for ctx.Err() == nil {
+		if dl, ok := ctx.Deadline(); ok { // never wait past the caller's deadline
+			wait = max(min(wait, time.Until(dl)), time.Millisecond)
+		}
 		msg, err := sub.NextMsg(wait)
 		if err != nil {
 			if errors.Is(err, nats.ErrTimeout) {
@@ -209,10 +217,30 @@ func allSeen(expect []string, seen map[string]bool) bool {
 func (n NATS) connzScan(ctx context.Context, cs *ConnzServer, account string, page int, first connzReply) error {
 	r := first
 	var prev map[uint64]bool // the set of the last multi-page scan that reconciled
+	var all map[uint64]ConnzConn
+	var count map[uint64]int
+	scans := 0
+	defer func() { // the connections not in every scan
+		cs.Changed = nil
+		for id, c := range all {
+			if count[id] < scans {
+				cs.Changed = append(cs.Changed, c)
+			}
+		}
+		slices.SortFunc(cs.Changed, func(a, b ConnzConn) int { return cmp.Compare(a.CID, b.CID) })
+	}()
 	for attempt := 1; ; attempt++ {
 		ok, multi, err := n.connzScanOnce(ctx, cs, account, page, r)
 		if err != nil {
 			return err
+		}
+		scans++
+		if all == nil {
+			all, count = map[uint64]ConnzConn{}, map[uint64]int{}
+		}
+		for _, c := range cs.Conns {
+			all[c.CID] = c
+			count[c.CID]++
 		}
 		if ok {
 			if !multi {
@@ -230,13 +258,38 @@ func (n NATS) connzScan(ctx context.Context, cs *ConnzServer, account string, pa
 			prev = nil
 		}
 		if attempt == connzScanTries {
-			cs.Incomplete = fmt.Sprintf("server %s's connected users kept changing", config.Clean(cs.Name))
+			cs.Incomplete = fmt.Sprintf("server %s's connected users kept changing", elideName(config.Clean(cs.Name)))
 			return nil
 		}
 		if r, err = n.connzFetch(ctx, cs, account, 0, page); err != nil {
 			return err
 		}
 	}
+}
+
+// maxShownName is the longest server name, in terminal cells, a "kept changing" line shows whole: with the rest of the
+// sentence it fills 63 cells, which is what is left of 80 after the doctor row's 17-column indent.
+const maxShownName = 24
+
+// elideName shortens a name wider than maxShownName cells to its first 10 cells, "..." and its last 11, so two long
+// names that differ only at the end stay distinguishable. Whole characters only: a wide one that would not fit is
+// left out. A server with no name is known by its 56-character id.
+func elideName(s string) string {
+	if cellwidth.String(s) <= maxShownName {
+		return s
+	}
+	r := []rune(s)
+	head, hw := 0, 0
+	for head < len(r) && hw+cellwidth.Rune(r[head]) <= 10 {
+		hw += cellwidth.Rune(r[head])
+		head++
+	}
+	tail, tw := len(r), 0
+	for tail > head && tw+cellwidth.Rune(r[tail-1]) <= maxShownName-13 {
+		tw += cellwidth.Rune(r[tail-1])
+		tail--
+	}
+	return string(r[:head]) + "..." + string(r[tail:])
 }
 
 func (n NATS) connzFetch(ctx context.Context, cs *ConnzServer, account string, offset, page int) (connzReply, error) {
