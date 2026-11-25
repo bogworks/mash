@@ -148,3 +148,5 @@
 | [0169](0169-doctor-looks-up-claude-read-only-to-report-its-version-and-nothing-else-runs-it.md) | Doctor looks up claude, read-only, to report its version; nothing else runs it | accepted | 2026-11-24 |
 | [0170](0170-the-0-5-5-migration-script-and-the-refusal-of-a-0-5-5-configuration-folder-ship-again.md) | The 0.5.5 migration script and the refusal of a 0.5.5 configuration folder ship again | accepted | 2026-11-24 |
 | [0171](0171-install-sh-pins-the-attestation-to-the-tags-commit-and-installs-nothing-when-it-cannot-read-it.md) | install.sh pins the attestation to the tag's commit, and installs nothing when it cannot read it | accepted | 2026-11-24 |
+| [0174](0174-refused-mail-is-listed-and-counted-with-its-class-and-without-its-body-in-mash-and-mashctl-views.md) | Refused mail is listed and counted, with its class and without its body, in mash and mashctl views | accepted | 2026-11-25 |
+| [0175](0175-planned-output-has-one-next-file-per-release-and-the-gate-1-demo-renders-one-file.md) | Planned output has one next file per release, and the Gate 1 demo renders one file | accepted | 2026-11-25 |
