@@ -570,3 +570,192 @@ func TestCloseReleaseRendersAndUnknownFails(t *testing.T) {
 		t.Errorf("unknown release: err = %v", err)
 	}
 }
+
+const oldFuture = `{"name":"future","description":"Comes later.",
+    "metadata":[{"name":"x-release","value":"0.6.0"}]}`
+
+// planFixture replaces the planned entry "mash future" with entry.
+func planFixture(t *testing.T, entry string, extra ...string) string {
+	t.Helper()
+	return patchedFixture(t, "mash.json", append([]string{oldFuture, entry}, extra...)...)
+}
+
+func futureWith(meta string) string {
+	return `{"name":"future","description":"Comes later.","metadata":[` + meta + `]}`
+}
+
+func TestPlanChecks(t *testing.T) {
+	for _, tc := range []struct{ name, meta, want string }{
+		{"unbuilt with x-release 0.7.0", `{"name":"x-plan","value":"next"},{"name":"x-release","value":"0.7.0"}`,
+			"mash future: an unbuilt entry (x-plan next) must not carry x-release 0.7.0"},
+		{"unbuilt with x-release 0.6.0", `{"name":"x-plan","value":"next"},{"name":"x-release","value":"0.6.0"}`,
+			"mash future: an unbuilt entry (x-plan next) must not carry x-release 0.6.0"},
+		{"bad value", `{"name":"x-plan","value":"soon"}`,
+			`mash future: x-plan "soon" is not one of now, next, later`},
+		{"built with plan", `{"name":"x-release","value":"1.0.0"},{"name":"x-plan","value":"later"}`,
+			"mash future: a built entry (x-release 1.0.0) must not carry x-plan later"},
+	} {
+		_, err := Generate(planFixture(t, futureWith(tc.meta)))
+		if err == nil || err.Error() != tc.want {
+			t.Errorf("%s: err = %v, want %q", tc.name, err, tc.want)
+		}
+	}
+	// A built entry that inherits built status and sets x-plan.
+	_, err := Generate(patchedFixture(t, "mash.json",
+		`{"name":"alpha","description":"Alpha.",`, `{"name":"alpha","description":"Alpha.",
+    "commands":[{"name":"kid","description":"Kid.","metadata":[{"name":"x-plan","value":"next"}]}],`))
+	want := "mash alpha kid: a built entry (it inherits x-release 1.0.0) must not carry x-plan next"
+	if err == nil || err.Error() != want {
+		t.Errorf("inherited built: err = %v, want %q", err, want)
+	}
+}
+
+func TestPlanUnderCloseReleaseAncestorIsRefused(t *testing.T) {
+	_, err := Generate(patchedFixture(t, "mash.json",
+		`{"name":"alpha","description":"Alpha.",`, `{"name":"alpha","description":"Alpha.",
+    "commands":[{"name":"kid","description":"Kid.","metadata":[{"name":"x-plan","value":"next"}]}],`,
+		`{"name":"x-release","value":"1.0.0"},
+     {"name":"x-mcp","value":{"tool":null,"why":"Not for agents."}}`,
+		`{"name":"x-release","value":"`+closeRelease+`"},
+     {"name":"x-mcp","value":{"tool":null,"why":"Not for agents."}}`))
+	if err == nil {
+		t.Fatal("Generate accepted x-plan under an ancestor at the close release")
+	}
+	for _, want := range []string{"a built entry (it inherits x-release", "must not carry x-plan next"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %v, want it to contain %q", err, want)
+		}
+	}
+}
+
+func TestPlanTextRenders(t *testing.T) {
+	for _, tc := range []struct{ plan, want string }{
+		{"next", "Planned: next"}, {"later", "Planned: later"},
+	} {
+		p, err := Generate(planFixture(t, futureWith(`{"name":"x-plan","value":"`+tc.plan+`"}`)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c := string(p["coming-in-0-6-0.md"]); !strings.Contains(c, tc.want+".") {
+			t.Errorf("%s: coming page lacks %q", tc.plan, tc.want)
+		}
+		if m := string(p["mash.md"]); !strings.Contains(m, tc.want+": `mash future`") {
+			t.Errorf("%s: tool page lacks the planned paragraph:\n%s", tc.plan, m)
+		}
+	}
+}
+
+func TestPlanNowUsesNowRelease(t *testing.T) {
+	now := futureWith(`{"name":"x-plan","value":"now"}`)
+	dir := planFixture(t, now)
+	if _, err := Generate(dir); err == nil ||
+		err.Error() != "mash future: x-plan now needs x-now-release in the tool file's info" {
+		t.Fatalf("without x-now-release: err = %v", err)
+	}
+	// One file carrying it is enough.
+	dir = planFixture(t, now, `"version":"1.0.0-spec.1"`, `"version":"1.0.0-spec.1","x-now-release":"1.0.1"`)
+	p, err := Generate(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := string(p["coming-in-0-6-0.md"]); !strings.Contains(c, "Planned for 1.0.1.") {
+		t.Errorf("coming page lacks the now text:\n%s", c)
+	}
+	if m := string(p["mash.md"]); !strings.Contains(m, "Planned for 1.0.1: `mash future`") {
+		t.Errorf("tool page lacks the now paragraph:\n%s", m)
+	}
+}
+
+func TestNowReleaseFilesMustAgree(t *testing.T) {
+	dir := planFixture(t, oldFuture, `"version":"1.0.0-spec.1"`, `"version":"1.0.0-spec.1","x-now-release":"1.0.1"`)
+	ctl, err := os.ReadFile(filepath.Join(fixture, "mashctl.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctl = []byte(strings.Replace(string(ctl), `"version":"1.0.0-spec.1"`, `"version":"1.0.0-spec.1","x-now-release":"1.0.2"`, 1))
+	if err := os.WriteFile(filepath.Join(dir, "mashctl.json"), ctl, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, gerr := Generate(dir)
+	if gerr == nil || !strings.Contains(gerr.Error(), `mashctl.json: x-now-release "1.0.2" differs from "1.0.1"`) {
+		t.Fatalf("err = %v", gerr)
+	}
+}
+
+func TestOldPlannedFormStillRenders(t *testing.T) {
+	p := fixturePages(t)
+	if c := p["coming-in-0-6-0.md"]; !strings.Contains(c, "Release: 0.6.0.") {
+		t.Errorf("coming page lacks the old release line:\n%s", c)
+	}
+	if m := p["mash.md"]; !strings.Contains(m, "Planned for 0.6.0: `mash future`.") {
+		t.Errorf("tool page lacks the old planned paragraph:\n%s", m)
+	}
+	// Any other release on an unbuilt entry is still refused.
+	_, err := Generate(planFixture(t, futureWith(`{"name":"x-release","value":"0.7.0"}`)))
+	if err == nil || !strings.Contains(err.Error(), `mash future: release "0.7.0" is neither`) {
+		t.Errorf("err = %v", err)
+	}
+}
+
+func TestPlannedDescendantsValidated(t *testing.T) {
+	kid := func(meta string) string {
+		return `{"name":"future","description":"Comes later.","metadata":[{"name":"x-plan","value":"later"}],
+    "commands":[{"name":"kid","description":"Kid.","metadata":[` + meta + `]}]}`
+	}
+	_, err := Generate(planFixture(t, kid(`{"name":"x-release","value":"0.7.0"}`)))
+	if err == nil || err.Error() != `mash future kid: release "0.7.0" is neither 1.0.0 nor 0.6.0` {
+		t.Errorf("nested x-release 0.7.0: err = %v", err)
+	}
+	_, err = Generate(planFixture(t, kid(`{"name":"x-plan","value":"now"}`)))
+	if err == nil || err.Error() != "mash future kid: x-plan now needs x-now-release in the tool file's info" {
+		t.Errorf("nested x-plan now: err = %v", err)
+	}
+}
+
+func TestPlanInherits(t *testing.T) {
+	entry := `{"name":"future","description":"Comes later.","metadata":[{"name":"x-plan","value":"later"}],
+    "commands":[{"name":"kid","description":"Inherits."},
+     {"name":"own","description":"Own plan.","metadata":[{"name":"x-plan","value":"next"}]}]}`
+	p, err := Generate(planFixture(t, entry))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := string(p["coming-in-0-6-0.md"])
+	for _, want := range []string{"`mash future kid`", "`mash future own`"} {
+		if !strings.Contains(c, want) {
+			t.Errorf("coming page lacks %s", want)
+		}
+	}
+	if strings.Count(c, "Planned: later.") != 2 || strings.Count(c, "Planned: next.") != 1 {
+		t.Errorf("plans not inherited as expected:\n%s", c)
+	}
+}
+
+func TestBuiltChildUnderPlannedParentRefused(t *testing.T) {
+	built := `{"name":"x-release","value":"1.0.0"}`
+	kids := `"commands":[{"name":"kid","description":"Kid.","metadata":[` + built + `]}]`
+	want := "mash future kid: a built entry (x-release 1.0.0) cannot sit under a planned parent"
+	plan := `{"name":"future","description":"Comes later.","metadata":[{"name":"x-plan","value":"next"}],` + kids + `}`
+	old := `{"name":"future","description":"Comes later.","metadata":[{"name":"x-release","value":"0.6.0"}],` + kids + `}`
+	for name, entry := range map[string]string{"x-plan parent": plan, "old-form parent": old} {
+		if _, err := Generate(planFixture(t, entry)); err == nil || err.Error() != want {
+			t.Errorf("%s: err = %v, want %q", name, err, want)
+		}
+	}
+}
+
+func TestPlanOnToolRootRefused(t *testing.T) {
+	dir := patchedFixture(t, "mash.json", `"description":"The tool.",`,
+		`"description":"The tool.","metadata":[{"name":"x-plan","value":"next"}],`)
+	_, err := Generate(dir)
+	if want := "mash: the tool root is built and must not carry x-plan"; err == nil || err.Error() != want {
+		t.Errorf("err = %v, want %q", err, want)
+	}
+}
+
+func TestRealSpecGeneratesWithZeroDiff(t *testing.T) {
+	root := repoRoot(t)
+	if d := CheckDir(filepath.Join(root, "spec"), filepath.Join(root, "docs", "reference")); len(d) != 0 {
+		t.Fatalf("diff: %v", d)
+	}
+}
