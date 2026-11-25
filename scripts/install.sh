@@ -169,7 +169,7 @@ unsafe_path() {
 }
 
 main() {
-    local new_a new_b os arch uname_s uname_m dir real tag sumsname name want got tmp line shown resolved ghout ghline ghver ghmajor ghminor ghpatch ghpre commit
+    local os arch uname_s uname_m dir real tag sumsname name want got tmp line shown resolved ghout ghline ghver ghmajor ghminor ghpatch ghpre commit
     local -a names staged_new
 
     [[ $REPO =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || die "MASH_REPO $REPO is not owner/name"
