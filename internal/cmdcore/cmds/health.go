@@ -33,7 +33,7 @@ const ReasonMailHeld = "mail is held: its folder cannot be written"
 
 // ReasonStoredScan is status's reason, and the delivery row's detail, while the first start of the switched-on build checks
 // the stored mail before it delivers any (TO-14). It happens once; there is nothing to do.
-const ReasonStoredScan = "mail is waiting while stored mail is checked"
+const ReasonStoredScan = "checking stored mail before delivery"
 
 // The ways a session can fail to hold its endpoint (HealthReport.Lease), and the words for them. Asked inside a session,
 // status and doctor report on that session itself: "ready, online" means this session holds the endpoint.
@@ -152,6 +152,7 @@ const (
 	CodeEndpointNotTaken      = "endpoint_not_taken"      // this session could not take it
 	CodeStorageUnwritable     = "storage_unwritable"      // the mail folder cannot be written
 	CodeUnknown               = "unknown"                 // a failure that fits none of the others; the reason says what was seen
+	CodeCheckingStoredMail    = "checking_stored_mail"    // the first start's stored-mail check is running
 )
 
 // HealthCheck is one row the service found. Detail is what the row says after its state ("" says nothing). Fix is the
@@ -385,7 +386,7 @@ var Status = cmdcore.Command[StatusParams, StatusResult]{
 		}
 		if r.Ready && rep.StoredScan {
 			reason := ReasonStoredScan
-			r.Ready, r.Reason, r.reasonCode = false, &reason, CodeUnknown // the reason says what was seen
+			r.Ready, r.Reason, r.reasonCode = false, &reason, CodeCheckingStoredMail
 		}
 		r.Online = r.Ready && rep.Online
 		return r, nil

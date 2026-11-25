@@ -290,9 +290,18 @@ func (e *Endpoint) scanStored(ctx context.Context) error {
 	// A state directory that cannot be made holds no list and no scanned line: nothing can be recorded, so there is
 	// nothing to scan for. Every message is still classified on its way through serve (a malformed one is never
 	// delivered), and a start with a writable directory scans.
+	// An existing directory that is read-only passes MkdirAll, so a file is made and removed to prove it takes writes.
 	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 		e.log.Printf("mash: stored mail not checked: the state directory is not writable: %v", err)
 		return nil
+	}
+	if probe, err := os.CreateTemp(filepath.Dir(p), ".scanprobe-*"); err != nil {
+		e.log.Printf("mash: stored mail not checked: the state directory is not writable: %v", err)
+		return nil
+	} else {
+		name := probe.Name()
+		_ = probe.Close()
+		_ = os.Remove(name)
 	}
 	first, last := info.State.FirstSeq, info.State.LastSeq
 	e.scanning.Store(true)
