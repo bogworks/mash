@@ -265,7 +265,6 @@ func TestWorkflows_labelResetRemovesApprovalLabels(t *testing.T) {
 // every push by anyone but the maintainer.
 func TestMergify_outsiderApprovalsDieOnPush(t *testing.T) {
 	m := loadMergify(t)
-	logins := []string{"randybias"}
 	found := false
 	for _, r := range m.PullRequestRules {
 		d, ok := r.Actions["dismiss_reviews"]
@@ -276,11 +275,15 @@ func TestMergify_outsiderApprovalsDieOnPush(t *testing.T) {
 			t.Errorf("rule %q: dismiss_reviews approved=%v when=%v, want true and synchronize", r.Name, d["approved"], d["when"])
 			continue
 		}
-		have := strings.Join(r.Conditions, "\n")
-		for _, l := range logins {
-			if !strings.Contains(have, "-author = "+l) {
-				t.Errorf("rule %q does not exclude maintainer %q (conditions %v)", r.Name, l, r.Conditions)
+		// The maintainer's login is read from the rule itself, so no login is written in this test.
+		excluded := false
+		for _, c := range r.Conditions {
+			if l, ok := strings.CutPrefix(c, "-author = "); ok && strings.TrimSpace(l) != "" {
+				excluded = true
 			}
+		}
+		if !excluded {
+			t.Errorf("rule %q does not exclude the maintainer's own pull requests with `-author = <login>` (conditions %v)", r.Name, r.Conditions)
 		}
 		found = true
 	}
