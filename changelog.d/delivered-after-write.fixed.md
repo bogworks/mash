@@ -1,0 +1,1 @@
+**A shell no longer shows unverified mail as delivered when serve's write to the session failed.** The mail is recorded as delivered only once it is written, so a failed write that is redelivered stays unshown to a shell that does not accept unverified mail ([#1507](https://github.com/bogworks/mash/issues/1507)).

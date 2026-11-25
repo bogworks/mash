@@ -211,6 +211,7 @@ func (e *Endpoint) spoolBatch(deliver Deliverer, show []pending, h *held, seen *
 			h.at[seq] = time.Now()
 			h.bytes += len(p.mail.Body)
 			h.stored += storedSize(p)
+			e.recordDeliveredBatch([]pending{p}) // spooled: record before anything acks it
 		}
 		seen.mark(p)
 	}
