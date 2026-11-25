@@ -76,6 +76,10 @@ is installed in your home folder, with no sudo.
    alice
    ```
 
+   They are small files in `~/.local/bin`. If your shell says
+   `command not found`, open a new terminal, or add `~/.local/bin` to your
+   PATH ([by hand, step 2](docs/guide/by-hand.md#2-install-mash-and-mashctl)).
+
    Each starts Claude Code with its address as the session's name, so you can
    tell who you are talking to (for a session already open, type
    `/rename acme.demo.alice`), and says on its first turn whether mail wakes
