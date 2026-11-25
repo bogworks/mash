@@ -271,7 +271,13 @@ func release(v string) (string, error) {
 // output, when a secrets pattern matches or a line exceeds the hard width.
 func render(dir, next string) (string, error) {
 	var nf nextFile
-	if err := readJSON(filepath.Join(dir, next), &nf); err != nil {
+	np := filepath.Join(dir, next)
+	if _, err := os.Stat(np); err != nil {
+		if _, err2 := os.Stat(next); err2 == nil { // a path from the current folder, as in -next spec/next-0.6.0.json
+			np = next
+		}
+	}
+	if err := readJSON(np, &nf); err != nil {
 		return "", err
 	}
 	rel, err := release(nf.Info.Version)
