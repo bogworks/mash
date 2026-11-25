@@ -21,6 +21,7 @@ above the latest published release, and the same ordering checks run again immed
 config. Before pushing, the local tag is verified against `$RELEASE_SIGNERS` (default `docs/allowed_signers`); a tag that fails is refused (exit 3), never pushed, and deleted if this run
 created it. Exit 0 published and verified, 2 usage, 3 refused, 4 the command failed or timed
 out (rerun to resume). The reasoning is in [decision 0001](decisions/0001-publishing-is-one-resumable-command.md).
+Run one publish of a release at a time: nothing stops a second `release-check publish` of the same release while the first runs (it reads empty draft digests and refuses, which is safe, but it is not a guard). Wait for the first to exit, then rerun it to resume.
 Then do step 7 (record the version and commit, optional).
 
 The paragraph above describes releases below the cutover. For a release **at or above the cutover** the differences
