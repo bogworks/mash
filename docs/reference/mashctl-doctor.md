@@ -114,9 +114,10 @@ storage    ok
 endpoints  ok    3 records, 3 inboxes
 keys       FAIL  1 revoked key is still connected
                  mashctl's users kept connecting and leaving; read 3 times
+                 wait a minute and run it again
 
 1 problem.
-hint: mashctl endpoint list
+hint: mashctl doctor
 ```
 
 ### --audit-users: two servers whose users keep changing
@@ -131,10 +132,10 @@ storage    ok
 endpoints  ok    3 records, 3 inboxes
 keys       FAIL  server s1's connected users kept changing
                  server NABCDEFGHI...LMNOPQRSTUV's connected users kept changing
-                 read 3 times
+                 read 3 times; wait a minute and run it again
 
 1 problem.
-hint: wait a minute, then run mashctl doctor --audit-users again
+hint: mashctl doctor --audit-users
 ```
 
 ### No server is configured

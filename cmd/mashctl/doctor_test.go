@@ -681,13 +681,13 @@ func TestDoctorRevokedStillConnectedFailsWithoutAudit(t *testing.T) {
 	rogueKey(t, e, "tool-a")
 	for _, args := range [][]string{{}, {"--strict"}} {
 		_, by, code := doctorJSON(t, e.run, args...)
-		if c := by["keys"]; code != 1 || c.State != "fail" || c.Detail != "1 revoked key is still connected\n1 other user, not issued by mashctl" || c.Fix == nil || *c.Fix != "mashctl endpoint list" {
+		if c := by["keys"]; code != 1 || c.State != "fail" || c.Detail != "1 revoked key is still connected\n1 other user, not issued by mashctl" || c.Fix != nil {
 			t.Fatalf("%v: %d %+v", args, code, c)
 		}
 	}
 	_, by, code := doctorJSON(t, e.run, "--audit-users")
 	c := by["keys"]
-	if code != 1 || !strings.HasPrefix(c.Detail, "1 revoked key is still connected\n1 connected user was not issued by mashctl:\nU") || c.Fix == nil || *c.Fix != "mashctl endpoint list" {
+	if code != 1 || !strings.HasPrefix(c.Detail, "1 revoked key is still connected\n1 connected user was not issued by mashctl:\nU") || c.Fix == nil || *c.Fix != "revoke it with the tool that issued it (mashctl revokes only its own)" {
 		t.Fatalf("audit: %d %+v", code, c)
 	}
 }
@@ -854,13 +854,13 @@ func TestDoctorKeysRevokedAndMashChurnLinesFit80Columns(t *testing.T) {
 	calls := scriptScans(t, keyScan(true, xKey), keyScan(true), keyScan(true, xKey))
 	_, by, code := doctorJSON(t, e.run)
 	*calls = 0
-	const want = "1 revoked key is still connected\nmashctl's users kept connecting and leaving; read 3 times"
-	if c := by["keys"]; code != 1 || c.State != "fail" || c.Detail != want {
+	const want = "1 revoked key is still connected\nmashctl's users kept connecting and leaving; read 3 times\nwait a minute and run it again"
+	if c := by["keys"]; code != 1 || c.State != "fail" || c.Detail != want || c.Fix == nil || *c.Fix != "mashctl doctor" {
 		t.Fatalf("%d %+v", code, c)
 	}
 	out, errb, _ := e.run("doctor")
 	text := cleanText(e, out)
-	if !strings.Contains(text, "keys       FAIL  1 revoked key is still connected\n                 mashctl's users kept connecting and leaving; read 3 times\n") {
+	if !strings.Contains(text, "keys       FAIL  1 revoked key is still connected\n                 mashctl's users kept connecting and leaving; read 3 times\n                 wait a minute and run it again\n") {
 		t.Fatalf("%q", text)
 	}
 	if n, l := maxLine(text + errb); n > 80 {
@@ -878,7 +878,7 @@ func TestDoctorAuditUsersChurnOfTwoServersLinesFit80Columns(t *testing.T) {
 	sc.Incomplete = "server s1's connected users kept changing\nserver " + short + "'s connected users kept changing"
 	scriptScans(t, sc)
 	_, by, code := doctorJSON(t, e.run, "--audit-users")
-	want := "server s1's connected users kept changing\nserver " + short + "'s connected users kept changing\nread 3 times"
+	want := "server s1's connected users kept changing\nserver " + short + "'s connected users kept changing\nread 3 times; wait a minute and run it again"
 	if c := by["keys"]; code != 1 || c.State != "fail" || c.Detail != want {
 		t.Fatalf("%d %+v", code, c)
 	}
@@ -1032,7 +1032,7 @@ func TestDoctorKeysChurnOfMashUsersWarns(t *testing.T) {
 		*calls = 0
 		_, by, code := doctorJSON(t, e.run, c.args...)
 		k := by["keys"]
-		if code != c.exit || k.State != "warn" || !strings.HasPrefix(k.Detail, line) || k.Fix == nil || *k.Fix != "wait a minute, then run mashctl doctor again" || *calls != 3 {
+		if code != c.exit || k.State != "warn" || !strings.HasPrefix(k.Detail, line) || k.Fix == nil || *k.Fix != "mashctl doctor" || *calls != 3 {
 			t.Fatalf("%v: %d calls %d %+v", c.args, code, *calls, k)
 		}
 	}
@@ -1053,7 +1053,7 @@ func TestDoctorAuditUsersFailsOnChurn(t *testing.T) {
 	scriptScans(t, keyScan(true))
 	_, by, code := doctorJSON(t, e.run, "--audit-users")
 	k := by["keys"]
-	if code != 1 || k.State != "fail" || k.Detail != "server s1's connected users kept changing\nread 3 times" || k.Fix == nil || *k.Fix != "wait a minute, then run mashctl doctor --audit-users again" {
+	if code != 1 || k.State != "fail" || k.Detail != "server s1's connected users kept changing\nread 3 times; wait a minute and run it again" || k.Fix == nil || *k.Fix != "mashctl doctor --audit-users" {
 		t.Fatalf("%d %+v", code, k)
 	}
 	if low := strings.ToLower(k.Detail); strings.Contains(low, "connz") || strings.Contains(low, "nats") || strings.Contains(low, "scans") {
@@ -1124,7 +1124,7 @@ func TestDoctorKeysRevokedSeenInEarlierReadFails(t *testing.T) {
 	for _, args := range [][]string{{}, {"--strict"}} {
 		*calls = 0
 		_, by, code := doctorJSON(t, e.run, args...)
-		if c := by["keys"]; code != 1 || c.State != "fail" || !strings.HasPrefix(c.Detail, "1 revoked key is still connected") || c.Fix == nil || *c.Fix != "mashctl endpoint list" {
+		if c := by["keys"]; code != 1 || c.State != "fail" || !strings.HasPrefix(c.Detail, "1 revoked key is still connected") || c.Fix == nil || *c.Fix != "mashctl doctor" {
 			t.Fatalf("%v: %d %+v", args, code, c)
 		}
 	}
@@ -1162,7 +1162,7 @@ func TestDoctorKeysRecordedCIDChangeWarns(t *testing.T) {
 	_, xKey := credsSubject(t, e.credsPath(xy("x").String()))
 	calls := scriptScans(t, cidScan(true, map[string]uint64{xKey: 1}), cidScan(true, map[string]uint64{xKey: 2}), cidScan(true, map[string]uint64{xKey: 2}))
 	runBoth(t, e, calls, "warn", 1, func(c doctorCheck) {
-		if !strings.HasPrefix(c.Detail, "mashctl's users kept connecting and leaving; read 3 times") || c.Fix == nil || *c.Fix != "wait a minute, then run mashctl doctor again" {
+		if !strings.HasPrefix(c.Detail, "mashctl's users kept connecting and leaving; read 3 times") || c.Fix == nil || *c.Fix != "mashctl doctor" {
 			t.Fatalf("%+v", c)
 		}
 	})
@@ -1193,7 +1193,7 @@ func TestDoctorKeysDeadlineAfterOneRead(t *testing.T) {
 	}
 	calls = 0
 	_, by, code = doctorJSON(t, e.run, "--audit-users")
-	if c := by["keys"]; code != 1 || c.State != "fail" || c.Detail != "server s1's connected users kept changing\nread once" {
+	if c := by["keys"]; code != 1 || c.State != "fail" || c.Detail != "server s1's connected users kept changing\nread once; wait a minute and run it again" {
 		t.Fatalf("%d %+v", code, c)
 	}
 	// An error on the first read still fails.
@@ -1259,7 +1259,7 @@ func TestDoctorKeysDeadlineDuringPauseBetweenReads(t *testing.T) {
 	}
 	calls = 0
 	_, by, code = doctorJSON(t, e.run, "--audit-users")
-	if c := by["keys"]; code != 1 || c.State != "fail" || c.Detail != "server s1's connected users kept changing\nread once" || calls != 1 {
+	if c := by["keys"]; code != 1 || c.State != "fail" || c.Detail != "server s1's connected users kept changing\nread once; wait a minute and run it again" || calls != 1 {
 		t.Fatalf("%d calls %d %+v", code, calls, c)
 	}
 }

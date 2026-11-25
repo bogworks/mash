@@ -705,12 +705,12 @@ func doctorKeys(rep *doctorReport, ctx context.Context, adm *admin.Admin, cfg co
 		if !auditUsers {
 			// Churn among users mashctl did not issue is not a finding; churn of one of mashctl's users is.
 			if churnIsMashs(attempts, recs) {
-				warns = append(warns, finding{"mashctl's users kept connecting and leaving; " + reads, "wait a minute, then run mashctl doctor again", true})
+				warns = append(warns, finding{"mashctl's users kept connecting and leaving; " + reads + "\nwait a minute and run it again", "mashctl doctor", true}) // two lines: one would pass 80 columns
 			}
 			scan.Incomplete = ""
 		} else {
 			churn = true
-			scan.Incomplete = scan.Incomplete + "\n" + reads
+			scan.Incomplete = scan.Incomplete + "\n" + reads // the churn-audit case below adds the wait to this line
 		}
 	}
 	unrecorded, keyless, revoked := connectedFindings(scan.Conns, recs)
@@ -736,7 +736,7 @@ func doctorKeys(rep *doctorReport, ctx context.Context, adm *admin.Admin, cfg co
 	}
 	slices.Sort(revoked)
 	var fails []finding
-	const fix = "mashctl endpoint list"
+	const fix = "" // no mashctl command ends a revoked key's connection, so the finding has no hint
 	auditFix := "revoke it with the tool that issued it (mashctl revokes only its own)"
 	if len(unrecorded)+keyless > 1 {
 		auditFix = "revoke them with the tool that issued them (mashctl revokes only its own)"
@@ -747,7 +747,7 @@ func doctorKeys(rep *doctorReport, ctx context.Context, adm *admin.Admin, cfg co
 	if scan.Incomplete != "" {
 		f := finding{incompleteLines(scan.Incomplete), initFix, true} // wrapped or not, it is lines of its own
 		if churn && len(fails) == 0 && len(unrecorded)+keyless == 0 {
-			f.fix = "wait a minute, then run mashctl doctor --audit-users again"
+			f = finding{incompleteLines(scan.Incomplete + "; wait a minute and run it again"), "mashctl doctor --audit-users", true}
 		}
 		fails = append(fails, f)
 	}
