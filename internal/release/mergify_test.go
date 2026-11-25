@@ -169,8 +169,10 @@ func TestMergify_waitsOnlyForChecksThatExist(t *testing.T) {
 func TestMergify_entryNeedsNoApproval(t *testing.T) {
 	m := loadMergify(t)
 	plain, ors := splitConditions(t, queueRule(t, m, "default").QueueConditions)
-	if len(ors) != 1 || len(ors[0]) != 2 || ors[0][1] != "label = lead-approved" || !strings.HasPrefix(ors[0][0], "-files ~= ") {
-		t.Errorf("queue_conditions or groups = %v, want only the exception-path group (ADR 0182)", ors)
+	// the exception-path group, and the size group beside it (a pull request GitHub cannot list whole needs the label too)
+	if len(ors) != 2 || len(ors[0]) != 2 || ors[0][1] != "label = lead-approved" || !strings.HasPrefix(ors[0][0], "-files ~= ") ||
+		len(ors[1]) != 2 || ors[1][0] != "#files < 3000" || ors[1][1] != "label = lead-approved" {
+		t.Errorf("queue_conditions or groups = %v, want the exception-path group and the #files < 3000 group (ADR 0182)", ors)
 	}
 	for _, c := range plain {
 		for _, banned := range []string{"lead-review", "approved-reviews-by", "lead-approved"} {
@@ -671,14 +673,19 @@ func TestMergify_aHugePullRequestIsNeverDocsOnly(t *testing.T) {
 func exceptionGroup(t *testing.T, m mergify, queue string) string {
 	t.Helper()
 	_, ors := splitConditions(t, queueRule(t, m, queue).QueueConditions)
-	if len(ors) != 1 || len(ors[0]) != 2 || ors[0][1] != "label = lead-approved" {
+	var group []string
+	for _, o := range ors {
+		if len(o) == 2 && strings.HasPrefix(o[0], "-files ~= ") {
+			if group != nil {
+				t.Fatalf("%s queue has more than one `-files ~=` or group: %v", queue, ors)
+			}
+			group = o
+		}
+	}
+	if group == nil || group[1] != "label = lead-approved" {
 		t.Fatalf("%s queue or groups = %v, want one group [-files ~= <regex>, label = lead-approved]", queue, ors)
 	}
-	re, ok := strings.CutPrefix(ors[0][0], "-files ~= ")
-	if !ok {
-		t.Fatalf("%s queue or group %v lacks the `-files ~=` member", queue, ors[0])
-	}
-	return re
+	return strings.TrimPrefix(group[0], "-files ~= ")
 }
 
 // The exception-path regex (ADR 0182) is one source written in two queues: the text must be identical.
@@ -781,7 +788,10 @@ func TestMergify_exceptionPathsNeedTheLabelToQueue(t *testing.T) {
 	for _, c := range []struct {
 		files, labels string
 		eligible      bool
-	}{{".mergify.yml", "", false}, {".mergify.yml", "lead-approved", true}, {"cmd/mash/main.go", "", true}} {
+	}{{".mergify.yml", "", false}, {".mergify.yml", "lead-approved", true}, {"cmd/mash/main.go", "", true},
+		{"scripts/buildrelease/main.go", "", false}, {"scripts/buildrelease/main.go", "lead-approved", true},
+		// GitHub lists at most 3000 files: a pull request that large may hide an exception path
+		{strings.Repeat("cmd/mash/x.go\n", 2999) + "cmd/mash/y.go", "", false}, {strings.Repeat("cmd/mash/x.go\n", 2998) + "cmd/mash/y.go", "", true}} {
 		if got := evalCondition(t, conds, map[string]string{"files": c.files, "label": c.labels}); got != c.eligible {
 			t.Errorf("default queue, files %q labels %q: eligible = %v, want %v", c.files, c.labels, got, c.eligible)
 		}

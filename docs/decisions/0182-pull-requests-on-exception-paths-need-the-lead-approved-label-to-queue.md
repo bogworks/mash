@@ -37,13 +37,14 @@ queue; every other pull request queues by itself as in ADR 0177.
 * **Condition.** The `default` and `docs` queues' `queue_conditions` gain `or: [-files ~= <regex>, label = lead-approved]`. <!-- adrlint:allow vocabulary -->
   The `docs` queue needs it too, because a pull request that changes only `docs/decisions/` is docs-only.
 * **Exception paths** (one regex, the same text in both queues, matched against each changed path):
-  * CI and queue configuration: `.github/`, `.mergify.yml`, `scripts/ci-*` (including `scripts/ci-changes`), `scripts/gate*`, and every script a workflow runs from the pull request (`scripts/build-twice`, `scripts/adrlint`, `scripts/changelog`, `scripts/doclint`, `scripts/draft-guard`, `scripts/lead-approve`, `scripts/notes-base`, `scripts/publishcheck`, `scripts/repofiles`, `scripts/review*`), since a change to one can make its own check pass; the shipped assets (`install.sh`, the `mash-*` scripts) are not included; <!-- adrlint:allow vocabulary -->
+  * CI and queue configuration: `.github/`, `.mergify.yml`, `scripts/ci-*` (including `scripts/ci-changes`), `scripts/gate*`, and every script a workflow runs from the pull request (`scripts/build-twice`, `scripts/buildrelease/` (which it builds and runs), `scripts/adrlint`, `scripts/changelog`, `scripts/doclint`, `scripts/draft-guard`, `scripts/lead-approve`, `scripts/notes-base`, `scripts/publishcheck`, `scripts/repofiles`, `scripts/review*`), since a change to one can make its own check pass; the shipped assets (`install.sh`, the `mash-*` scripts) are not included; <!-- adrlint:allow vocabulary -->
   * release tooling: `scripts/release*` (including `scripts/releasecheck/`), `internal/release/`;
   * `spec/`;
   * `docs/decisions/`, the whole folder;
   * `contracts/`;
   * order-16 guarded paths, taken from `scripts/releasecheck/unlinked.go`: every `internal/policy*` directory, and
     `internal/requesterreg`, `internal/issue`, `internal/reconcile` and `internal/listset` with their subpackages.
+* **A pull request of 3000 files or more also needs the label,** because GitHub lists at most 3000 files of a pull request and Mergify cannot see an exception path beyond that.
 * **The label is removed on every push.** `label-reset` strips `lead-approved` on `opened`, `reopened` and <!-- adrlint:allow vocabulary -->
   `synchronize`, so approval covers the head it was given on and no later one.
 * **`hold` is unchanged** as a deliberate brake with its reason written on the pull request.
