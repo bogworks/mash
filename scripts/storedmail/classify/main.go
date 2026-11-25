@@ -7,30 +7,19 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
-	"time"
-	"unicode/utf8"
 
-	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
-	"github.com/bogworks/mash/internal/admin"
-	"github.com/bogworks/mash/internal/natsauth"
 	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/sapsdk"
-	"github.com/bogworks/mash/internal/testenv"
+	"github.com/bogworks/mash/scripts/storedmail/kit"
 )
-
-// stepTimeout is how long one mash command of the check may run before it is killed.
-const stepTimeout = 60 * time.Second
 
 type result struct {
 	tag                  string
@@ -82,44 +71,6 @@ func counts(m map[string]int) string {
 	return strings.Join(ks, ",")
 }
 
-type kit struct {
-	e     *testenv.Env
-	bin   string
-	dir   string
-	creds map[string]string
-}
-
-func (k *kit) mash(who string, stdin string, args ...string) error {
-	home := filepath.Join(k.dir, "home", who)
-	if err := os.MkdirAll(home, 0o700); err != nil {
-		return err
-	}
-	cmd := exec.Command(k.bin, args...)
-	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "MASH_STATE_DIR=" + home + "/state",
-		"MASH_ENDPOINT=" + k.e.Owner + ".dev." + who, "MASH_SERVER=" + k.e.URL, "MASH_CREDS=" + k.creds[who],
-		"MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1"}
-	cmd.Stdin = strings.NewReader(stdin)
-	var out strings.Builder
-	cmd.Stdout, cmd.Stderr = &out, &out
-	done := make(chan error, 1)
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	go func() { done <- cmd.Wait() }()
-	select {
-	case err := <-done:
-		if err != nil {
-			line, _, _ := strings.Cut(strings.TrimSpace(strings.ReplaceAll(out.String(), "warning: no encryption to the server (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION)\n", "")), "\n")
-			return fmt.Errorf("%v: %s", err, line)
-		}
-		return nil
-	case <-time.After(stepTimeout):
-		_ = cmd.Process.Kill() // this command's own PID, recorded by os/exec
-		<-done
-		return fmt.Errorf("timed out")
-	}
-}
-
 func run(bin, tag string) (*result, error) {
 	if os.Getenv("MASH_STOREDMAIL_IN_CONTAINER") != "1" { // this program removes its scratch dir and runs released binaries: container only
 		return nil, fmt.Errorf("refusing to run outside the container (use scripts/storedmail/run.sh)")
@@ -137,105 +88,32 @@ func run(bin, tag string) (*result, error) {
 		}
 		bin = copyTo
 	}
-	e, stop, err := testenv.Launch(filepath.Join(dir, "srv"))
+	k, err := kit.New(dir, bin, tag, []kit.Name{{Label: "alice", Group: "dev", Instance: "alice"}, {Label: "bob", Group: "dev", Instance: "bob"}})
 	if err != nil {
 		return nil, err
 	}
-	defer stop()
+	defer k.Close()
 	ctx := context.Background()
-	anc, err := nats.Connect(e.URL, natsauth.UserCredentials(e.AdminCreds))
-	if err != nil {
-		return nil, err
-	}
-	defer anc.Close()
-	adm, err := admin.New(anc, e.Owner)
-	if err != nil {
-		return nil, err
-	}
-	if err := adm.Init(ctx); err != nil {
-		return nil, err
-	}
-	k := &kit{e: e, bin: bin, dir: dir, creds: map[string]string{}}
-	addrs := map[string]sap.Address{}
-	for _, name := range []string{"alice", "bob"} {
-		a, err := sap.NewAddress(e.Owner, "dev", name)
-		if err != nil {
-			return nil, err
-		}
-		creds, pub, err := e.MintEndpoint(a)
-		if err != nil {
-			return nil, err
-		}
-		if _, err := adm.Provision(ctx, a, pub, e.Account, "", admin.Meta{}); err != nil {
-			return nil, err
-		}
-		k.creds[name], addrs[name] = creds, a
-	}
 	r := &result{tag: tag, trust: map[string]int{}, class: map[string]int{}}
-	if err := k.sendAll(r, "alice", "bob"); err != nil {
+	k.SendAll("alice", "bob")
+	if err := k.BasicErr(); err != nil {
 		return nil, err
 	}
-	js, err := jetstream.New(anc)
+	r.sends, r.refused = k.Sends, k.Refused
+	js, err := jetstream.New(k.Conn)
 	if err != nil {
 		return nil, err
 	}
 	for _, name := range []string{"alice", "bob"} {
-		if err := check(ctx, js, addrs[name], r); err != nil {
+		if err := check(ctx, js, k.Addrs[name], r); err != nil {
 			return nil, err
 		}
 	}
 	if ok := r.sends - r.refused; r.msgs < ok || r.msgs < 2 {
 		return nil, fmt.Errorf("%d messages stored, but %d of %d sends succeeded (need at least that many, and 2)", r.msgs, ok, r.sends)
 	}
-	selfCheck(r)
+	r.failures = append(r.failures, kit.SelfCheck()...)
 	return r, nil
-}
-
-// sendAll has each side send every kind this CLI writes. The two plain sends every release supports must succeed, or it
-// returns an error; a refused flag-dependent send (a flag this release lacks) is counted and noted, not fatal.
-func (k *kit) sendAll(r *result, a, b string) error {
-	var basicErr error
-	to := func(n string) string { return k.e.Owner + ".dev." + n }
-	long := strings.Repeat("long line of text, with unicode é世界\U0001F600 and tabs\t\n", 150)
-	send := func(basic bool, who, stdin string, args ...string) {
-		r.sends++
-		if err := k.mash(who, stdin, append([]string{"send"}, args...)...); err != nil {
-			if basic {
-				r.refused++
-				if basicErr == nil {
-					basicErr = fmt.Errorf("basic send %v failed: %w", args, err)
-				}
-				return
-			}
-			r.refused++
-			if !lacksFlag(err) { // any other failure of a supported send is a broken send path: the run fails
-				if basicErr == nil {
-					basicErr = fmt.Errorf("send %v failed: %w", args, err)
-				}
-				return
-			}
-			fmt.Fprintf(os.Stderr, "note: %s send %v: this release lacks the flag: %v\n", r.tag, args, err)
-		}
-	}
-	send(true, a, "", to(b), "hello bob")
-	//lint:ignore ST1018 deliberate bidi-override (U+202E) test input, written as the literal character
-	send(false, a, "", to(b), "unicode é世界 \U0001F600 ‮ rtl", "--kind", "fyi")
-	send(false, a, ".", to(b), "--file", "-")
-	send(false, a, long, to(b), "--file", "-", "--kind", "result")
-	send(false, a, "", to(b), "urgent one", "--urgent", "--kind", "blocker")
-	send(false, a, "", to(b), "keyed", "--id", "storedmail-1", "--kind", "question")
-	send(true, b, "", to(a), "hello alice")
-	send(false, b, "", to(a), "reply", "--reply-to", "1")
-	send(false, b, "", to(a), "unicode é世界", "--kind", "fyi")
-	send(false, a, "", to(b), "relayed", "--relay", "1")
-	return basicErr
-}
-
-// lacksFlag is true when a send failed because this release does not know a flag (the only reason a case is skipped).
-func lacksFlag(err error) bool {
-	m := strings.ToLower(err.Error())
-	return strings.Contains(m, "unknown flag") || strings.Contains(m, "unknown option") ||
-		strings.Contains(m, "flag provided but not defined") || strings.Contains(m, "unrecognized")
 }
 
 // check reads every message of one inbox stream and classifies it, with its header and without.
@@ -260,7 +138,7 @@ func check(ctx context.Context, js jetstream.JetStream, a sap.Address, r *result
 		if class != "" {
 			r.class[class]++
 		}
-		why := candidate(vals, trust, class, m.Subject)
+		why := kit.Candidate(vals, trust, class, m.Subject)
 		if class != "" && why == "" {
 			why = "class outside the CHG-4 baseline"
 		}
@@ -268,7 +146,7 @@ func check(ctx context.Context, js jetstream.JetStream, a sap.Address, r *result
 			why = "trust " + string(trust) + ", expected verified"
 		}
 		if why != "" {
-			r.failures = append(r.failures, fmt.Sprintf("%s: class %q trust %s stream %s seq %d header %s", why, class, trust, a.InboxStream(), seq, shape(vals)))
+			r.failures = append(r.failures, fmt.Sprintf("%s: class %q trust %s stream %s seq %d header %s", why, class, trust, a.InboxStream(), seq, kit.Shape(vals)))
 		}
 		if t, c := sapsdk.Classify(m.Subject, nil, m.Data); t != sap.TrustAbsent || c != "" {
 			r.failures = append(r.failures, fmt.Sprintf("control (no Agent-Sender) gave %s %q at %s seq %d", t, c, a.InboxStream(), seq))
@@ -282,86 +160,4 @@ func check(ctx context.Context, js jetstream.JetStream, a sap.Address, r *result
 		}
 	}
 	return nil
-}
-
-var ctl = regexp.MustCompile(`[\x00-\x1f\x7f]`)
-
-// candidate names the eleventh-shape candidate a header is, or "".
-func candidate(vals []string, trust sap.Trust, class, subject string) string {
-	if len(vals) != 1 {
-		return ""
-	}
-	v := vals[0]
-	if !utf8.ValidString(v) {
-		return "eleventh-shape candidate: invalid UTF-8 in the value"
-	}
-	var obj map[string]json.RawMessage
-	if json.Unmarshal([]byte(v), &obj) != nil {
-		return ""
-	}
-	if raw, ok := obj["v"]; ok && string(raw) != "1" {
-		if _, isNum := numeric(raw); isNum {
-			return "eleventh-shape candidate: v is the number " + string(raw)
-		}
-	}
-	var sub string
-	if json.Unmarshal(obj["sub"], &sub) == nil && (sub == "" || strings.Contains(sub, "..") || strings.HasPrefix(sub, ".") ||
-		strings.HasSuffix(sub, ".") || ctl.MatchString(sub)) {
-		return "eleventh-shape candidate: sub with an empty token, empty, or a control character"
-	}
-	_, signed := obj["sig"]
-	if !signed && trust == sap.TrustMalformed {
-		switch class {
-		case sapsdk.ClassTimeInvalid, sapsdk.ClassNonce, sapsdk.ClassUnreadable:
-			return "eleventh-shape candidate: unsigned claim with a bad ts, nonce or sub"
-		}
-	}
-	if class == sapsdk.ClassUnreadable {
-		return "eleventh-shape candidate: unreadable sender header"
-	}
-	return ""
-}
-
-func numeric(raw json.RawMessage) (float64, bool) {
-	var f float64
-	return f, json.Unmarshal(raw, &f) == nil
-}
-
-// shape is a header with every value removed: member names, kinds and lengths only. No body, no key, no signature.
-func shape(vals []string) string {
-	if len(vals) != 1 {
-		return fmt.Sprintf("%d Agent-Sender values", len(vals))
-	}
-	var obj map[string]json.RawMessage
-	if json.Unmarshal([]byte(vals[0]), &obj) != nil {
-		return fmt.Sprintf("not a JSON object, %d bytes", len(vals[0]))
-	}
-	var ks []string
-	for k, raw := range obj {
-		var s string
-		switch {
-		case k == "v":
-			ks = append(ks, "v="+string(raw))
-		case json.Unmarshal(raw, &s) == nil:
-			ks = append(ks, fmt.Sprintf("%s:str(%d)", k, len(s)))
-		default:
-			ks = append(ks, k+":non-text")
-		}
-	}
-	sort.Strings(ks)
-	return "{" + strings.Join(ks, " ") + "}"
-}
-
-// selfCheck proves the detector sees what it is for, so a clean table is not a blind one.
-func selfCheck(r *result) {
-	const hdr = `{"v":1.0,"account":"A","user":"U","sub":"agents.mail.x"}`
-	if candidate([]string{hdr}, sap.TrustVerified, "", "s") == "" {
-		r.failures = append(r.failures, "self-check: v 1.0 not seen as a candidate")
-	}
-	if candidate([]string{`{"v":1,"sub":"a..b"}`}, sap.TrustVerified, "", "s") == "" {
-		r.failures = append(r.failures, "self-check: empty sub token not seen as a candidate")
-	}
-	if candidate([]string{"{\"v\":1,\"x\":\"\xff\"}"}, sap.TrustVerified, "", "s") == "" {
-		r.failures = append(r.failures, "self-check: invalid UTF-8 not seen as a candidate")
-	}
 }
