@@ -34,7 +34,7 @@ for t in "${tags[@]}"; do
 	echo "$t sha256 $got (matches the release digest)"
 done
 
-docker run --rm --name "$name" -e MASH_STOREDMAIL_IN_CONTAINER=1 -v "$root":/src:ro -v "$bins":/bins:ro golang:1.27 sh -c '
+docker run --rm --platform linux/amd64 --name "$name" -e MASH_STOREDMAIL_IN_CONTAINER=1 -v "$root":/src:ro -v "$bins":/bins:ro golang:1.27 sh -c '
 	set -e
 	mkdir /work && tar -C /src --exclude=./.git --exclude=./mash -cf - . | tar -C /work -xf -
 	cd /work && go run ./scripts/storedmail/classify /bins "$@"

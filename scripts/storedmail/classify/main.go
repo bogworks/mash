@@ -29,6 +29,9 @@ import (
 	"github.com/bogworks/mash/internal/testenv"
 )
 
+// stepTimeout is how long one mash command of the check may run before it is killed.
+const stepTimeout = 60 * time.Second
+
 type result struct {
 	tag                  string
 	msgs, sends, refused int
@@ -110,7 +113,7 @@ func (k *kit) mash(who string, stdin string, args ...string) error {
 			return fmt.Errorf("%v: %s", err, line)
 		}
 		return nil
-	case <-time.After(60 * time.Second):
+	case <-time.After(stepTimeout):
 		_ = cmd.Process.Kill() // this command's own PID, recorded by os/exec
 		<-done
 		return fmt.Errorf("timed out")
