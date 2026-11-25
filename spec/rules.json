@@ -86,7 +86,7 @@
   },
   {
    "rule": "Every command that changes the mesh or this machine's setup takes --dry-run",
-   "detail": "It prints the usual line with 'Would' in front and changes nothing; with --json the object is the one the real run would print, with \"dry_run\": true. In mashctl the dry_run key is in every such object, false when the run is real (and init adds would_change, null when the run is real); mash join prints dry_run only for a dry run. That is mashctl's changing commands and mash join. Sending a message is not such a change and has no --dry-run."
+   "detail": "It prints the usual line with 'Would' in front and changes nothing; with --json the object is the one the real run would print, with \"dry_run\": true. In every such object, in mashctl and in mash join, the dry_run key is always present: false when the run is real (and mashctl init adds would_change, null unless it is a dry run). That is mashctl's changing commands and mash join. Sending a message is not such a change and has no --dry-run."
   },
   {
    "rule": "help is also a command",
@@ -126,7 +126,7 @@
   },
   {
    "rule": "In --json, one name for one fact",
-   "detail": "A yes-or-no fact has one name in every command of both tools: online is a boolean wherever it appears (mash who, mash status, mashctl endpoint list and show, mashctl status), never ready, ok or state for the same fact; an endpoint's suspended state is its own boolean, suspended. ready stays the name of \"mail works for this endpoint\" and \"the server works\" (mash status and mashctl status, which was ok). A count is named as a count: endpoint_count, online_count, wake_count. An unset field is null: never \"\" and never left out, so a command's keys are the same on every run. An empty list is [] and an empty map is {}. A list's key is plural: capabilities, not capability. The one exception is mash who --json, which follows ADR 0049 (who JSON fields are added, never renamed or removed) and so keeps capability; it still prints every field for every endpoint, an unset role, host or description as null and no capability as []. A doctor row's state (ok, warn, fail, skip) is a different fact and keeps its name."
+   "detail": "A yes-or-no fact has one name in every command of both tools: online is a boolean wherever it appears (mash who, mash status, mashctl endpoint list and show, mashctl status), never ready, ok or state for the same fact; an endpoint's suspended state is its own boolean, suspended. ready stays the name of \"mail works for this endpoint\" and \"the server works\" (mash status and mashctl status, which was ok). A count is named as a count: endpoint_count, online_count, wake_count. An unset field is null: never \"\" and never left out, so a command's keys are the same on every run. An empty list is [] and an empty map is {}. A list's key is plural: capabilities, not capability. The one exception is mash who --json, which follows ADR 0049 as amended by ADR 0184 (who JSON fields are added, never renamed or removed) and so keeps capability; it prints every field for every endpoint, an unset role, host or description as null and no capability as []. A doctor row's state (ok, warn, fail, skip) is a different fact and keeps its name."
   }
  ],
  "words": [

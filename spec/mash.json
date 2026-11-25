@@ -1809,7 +1809,8 @@
      {
       "name": "x-json",
       "value": {
-       "endpoint": "acme.demo.bob"
+       "endpoint": "acme.demo.bob",
+       "dry_run": false
       }
      },
      {
@@ -1819,7 +1820,8 @@
        "servers": [
         "tls://myserver:4222"
        ],
-       "creds": "/home/ada/.config/mash/acme.demo.bob.creds"
+       "creds": "/home/ada/.config/mash/acme.demo.bob.creds",
+       "dry_run": false
       }
      },
      {

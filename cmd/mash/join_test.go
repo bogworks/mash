@@ -377,7 +377,7 @@ func TestJoinJSON(t *testing.T) {
 		t.Errorf("--dry-run --json: %+v", r)
 	}
 	r = w.run("join", "acme.demo.bob.join", "--json")
-	want = `{"endpoint":"acme.demo.bob"}` + "\n"
+	want = `{"endpoint":"acme.demo.bob","dry_run":false}` + "\n"
 	if r.code != 0 || r.out != want || r.errs != "" {
 		t.Errorf("--json: %+v", r)
 	}
@@ -392,7 +392,7 @@ func TestJoinDetailJSON(t *testing.T) {
 	w := newJoinWorld(t)
 	// --detail --json adds the servers and the creds file's absolute path, not abbreviated with ~
 	r := w.run("join", "acme.demo.bob.join", "--detail", "--json")
-	want := `{"endpoint":"acme.demo.bob","servers":["tls://myserver:4222"],"creds":"` + filepath.Join(w.cfg, "acme.demo.bob.creds") + `"}` + "\n"
+	want := `{"endpoint":"acme.demo.bob","servers":["tls://myserver:4222"],"creds":"` + filepath.Join(w.cfg, "acme.demo.bob.creds") + `","dry_run":false}` + "\n"
 	if r.code != 0 || r.out != want || r.errs != "" || !filepath.IsAbs(w.cfg) {
 		t.Errorf("--detail --json: %+v\nwant %s", r, want)
 	}
