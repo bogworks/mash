@@ -686,10 +686,10 @@ func (a *Authority) signingRecordLocked() (string, error) {
 // ErrNoGroupKey is wrapped by GroupKey when the owner group has no key file and create is false.
 var ErrNoGroupKey = errors.New("mashctl: no signing key for owner group")
 
-// groupRE is one part of an owner group name "range.owner": lower-case letters, digits and hyphens.
+// groupRE is one part of an owner group name "owner.group": lower-case letters, digits and hyphens.
 var groupRE = regexp.MustCompile(`^[a-z0-9-]{1,32}$`)
 
-// validGroup reports whether g is "range.owner" with both parts of that shape. The shape keeps path
+// validGroup reports whether g is "owner.group" with both parts of that shape. The shape keeps path
 // separators out of file names; the single dot cannot make a name that climbs.
 func validGroup(g string) bool {
 	r, o, ok := strings.Cut(g, ".")
@@ -698,7 +698,7 @@ func validGroup(g string) bool {
 
 func (a *Authority) groupsPath() string { return filepath.Join(a.dir, groupsDir) }
 
-// GroupKey returns the scoped signing key of owner group "range.owner", kept in groups/<range>.<owner>.nk under the same custody rules as the other
+// GroupKey returns the scoped signing key of owner group "owner.group", kept in groups/<owner>.<group>.nk under the same custody rules as the other
 // keys; with create it generates and writes one if absent. It never overwrites.
 func (a *Authority) GroupKey(group string, create bool) (nkeys.KeyPair, error) {
 	if !validGroup(group) {

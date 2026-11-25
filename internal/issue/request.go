@@ -44,7 +44,7 @@ const (
 // and never read.
 type Request struct {
 	Version   int    `json:"version"`
-	Address   string `json:"address"`    // range.owner.name
+	Address   string `json:"address"`    // owner.group.instance
 	PublicKey string `json:"public_key"` // a NATS user public key; never a seed
 	Host      string `json:"host"`       // the name the requester is registered under
 	Nonce     string `json:"nonce"`      // base64url, at least MinNonceBytes random bytes
@@ -168,8 +168,8 @@ func validHost(h string) bool {
 	return true
 }
 
-// AddressParts is the owner, group and instance of the request's address. The policy path calls the owner token the
-// range and the group token the owner.
+// AddressParts is the owner, group and instance of the request's address. The policy path's variables rng and owner hold the
+// owner token and the group token.
 func (r Request) AddressParts() (sap.Address, error) {
 	id, err := sap.ParseAddress(r.Address)
 	if err != nil {
@@ -181,7 +181,7 @@ func (r Request) AddressParts() (sap.Address, error) {
 	return id, nil
 }
 
-// Group is "range.owner" of the request's address; "" when the address does not parse.
+// Group is "owner.group" of the request's address; "" when the address does not parse.
 func (r Request) Group() string {
 	id, err := r.AddressParts()
 	if err != nil {
