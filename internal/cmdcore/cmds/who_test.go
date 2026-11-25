@@ -175,14 +175,19 @@ func TestWhoUsageErrors(t *testing.T) {
 		{[]string{"acme..demo"}, "error: acme..demo is not an owner, an owner.group or an address\n"},
 		{[]string{"acme", "demo"}, "error: unexpected argument \"demo\" for mash who\n"},
 		{[]string{"--online", "--offline"}, "error: mash who takes --online or --offline, not both\n"},
-		{[]string{"--match", "x"}, "error: unknown option --match\n"},
-		{[]string{"--long"}, "error: unknown option --long\n"},
 		{[]string{"--wide=maybe"}, "error: --wide must be true or false\n"},
 	} {
 		f := directory()
 		code, out, errs := runWho(f, cliframe.Global{}, tc.args...)
 		if code != 2 || out != "" || errs != tc.want+hint || f.calls != 0 {
 			t.Errorf("%v: %d %q %q calls %d", tc.args, code, out, errs, f.calls)
+		}
+	}
+	for _, flag := range []string{"--match", "--long"} { // an unknown flag: the same form as before the verb, no hint (ADR 0168)
+		f := directory()
+		code, out, errs := runWho(f, cliframe.Global{}, flag, "x")
+		if code != 2 || out != "" || errs != "error: unknown flag "+flag+"\n" || f.calls != 0 {
+			t.Errorf("%s: %d %q %q calls %d", flag, code, out, errs, f.calls)
 		}
 	}
 	code, out, errs := runWho(directory(), cliframe.Global{JSON: true}, "acme_demo")

@@ -295,11 +295,11 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 		return cliframe.Report(stdout, stderr, cliframe.Usagef("mash serve is started by an agent host, not by hand").WithHint("mash serve --help"), global.JSON)
 	}
 	if args[0] == "serve" && len(args) > 1 { // serve's one option, --accept-unverified, is out of args: anything left is wrong
-		msg := "unknown option " + args[1]
-		if !strings.HasPrefix(args[1], "-") {
-			msg = "serve takes no argument " + args[1]
+		if strings.HasPrefix(args[1], "-") { // the same form as everywhere else, and no hint (ADR 0168)
+			flag, _, _ := strings.Cut(args[1], "=")
+			return cliframe.Report(stdout, stderr, cliframe.Usagef("unknown flag %s", config.Clean(flag)), global.JSON)
 		}
-		return cliframe.Report(stdout, stderr, cliframe.Usagef("%s", msg).WithHint("mash serve --help"), global.JSON)
+		return cliframe.Report(stdout, stderr, cliframe.Usagef("%s", "serve takes no argument "+args[1]).WithHint("mash serve --help"), global.JSON)
 	}
 	if args[0] == "version" { // needs no endpoint, so before config
 		mk := func(context.Context) (*cmdcore.Env, error) {

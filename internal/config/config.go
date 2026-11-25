@@ -903,18 +903,6 @@ func RejectedArg(a string) string {
 	return "option " + strconv.Quote(name)
 }
 
-// RejectedOption is RejectedArg with the option name unquoted, as mashctl words it: "option --x", or "argument".
-func RejectedOption(a string) string {
-	if !strings.HasPrefix(a, "-") {
-		return "argument"
-	}
-	name, _, _ := strings.Cut(a, "=")
-	if len(name) > 32 {
-		name = name[:32]
-	}
-	return "option " + Clean(name)
-}
-
 // nameRuleFileKey is the value of a present name_rule_file key: set is false when the key is absent. A key that is
 // present must be a non-empty string.
 func nameRuleFileKey(raw json.RawMessage) (path string, set bool, err error) {

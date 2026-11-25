@@ -784,7 +784,7 @@ func TestCLIInboxAfter(t *testing.T) {
 		t.Fatalf("inbox --after 4: %d %q", code, out)
 	}
 	for _, bad := range [][]string{{"inbox", "--after", "x"}, {"inbox", "--limit"}, {"inbox", "--bogus", "1"}, {"inbox", "--limit", "two"}} {
-		if out, code := w.cli(t, "a", bad...); code != 2 || !strings.HasPrefix(out, "error: ") || !strings.Contains(out, "hint: mash inbox --help") {
+		if out, code := w.cli(t, "a", bad...); code != 2 || !strings.HasPrefix(out, "error: ") || !strings.Contains(out, "hint: mash inbox --help") && !strings.HasPrefix(out, "error: unknown flag ") {
 			t.Fatalf("%v: want a usage error, got %d %q", bad, code, out)
 		}
 	}

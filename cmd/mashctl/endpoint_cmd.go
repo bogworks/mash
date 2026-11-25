@@ -89,7 +89,7 @@ func parseEpInput(s epSpec, args []string) (epInput, error) {
 			}
 			in.values[name] = v
 		case a != "-" && strings.HasPrefix(a, "-"):
-			return in, cliframe.Usagef("unknown %s", config.RejectedOption(a)).WithHint(hint)
+			return in, unknownFlag(a)
 		default:
 			in.pos = append(in.pos, a)
 		}

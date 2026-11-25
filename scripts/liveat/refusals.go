@@ -146,7 +146,7 @@ var AT003 = Scenario{
 			{Name: "--public-key without --out", Label: "key-without-out", Home: ha, Args: create("alice.dev.solo", "--public-key", fresh), Exit: 2, NoJSON: true,
 				Hint: [][]string{{"--public-key needs --out"}, {"mashctl endpoint create --help"}}},
 			{Name: "a removed option", Label: "removed-option", Home: ha, Args: create("alice.dev.solo", "--make-key"), Exit: 2, NoJSON: true,
-				Hint: [][]string{{"unknown option"}, {"mashctl endpoint create --help"}}},
+				Hint: [][]string{{"unknown flag"}}},
 			{Name: "a token with a capital", Label: "name-capital", Home: ha, Args: create("alice.dev.Design", pk...), Exit: 2, NoJSON: true,
 				Hint: [][]string{{"owner.group.name"}}},
 			{Name: "a token with a double dash", Label: "name-dashes", Home: ha, Args: create("alice.dev.a--b", pk...), Exit: 2, NoJSON: true,

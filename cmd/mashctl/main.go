@@ -115,11 +115,17 @@ func runVerbs(args []string, env func(string) string, lookup config.Lookup, stdo
 	default:
 		// Neither error carries a hint (ADR 0168): a hint is a command that fixes the problem, or there is none.
 		if strings.HasPrefix(args[0], "-") && args[0] != "-" { // a flag that does not exist: its name only, never a value after `=`
-			name, _, _ := strings.Cut(args[0], "=")
-			return cliframe.Report(stdout, stderr, cliframe.Usagef("unknown flag %s", config.Clean(name)), jsonRequested(args[1:]) || global.JSON)
+			return cliframe.Report(stdout, stderr, unknownFlag(args[0]), jsonRequested(args[1:]) || global.JSON)
 		}
 		return cliframe.Report(stdout, stderr, cliframe.Usagef("unknown command %q", config.Clean(args[0])), jsonRequested(args[1:]) || global.JSON)
 	}
+}
+
+// unknownFlag is the one error for a flag that does not exist, wherever it stands: its name only (never a value after
+// `=`), and no hint (ADR 0168).
+func unknownFlag(a string) error {
+	name, _, _ := strings.Cut(a, "=")
+	return cliframe.Usagef("unknown flag %s", config.Clean(name))
 }
 
 // helpRequested reports whether -h or --help is the first argument after the verb, or, for a verb with sub-verbs

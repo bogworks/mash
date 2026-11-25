@@ -110,6 +110,12 @@ func wantUsage(t *testing.T, so, se string, code int, verb, msg string) {
 		t.Fatalf("exit %d, stdout %q, stderr %q", code, so, se)
 	}
 	lines := strings.Split(strings.TrimRight(se, "\n"), "\n")
+	if strings.HasPrefix(msg, "unknown flag") { // no hint (ADR 0168)
+		if len(lines) != 1 || !strings.HasPrefix(lines[0], "error: "+msg) {
+			t.Errorf("stderr %q, want %q and no hint", se, "error: "+msg)
+		}
+		return
+	}
 	if len(lines) != 2 || !strings.HasPrefix(lines[0], "error: ") || !strings.Contains(lines[0], msg) || lines[1] != "hint: mashctl endpoint "+verb+" --help" {
 		t.Errorf("stderr %q, want error containing %q and the help hint", se, msg)
 	}
@@ -147,7 +153,7 @@ func TestEndpointCreateRemovedOptions(t *testing.T) {
 		{"--bogus"},
 	} {
 		so, se, code := h.run(append([]string{"endpoint", "create", a}, args...)...)
-		wantUsage(t, so, se, code, "create", "unknown option")
+		wantUsage(t, so, se, code, "create", "unknown flag")
 		if !strings.Contains(se, args[0]) {
 			t.Errorf("%v: stderr %q does not name the option", args, se)
 		}

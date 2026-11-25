@@ -172,7 +172,7 @@ func TestWhoCLI(t *testing.T) {
 	if out, code := w.cli(t, "b", "who", "--online", "--offline"); code != 2 || out != "error: mash who takes --online or --offline, not both\nhint: mash who --help\n" {
 		t.Errorf("conflict: %d %q", code, out)
 	}
-	if out, code := w.cli(t, "b", "who", "--match", "x"); code != 2 || !strings.HasPrefix(out, "error: unknown option --match\nhint: mash who --help") {
+	if out, code := w.cli(t, "b", "who", "--match", "x"); code != 2 || out != "error: unknown flag --match\n" {
 		t.Errorf("old filter: %d %q", code, out)
 	}
 	for _, old := range []string{"--long", "--names", "--role", "--label"} {

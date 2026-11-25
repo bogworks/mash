@@ -149,8 +149,8 @@ func TestDoctorAuditUsersNoSysCreds(t *testing.T) {
 func TestDoctorUsageAndRemovedVerbs(t *testing.T) {
 	f := newAuditEnv(t)
 	for args, want := range map[string]string{
-		"doctor --x":        "error: unknown option --x\nhint: mashctl doctor --help\n",
-		"doctor --dry-run":  "error: unknown option --dry-run\nhint: mashctl doctor --help\n",
+		"doctor --x":        "error: unknown flag --x\n",
+		"doctor --dry-run":  "error: unknown flag --dry-run\n",
 		"doctor extra":      "error: too many arguments\nhint: mashctl doctor --help\n",
 		"audit":             "error: unknown command \"audit\"\n",
 		"issued check":      "error: unknown command \"issued\"\n",

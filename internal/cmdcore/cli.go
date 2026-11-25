@@ -13,6 +13,7 @@ import (
 
 	"github.com/bogworks/mash/internal/cliframe"
 	"github.com/bogworks/mash/internal/cmdcore/render"
+	"github.com/bogworks/mash/internal/config"
 )
 
 // CLIFunc runs one command from its arguments (the global options already removed by cliframe.Extract) and returns the
@@ -23,7 +24,7 @@ type CLIFunc func(args []string, stdin io.Reader, stdout, stderr io.Writer, g cl
 //
 // Arguments are parsed from the params tags: positionals in field order, --flag value, --flag=value, short flags, bool
 // flags, repeated flags for []string, and "--" to end the options. A bare "-" is a positional (standard input for
-// --file, and for send's message). An unknown option, a missing value, a bad enum value, number or boolean, an empty required positional, a
+// --file, and for send's message). An unknown flag, a missing value, a bad enum value, number or boolean, an empty required positional, a
 // single-value option given twice and surplus positionals are usage errors (exit 2). On success the result's Text, or with --json its compact JSON, goes to stdout; a result that is an ExitCoder sets the exit code and one that is a Hinter adds a hint line on stderr.
 func CLI[P any, R Result](c Command[P, R], env EnvFunc) CLIFunc {
 	return CLIWith(c, env, Frame{Tool: "mash"})
@@ -144,7 +145,9 @@ func parseArgs(name string, fields []field, args []string, pv reflect.Value) err
 		return nil
 	}
 	unknown := func(a string) error {
-		return cliframe.Usagef("unknown option %s", a).WithHint("mash " + name + " --help")
+		// The same form as an unknown flag before the verb, and no hint (ADR 0168): the flag's name only, never a value after `=`.
+		flag, _, _ := strings.Cut(a, "=")
+		return cliframe.Usagef("unknown flag %s", config.Clean(flag))
 	}
 	usage := func(format string, a ...any) error {
 		return cliframe.Usagef(format, a...).WithHint("mash " + name + " --help")

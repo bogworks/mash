@@ -123,7 +123,7 @@ func TestLimitsNeedsASubVerb(t *testing.T) {
 	if code != 2 || out != "" || !strings.Contains(errb, "show") || !strings.Contains(errb, "apply") {
 		t.Fatalf("limits: %d %q %q", code, out, errb)
 	}
-	if out, errb, code = h.run("limits", "--show"); code != 2 || out != "" || errb != "error: unknown option --show\nhint: mashctl limits --help\n" {
+	if out, errb, code = h.run("limits", "--show"); code != 2 || out != "" || errb != "error: unknown flag --show\n" {
 		t.Fatalf("limits --show: %d %q %q", code, out, errb)
 	}
 	if _, errb, code = h.run("limits", "frob"); code != 2 || errb != "error: mashctl limits takes show or apply\nhint: mashctl limits --help\n" {

@@ -55,7 +55,7 @@ func TestSetupCommandsWithAWrongCommandLineChangeNothing(t *testing.T) {
 	for _, args := range cases {
 		rc, out, errb := kcRun(t, args...)
 		lines := strings.Split(strings.TrimSuffix(errb, "\n"), "\n")
-		if rc != 2 || out != "" || len(lines) != 2 || !strings.HasPrefix(lines[0], "error: ") || !strings.HasPrefix(lines[1], "hint: mash ") {
+		if rc != 2 || out != "" || !strings.HasPrefix(lines[0], "error: ") || (len(lines) != 2 || !strings.HasPrefix(lines[1], "hint: mash ")) && !strings.HasPrefix(lines[0], "error: unknown flag ") {
 			t.Errorf("%v: rc %d, stdout %q, stderr %q", args, rc, out, errb)
 		}
 		if after := treeSnapshot(t, dir); after != before {

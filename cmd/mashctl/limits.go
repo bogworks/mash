@@ -93,7 +93,7 @@ func runLimits(args []string, g cliframe.Global, env func(string) string, lookup
 		return runLimitsApply(rest, g, env, lookup, stdout, stderr)
 	}
 	if strings.HasPrefix(args[0], "-") {
-		return cliframe.Report(stdout, stderr, cliframe.Usagef("unknown %s", config.RejectedOption(args[0])).WithHint("mashctl limits --help"), jsonRequested(args))
+		return cliframe.Report(stdout, stderr, unknownFlag(args[0]), jsonRequested(args))
 	}
 	return cliframe.Report(stdout, stderr, cliframe.Usagef("mashctl limits takes show or apply").WithHint("mashctl limits --help"), jsonRequested(rest))
 }

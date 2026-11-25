@@ -87,7 +87,7 @@ func TestGlobalFlagErrorsAreUsageExit2(t *testing.T) {
 // mashctl's own --json (the verbs that parse it) are not taken as global options.
 func TestGlobalFlagsLeaveTheVerbsOwnFlagsAlone(t *testing.T) {
 	h := newFleetEnv(t)
-	if so, _, code := h.run("endpoint", "show", "--bogus", "--json"); code != 2 || !strings.HasPrefix(so, `{"error":"unknown option --bogus"`) {
+	if so, _, code := h.run("endpoint", "show", "--bogus", "--json"); code != 2 || !strings.HasPrefix(so, `{"error":"unknown flag --bogus"`) {
 		t.Errorf("endpoint --json: %d %q", code, so)
 	}
 	if so, _, _ := h.run("endpoint", "create", "o.g.x", "--out", "--json", "--bogus"); so != "" {

@@ -326,7 +326,7 @@ func confRules(t *testing.T, spec confSpec) {
 				confFail(t, "width "+name, p)
 			})
 
-			t.Run("bad option", func(t *testing.T) { // (b) and (d): exit 2, an error line, the command's own help as the hint
+			t.Run("bad option", func(t *testing.T) { // (b) and (d): exit 2, an error line, no hint
 				r := runMash(env, append(append([]string{}, words...), append(pos, "--x")...)...)
 				var p []string
 				lines := strings.Split(strings.TrimSuffix(r.errs, "\n"), "\n")
@@ -336,27 +336,20 @@ func confRules(t *testing.T, spec confSpec) {
 				if r.out != "" {
 					p = append(p, fmt.Sprintf("stdout: want nothing (nothing is attempted), got %q", r.out))
 				}
-				if len(lines) != 2 {
-					p = append(p, fmt.Sprintf("stderr: want one error line and one hint line, got %q", r.errs))
-				} else {
-					if want := "error: unknown option --x"; lines[0] != want {
-						p = append(p, fmt.Sprintf("error line: want %q, got %q", want, lines[0]))
-					}
-					if want := "hint: mash " + name + " --help"; lines[1] != want {
-						p = append(p, fmt.Sprintf("hint line: want %q, got %q", want, lines[1]))
-					}
+				if len(lines) != 1 || lines[0] != "error: unknown flag --x" { // no hint (ADR 0168)
+					p = append(p, fmt.Sprintf("stderr: want %q, got %q", "error: unknown flag --x\n", r.errs))
 				}
 				confFail(t, "bad-option "+name, p)
 			})
 
-			t.Run("bad option as json", func(t *testing.T) { // (c): {error, hint} on stdout, nothing on stderr, the same exit code
+			t.Run("bad option as json", func(t *testing.T) { // (c): {error} on stdout, nothing on stderr, the same exit code
 				r := runMash(env, append(append([]string{}, words...), append(pos, "--x", "--json")...)...)
 				var p []string
 				var obj map[string]any
 				if err := json.Unmarshal([]byte(r.out), &obj); err != nil {
 					p = append(p, fmt.Sprintf("stdout: want one JSON object, got %q", r.out))
-				} else if len(obj) != 2 || obj["error"] == nil || obj["hint"] != "mash "+name+" --help" || obj["error"] != "unknown option --x" {
-					p = append(p, fmt.Sprintf("stdout: want {error:%q, hint:%q}, got %q", "unknown option --x", "mash "+name+" --help", r.out))
+				} else if len(obj) != 1 || obj["error"] != "unknown flag --x" {
+					p = append(p, fmt.Sprintf("stdout: want {error:%q}, got %q", "unknown flag --x", r.out))
 				}
 				if r.errs != "" {
 					p = append(p, fmt.Sprintf("stderr: want nothing with --json, got %q", r.errs))

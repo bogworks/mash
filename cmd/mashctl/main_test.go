@@ -132,8 +132,11 @@ func TestMashctlGlobalOptionsBeforeVerb(t *testing.T) {
 	if out, errb, code := ctlRun(t, e, "--verbose", "status"); code != 2 || out != "" || errb != "error: unknown flag --verbose\n" {
 		t.Errorf("unknown flag before the verb: %d %q %q", code, out, errb)
 	}
-	if out, errb, code := ctlRun(t, e, "status", "--verbose"); code != 2 || out != "" || strings.Contains(errb, "unknown command") || !strings.HasPrefix(errb, "error: unknown option --verbose\n") {
+	if out, errb, code := ctlRun(t, e, "status", "--bogus"); code != 2 || out != "" || errb != "error: unknown flag --bogus\n" {
 		t.Errorf("unknown flag after the verb: %d %q %q", code, out, errb)
+	}
+	if out, errb, code := ctlRun(t, e, "status", "--x=secret"); code != 2 || out != "" || errb != "error: unknown flag --x\n" {
+		t.Errorf("flag value echoed after the verb: %d %q %q", code, out, errb)
 	}
 	if out, errb, code := ctlRun(t, e, "nope"); code != 2 || out != "" || errb != "error: unknown command \"nope\"\n" {
 		t.Errorf("unknown command: %d %q %q", code, out, errb)

@@ -153,7 +153,7 @@ func TestEndpointVerbsUsage(t *testing.T) {
 			}
 		}
 		_, errb, code := h.run("endpoint", verb, "--bogus")
-		if code != 2 || !strings.Contains(errb, "--help") {
+		if code != 2 || errb != "error: unknown flag --bogus\n" {
 			t.Errorf("%s --bogus: %d %q", verb, code, errb)
 		}
 	}

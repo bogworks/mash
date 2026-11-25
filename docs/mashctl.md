@@ -60,7 +60,7 @@ These change the endpoint's directory record (what `who --wide` shows). They con
 - Both print `Updated endpoint ADDRESS`. A command that leaves the record as it is prints `Nothing to change on endpoint ADDRESS`.
 - `--dry-run` prints `Would update endpoint ADDRESS: what` and `Nothing was changed.`, and changes nothing.
 - `--json` prints `{"address": ..., "set": {...}}` or `{"address": ..., "unset": [...]}`, with `"dry_run": true` for a dry run.
-- A key that cannot be set, a missing value, a key given twice and an unknown option exit 2 and are not echoed back. An endpoint with no directory record exits 1.
+- A key that cannot be set, a missing value, a key given twice and an unknown flag exit 2 and are not echoed back. An endpoint with no directory record exits 1.
 
 Labels do not change a minted user: the permissions of an endpoint do not depend on them, so setting one leaves nothing to reissue.
 
@@ -271,7 +271,7 @@ Every failure is `error: WHAT` on standard error and at most one `hint: COMMAND`
 
 | Error | Exit | Meaning |
 | --- | --- | --- |
-| `unknown option --x` | 2 | An option that does not exist. `--make-key`, `--jwt-out`, `--creds-out`, `--label`, `--owner`, `--group`, `--name` and the other metadata options are gone. |
+| `unknown flag --x` | 2 | A flag that does not exist (no hint). `--make-key`, `--jwt-out`, `--creds-out`, `--label`, `--owner`, `--group`, `--name` and the other metadata options are gone. |
 | `not an endpoint address` | 2 | The address is not `owner.group.name`. |
 | `--public-key needs --out, the join file to write` | 2 | A public key is signed for a machine that makes its own seed. |
 | `ADDRESS already exists` | 1 | create: the endpoint exists. Use `endpoint reissue`. |

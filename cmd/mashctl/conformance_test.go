@@ -16,7 +16,7 @@ package main
 //	toplevel/unlisted    every verb of the build's mashctl --help is a command of the specification
 //	removed/<verb>       the verbs and options the specification removed are unknown to the build
 //	width/<path>         every --help output is at most 80 columns per line
-//	bad-option/<path>    an unknown option exits 2: 'error: unknown option --bogus', then 'hint: mashctl <path> --help'
+//	bad-option/<path>    an unknown flag exits 2: 'error: unknown flag --bogus', and no hint
 //	bad-option-json/...  the same with --json: {error, hint} on stdout, nothing on stderr
 //	usage-exit/<path>    a missing required argument exits 2, and no usage error gives a code other than 2
 //	extra-option/...     an option a --help lists that the specification lacks for the command (its own and the global ones)
@@ -496,7 +496,7 @@ func TestConformance(t *testing.T) {
 				if !strings.HasPrefix(opt, "--") {
 					opt = o.args[len(o.args)-1]
 				}
-				want := fmt.Sprintf("error: unknown option %s\nhint: mashctl %s --help\n", opt, o.hint)
+				want := fmt.Sprintf("error: unknown flag %s\n", opt)
 				var p []string
 				if r.code != 2 || r.out != "" || r.errs != want {
 					p = append(p, fmt.Sprintf("want exit 2, no stdout, stderr %q; got exit %d, stdout %q, stderr %q", want, r.code, r.out, r.errs))
@@ -540,8 +540,8 @@ func TestConformance(t *testing.T) {
 				if r.out != "" {
 					p = append(p, fmt.Sprintf("stdout: want nothing, got %q", r.out))
 				}
-				if len(lines) != 2 || lines[0] != "error: unknown option --bogus" || lines[1] != "hint: mashctl "+sc.path+" --help" {
-					p = append(p, fmt.Sprintf("stderr: want %q, got %q", "error: unknown option --bogus\nhint: mashctl "+sc.path+" --help\n", r.errs))
+				if len(lines) != 1 || lines[0] != "error: unknown flag --bogus" {
+					p = append(p, fmt.Sprintf("stderr: want %q, got %q", "error: unknown flag --bogus\n", r.errs))
 				}
 				confFail(t, "bad-option "+sc.path, p)
 			})
@@ -551,8 +551,8 @@ func TestConformance(t *testing.T) {
 				var obj map[string]any
 				if err := json.Unmarshal([]byte(r.out), &obj); err != nil {
 					p = append(p, fmt.Sprintf("stdout: want one JSON object, got %q", r.out))
-				} else if len(obj) != 2 || obj["error"] != "unknown option --bogus" || obj["hint"] != "mashctl "+sc.path+" --help" {
-					p = append(p, fmt.Sprintf("stdout: want {error:%q, hint:%q}, got %q", "unknown option --bogus", "mashctl "+sc.path+" --help", r.out))
+				} else if len(obj) != 1 || obj["error"] != "unknown flag --bogus" {
+					p = append(p, fmt.Sprintf("stdout: want {error:%q}, got %q", "unknown flag --bogus", r.out))
 				}
 				if r.errs != "" {
 					p = append(p, fmt.Sprintf("stderr: want nothing with --json, got %q", r.errs))

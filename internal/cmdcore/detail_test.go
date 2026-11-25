@@ -82,7 +82,7 @@ func (p plainResult) Text(cmdcore.Opts) string { return p.Got }
 func TestOldVerboseOptionIsRefused(t *testing.T) {
 	for _, old := range []string{"--verbose", "-v"} {
 		code, _, e := runFull(cliframe.Global{}, "x", old)
-		if code != 2 || !strings.Contains(e, "unknown option "+old) {
+		if code != 2 || !strings.Contains(e, "unknown flag "+old) {
 			t.Errorf("%s: %d %q", old, code, e)
 		}
 	}
