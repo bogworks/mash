@@ -1,0 +1,1 @@
+**A relative `MASH_CONFIG_DIR`, `MASH_STATE_DIR` or `MASH_KEYS_DIR` is refused without printing its value.** The error names the variable and says it must be an absolute path ([#1343](https://github.com/bogworks/mash/issues/1343)).
