@@ -1239,3 +1239,68 @@ func refuseStagedPair(t *testing.T, rel, refusal string) {
 		t.Errorf("staged files left in the folder: %v", ents)
 	}
 }
+
+// A real mash 0.5.5 configuration folder holds the keys url and tls_ca. The current mash and mashctl refuse every
+// command, version included, when they find them (ADR 0170). The installer's version checks, before the renames and
+// in the final report, must not see the user's configuration, so the install completes and says what it installed.
+func TestInstallSh_a055ConfigurationDoesNotStopTheInstallOrItsReport(t *testing.T) {
+	const cfg = `{"url":"nats://nats.example.com:4222","owner":"alice","name":"alice-laptop","tls_ca":"/home/alice/ca.pem"}` + "\n"
+	refuser := func(line string) string {
+		return "#!/bin/sh\n" +
+			"if [ \"$1\" = version ]; then\n" +
+			"  for f in \"$HOME/.config/mash/config.json\" \"$XDG_CONFIG_HOME/mash/config.json\"; do\n" +
+			"    [ -f \"$f\" ] || continue\n" +
+			"    case \"$(cat \"$f\")\" in *'\"url\"'*|*'\"tls_ca\"'*) echo 'error: a mash 0.5.5 configuration' >&2; exit 1;; esac\n" +
+			"  done\n" +
+			"  echo '" + line + "'\n" +
+			"fi\nexit 0\n"
+	}
+	for _, viaXDG := range []bool{false, true} {
+		name := "HOME"
+		if viaXDG {
+			name = "XDG_CONFIG_HOME"
+		}
+		t.Run(name, func(t *testing.T) {
+			goos, goarch := hostPlatform(t)
+			rel := t.TempDir()
+			var sums strings.Builder
+			for n, line := range map[string]string{"mash-" + goos + "-" + goarch: fakeMashVersion, "mashctl-" + goos + "-" + goarch: fakeCtlVersion} {
+				body := refuser(line)
+				writeFile(t, filepath.Join(rel, n), body)
+				h := sha256.Sum256([]byte(body))
+				fmt.Fprintf(&sums, "%s  %s\n", hex.EncodeToString(h[:]), n)
+			}
+			writeFile(t, filepath.Join(rel, "SHA256SUMS"), sums.String())
+			writeFile(t, filepath.Join(rel, "mash.intoto.jsonl"), "{}\n")
+
+			home := tempHome(t)
+			cfgDir := filepath.Join(home, ".config", "mash")
+			if err := os.MkdirAll(cfgDir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			writeFile(t, filepath.Join(cfgDir, "config.json"), cfg)
+			var env []string
+			if viaXDG {
+				env = append(env, "XDG_CONFIG_HOME="+filepath.Join(home, ".config"))
+			}
+			r := runInstallIn(t, rel, installTools(t, nil), home, filepath.Join(home, "bin"), "install.sh", env...)
+			if r.err != nil {
+				t.Fatalf("install failed: %v\n%s", r.err, r.out)
+			}
+			for _, want := range []string{"Installed " + fakeMashVersion + " in ~/bin\n", "Installed " + fakeCtlVersion + " in ~/bin\n"} {
+				if !strings.Contains(r.out, want) {
+					t.Errorf("output lacks %q:\n%s", want, r.out)
+				}
+			}
+			// the fake does refuse with that configuration when run as the user
+			c := exec.Command(filepath.Join(r.dest, "mash"), "version")
+			c.Env = []string{"PATH=" + installTools(t, nil), "HOME=" + home}
+			if viaXDG {
+				c.Env = append(c.Env, "XDG_CONFIG_HOME="+filepath.Join(home, ".config"))
+			}
+			if err := c.Run(); err == nil {
+				t.Error("the fake mash did not refuse under the 0.5.5 configuration; the test proves nothing")
+			}
+		})
+	}
+}

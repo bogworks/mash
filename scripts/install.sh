@@ -61,10 +61,18 @@ die() {
 # variables, PATH only), so the user's own configuration cannot make it refuse to report.
 version_of() {
     local out
+    out=$(version_line "$1") || return 0
+    printf '%s\n' "$out" | awk 'NR == 1 { sub(/^v/, "", $2); print $2 }'
+}
+
+# version_line PROGRAM: the first line PROGRAM's `version` prints, run as version_of runs it
+# (isolated); empty if it does not run or exits non-zero.
+version_line() {
+    local out
     mkdir -p -- "$VHOME" || return 0 # VHOME is set in main: an assignment here would die with the command substitution
     out=$(env -i HOME="$VHOME" PATH="$PATH" XDG_CONFIG_HOME="$VHOME/config" \
         XDG_STATE_HOME="$VHOME/state" XDG_DATA_HOME="$VHOME/data" "$1" version 2>/dev/null) || return 0
-    printf '%s\n' "$out" | awk 'NR == 1 { sub(/^v/, "", $2); print $2 }'
+    printf '%s\n' "$out" | head -n 1
 }
 
 # sha256_of FILE: the hex SHA-256 of FILE, with sha256sum or shasum.
@@ -333,7 +341,7 @@ main() {
 
     shown=$(tilde "$dir")
     for name in mash mashctl; do
-        line=$("$real/$name" version 2>/dev/null | head -n 1) || true
+        line=$(version_line "$real/$name")
         [ -n "$line" ] || die "the installed $name did not report its version"
         echo "Installed $line in $shown"
     done
