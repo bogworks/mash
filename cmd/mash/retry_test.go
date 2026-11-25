@@ -384,10 +384,20 @@ func TestServeUnreadablePolicyIsConfigError(t *testing.T) {
 	}
 }
 
+// cancelWait bounds the waits for the server's side of a cancel and for a cancel to take effect. It is a ceiling, not
+// a delay: a wait ends as soon as its condition holds. serve returns without waiting for the abandoned connect of a cancelled open (endpoint.connect
+// closes it from its own goroutine), and the server drops the client after that, so on a loaded runner the count
+// falls well after serve has returned (#1523).
+const cancelWait = 30 * time.Second
+
+// exitWait bounds serve returning after a cancel. It stays short: a regression that makes serve wait out an open's
+// 20 s timeout must fail, so only the server's connection count gets the long ceiling.
+const exitWait = 5 * time.Second
+
 // stdin closing at any point of the wait must end serve and leave no connection or lease behind.
 func waitGone(t *testing.T, w *world, base int, name string, kv jetstream.KeyValue, planted bool) {
 	t.Helper()
-	eventually(t, 5*time.Second, "endpoint connections closed", func() bool { return w.e.Connections() <= base })
+	eventually(t, cancelWait, "endpoint connections closed", func() bool { return w.e.Connections() <= base })
 	if !planted {
 		return
 	}
@@ -406,9 +416,9 @@ func TestServeCancelDuringWait(t *testing.T) {
 	s.initialize(t)
 	s.tools(t)
 	attempts := acquireAttempts.Load()
-	eventually(t, 5*time.Second, "waiting", func() bool { return acquireAttempts.Load() > attempts+2 })
+	eventually(t, cancelWait, "waiting", func() bool { return acquireAttempts.Load() > attempts+2 })
 	s.in.Close()
-	s.exited(t, 5*time.Second)
+	s.exited(t, exitWait)
 	waitGone(t, w, base, tAddr("a").Flat(), kv, false)
 }
 
@@ -432,14 +442,14 @@ func TestServeCancelRightAfterOpen(t *testing.T) {
 	freeLease(t, kv, tAddr("a").Flat())
 	select {
 	case <-reached:
-	case <-time.After(5 * time.Second):
+	case <-time.After(cancelWait):
 		t.Fatal("no successful Open")
 	}
 	cancel() // cancellation is in effect before the successful Open is published
 	letGo()
 	select {
 	case <-done:
-	case <-time.After(5 * time.Second):
+	case <-time.After(exitWait):
 		t.Fatal("serve did not exit")
 	}
 	waitGone(t, w, base, tAddr("a").Flat(), kv, false)
@@ -465,14 +475,14 @@ func TestServeCancelBeforeAttemptAndParentCancel(t *testing.T) {
 	t.Cleanup(closeIO)
 	select {
 	case <-reached:
-	case <-time.After(5 * time.Second):
+	case <-time.After(cancelWait):
 		t.Fatal("no attempt started")
 	}
 	cancel()
 	letGo()
 	select {
 	case <-done:
-	case <-time.After(5 * time.Second):
+	case <-time.After(exitWait):
 		t.Fatal("serve did not exit on parent cancel")
 	}
 	waitGone(t, w, base, tAddr("a").Flat(), kv, false)
