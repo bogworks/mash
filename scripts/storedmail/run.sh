@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Stored-mail check: mail written by released mash binaries, classified by sapsdk.Classify, in a throwaway container.
-#   scripts/storedmail/run.sh [tag...]      default tags: v0.5.8 v0.5.7 v0.5.6
+#   scripts/storedmail/run.sh [tag...]      default tags: v0.5.9 v0.5.8 v0.5.7 v0.5.6
 # The release binaries are downloaded on the host into a fresh temp dir and are never run here; the container mounts that
 # dir read-only and runs them, with the NATS server, itself. Exits non-zero on a candidate or an unexpected class.
 # Env: MASH_RELEASE_REPO  GitHub repo the releases come from (default bogworks/mash).
@@ -8,7 +8,7 @@ set -euo pipefail
 
 root=$(cd "$(dirname "$0")/../.." && pwd)
 tags=("$@")
-[ ${#tags[@]} -gt 0 ] || tags=(v0.5.8 v0.5.7 v0.5.6)
+[ ${#tags[@]} -gt 0 ] || tags=(v0.5.9 v0.5.8 v0.5.7 v0.5.6)
 repo=${MASH_RELEASE_REPO:-bogworks/mash}
 if command -v sha256sum >/dev/null 2>&1; then sha256() { sha256sum "$1"; }; else sha256() { shasum -a 256 "$1"; }; fi
 bins=$(mktemp -d)
