@@ -196,6 +196,10 @@ A revocation is not a transaction across NATS claims, JetStream resources and lo
 
 What a revocation does not do: credentials minted by other tools (for example `nsc`) under the account key keep their own permissions until they are revoked. `mashctl doctor` finds a connected key that mash did not issue.
 
+### One administrator at a time
+
+One administrator at a time is mash's stated limit. `mashctl` does not lock across operators or machines, so two administrators who change one account, or reissue one endpoint, at the same moment can interleave their writes. Known under this limit: [#199](https://github.com/bogworks/mash/issues/199) (account JWT writers are not serialised across operators), [#627](https://github.com/bogworks/mash/issues/627), [#767](https://github.com/bogworks/mash/issues/767) and [#872](https://github.com/bogworks/mash/issues/872) (reissue on two machines can interleave). There is no lock for this: agree who administers before you start.
+
 ### Finding endpoints: `who` and `--json`
 
 ```
