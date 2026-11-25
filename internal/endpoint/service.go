@@ -130,8 +130,13 @@ type service struct {
 }
 
 // stop deregisters the SAP service and ends the heartbeat. Idempotent.
-// serviceFlush waits until the server has the service's subscriptions; a seam for tests.
-var serviceFlush = func(nc *nats.Conn) error { return nc.FlushTimeout(5 * time.Second) }
+// serviceFlush waits until the server has the service's subscriptions, for at most 5 s and no longer than ctx: serve's
+// ctx ends when its stdin closes, so a connection that is reconnecting cannot hold up the exit. A seam for tests.
+var serviceFlush = func(ctx context.Context, nc *nats.Conn) error {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	return nc.FlushWithContext(ctx)
+}
 
 func (s *service) stop() {
 	s.stopOnce.Do(func() {
@@ -290,7 +295,7 @@ func (e *Endpoint) StartService(ctx context.Context, onPrompt func(PromptEvent))
 	}
 	// The endpoints' subscriptions reach the server before StartService returns, so a prompt sent from another
 	// connection right after it finds a responder (#19: "no responders" under load).
-	if err := serviceFlush(e.nc); err != nil {
+	if err := serviceFlush(ctx, e.nc); err != nil {
 		return fmt.Errorf("mash: service registration: %w", err)
 	}
 	started = true

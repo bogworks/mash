@@ -817,7 +817,9 @@ func (e *Endpoint) Close() {
 		e.leaseCancel()
 		<-e.leaseDone
 	}
-	if e.leaseKV != nil {
+	// A connection that is down, reconnecting or revoked cannot carry the delete: the lease is left to expire rather
+	// than hold up the exit for the whole of releaseTimeout.
+	if e.leaseKV != nil && e.nc.IsConnected() {
 		ctx, cancel := context.WithTimeout(context.Background(), releaseTimeout)
 		if err := e.releaseLease(ctx); err != nil {
 			e.log.Printf("lease release: %v; the next session waits up to %s for it to expire", err, store.LeaseTTL)

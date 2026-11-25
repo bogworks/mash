@@ -369,7 +369,10 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 		}
 		sdir, err := endpoint.SpoolDir(cfg)
 		if err == nil {
-			err = ep.SetSpool(spool.Spool{Dir: sdir}, adapter.OwnerToken(os.Getenv))
+			err = ep.SetSpoolContext(ctx, spool.Spool{Dir: sdir}, adapter.OwnerToken(os.Getenv))
+		}
+		if ctx.Err() != nil {
+			return // stdin closed or a signal came: no spool or service to start, and nothing to report
 		}
 		if err != nil {
 			if failClosed {
@@ -403,7 +406,7 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 					return
 				}
 				_ = srv.Notify(text, map[string]string{"request_id": p.RequestID, "from": p.From, "kind": "prompt"})
-			}); err != nil {
+			}); err != nil && ctx.Err() == nil {
 				fmt.Fprintln(stderr, err)
 				_ = srv.Notify(endpoint.ErrorInstructions(cfg.DisplayName(), err), map[string]string{"error": "true"})
 			}

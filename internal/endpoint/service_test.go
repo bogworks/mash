@@ -334,7 +334,7 @@ func TestPromptNothingAfterTerminator(t *testing.T) {
 // prompts with no heartbeat (codex H1 on #20). It stays installed, so a callback from before the stop finds it.
 func TestStartServiceFailureLeavesNoService(t *testing.T) {
 	old := serviceFlush
-	serviceFlush = func(*nats.Conn) error { return errors.New("simulated flush timeout") }
+	serviceFlush = func(context.Context, *nats.Conn) error { return errors.New("simulated flush timeout") }
 	t.Cleanup(func() { serviceFlush = old })
 	f := newFixture(t, "a", "b")
 	ctx, cancel := context.WithCancel(context.Background())
