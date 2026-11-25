@@ -129,6 +129,7 @@ func TestStatusReadyOnlineWhileASessionHoldsTheEndpoint(t *testing.T) {
 	s := startServe(t, w.env["a"])
 	s.initialize(t)
 	s.tools(t)
+	waitStoredScan(t, w.env["a"])
 	eventually(t, 10*time.Second, "status says online", func() bool {
 		return runMash(w.env["a"], "status").out == tTo("a")+": ready, online\n"
 	})
@@ -451,9 +452,12 @@ func TestStatusAndDoctorDoorsAgree(t *testing.T) {
 	for name, env := range cases {
 		s := startServe(t, env)
 		s.initialize(t)
+		if name == "ready" { // only a serve that takes the endpoint scans the stored mail
+			waitStoredScan(t, env)
+		}
 		for _, tool := range []string{"status", "doctor"} {
 			id++
-			if name == "ready" { // a hook has run in the session, so its delivery row is ok (the shell skips it, see below)
+			if name == "ready" { // the stored-mail scan is over, and a hook has run in the session, so its delivery row is ok (the shell skips it, see below)
 				hookRan(t, w, s, "a")
 			}
 			cli := runMash(env, tool)

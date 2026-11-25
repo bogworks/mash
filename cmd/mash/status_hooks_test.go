@@ -2,12 +2,38 @@ package main
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/bogworks/mash/internal/endpoint"
 )
+
+// storedScanDeadline bounds waitStoredScan.
+const storedScanDeadline = 10 * time.Second
+
+// waitStoredScan waits, after a test started a serve that takes the endpoint, until the one-time scan of the stored mail
+// has finished: the scanned line is in the malformed list of the endpoint's spool (it is written whole when the scan
+// ends, an empty stream included). Until then status says "not ready: checking stored mail before delivery" (TO-14),
+// which is right but not what a test of the ready state looks for. Call it only for a serve that holds the endpoint.
+func waitStoredScan(t *testing.T, env map[string]string) {
+	t.Helper()
+	cfg, err := loadCfg(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := endpoint.SpoolDir(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	list := filepath.Join(d, "refused-malformed.seqs")
+	eventually(t, storedScanDeadline, "the stored-mail scan finished (no scanned line in "+list+")", func() bool {
+		b, err := os.ReadFile(list)
+		return err == nil && strings.Contains("\n"+string(b), "\nscanned ")
+	})
+}
 
 // shellSession is the session object of status --detail --json run at a shell, as raw JSON ("null" at no session).
 func shellSession(t *testing.T, w *world) (string, string) {
