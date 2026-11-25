@@ -50,6 +50,7 @@ type at010Env struct {
 	sys     *nats.Conn
 	cluster NATSCluster
 	js      bool // JetStream is on, and the account may use it
+	n       int  // the number of servers: 2 for the two-server tests
 
 	mu   sync.Mutex
 	cur  string // the account JWT last pushed
@@ -74,7 +75,13 @@ func newLiveEnv(t *testing.T, prev listset.ListSet) *at010Env { return newLiveEn
 // newLiveEnvJS is newLiveEnv with JetStream on every server and enabled for the account when js is true.
 func newLiveEnvJS(t *testing.T, prev listset.ListSet, js bool) *at010Env {
 	t.Helper()
-	e := &at010Env{t: t, js: js, scoped: map[string]nkeys.KeyPair{}, dirs: map[string]string{}, srvs: map[string]*server.Server{}, urls: map[string]string{}, rec: newLiveIssueRecord(t)}
+	return newLiveEnvN(t, prev, js, 2)
+}
+
+// newLiveEnvN is newLiveEnvJS with n servers, named s1..sn and routed to each other.
+func newLiveEnvN(t *testing.T, prev listset.ListSet, js bool, n int) *at010Env {
+	t.Helper()
+	e := &at010Env{t: t, js: js, n: n, scoped: map[string]nkeys.KeyPair{}, dirs: map[string]string{}, srvs: map[string]*server.Server{}, urls: map[string]string{}, rec: newLiveIssueRecord(t)}
 	e.op = at010Must(nkeys.CreateOperator())
 	opPub := at010Must(e.op.PublicKey())
 	oc := jwt.NewOperatorClaims(opPub)
@@ -93,25 +100,34 @@ func newLiveEnvJS(t *testing.T, prev listset.ListSet, js bool) *at010Env {
 
 	gen1 := e.account(compile(t, prev))
 	e.setCurrent(gen1)
-	for _, n := range []string{"s1", "s2"} {
+	names := e.names()
+	for _, n := range names {
 		e.dirs[n] = t.TempDir()
 	}
 	if js {
-		// A JetStream cluster elects its meta leader only with both servers up, so both are started with each
+		// A JetStream cluster elects its meta leader only with every server up, so all are started with each
 		// other's route and awaited together.
 		ports := map[string]int{}
-		for _, n := range []string{"s1", "s2"} {
+		var all []string
+		for _, n := range names {
 			l := at010Must(net.Listen("tcp", "127.0.0.1:0"))
 			ports[n] = l.Addr().(*net.TCPAddr).Port
 			_ = l.Close()
+			all = append(all, fmt.Sprintf("nats-route://127.0.0.1:%d", ports[n]))
 		}
-		routes := fmt.Sprintf("nats-route://127.0.0.1:%d,nats-route://127.0.0.1:%d", ports["s1"], ports["s2"])
-		a, b := e.launch("s1", true, routes, ports["s1"]), e.launch("s2", true, routes, ports["s2"])
-		e.await("s1", a)
-		e.await("s2", b)
+		routes := strings.Join(all, ",")
+		started := map[string]*server.Server{}
+		for _, n := range names {
+			started[n] = e.launch(n, true, routes, ports[n])
+		}
+		for _, n := range names {
+			e.await(n, started[n])
+		}
 	} else {
 		s1 := e.start("s1", true, "")
-		e.start("s2", true, fmt.Sprintf("nats-route://127.0.0.1:%d", s1.ClusterAddr().Port))
+		for _, n := range names[1:] {
+			e.start(n, true, fmt.Sprintf("nats-route://127.0.0.1:%d", s1.ClusterAddr().Port))
+		}
 	}
 	e.waitRoutes()
 
@@ -121,8 +137,17 @@ func newLiveEnvJS(t *testing.T, prev listset.ListSet, js bool) *at010Env {
 	e.sys = at010Must(nats.Connect(e.urls["s1"], nats.Timeout(15*time.Second), nats.UserJWT(
 		func() (string, error) { return tok, nil }, func(n []byte) ([]byte, error) { return sysUser.Sign(n) })))
 	t.Cleanup(e.sys.Close)
-	e.cluster = NATSCluster{Conn: e.sys, Inventory: 2}
+	e.cluster = NATSCluster{Conn: e.sys, Inventory: n}
 	return e
+}
+
+// names is the server names s1..sn.
+func (e *at010Env) names() []string {
+	out := make([]string, e.n)
+	for i := range out {
+		out[i] = fmt.Sprintf("s%d", i+1)
+	}
+	return out
 }
 
 func (e *at010Env) setCurrent(tok string) {
@@ -239,7 +264,7 @@ func (e *at010Env) waitRoutes() {
 	e.t.Helper()
 	deadline := time.Now().Add(at010Wait)
 	for time.Now().Before(deadline) {
-		ok := len(e.srvs) == 2
+		ok := len(e.srvs) == e.n
 		for _, s := range e.srvs {
 			ok = ok && s.NumRoutes() > 0
 		}
@@ -251,16 +276,16 @@ func (e *at010Env) waitRoutes() {
 	e.t.Fatal("the servers did not route to each other")
 }
 
-// waitServers waits until the system account sees both servers.
+// waitServers waits until the system account sees every server.
 func (e *at010Env) waitServers(ctx context.Context) {
 	e.t.Helper()
 	deadline := time.Now().Add(at010Wait)
 	for time.Now().Before(deadline) {
-		if set, err := e.cluster.Servers(ctx); err == nil && set.Complete(2) {
+		if set, err := e.cluster.Servers(ctx); err == nil && set.Complete(e.n) {
 			return
 		}
 	}
-	e.t.Fatal("the system account does not see both servers")
+	e.t.Fatal("the system account does not see every server")
 }
 
 // pushTo pushes tok to the named servers and requires each to acknowledge it.
@@ -357,7 +382,7 @@ func (e *at010Env) signers(c *listset.Compiled) map[string]string {
 
 func (e *at010Env) gateInput(r *at010Run, p *LiveProber, w *LiveWitnesses) GateInput {
 	return GateInput{
-		Cluster: e.cluster, Prober: p, Witnesses: w, Account: e.acctPub, Inventory: 2,
+		Cluster: e.cluster, Prober: p, Witnesses: w, Account: e.acctPub, Inventory: e.n,
 		Record: r.rec, Compiled: r.c2, Expect: r.ex,
 		Previous: &Candidate{Generation: 1, Compiled: r.c1, Signers: e.signers(r.c1)},
 		Signers:  e.signers(r.c2),
@@ -389,7 +414,7 @@ func (e *at010Env) heldJWTs(ctx context.Context) map[string]*jwt.AccountClaims {
 func (e *at010Env) checkProbesRevoked(ctx context.Context, keys []string) {
 	e.t.Helper()
 	held := e.heldJWTs(ctx)
-	if len(held) != 2 {
+	if len(held) != e.n {
 		e.t.Fatalf("servers answered: %d", len(held))
 	}
 	for n, c := range held {
