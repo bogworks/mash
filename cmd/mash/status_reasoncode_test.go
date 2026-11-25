@@ -260,7 +260,7 @@ func TestStatusSessionGoneWhenServeStops(t *testing.T) {
 	s.initialize(t)
 	eventually(t, 10*time.Second, "shell sees the session", func() bool { got, _ := shellSession(t, w); return got != "null" })
 	s.in.Close()
-	eventually(t, 10*time.Second, "the record is gone", func() bool { got, _ := shellSession(t, w); return got == "null" })
+	eventually(t, cancelWait, "the record is gone after serve stopped", func() bool { got, _ := shellSession(t, w); return got == "null" })
 }
 
 // A serve that no longer holds the endpoint takes its record away: the shell then names no session.
