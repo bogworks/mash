@@ -900,13 +900,12 @@
         "value": [
          {
           "case": "Created, credentials installed on this machine",
-          "text": "Created endpoint acme.demo.bob\nCredentials: /home/ada/.config/mash/acme.demo.bob.creds",
+          "text": "Created endpoint acme.demo.bob\nCredentials: <config dir>/acme.demo.bob.creds",
           "stream": "stdout",
           "exit": 0,
           "issue": "#1044",
           "replaces": "Created, credentials installed on this machine",
-          "note": "The line says where the file it wrote is, as gh and aws do; --json already has it as \"creds\". The path is the one in the x-json example. The case with a join file is unchanged (its Join file line is the location it wrote); mash who's text is unchanged.",
-          "verbatim": true
+          "note": "The line says where the file it wrote is, as gh and aws do; --json already has it as \"creds\". <config dir> stands for the folder the program is using (the default, or the one --config-dir names); the program prints the real path, so the example is not verbatim. The case with a join file is unchanged (its Join file line is the location it wrote); mash who's text is unchanged."
          }
         ]
        }
