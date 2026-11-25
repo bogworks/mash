@@ -22,11 +22,17 @@ import (
 func (h *fleetEnv) stateOf(name string) string {
 	h.t.Helper()
 	out, errb, code := h.run("endpoint", "show", ad(name).String(), "--json")
-	var j struct{ State string }
+	var j struct{ Online, Suspended bool }
 	if code != 0 || json.Unmarshal([]byte(out), &j) != nil {
 		h.t.Fatalf("show %s: %d %q %q", name, code, out, errb)
 	}
-	return j.State
+	switch { // the word the text shows: suspended wins over online
+	case j.Suspended:
+		return "suspended"
+	case j.Online:
+		return "online"
+	}
+	return "offline"
 }
 
 // holdLease writes the lease key a running session holds for o.g.<name>.

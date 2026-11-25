@@ -367,6 +367,13 @@
         "exit": 1,
         "issue": "#1097",
         "note": "With --json: {\"error\":\"no server is configured\",\"hint\":\"mashctl init --config <file>\"} on stdout, exit 1."
+       },
+       {
+        "case": "--json",
+        "text": "{\n  \"server\": \"tls://localhost:4222\",\n  \"ready\": true,\n  \"endpoint_count\": 3,\n  \"online_count\": 1,\n  \"reason\": null\n}",
+        "stream": "stdout",
+        "exit": 0,
+        "verbatim": true
        }
       ]
      },
@@ -374,9 +381,9 @@
       "name": "x-json",
       "value": {
        "server": "tls://localhost:4222",
-       "ok": true,
-       "endpoints": 3,
-       "online": 1,
+       "ready": true,
+       "endpoint_count": 3,
+       "online_count": 1,
        "reason": null
       }
      },
@@ -390,20 +397,6 @@
      {
       "name": "x-today",
       "value": "New in 0.5.6."
-     },
-     {
-      "name": "x-output-next",
-      "value": [
-       {
-        "case": "--json",
-        "text": "{\n  \"server\": \"tls://localhost:4222\",\n  \"ready\": true,\n  \"endpoint_count\": 3,\n  \"online_count\": 1,\n  \"reason\": null\n}",
-        "stream": "stdout",
-        "exit": 0,
-        "issue": "#1041",
-        "note": "--json is shown as it prints at a terminal (indented); piped it is one compact line (rule \"--json prints one object\"). Two changes. The yes/no fact \"it works\" is \"ready\", as in mash status --json (today \"ok\"). A count is named as a count: endpoint_count and online_count (today \"endpoints\" and \"online\", where online was a number while online is a boolean in mash who and mash status). With several servers the same object is repeated in \"servers\", as today. Text is unchanged.",
-        "verbatim": true
-       }
-      ]
      }
     ]
    },
@@ -1162,6 +1155,20 @@
           "text": "No endpoints.",
           "stream": "stdout",
           "exit": 0
+         },
+         {
+          "case": "--json",
+          "text": "{\n  \"endpoints\": [\n    {\n      \"address\": \"acme.demo.alice\",\n      \"owner\": \"acme\",\n      \"group\": \"demo\",\n      \"name\": \"alice\",\n      \"online\": true,\n      \"suspended\": false\n    },\n    {\n      \"address\": \"acme.demo.bob\",\n      \"owner\": \"acme\",\n      \"group\": \"demo\",\n      \"name\": \"bob\",\n      \"online\": false,\n      \"suspended\": false\n    }\n  ]\n}",
+          "stream": "stdout",
+          "exit": 0,
+          "verbatim": true
+         },
+         {
+          "case": "--json, suspended while online",
+          "text": "{\n  \"endpoints\": [\n    {\n      \"address\": \"acme.demo.alice\",\n      \"owner\": \"acme\",\n      \"group\": \"demo\",\n      \"name\": \"alice\",\n      \"online\": true,\n      \"suspended\": true\n    },\n    {\n      \"address\": \"acme.demo.bob\",\n      \"owner\": \"acme\",\n      \"group\": \"demo\",\n      \"name\": \"bob\",\n      \"online\": false,\n      \"suspended\": false\n    }\n  ]\n}",
+          "stream": "stdout",
+          "exit": 0,
+          "verbatim": true
          }
         ]
        },
@@ -1174,7 +1181,8 @@
            "owner": "acme",
            "group": "demo",
            "name": "alice",
-           "state": "online"
+           "online": true,
+           "suspended": false
           }
          ]
         }
@@ -1193,29 +1201,6 @@
        {
         "name": "x-notes",
         "value": "Every row prints its owner and group, so a line can be grepped or cut on its own. With --wide, ADDRESS takes the place of NAME (the address carries the name)."
-       },
-       {
-        "name": "x-output-next",
-        "value": [
-         {
-          "case": "--json",
-          "text": "{\n  \"endpoints\": [\n    {\n      \"address\": \"acme.demo.alice\",\n      \"owner\": \"acme\",\n      \"group\": \"demo\",\n      \"name\": \"alice\",\n      \"online\": true,\n      \"suspended\": false\n    },\n    {\n      \"address\": \"acme.demo.bob\",\n      \"owner\": \"acme\",\n      \"group\": \"demo\",\n      \"name\": \"bob\",\n      \"online\": false,\n      \"suspended\": false\n    }\n  ]\n}",
-          "stream": "stdout",
-          "exit": 0,
-          "issue": "#1041",
-          "note": "--json is shown as it prints at a terminal (indented); piped it is one compact line (rule \"--json prints one object\"). The state word (online, offline, suspended) becomes two booleans, online and suspended, so the one fact \"online\" has one name in every --json (mash who already has it). Today: \"state\": \"online\". The text table keeps its STATE column. online is the lease alone and does not depend on suspended: suspending parks inbound mail and leaves the session and its lease running (ADR 0057), so an endpoint can be online and suspended at once. In the text table the STATE column shows suspended in preference to online or offline.",
-          "verbatim": true
-         },
-         {
-          "case": "--json, suspended while online",
-          "text": "{\n  \"endpoints\": [\n    {\n      \"address\": \"acme.demo.alice\",\n      \"owner\": \"acme\",\n      \"group\": \"demo\",\n      \"name\": \"alice\",\n      \"online\": true,\n      \"suspended\": true\n    },\n    {\n      \"address\": \"acme.demo.bob\",\n      \"owner\": \"acme\",\n      \"group\": \"demo\",\n      \"name\": \"bob\",\n      \"online\": false,\n      \"suspended\": false\n    }\n  ]\n}",
-          "stream": "stdout",
-          "exit": 0,
-          "issue": "#1041",
-          "note": "Alice is suspended and her session is still running, so online is true and suspended is true. online comes from the lease and never from suspended. The text table would show her STATE as suspended, which wins over online and offline.",
-          "verbatim": true
-         }
-        ]
        }
       ]
      },
@@ -1274,7 +1259,8 @@
         "name": "x-json",
         "value": {
          "address": "acme.demo.bob",
-         "state": "offline",
+         "online": false,
+         "suspended": false,
          "created": "2026-11-19T09:40:00Z",
          "waiting": 1,
          "labels": {

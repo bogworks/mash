@@ -72,6 +72,60 @@ Stream: stdout. Exit code: 0.
 No endpoints.
 ```
 
+### --json
+
+Stream: stdout. Exit code: 0.
+
+```text
+{
+  "endpoints": [
+    {
+      "address": "acme.demo.alice",
+      "owner": "acme",
+      "group": "demo",
+      "name": "alice",
+      "online": true,
+      "suspended": false
+    },
+    {
+      "address": "acme.demo.bob",
+      "owner": "acme",
+      "group": "demo",
+      "name": "bob",
+      "online": false,
+      "suspended": false
+    }
+  ]
+}
+```
+
+### --json, suspended while online
+
+Stream: stdout. Exit code: 0.
+
+```text
+{
+  "endpoints": [
+    {
+      "address": "acme.demo.alice",
+      "owner": "acme",
+      "group": "demo",
+      "name": "alice",
+      "online": true,
+      "suspended": true
+    },
+    {
+      "address": "acme.demo.bob",
+      "owner": "acme",
+      "group": "demo",
+      "name": "bob",
+      "online": false,
+      "suspended": false
+    }
+  ]
+}
+```
+
 ## JSON
 
 With `--json` the result is this shape. The values are an example.
@@ -84,7 +138,8 @@ With `--json` the result is this shape. The values are an example.
       "owner": "acme",
       "group": "demo",
       "name": "alice",
-      "state": "online"
+      "online": true,
+      "suspended": false
     }
   ]
 }

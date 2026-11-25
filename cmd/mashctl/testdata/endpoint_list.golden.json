@@ -5,14 +5,16 @@
       "owner": "o",
       "group": "g",
       "name": "a",
-      "state": "offline"
+      "online": false,
+      "suspended": false
     },
     {
       "address": "o.g.b",
       "owner": "o",
       "group": "g",
       "name": "b",
-      "state": "offline"
+      "online": false,
+      "suspended": false
     }
   ]
 }

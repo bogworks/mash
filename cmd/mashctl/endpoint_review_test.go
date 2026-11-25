@@ -137,7 +137,7 @@ func TestEndpointShowDeleteFlatJSON(t *testing.T) {
 	h.seed(ad("s"))
 	so, _, _ := h.run("endpoint", "show", "o.g.s", "--json")
 	m := jsonObject(t, so)
-	if m["address"] != "o.g.s" || m["state"] != "offline" || m["public_key"] == "" || m["endpoint"] != nil || m["labels"] == nil {
+	if m["address"] != "o.g.s" || m["online"] != false || m["suspended"] != false || m["state"] != nil || m["public_key"] == "" || m["endpoint"] != nil || m["labels"] == nil {
 		t.Errorf("show %v", m)
 	}
 	so, _, _ = h.run("endpoint", "delete", "o.g.s", "--yes", "--json")

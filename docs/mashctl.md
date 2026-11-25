@@ -36,7 +36,7 @@ mashctl limits show
 mashctl limits apply [prefix] [--dry-run]
 ```
 
-`status` prints one line per configured server: `tls://host:4222: ok, 3 endpoints, 1 online`, or `tls://host:4222: not ok: the server did not answer`. It exits 1 when any server is not ok, and then prints `hint: mashctl doctor` on stderr. `--json` prints `{"server", "ok", "endpoints", "online", "reason"}` for one server, and `{"servers": [...]}` for several.
+`status` prints one line per configured server: `tls://host:4222: ok, 3 endpoints, 1 online`, or `tls://host:4222: not ok: the server did not answer`. It exits 1 when any server is not ok, and then prints `hint: mashctl doctor` on stderr. `--json` prints `{"server", "ready", "endpoint_count", "online_count", "reason"}` for one server, and `{"servers": [...]}` for several.
 
 `limits show` prints the inbox size and age limits in force (`inbox size:  16 MiB`, `inbox age:   30 days`; `--json`: `{"inbox_bytes", "inbox_age"}`). `limits apply` raises existing inboxes to the limits in `config.json` and never lowers one: it prints `Raised 2 inboxes` or `Nothing to raise`. Its prefix is an owner (`acme`), an owner and group (`acme.demo`), or one address; the default is every inbox. See [Changing limits later](operations.md#changing-limits-later).
 
@@ -246,7 +246,7 @@ public key: UDXU4RCSV3GJRXWQ4PNDKYEL7ZBSMSGGTJYNDQGHFM4QWHBRD3ZTQ4LX
 
 `role`, `host`, `description`, `capability` and `note` lines appear when the record has them. The labels are padded to the longest label in the block plus one space, so with a `description` the values start one column further right. It exits 1 when the endpoint does not exist. Both change nothing.
 
-`--json` prints, for `list`, `{"endpoints": [{"address", "owner", "group", "name", "state"}]}`, and for `show`, `address`, `state`, `created` (RFC 3339), `waiting`, `labels`, `public_key` and the optional fields above.
+`--json` prints, for `list`, `{"endpoints": [{"address", "owner", "group", "name", "online", "suspended"}]}`, and for `show`, `address`, `online`, `suspended`, `created` (RFC 3339), `waiting`, `labels`, `public_key` and the optional fields above.
 
 ## mashctl version
 

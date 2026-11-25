@@ -523,7 +523,7 @@ func statusAllOK(code int, stdout string, want int) (bool, string) {
 	var doc struct {
 		Servers []struct {
 			Server string  `json:"server"`
-			OK     bool    `json:"ok"`
+			OK     bool    `json:"ready"`
 			Reason *string `json:"reason"`
 		} `json:"servers"`
 	}

@@ -63,7 +63,7 @@ func TestEndpointListPrefix(t *testing.T) {
 	}
 	// the JSON is filtered the same way
 	out, _, code := h.run("endpoint", "list", "acme.demo", "--json")
-	var j struct{ Endpoints []map[string]string }
+	var j struct{ Endpoints []map[string]any }
 	if code != 0 || json.Unmarshal([]byte(out), &j) != nil || len(j.Endpoints) != 2 || j.Endpoints[0]["address"] != "acme.demo.alice" {
 		t.Fatalf("%d %q", code, out)
 	}
@@ -125,7 +125,7 @@ func TestEndpointListEmptyAndJSON(t *testing.T) {
 	}
 	h.seed(addr3("acme", "demo", "alice"))
 	out, _, code = h.run("endpoint", "list", "--json")
-	want := "{\n  \"endpoints\": [\n    {\n      \"address\": \"acme.demo.alice\",\n      \"owner\": \"acme\",\n      \"group\": \"demo\",\n      \"name\": \"alice\",\n      \"state\": \"offline\"\n    }\n  ]\n}\n"
+	want := "{\n  \"endpoints\": [\n    {\n      \"address\": \"acme.demo.alice\",\n      \"owner\": \"acme\",\n      \"group\": \"demo\",\n      \"name\": \"alice\",\n      \"online\": false,\n      \"suspended\": false\n    }\n  ]\n}\n"
 	if code != 0 || out != want {
 		t.Fatalf("%d %q", code, out)
 	}
@@ -155,14 +155,15 @@ func TestEndpointShowFields(t *testing.T) {
 	out, _, code = h.run("endpoint", "show", "acme.demo.bob", "--json")
 	var j struct {
 		Address   string            `json:"address"`
-		State     string            `json:"state"`
+		Online    bool              `json:"online"`
+		Suspended bool              `json:"suspended"`
 		Created   string            `json:"created"`
 		Waiting   int               `json:"waiting"`
 		Labels    map[string]string `json:"labels"`
 		PublicKey string            `json:"public_key"`
 		Role      string            `json:"role"`
 	}
-	if code != 0 || json.Unmarshal([]byte(out), &j) != nil || j.Address != "acme.demo.bob" || j.State != "offline" || j.Waiting != 0 || j.Labels["team"] != "blue" ||
+	if code != 0 || json.Unmarshal([]byte(out), &j) != nil || j.Address != "acme.demo.bob" || j.Online || j.Suspended || j.Waiting != 0 || j.Labels["team"] != "blue" ||
 		j.PublicKey != rec.User || j.Role != "reviewer" || !regexp.MustCompile(`^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$`).MatchString(j.Created) {
 		t.Fatalf("%d %q", code, out)
 	}

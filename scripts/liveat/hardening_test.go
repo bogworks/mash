@@ -10,11 +10,11 @@ import (
 )
 
 func TestStatusAllOK(t *testing.T) {
-	good := `{"servers":[{"server":"tls://a:1","ok":true},{"server":"tls://b:1","ok":true},{"server":"tls://c:1","ok":true}]}`
+	good := `{"servers":[{"server":"tls://a:1","ready":true},{"server":"tls://b:1","ready":true},{"server":"tls://c:1","ready":true}]}`
 	if ok, d := statusAllOK(0, good, 3); !ok {
 		t.Fatal(d)
 	}
-	down := `{"servers":[{"server":"tls://a:1","ok":true},{"server":"tls://b:1","ok":false,"reason":"the server did not answer"},{"server":"tls://c:1","ok":true}]}`
+	down := `{"servers":[{"server":"tls://a:1","ready":true},{"server":"tls://b:1","ready":false,"reason":"the server did not answer"},{"server":"tls://c:1","ready":true}]}`
 	if ok, d := statusAllOK(1, down, 3); ok || !strings.Contains(d, "tls://b:1 not ok: the server did not answer") {
 		t.Fatal(ok, d)
 	}
@@ -22,9 +22,9 @@ func TestStatusAllOK(t *testing.T) {
 		code int
 		out  string
 	}{
-		"one server only": {0, `{"server":"tls://a:1","ok":true}`},
-		"two entries":     {0, `{"servers":[{"server":"a","ok":true},{"server":"b","ok":true}]}`},
-		"duplicate":       {0, `{"servers":[{"server":"a","ok":true},{"server":"a","ok":true},{"server":"c","ok":true}]}`},
+		"one server only": {0, `{"server":"tls://a:1","ready":true}`},
+		"two entries":     {0, `{"servers":[{"server":"a","ready":true},{"server":"b","ready":true}]}`},
+		"duplicate":       {0, `{"servers":[{"server":"a","ready":true},{"server":"a","ready":true},{"server":"c","ready":true}]}`},
 		"not json":        {0, `nope`},
 		"exit 1":          {1, good},
 	} {
