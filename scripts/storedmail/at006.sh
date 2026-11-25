@@ -50,10 +50,10 @@ echo "== AT-006 / AT-018 run =="
 echo "commit tested:       $commit ($tree)"
 echo "oracle ($base): $main"
 echo "release repo:        ${MASH_RELEASE_REPO:-bogworks/mash}"
-echo "venue:               container from $image, image $digest, name $name, docker run --rm --init"
+echo "venue:               container from $image, image $digest, name $name, docker run --rm --init --platform linux/amd64"
 echo
 
-git -C "$root" archive "$main" | docker run -i --rm --init --name "$name" -e AT006_TAGS="${AT006_TAGS:-}" \
+git -C "$root" archive "$main" | docker run -i --rm --init --platform linux/amd64 --name "$name" -e AT006_TAGS="${AT006_TAGS:-}" \
 	-e MASH_RELEASE_REPO="${MASH_RELEASE_REPO:-bogworks/mash}" -e AT006_IN_CONTAINER=1 \
 	-v "$root":/src:ro "$image" bash -c '
 	set -uo pipefail
