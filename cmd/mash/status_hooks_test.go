@@ -16,7 +16,7 @@ const storedScanDeadline = 10 * time.Second
 
 // waitStoredScan waits, after a test started a serve that takes the endpoint, until the one-time scan of the stored mail
 // has finished: the scanned line is in the malformed list of the endpoint's spool (it is written whole when the scan
-// ends, an empty stream included). Until then status says "not ready: checking stored mail before delivery" (TO-14),
+// ends, an empty stream included). Until then status says "not ready: mail is waiting while stored mail is checked" (TO-14),
 // which is right but not what a test of the ready state looks for. Call it only for a serve that holds the endpoint.
 func waitStoredScan(t *testing.T, env map[string]string) {
 	t.Helper()

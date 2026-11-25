@@ -25,14 +25,14 @@ func TestStatusAndDoctorSayStoredMailIsBeingChecked(t *testing.T) {
 		return code, o.String(), e.String()
 	}
 	code, out, errs := status()
-	if code != 1 || !strings.Contains(out, ": not ready: checking stored mail before delivery\n") || !strings.Contains(errs, "hint: mash doctor") {
+	if code != 1 || !strings.Contains(out, ": not ready: mail is waiting while stored mail is checked\n") || !strings.Contains(errs, "hint: mash doctor") {
 		t.Fatalf("status during the scan: exit %d\nstdout: %q\nstderr: %q", code, out, errs)
 	}
 	if rc := sessionDetail(t, &healthSvc{cfg: w.cfgOf(t, "a"), scanning: func() bool { return true }}); rc != "checking_stored_mail" {
 		t.Fatalf("reason_code %q, want checking_stored_mail", rc)
 	}
 	dcode, dout, _ := doctorOf(h, false)
-	if dcode != 1 || !strings.Contains(dout, "delivery  FAIL  checking stored mail before delivery\n") {
+	if dcode != 1 || !strings.Contains(dout, "delivery  FAIL  mail is waiting while stored mail is checked\n") {
 		t.Fatalf("doctor during the scan: exit %d\n%s", dcode, dout)
 	}
 	dcode, dout, _ = doctorOf(h, true)

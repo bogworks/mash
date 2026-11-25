@@ -33,7 +33,7 @@ const ReasonMailHeld = "mail is held: its folder cannot be written"
 
 // ReasonStoredScan is status's reason, and the delivery row's detail, while the first start of the switched-on build checks
 // the stored mail before it delivers any (TO-14). It happens once; there is nothing to do.
-const ReasonStoredScan = "checking stored mail before delivery"
+const ReasonStoredScan = "mail is waiting while stored mail is checked"
 
 // The ways a session can fail to hold its endpoint (HealthReport.Lease), and the words for them. Asked inside a session,
 // status and doctor report on that session itself: "ready, online" means this session holds the endpoint.
