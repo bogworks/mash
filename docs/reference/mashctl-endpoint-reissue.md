@@ -60,7 +60,7 @@ Stream: stdout. Exit code: 0.
 
 ```text
 Reissued credentials for acme.demo.bob
-Join file: acme.demo.bob.join
+Join file:            acme.demo.bob.join
 servers acknowledged: 2
 ```
 

@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/nats-io/jwt/v2"
@@ -249,13 +250,17 @@ func epPrint(w io.Writer, verb string, t epTarget, res epResult, detail, jsonOut
 	default:
 		fmt.Fprintf(w, "Reissued credentials for %s\n", name)
 	}
+	var rows []cliframe.Row
 	if t.join {
-		fmt.Fprintf(w, "Join file: %s\n", t.outPath)
+		rows = append(rows, cliframe.Row{Label: "Join file", Value: t.outPath})
 	} else if verb == "create" {
 		fmt.Fprintf(w, "Credentials: %s\n", t.outPath)
 	}
 	if verb == "reissue" && detail {
-		fmt.Fprintf(w, "servers acknowledged: %d\n", res.acked)
+		rows = append(rows, cliframe.Row{Label: "servers acknowledged", Value: strconv.Itoa(res.acked)})
+	}
+	if len(rows) > 0 {
+		fmt.Fprintln(w, cliframe.Block(rows...))
 	}
 }
 

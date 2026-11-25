@@ -1,0 +1,1 @@
+**`--detail` blocks and other `label: value` blocks now pad every label to the longest label in the block plus one space, so values line up and none overflows its column (`mash send --detail`, `mashctl endpoint show` and `mashctl endpoint reissue --detail`)** ([#1050](https://github.com/bogworks/mash/issues/1050)).

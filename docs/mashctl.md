@@ -192,7 +192,7 @@ Gives an existing endpoint new credentials and cancels the old ones. It revokes 
 
 With no option the new key pair is made on this host and `<config dir>/<address>.creds` is replaced. With `--out PATH` the command writes a join file for another machine and installs nothing here. With `--out PATH --public-key PATH` it signs the endpoint's new public key and the join file holds the user JWT. `--public-key` needs `--out`.
 
-On success it prints `Reissued credentials for alice.dev.design`, then `Join file: PATH` with `--out`. With `--detail` it adds the line `servers acknowledged: N`; with `--json` the object gains `servers_acknowledged`. This is the only place `--detail` changes `mashctl`: every other command prints what it prints without it, in text and in `--json`. With `--dry-run` it prints `Would reissue credentials for alice.dev.design`, and with `--json` the same object plus `"dry_run": true`. If the join file cannot be written after the key changed, the hint is `remove PATH or choose another --out`. With `--json` it prints `{"address": "alice.dev.design", "join_file": null}`; with `--out` `join_file` is the path. There is no bulk form: reissue takes one address.
+On success it prints `Reissued credentials for alice.dev.design`, then `Join file: PATH` with `--out`. With `--detail` it adds the line `servers acknowledged: N`, with `Join file:` padded to the same column; with `--json` the object gains `servers_acknowledged`. This is the only place `--detail` changes `mashctl`: every other command prints what it prints without it, in text and in `--json`. With `--dry-run` it prints `Would reissue credentials for alice.dev.design`, and with `--json` the same object plus `"dry_run": true`. If the join file cannot be written after the key changed, the hint is `remove PATH or choose another --out`. With `--json` it prints `{"address": "alice.dev.design", "join_file": null}`; with `--out` `join_file` is the path. There is no bulk form: reissue takes one address.
 
 `--public-key` naming the key the endpoint already has is refused: nothing would be rotated. Make a new key with `mash key create --out NAME.seed`. The one exception is a rerun after a killed `--public-key` reissue: the command leaves `<PATH>.pending` while the key changes, and a rerun with the same key and `--out` finishes the join file and removes the file.
 
@@ -244,7 +244,7 @@ labels:     team=blue
 public key: UDXU4RCSV3GJRXWQ4PNDKYEL7ZBSMSGGTJYNDQGHFM4QWHBRD3ZTQ4LX
 ```
 
-`role`, `host`, `description`, `capability` and `note` lines appear when the record has them. It exits 1 when the endpoint does not exist. Both change nothing.
+`role`, `host`, `description`, `capability` and `note` lines appear when the record has them. The labels are padded to the longest label in the block plus one space, so with a `description` the values start one column further right. It exits 1 when the endpoint does not exist. Both change nothing.
 
 `--json` prints, for `list`, `{"endpoints": [{"address", "owner", "group", "name", "state"}]}`, and for `show`, `address`, `state`, `created` (RFC 3339), `waiting`, `labels`, `public_key` and the optional fields above.
 

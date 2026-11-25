@@ -72,10 +72,10 @@ Urgent question mail sent (number 43).
 Stream: stdout. Exit code: 0.
 
 ```text
-Mail sent (number 42).
-to:      acme.demo.alice
-kind:    task
-urgent:  no
+Mail sent (number 42)
+to:     acme.demo.alice
+kind:   task
+urgent: no
 ```
 
 ### A reply marked question that asks nothing
