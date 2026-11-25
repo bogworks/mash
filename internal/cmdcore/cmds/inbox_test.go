@@ -250,7 +250,7 @@ func TestInboxOptions(t *testing.T) {
 			t.Errorf("--limit %s: %d %q %q", bad, code, out, errs)
 		}
 	}
-	if code, _, errs := runInbox(b, cliframe.Global{}, "--after", "-1"); code != 2 || !strings.Contains(errs, "unknown option") && !strings.Contains(errs, "--after") {
+	if code, _, errs := runInbox(b, cliframe.Global{}, "--after", "-1"); code != 2 || !strings.Contains(errs, "unknown flag") && !strings.Contains(errs, "--after") {
 		t.Errorf("--after -1: %d %q", code, errs)
 	}
 	if code, _, errs := runInbox(b, cliframe.Global{}, "--after", "x"); code != 2 || errs != "error: --after must be a whole number\nhint: mash inbox --help\n" {

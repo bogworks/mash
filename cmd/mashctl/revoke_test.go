@@ -100,14 +100,14 @@ func TestRetireRefusedWhenRevokeFails(t *testing.T) {
 	}
 }
 
-// --no-revoke, --force and --delete-creds are gone: each is an unknown option, and nothing is attempted.
+// --no-revoke, --force and --delete-creds are gone: each is an unknown flag, and nothing is attempted.
 func TestRemovedDeleteFlagsAreUnknownOptions(t *testing.T) {
 	h := newFleetEnv(t)
 	h.provisionDeclared("a")
 	s := stubRevoke(t)
 	for _, f := range []string{"--no-revoke", "--force", "--delete-creds"} {
 		out, errb, code := h.run("endpoint", "delete", "o.g.a", "--yes", f)
-		want := "error: unknown option " + f + "\nhint: mashctl endpoint delete --help\n"
+		want := "error: unknown flag " + f + "\n"
 		if code != 2 || out != "" || errb != want {
 			t.Errorf("%s: %d %q %q", f, code, out, errb)
 		}
@@ -130,13 +130,13 @@ func TestRetireUnknownOptionsAndSingleServerCount(t *testing.T) {
 	h := newFleetEnv(t)
 	h.provisionDeclared("a")
 	s := stubRevoke(t)
-	if _, errb, code := h.run("endpoint", "delete", "o.g.a", "--yes", "--bogus"); code != 2 || !strings.Contains(errb, "unknown option") || !strings.Contains(errb, "endpoint delete --help") {
+	if _, errb, code := h.run("endpoint", "delete", "o.g.a", "--yes", "--bogus"); code != 2 || errb != "error: unknown flag --bogus\n" {
 		t.Fatalf("%d %q", code, errb)
 	}
-	// --servers and --sys-creds are gone: each is an unknown option, and nothing is attempted.
+	// --servers and --sys-creds are gone: each is an unknown flag, and nothing is attempted.
 	for _, args := range [][]string{{"--servers", "2"}, {"--servers=2"}, {"--sys-creds", "/s.creds"}, {"--sys-creds=/s.creds"}} {
 		out, errb, code := h.run(append([]string{"endpoint", "delete", "o.g.a", "--yes"}, args...)...)
-		want := "error: unknown option " + strings.SplitN(args[0], "=", 2)[0] + "\nhint: mashctl endpoint delete --help\n"
+		want := "error: unknown flag " + strings.SplitN(args[0], "=", 2)[0] + "\n"
 		if code != 2 || out != "" || errb != want {
 			t.Errorf("%v: %d %q %q", args, code, out, errb)
 		}

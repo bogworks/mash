@@ -248,7 +248,7 @@ func TestStatusAndDoctorSeveralInstalled(t *testing.T) {
 func TestStatusTakesNoArguments(t *testing.T) {
 	for _, args := range [][]string{{"status", "extra"}, {"doctor", "extra"}, {"status", "--bogus"}, {"doctor", "--bogus"}} {
 		r := runMash(map[string]string{"HOME": t.TempDir()}, args...)
-		if r.code != 2 || r.out != "" || !strings.HasSuffix(r.errs, "\nhint: mash "+args[0]+" --help\n") {
+		if r.code != 2 || r.out != "" || !strings.HasSuffix(r.errs, "\nhint: mash "+args[0]+" --help\n") && !strings.HasPrefix(r.errs, "error: unknown flag ") {
 			t.Errorf("%v: %+v", args, r)
 		}
 	}

@@ -24,9 +24,9 @@ func TestEndpointReissueArguments(t *testing.T) {
 	}
 	for _, f := range [][]string{{"--make-key"}, {"--jwt-out", "x"}, {"--all"}, {"--changed"}, {"--yes"}, {"--bogus"}} {
 		so, se, code := h.run(append([]string{"endpoint", "reissue", a}, f...)...)
-		wantUsage(t, so, se, code, "reissue", "unknown option")
+		wantUsage(t, so, se, code, "reissue", "unknown flag")
 	}
-	if so, se, code := h.run("endpoint", "reissue", "--all", "--yes"); code != 2 || so != "" || !strings.Contains(se, "unknown option") {
+	if so, se, code := h.run("endpoint", "reissue", "--all", "--yes"); code != 2 || so != "" || !strings.Contains(se, "unknown flag") {
 		t.Errorf("bulk form: %d %q %q", code, so, se)
 	}
 }

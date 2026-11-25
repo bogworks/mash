@@ -68,7 +68,7 @@ func runEndpoint(args []string, g cliframe.Global, env func(string) string, look
 		}
 	}
 	if args[0] != "-" && strings.HasPrefix(args[0], "-") { // an option the parent does not have is not a sub-command name
-		return cliframe.Report(stdout, stderr, cliframe.Usagef("unknown %s", config.RejectedOption(args[0])).WithHint("mashctl endpoint --help"), jsonRequested(args))
+		return cliframe.Report(stdout, stderr, unknownFlag(args[0]), jsonRequested(args))
 	}
 	return cliframe.Report(stdout, stderr, cliframe.Usagef("unknown command %q", config.Clean(args[0])).WithHint("mashctl endpoint --help"), jsonRequested(rest))
 }

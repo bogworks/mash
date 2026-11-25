@@ -52,9 +52,9 @@ The rules every mash command and tool follows.
    'error: --kind must be one of blocker, question, task, result, fyi' or
    'error: --reply-to must be a whole number'. Two things that cannot go
    together: 'error: mash send takes the message text or --file, not both'. An
-   option that does not exist: 'error: unknown option --x'. The hint is always
-   the command's own help: 'hint: mash send --help'. Exit 2, and nothing is
-   attempted.
+   option that does not exist: 'error: unknown flag --x', with no hint. Every
+   other wrong command line has the command's own help as its hint: 'hint:
+   mash send --help'. Exit 2, and nothing is attempted.
 
 10. --help has one layout, generated from this specification. For a command,
    in this order: the one-line description; 'Usage:' and the synopsis;

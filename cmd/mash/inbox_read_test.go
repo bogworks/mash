@@ -187,7 +187,7 @@ func TestInboxAndReadHelpAndUsageNeedNoEndpoint(t *testing.T) {
 			t.Errorf("%s --help: %+v", verb, r)
 		}
 		r = runMash(env, verb, "--bogus")
-		if r.code != 2 || r.out != "" || !strings.HasPrefix(r.errs, "error: unknown option --bogus\n") {
+		if r.code != 2 || r.out != "" || !strings.HasPrefix(r.errs, "error: unknown flag --bogus\n") {
 			t.Errorf("%s --bogus: %+v", verb, r)
 		}
 	}

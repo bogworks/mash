@@ -19,12 +19,12 @@ func TestVerbHelpAndStrayArguments(t *testing.T) {
 		}
 	}
 	var out, errb bytes.Buffer
-	if code := run([]string{"status", "--bogus"}, env, strings.NewReader(""), &out, &errb); code != 2 || out.Len() != 0 || errb.String() != "error: unknown option --bogus\nhint: mash status --help\n" {
+	if code := run([]string{"status", "--bogus"}, env, strings.NewReader(""), &out, &errb); code != 2 || out.Len() != 0 || errb.String() != "error: unknown flag --bogus\n" {
 		t.Errorf("status --bogus: %d %q %q", code, out.String(), errb.String())
 	}
 	out.Reset()
 	errb.Reset()
-	if code := run([]string{"version", "--bogus"}, env, strings.NewReader(""), &out, &errb); code != 2 || out.Len() != 0 || errb.String() != "error: unknown option --bogus\nhint: mash version --help\n" {
+	if code := run([]string{"version", "--bogus"}, env, strings.NewReader(""), &out, &errb); code != 2 || out.Len() != 0 || errb.String() != "error: unknown flag --bogus\n" {
 		t.Errorf("version --bogus: %d %q %q", code, out.String(), errb.String())
 	}
 }
@@ -52,6 +52,18 @@ func TestNoJSONFormIsRefused(t *testing.T) {
 		run(args, env, strings.NewReader(""), &out, &errb)
 		if strings.Contains(errb.String()+out.String(), "has no --json form") {
 			t.Errorf("%v refused: %q", args, errb.String())
+		}
+	}
+}
+
+// An unknown flag after the verb is the same `error: unknown flag --x` as before it, with no hint (ADR 0168), and only
+// the flag's name is echoed, never a value after `=`.
+func TestMashUnknownFlagAfterTheVerbIsNamedWithoutAHint(t *testing.T) {
+	env := func(string) string { return "" }
+	for _, args := range [][]string{{"status", "--x=secret"}, {"send", "a.b.c", "hi", "--x=secret"}, {"serve", "--x=secret"}} {
+		var out, errb bytes.Buffer
+		if code := run(args, env, strings.NewReader(""), &out, &errb); code != 2 || out.Len() != 0 || errb.String() != "error: unknown flag --x\n" {
+			t.Errorf("%v: %d %q %q", args, code, out.String(), errb.String())
 		}
 	}
 }

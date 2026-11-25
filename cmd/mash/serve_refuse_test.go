@@ -119,7 +119,7 @@ func TestServeFlagsShadowTheEnvironment(t *testing.T) {
 
 // serve takes no argument but --accept-unverified (and the global options): a wrong command line is a usage error.
 func TestServeRefusesUnknownArguments(t *testing.T) {
-	for args, want := range map[string]string{"--x": "error: unknown option --x\n", "-q": "error: unknown option -q\n"} {
+	for args, want := range map[string]string{"--x": "error: unknown flag --x\n", "-q": "error: unknown flag -q\n"} {
 		var out, errb bytes.Buffer
 		if code := run([]string{"serve", args}, func(string) string { return "" }, strings.NewReader(""), &out, &errb); code != 2 ||
 			!strings.HasPrefix(errb.String(), want) || out.Len() != 0 {

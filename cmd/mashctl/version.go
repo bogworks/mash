@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/bogworks/mash/internal/cliframe"
-	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/endpoint"
 )
 
@@ -49,7 +48,10 @@ func runVersion(args []string, stdout, stderr io.Writer) int {
 		case a == "--json":
 			asJSON = true
 		default:
-			return cliframe.Report(stdout, stderr, cliframe.Usagef("unknown %s", config.RejectedOption(a)).WithHint("mashctl version --help"), jsonRequested(args))
+			if strings.HasPrefix(a, "-") && a != "-" {
+				return cliframe.Report(stdout, stderr, unknownFlag(a), jsonRequested(args))
+			}
+			return cliframe.Report(stdout, stderr, cliframe.Usagef("unknown argument").WithHint("mashctl version --help"), jsonRequested(args))
 		}
 	}
 	bi, _ := readBuildInfo()

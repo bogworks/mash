@@ -69,7 +69,7 @@ func TestInboxUsageAndOldVerb(t *testing.T) {
 		}
 	}
 	for _, args := range [][]string{{"endpoint", "inbox"}, {"endpoint", "inbox", "o.g.a", "--limit", "0"}, {"endpoint", "inbox", "o.g.a", "--bogus"}} {
-		if out, errb, code := ctlRun(t, f.e, args...); code != 2 || out != "" || !strings.HasPrefix(errb, "error: ") || !strings.Contains(errb, "hint: mashctl endpoint inbox --help") {
+		if out, errb, code := ctlRun(t, f.e, args...); code != 2 || out != "" || !strings.HasPrefix(errb, "error: ") || !strings.Contains(errb, "hint: mashctl endpoint inbox --help") && errb != "error: unknown flag --bogus\n" {
 			t.Errorf("%v: %d %q %q", args, code, out, errb)
 		}
 	}

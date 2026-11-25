@@ -68,12 +68,12 @@ func TestMashctlUsageAndErrors(t *testing.T) {
 	// the removed verbs are unknown commands, like any other
 	for _, verb := range []string{"provision", "deprovision", "list", "show", "set-meta", "label", "unlabel", "suspend", "resume", "suspended", "permissions", "inbox"} {
 		for _, args := range [][]string{{verb}, {verb, "o.g.c"}, {verb, "--help"}} {
-			if out, errb, code := ctlRun(t, e, args...); code != 2 || out != "" || errb != "error: unknown command \""+verb+"\"\nhint: mashctl --help\n" {
+			if out, errb, code := ctlRun(t, e, args...); code != 2 || out != "" || errb != "error: unknown command \""+verb+"\"\n" {
 				t.Errorf("%v: %d %q %q", args, code, out, errb)
 			}
 		}
 	}
-	if out, errb, code := ctlRun(t, e, "frob"); code != 2 || out != "" || errb != "error: unknown command \"frob\"\nhint: mashctl --help\n" {
+	if out, errb, code := ctlRun(t, e, "frob"); code != 2 || out != "" || errb != "error: unknown command \"frob\"\n" {
 		t.Fatalf("unknown: %d %q %q", code, out, errb)
 	}
 	if out, _, code := ctlRun(t, e, "version"); code != 0 || !regexp.MustCompile(`^mashctl v\S+ \(\S+\)\n$`).MatchString(out) {
@@ -116,5 +116,35 @@ func TestMashctlAddressOnly(t *testing.T) {
 		if strings.Contains(strings.ToLower(h.String()), gone) {
 			t.Errorf("help mentions %q:\n%s", gone, h.String())
 		}
+	}
+}
+
+// A global option stands before the verb, as it does for mash: `mashctl --json status` is `mashctl status --json`.
+// An unknown flag is an unknown flag wherever it stands, never an unknown command; neither error carries a hint
+// (ADR 0168), and a flag's value is never echoed.
+func TestMashctlGlobalOptionsBeforeVerb(t *testing.T) {
+	e := testenv.Start(t)
+	after, aerr, acode := ctlRun(t, e, "status", "--json")
+	before, berr, bcode := ctlRun(t, e, "--json", "status")
+	if acode != bcode || after != before || aerr != berr || !strings.HasPrefix(before, "{") {
+		t.Fatalf("--json before the verb: %d %q %q; after: %d %q %q", bcode, before, berr, acode, after, aerr)
+	}
+	if out, errb, code := ctlRun(t, e, "--verbose", "status"); code != 2 || out != "" || errb != "error: unknown flag --verbose\n" {
+		t.Errorf("unknown flag before the verb: %d %q %q", code, out, errb)
+	}
+	if out, errb, code := ctlRun(t, e, "status", "--bogus"); code != 2 || out != "" || errb != "error: unknown flag --bogus\n" {
+		t.Errorf("unknown flag after the verb: %d %q %q", code, out, errb)
+	}
+	if out, errb, code := ctlRun(t, e, "status", "--x=secret"); code != 2 || out != "" || errb != "error: unknown flag --x\n" {
+		t.Errorf("flag value echoed after the verb: %d %q %q", code, out, errb)
+	}
+	if out, errb, code := ctlRun(t, e, "nope"); code != 2 || out != "" || errb != "error: unknown command \"nope\"\n" {
+		t.Errorf("unknown command: %d %q %q", code, out, errb)
+	}
+	if out, errb, code := ctlRun(t, e, "--x=secret", "status"); code != 2 || out != "" || errb != "error: unknown flag --x\n" || strings.Contains(errb, "secret") {
+		t.Errorf("flag value echoed: %d %q %q", code, out, errb)
+	}
+	if out, errb, code := ctlRun(t, e, "--version"); code != 0 || errb != "" || !strings.HasPrefix(out, "mashctl v") {
+		t.Errorf("--version: %d %q %q", code, out, errb)
 	}
 }

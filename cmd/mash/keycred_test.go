@@ -130,7 +130,7 @@ func TestKeyCreateHasOnlyTheSpecifiedOptions(t *testing.T) {
 	chdirTemp(t)
 	for _, flag := range []string{"--pub-out", "--dry-run", "--force"} {
 		rc, out, errb := kcRun(t, "key", "create", flag, "x")
-		if rc != 2 || out != "" || !strings.HasPrefix(errb, "error: unknown option "+flag) || !strings.HasSuffix(errb, "hint: mash key create --help\n") {
+		if rc != 2 || out != "" || !strings.HasPrefix(errb, "error: unknown flag "+flag) || errb != "error: unknown flag "+flag+"\n" {
 			t.Errorf("%s: rc %d, stdout %q, stderr %q", flag, rc, out, errb)
 		}
 	}

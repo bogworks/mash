@@ -515,8 +515,8 @@ func TestInitCommandLineErrors(t *testing.T) {
 		want string
 	}{
 		{[]string{"init"}, "error: mashctl init needs --config <file>\nhint: mashctl init --help\n"},
-		{[]string{"init", "--local"}, "error: unknown option --local\nhint: mashctl init --help\n"},
-		{[]string{"init", "--start", "--config", "x"}, "error: unknown option --start\nhint: mashctl init --help\n"},
+		{[]string{"init", "--local"}, "error: unknown flag --local\n"},
+		{[]string{"init", "--start", "--config", "x"}, "error: unknown flag --start\n"},
 		{[]string{"init", "--config", "x", "extra"}, "error: too many arguments\nhint: mashctl init --help\n"},
 		{[]string{"init", "--config"}, "error: --config needs a value\nhint: mashctl init --help\n"},
 	}
@@ -714,7 +714,7 @@ func TestAdoptAndInitLocalAreGone(t *testing.T) {
 		t.Errorf("adopt: %d %q %q", code, out, errb)
 	}
 	for _, args := range [][]string{{"init", "--local"}, {"init", "--local", "--start", "--dir", filepath.Join(a.root, "srv")}} {
-		if out, errb, code = a.run(args...); code != 2 || out != "" || !strings.HasPrefix(errb, "error: unknown option --") || !strings.HasSuffix(errb, "hint: mashctl init --help\n") {
+		if out, errb, code = a.run(args...); code != 2 || out != "" || !strings.HasPrefix(errb, "error: unknown flag --") || strings.Contains(errb, "hint:") {
 			t.Errorf("%v: %d %q %q", args, code, out, errb)
 		}
 	}

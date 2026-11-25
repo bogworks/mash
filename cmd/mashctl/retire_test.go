@@ -193,7 +193,7 @@ func TestRetireConsequencesAndUsage(t *testing.T) {
 	}
 	for _, args := range [][]string{{"endpoint", "delete"}, {"endpoint", "delete", "o.g.a", "--yes", "b"}, {"endpoint", "delete", "o.g.a", "--yes", "--bogus"}, {"endpoint", "delete", "o.g.a", "--yes", "--policy", "p.yaml"}} {
 		_, errb, code := h.run(args...)
-		if code != 2 || !strings.HasPrefix(errb, "error: ") || !strings.HasSuffix(errb, "\nhint: mashctl endpoint delete --help\n") {
+		if code != 2 || !strings.HasPrefix(errb, "error: ") || !strings.HasSuffix(errb, "\nhint: mashctl endpoint delete --help\n") && !strings.HasPrefix(errb, "error: unknown flag --") {
 			t.Errorf("%v: %d %q", args, code, errb)
 		}
 	}

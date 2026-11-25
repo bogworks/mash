@@ -174,8 +174,8 @@ func revocationUnknown(t *testing.T, r *refEnv) {
 var refusalCases = []refCase{
 	// create
 	{"create_too_many", []string{"endpoint", "create", "o.g.a", "o.g.b"}, nil, "too many arguments", 2},
-	{"create_unknown_option", []string{"endpoint", "create", "o.g.a", "--bogus"}, nil, `unknown option --bogus`, 2},
-	{"create_removed_option", []string{"endpoint", "create", "o.g.a", "--make-key"}, nil, `unknown option --make-key`, 2},
+	{"create_unknown_option", []string{"endpoint", "create", "o.g.a", "--bogus"}, nil, `unknown flag --bogus`, 2},
+	{"create_removed_option", []string{"endpoint", "create", "o.g.a", "--make-key"}, nil, `unknown flag --make-key`, 2},
 	{"create_slash_form", []string{"endpoint", "create", "o/g/a"}, nil, "not an endpoint address", 2},
 	{"create_flat_form", []string{"endpoint", "create", "a"}, nil, "not an endpoint address", 2},
 	{"create_public_key_needs_out", []string{"endpoint", "create", "o.g.a", "--public-key", "{PUB}"}, nil, "--public-key needs --out, the join file to write", 2},
@@ -234,14 +234,14 @@ var refusalCases = []refCase{
 
 	// reissue
 	{"reissue_too_many", []string{"endpoint", "reissue", "o.g.a", "o.g.b"}, nil, "too many arguments", 2},
-	{"reissue_unknown_option", []string{"endpoint", "reissue", "o.g.a", "--bogus"}, nil, `unknown option --bogus`, 2},
-	{"reissue_removed_all", []string{"endpoint", "reissue", "--all"}, nil, `unknown option --all`, 2},
-	{"reissue_removed_make_key", []string{"endpoint", "reissue", "o.g.a", "--make-key"}, nil, `unknown option --make-key`, 2},
+	{"reissue_unknown_option", []string{"endpoint", "reissue", "o.g.a", "--bogus"}, nil, `unknown flag --bogus`, 2},
+	{"reissue_removed_all", []string{"endpoint", "reissue", "--all"}, nil, `unknown flag --all`, 2},
+	{"reissue_removed_make_key", []string{"endpoint", "reissue", "o.g.a", "--make-key"}, nil, `unknown flag --make-key`, 2},
 	{"reissue_address_missing", []string{"endpoint", "reissue"}, nil, "missing the endpoint address", 2},
 	{"reissue_slash_form", []string{"endpoint", "reissue", "o/g/a"}, nil, "not an endpoint address", 2},
 	{"reissue_public_key_needs_out", []string{"endpoint", "reissue", "o.g.a", "--public-key", "{PUB}"}, nil, "--public-key needs --out, the join file to write", 2},
-	{"delete_servers_option_gone", []string{"endpoint", "delete", "o.g.a", "--servers", "2"}, nil, "unknown option --servers", 2},
-	{"delete_sys_creds_option_gone", []string{"endpoint", "delete", "o.g.a", "--sys-creds", "x"}, nil, "unknown option --sys-creds", 2},
+	{"delete_servers_option_gone", []string{"endpoint", "delete", "o.g.a", "--servers", "2"}, nil, "unknown flag --servers", 2},
+	{"delete_sys_creds_option_gone", []string{"endpoint", "delete", "o.g.a", "--sys-creds", "x"}, nil, "unknown flag --sys-creds", 2},
 	{"reissue_config", []string{"endpoint", "reissue", "o.g.a"}, badConfig, "no-such-rule.json", 1},
 	{"reissue_no_config_dir", []string{"endpoint", "reissue", "o.g.a"}, noConfigDir, "no config folder to write the credentials file in", 1},
 	{"reissue_public_key_unreadable", []string{"endpoint", "reissue", "o.g.a", "--public-key", "{AUX}/missing.pub", "--out", "{AUX}/out.join"}, nil, "cannot read the public key file", 1},
@@ -352,7 +352,7 @@ func TestEndpointRefusals(t *testing.T) {
 				len(lines) == 2 && !strings.HasPrefix(lines[1], "hint: ") {
 				t.Errorf("want one error line holding %q and at most one hint line: stdout %q stderr %q", c.want, so, se)
 			}
-			if c.wantExit == 2 && (len(lines) != 2 || !strings.HasSuffix(lines[1], "--help")) {
+			if c.wantExit == 2 && !strings.HasPrefix(lines[0], "error: unknown flag ") && (len(lines) != 2 || !strings.HasSuffix(lines[1], "--help")) {
 				t.Errorf("a wrong command line needs the help hint: %q", se)
 			}
 			noSecrets(t, so, se)

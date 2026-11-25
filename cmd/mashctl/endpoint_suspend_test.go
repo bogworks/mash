@@ -117,7 +117,7 @@ func TestEndpointSuspendTakesNoDryRun(t *testing.T) {
 	h.seed(ad("c"))
 	for _, verb := range []string{"suspend", "resume"} {
 		out, errb, code := h.run("endpoint", verb, "o.g.c", "--dry-run")
-		want := "error: unknown option --dry-run\nhint: mashctl endpoint " + verb + " --help\n"
+		want := "error: unknown flag --dry-run\n"
 		if code != 2 || out != "" || errb != want {
 			t.Errorf("%s: %d %q %q", verb, code, out, errb)
 		}
@@ -187,7 +187,7 @@ func TestEndpointPermissions(t *testing.T) {
 		t.Errorf("--json: %d %q", code, o2)
 	}
 	// the --nsc form is gone
-	if out, errb, code := h.run("endpoint", "permissions", "acme.demo.bob", "--nsc"); code != 2 || out != "" || !strings.Contains(errb, `unknown option --nsc`) {
+	if out, errb, code := h.run("endpoint", "permissions", "acme.demo.bob", "--nsc"); code != 2 || out != "" || !strings.Contains(errb, `unknown flag --nsc`) {
 		t.Errorf("--nsc: %d %q %q", code, out, errb)
 	}
 	for _, arg := range []string{"bob", "acme_demo_bob", seedShaped} {
@@ -226,7 +226,7 @@ func TestVersionOutput(t *testing.T) {
 	if shortCommit("") != "unknown" || shortCommit("abc") != "abc" || shortCommit("3f9a41c8d2e0+dirty") != "3f9a41c+dirty" {
 		t.Error("shortCommit")
 	}
-	if out, errb, code := h.run("version", "--bogus"); code != 2 || out != "" || !strings.HasPrefix(errb, "error: unknown option") {
+	if out, errb, code := h.run("version", "--bogus"); code != 2 || out != "" || !strings.HasPrefix(errb, "error: unknown flag") {
 		t.Errorf("--bogus: %d %q %q", code, out, errb)
 	}
 	if out, _, code := h.run("version", "--help"); code != 0 || !strings.HasPrefix(out, "usage: mashctl version") {
