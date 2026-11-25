@@ -1071,11 +1071,11 @@
       "value": [
        {
         "case": "--json",
-        "text": "{\n  \"endpoints\": [\n    {\n      \"address\": \"acme.demo.alice\",\n      \"online\": true,\n      \"role\": \"reviewer\",\n      \"host\": \"myserver\",\n      \"description\": \"reviews pull requests\",\n      \"capabilities\": [\n        \"review\"\n      ],\n      \"labels\": {\n        \"team\": \"blue\"\n      }\n    },\n    {\n      \"address\": \"acme.demo.bob\",\n      \"online\": false,\n      \"role\": null,\n      \"host\": null,\n      \"description\": null,\n      \"capabilities\": [],\n      \"labels\": {}\n    }\n  ]\n}",
+        "text": "{\n  \"endpoints\": [\n    {\n      \"address\": \"acme.demo.alice\",\n      \"online\": true,\n      \"role\": \"reviewer\",\n      \"host\": \"myserver\",\n      \"description\": \"reviews pull requests\",\n      \"capability\": [\n        \"review\"\n      ],\n      \"labels\": {\n        \"team\": \"blue\"\n      }\n    },\n    {\n      \"address\": \"acme.demo.bob\",\n      \"online\": false,\n      \"role\": null,\n      \"host\": null,\n      \"description\": null,\n      \"capability\": [],\n      \"labels\": {}\n    }\n  ]\n}",
         "stream": "stdout",
         "exit": 0,
         "issue": "#1042",
-        "note": "--json is shown as it prints at a terminal (indented); piped it is one compact line (rule \"--json prints one object\"). The list key is plural: capabilities, not capability (today \"capability\": [] holds a list). Unset fields stay null. The same change in the MCP tool's structured result, which is the same object. The --capability filter keeps its name.",
+        "note": "--json is shown as it prints at a terminal (indented); piped it is one compact line (rule \"--json prints one object\"). The key stays capability, as today: ADR 0049 says who JSON fields are added, never renamed or removed (the one exception to plural list keys). Unset fields stay null. The same in the MCP tool's structured result, which is the same object.",
         "verbatim": true
        }
       ]
