@@ -22,7 +22,7 @@ func fakeDrive(bad map[string]func([]compatObs) []compatObs) func(context.Contex
 	return func(_ context.Context, w, r compatBin, corpus []compatMsg) ([]compatObs, error) {
 		obs := make([]compatObs, len(corpus))
 		for i, m := range corpus {
-			obs[i] = compatObs{Number: m.Number, Sent: true, Seq: m.Number + 1, Copies: 1, Notified: 1}
+			obs[i] = compatObs{Number: m.Number, Sent: true, Seq: m.Number + 1, Copies: 1, Shown: 1}
 		}
 		if f := bad[w.Version+">"+r.Version]; f != nil {
 			obs = f(obs)
@@ -139,15 +139,15 @@ func TestCompatReasons(t *testing.T) {
 		mod  func(o []compatObs) []compatObs
 		want string
 	}{
-		"missing":                   {func(o []compatObs) []compatObs { o[2].Copies = 0; return o }, "message 3: missing"},
-		"twice":                     {func(o []compatObs) []compatObs { o[1].Copies = 2; return o }, "message 2: delivered twice"},
-		"not delivered":             {func(o []compatObs) []compatObs { o[0].Sent = false; return o }, "message 1: not delivered"},
-		"refused":                   {func(o []compatObs) []compatObs { o[4].Refused = "version missing"; return o }, "message 5: refused: version missing"},
-		"stored but never notified": {func(o []compatObs) []compatObs { o[3].Notified = 0; return o }, "message 4: not delivered"},
-		"notified twice":            {func(o []compatObs) []compatObs { o[1].Notified = 2; return o }, "message 2: delivered twice"},
-		"missing from the inbox":    {func(o []compatObs) []compatObs { o[2].Copies = 0; o[2].Notified = 1; return o }, "message 3: missing"},
-		"first of several":          {func(o []compatObs) []compatObs { o[5].Copies = 0; o[3].Copies = 2; return o }, "message 4: delivered twice"},
-		"absent":                    {func(o []compatObs) []compatObs { return o[:2] }, "message 3: not delivered"},
+		"missing":                {func(o []compatObs) []compatObs { o[2].Copies = 0; return o }, "message 3: missing"},
+		"twice":                  {func(o []compatObs) []compatObs { o[1].Copies = 2; return o }, "message 2: delivered twice"},
+		"not delivered":          {func(o []compatObs) []compatObs { o[0].Sent = false; return o }, "message 1: not delivered"},
+		"refused":                {func(o []compatObs) []compatObs { o[4].Refused = "version missing"; return o }, "message 5: refused: version missing"},
+		"stored but never shown": {func(o []compatObs) []compatObs { o[3].Shown = 0; return o }, "message 4: not delivered"},
+		"shown twice":            {func(o []compatObs) []compatObs { o[1].Shown = 2; return o }, "message 2: delivered twice"},
+		"missing from the inbox": {func(o []compatObs) []compatObs { o[2].Copies = 0; o[2].Shown = 1; return o }, "message 3: missing"},
+		"first of several":       {func(o []compatObs) []compatObs { o[5].Copies = 0; o[3].Copies = 2; return o }, "message 4: delivered twice"},
+		"absent":                 {func(o []compatObs) []compatObs { return o[:2] }, "message 3: not delivered"},
 	}
 	for name, c := range cases {
 		stdout, _, code := runCompat([]string{"0.5.10", "0.6.0"}, CompatOptions{Download: fakeDownload(""), Drive: fakeDrive(map[string]func([]compatObs) []compatObs{"0.5.10>0.6.0": c.mod})})
@@ -379,32 +379,58 @@ func TestCompatDefaultRepo(t *testing.T) {
 	}
 }
 
-// H2: the delivery path is observed through the channel notifications serve sends: their meta names the receiver and
-// the messages it delivered.
-func TestCompatSeqsOf(t *testing.T) {
+// H2: the delivery the session sees is what `mash hook` prints: shownCount counts the message blocks that carry a
+// message's marker, in full-message form and in digest form, over the hook's JSON or raw text. A channel notification
+// is not evidence of delivery, so a fyi message shown by the hook with no notification passes (Shown is all the judge
+// reads), and a message the hook never showed, or showed twice (in one run or across two), fails.
+func TestCompatShownCount(t *testing.T) {
+	wrap := func(ctx string) string {
+		b, _ := json.Marshal(map[string]any{"hookSpecificOutput": map[string]any{"hookEventName": "UserPromptSubmit", "additionalContext": ctx}})
+		return string(b)
+	}
+	full := "--- #5 from a.b.c\nkind: fyi\n> compat-1-ab\n> body\n--- #6 from a.b.c\nkind: task\n> compat-2-ab\n"
+	digest := "#5\tfrom a.b.c\t\tkind fyi\tcompat-1-ab\n#6\tfrom a.b.c\t\tkind task\tcompat-2-ab\n"
 	for _, c := range []struct {
-		meta string
-		want []string
+		name, out, marker string
+		want              int
 	}{
-		{`{"to":"reader","count":"2","seqs":"3,4"}`, []string{"3", "4"}},
-		{`{"to":"reader","seqs":"7","wake":"true"}`, []string{"7"}},
-		{`{"to":"other","seqs":"7"}`, nil},
-		{`{"to":"reader"}`, nil},
-		{``, nil},
-		{`not json`, nil},
+		{"full, json", wrap(full), "compat-1-ab", 1},
+		{"full, json, second", wrap(full), "compat-2-ab", 1},
+		{"digest, json", wrap(digest), "compat-1-ab", 1},
+		{"raw text", full, "compat-2-ab", 1},
+		{"absent", wrap(full), "compat-9-ab", 0},
+		{"nothing shown", "", "compat-1-ab", 0},
+		{"shown twice in a run", wrap(full + full), "compat-1-ab", 2},
+		{"two blocks mentioning it", wrap("--- #5 from a\n> compat-1-ab\n--- #6 from a\n> compat-1-ab\n"), "compat-1-ab", 2},
 	} {
-		if got := seqsOf(c.meta, "reader"); strings.Join(got, ",") != strings.Join(c.want, ",") {
-			t.Errorf("%q: %v, want %v", c.meta, got, c.want)
+		if got := shownCount(c.out, c.marker); got != c.want {
+			t.Errorf("%s: %d, want %d", c.name, got, c.want)
 		}
 	}
-	p := &serveProc{anyEv: make(chan chanEvent, 8)}
-	for _, m := range []string{`{"to":"reader","seqs":"3,4"}`, `{"to":"reader","seqs":"3"}`, `{"level":"warn"}`} {
-		p.anyEv <- chanEvent{Meta: m}
+	// A message shown once by the first hook run and again by the second is shown twice.
+	total := shownCount(wrap(full), "compat-1-ab") + shownCount(wrap(full), "compat-1-ab")
+	obs := make([]compatObs, len(compatCorpus))
+	for i, m := range compatCorpus {
+		obs[i] = compatObs{Number: m.Number, Sent: true, Seq: m.Number + 1, Copies: 1, Shown: 1}
 	}
-	counts := map[string]int{}
-	p.collectSeqs("reader", counts)
-	if counts["3"] != 2 || counts["4"] != 1 || len(counts) != 2 {
-		t.Errorf("counts %v", counts)
+	obs[0].Shown = total
+	if n, reason := judgeCompat(compatCorpus, obs); n != compatCorpus[0].Number || reason != "delivered twice" {
+		t.Errorf("shown on two hook runs: message %d %q", n, reason)
+	}
+	// fyi mail the hook showed (and no channel notification announced) is delivered.
+	for i, m := range compatCorpus {
+		if m.Kind == "fyi" {
+			obs[0].Shown = 1
+			obs[i].Shown = shownCount(wrap(full), "compat-1-ab")
+		}
+	}
+	if n, reason := judgeCompat(compatCorpus, obs); n != 0 {
+		t.Errorf("fyi shown once by the hook: message %d %q", n, reason)
+	}
+	// Shown zero times is not delivered.
+	obs[1].Shown = shownCount("", "compat-2-ab")
+	if n, reason := judgeCompat(compatCorpus, obs); n != compatCorpus[1].Number || reason != "not delivered" {
+		t.Errorf("never shown: message %d %q", n, reason)
 	}
 }
 

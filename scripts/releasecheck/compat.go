@@ -78,12 +78,12 @@ type compatBin struct {
 
 // compatObs is what happened to one corpus message.
 type compatObs struct {
-	Number   int
-	Sent     bool   // the writing binary reported it stored
-	Seq      int    // its stream sequence, 0 when not visible
-	Copies   int    // how many times the message is in the reading binary's stored inbox
-	Notified int    // how many channel notifications serve (the delivery to the session) carried it
-	Refused  string // the class the reading binary gave when it refused the message; empty when it did not
+	Number  int
+	Sent    bool   // the writing binary reported it stored
+	Seq     int    // its stream sequence, 0 when not visible
+	Copies  int    // how many times the message is in the reading binary's stored inbox
+	Shown   int    // how many message blocks the reading binary's `mash hook` (what the session is shown) carried for it, over every hook run
+	Refused string // the class the reading binary gave when it refused the message; empty when it did not
 }
 
 // CompatOptions configure `release-check --compat`. Every external seam is a field a test replaces.
@@ -338,12 +338,14 @@ func compatRun(ctx context.Context, args []string, o CompatOptions, ev *compatEv
 }
 
 // judgeCompat finds the first message of the corpus that was not delivered exactly once, and why: n is 0 when every
-// message was. Two observations of the reading binary decide it, and each yields its own reason:
+// message was. Observations of the reading binary decide it, and each yields its own reason:
 //   - the writer's report that it stored the message (a message that was not stored, or has no observation: "not delivered");
 //   - the refusal class the reader gave it ("refused: <class>");
 //   - the reader's stored inbox, which must hold the message once: none is "missing", more is "delivered twice";
-//   - the channel notifications serve sent the session (the delivery path itself), which must carry the message once: a
-//     message that is stored but that serve never delivered is "not delivered", one it delivered more than once "delivered twice".
+//   - what the session was shown, which is what `mash hook` printed for it (a channel notification is only a one-line
+//     wake for an idle session and is not evidence of delivery): a message shown no time is "not delivered", one shown
+//     more than once (on one hook run or across two) "delivered twice". A version without `mash hook` is judged by the
+//     stored inbox alone, which the driver records as Shown.
 func judgeCompat(corpus []compatMsg, obs []compatObs) (n int, reason string) {
 	by := map[int]compatObs{}
 	for _, ob := range obs {
@@ -358,46 +360,18 @@ func judgeCompat(corpus []compatMsg, obs []compatObs) (n int, reason string) {
 			return m.Number, "refused: " + ob.Refused
 		case ob.Copies == 0:
 			return m.Number, "missing"
-		case ob.Copies > 1 || ob.Notified > 1:
+		case ob.Copies > 1 || ob.Shown > 1:
 			return m.Number, "delivered twice"
-		case ob.Notified == 0:
+		case ob.Shown == 0:
 			return m.Number, "not delivered"
 		}
 	}
 	return 0, ""
 }
 
-// compatSettle is how long the run keeps counting channel notifications after every message was announced, so a
-// redelivery (a nak is redelivered after 500 ms) is seen.
+// compatSettle is how long the run waits after the hook showed every message before it runs the hook once more, which
+// must show nothing new: a redelivery (a nak is redelivered after 500 ms) would show a message again.
 const compatSettle = 2 * time.Second
-
-// seqsOf is the message numbers a channel notification delivered to endpoint to, from its meta ("to" and "seqs": a
-// comma-separated list). A notice of serve's own carries neither and yields none.
-func seqsOf(meta, to string) []string {
-	var m map[string]any
-	if json.Unmarshal([]byte(meta), &m) != nil {
-		return nil
-	}
-	seqs, _ := m["seqs"].(string)
-	if got, _ := m["to"].(string); got != to || seqs == "" {
-		return nil
-	}
-	return strings.Split(seqs, ",")
-}
-
-// collectSeqs adds the numbers of every channel notification that arrived since the last call to counts.
-func (p *serveProc) collectSeqs(to string, counts map[string]int) {
-	for {
-		select {
-		case e := <-p.anyEv:
-			for _, q := range seqsOf(e.Meta, to) {
-				counts[strings.TrimSpace(q)]++
-			}
-		default:
-			return
-		}
-	}
-}
 
 var (
 	sentNumberRE = regexp.MustCompile(`\(number (\d+)\)`)
@@ -406,8 +380,9 @@ var (
 
 // driveCompat is the real drive: one embedded NATS server in mash's account setup, the writer's binary sending the
 // corpus to the reader, the reader's binary running serve as an MCP client does (latency.go's startServe, which verifies
-// and delivers) and then listing and reading its inbox. Delivery is observed twice: the channel notifications serve sends
-// the session, counted per message number, and the stored inbox. Each message is tracked by a marker in its body (sender, nonce) and the stream sequence the send reported.
+// and spools) and then listing and reading its inbox. Delivery is observed twice: what `mash hook` shows the session (the
+// message blocks it prints, counted per message number; serve's channel notifications are only a wake and are not
+// counted), and the stored inbox. Each message is tracked by a marker in its body (sender, nonce) and the stream sequence the send reported.
 func driveCompat(ctx context.Context, writer, reader compatBin, corpus []compatMsg) ([]compatObs, error) {
 	dir, err := os.MkdirTemp("", "release-check-compat-lab-")
 	if err != nil {
@@ -521,33 +496,49 @@ func driveCompat(ctx context.Context, writer, reader compatBin, corpus []compatM
 			return nil, ctx.Err()
 		}
 	}
-	// The delivery itself: every channel notification serve sent the session carries the numbers of the messages it
-	// delivered. Wait until each stored message was announced, then a settle period for a redelivery, and count.
-	notified := map[string]int{}
-	allNotified := func() bool {
-		p.collectSeqs("reader", notified)
-		for _, o := range obs {
-			if o.Sent && o.Seq != 0 && notified[strconv.Itoa(o.Seq)] == 0 {
-				return false
+	// The delivery itself: serve holds the mail for the hook (MASH_SPOOL_FROM_START), and what the session is shown is
+	// what `mash hook` prints. Run it until every stored message was shown, wait a settle period, and run it once more:
+	// that run must show nothing new. A version without `mash hook` has only the stored inbox to go by (set below).
+	hooked := !release.TagBelow("v"+reader.Version, release.HookSince)
+	if hooked {
+		shown := map[int]int{}
+		runHook := func() error {
+			out, _, _, err := runBounded(ctx, reader.Path, []string{"hook"}, renv, hookInputs["UserPromptSubmit"])
+			if err != nil {
+				return err
 			}
+			for _, o := range obs {
+				shown[o.Number] += shownCount(out, marker(o.Number))
+			}
+			return nil
 		}
-		return true
-	}
-	for nd := time.Now().Add(onlineTimeout); !allNotified() && time.Now().Before(nd) && ctx.Err() == nil; {
-		time.Sleep(200 * time.Millisecond)
-	}
-	select {
-	case <-time.After(compatSettle):
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
-	p.collectSeqs("reader", notified)
-	for i := range obs {
-		// A send that did not report its number cannot be matched to a notification: the stored inbox is then the only observation.
-		if obs[i].Seq != 0 {
-			obs[i].Notified = notified[strconv.Itoa(obs[i].Seq)]
-		} else {
-			obs[i].Notified = obs[i].Copies
+		allShown := func() bool {
+			for _, o := range obs {
+				if o.Sent && shown[o.Number] == 0 {
+					return false
+				}
+			}
+			return true
+		}
+		for nd := time.Now().Add(onlineTimeout); ctx.Err() == nil; {
+			if err := runHook(); err != nil {
+				return nil, err
+			}
+			if allShown() || time.Now().After(nd) {
+				break
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+		select {
+		case <-time.After(compatSettle):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		if err := runHook(); err != nil {
+			return nil, err
+		}
+		for i := range obs {
+			obs[i].Shown = shown[obs[i].Number]
 		}
 	}
 	for i := range obs {
@@ -563,6 +554,9 @@ func driveCompat(ctx context.Context, writer, reader compatBin, corpus []compatM
 			if m := refusedRE.FindStringSubmatch(out); m != nil {
 				obs[i].Refused = strings.TrimSpace(m[1])
 			}
+		}
+		if !hooked {
+			obs[i].Shown = obs[i].Copies
 		}
 	}
 	return obs, nil
