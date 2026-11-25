@@ -385,6 +385,71 @@
      {
       "name": "x-notes",
       "value": "send has no --dry-run: sending is the act itself, not a change to the mesh. The number is the message's number in the recipient's inbox. It is printed because the sender can find it nowhere else, and needs it: an answer arrives marked 'reply to: 42'."
+     },
+     {
+      "name": "x-output-next",
+      "value": [
+       {
+        "case": "Sent",
+        "text": "Mail sent (number 42)",
+        "stream": "stdout",
+        "exit": 0,
+        "issue": "#1046",
+        "replaces": "Sent",
+        "note": "One success-line form in both tools, as today but for one thing: a capital first letter and no full stop (Created endpoint acme.demo.bob, Deleted endpoint acme.demo.bob). Only the full stop goes.",
+        "verbatim": true
+       },
+       {
+        "case": "Sent, urgent, with a kind",
+        "text": "Urgent question mail sent (number 43)",
+        "stream": "stdout",
+        "exit": 0,
+        "issue": "#1046",
+        "replaces": "Sent, urgent, with a kind",
+        "note": "One success-line form in both tools, as today but for one thing: a capital first letter and no full stop (Created endpoint acme.demo.bob, Deleted endpoint acme.demo.bob). Only the full stop goes.",
+        "verbatim": true
+       },
+       {
+        "case": "With --detail",
+        "text": "Mail sent (number 42)\nto:     acme.demo.alice\nkind:   task\nurgent: no",
+        "stream": "stdout",
+        "exit": 0,
+        "issue": "#1046 / #1050",
+        "replaces": "With --detail",
+        "note": "One success-line form in both tools, as today but for one thing: a capital first letter and no full stop (Created endpoint acme.demo.bob, Deleted endpoint acme.demo.bob). The full stop goes. The --detail labels are padded to the longest label (\"urgent:\") plus one space, as every block is (#1050); today they are padded to nine columns.",
+        "verbatim": true
+       },
+       {
+        "case": "A reply marked question that asks nothing",
+        "text": "Mail sent as fyi (number 44): a reply marked question that asks nothing",
+        "stream": "stdout",
+        "exit": 0,
+        "issue": "#1046",
+        "replaces": "A reply marked question that asks nothing",
+        "note": "One success-line form in both tools, as today but for one thing: a capital first letter and no full stop (Created endpoint acme.demo.bob, Deleted endpoint acme.demo.bob). Only the full stop goes.",
+        "verbatim": true
+       },
+       {
+        "case": "Repeated --id",
+        "text": "Mail already sent; nothing new stored",
+        "stream": "stdout",
+        "exit": 0,
+        "issue": "#1046",
+        "replaces": "Repeated --id",
+        "note": "One success-line form in both tools, as today but for one thing: a capital first letter and no full stop (Created endpoint acme.demo.bob, Deleted endpoint acme.demo.bob). Only the full stop goes.",
+        "verbatim": true
+       },
+       {
+        "case": "No such endpoint",
+        "text": "error: no endpoint acme.demo.alise\nhint: mash who",
+        "stream": "stderr",
+        "exit": 1,
+        "issue": "#1046",
+        "replaces": "No such endpoint",
+        "note": "Not found reads \"no endpoint <address>\" in both tools, echoing the address as typed (today \"no endpoint has the address ...\"). The hint is unchanged.",
+        "verbatim": true
+       }
+      ]
      }
     ]
    },
@@ -598,6 +663,91 @@
      {
       "name": "x-notes",
       "value": "FROM shows only the name when the sender is in your own owner and group. MESSAGE is the sender's words, as untrusted as the full text; it is not quoted because the column already marks it. It shows the first line of the text, cut to fit 80 columns and ending in … when there is more; mash read shows all of it. The JSON carries the same cut text as 'preview'."
+     },
+     {
+      "name": "x-output-next",
+      "value": [
+       {
+        "case": "Messages",
+        "text": "2 messages for acme.demo.alice, 2 new, 1 urgent.\n\nNUMBER  FROM           WHEN     STATE  URGENT  KIND      MESSAGE\n1       acme.demo.bob  10s ago  new    no      task      lunch at noon?\n2       acme.demo.bob  8s ago   new    yes     question  ready?",
+        "stream": "stdout",
+        "exit": 0,
+        "issue": "#1045",
+        "replaces": "Messages",
+        "note": "FROM is always the sender's full address, never the short name: two senders in different groups or owners cannot print alike (mash read and --json already give the full address). Only the FROM column changes; the rest of the case is as today. The x-notes sentence \"FROM shows only the name when the sender is in your own owner and group\" goes.",
+        "verbatim": true
+       },
+       {
+        "case": "A long message, or one of several lines",
+        "text": "NUMBER  FROM           WHEN    STATE  URGENT  KIND    MESSAGE\n3       acme.demo.bob  1m ago  new    no      result  The build passed on all f…",
+        "stream": "stdout",
+        "exit": 0,
+        "issue": "#1045",
+        "replaces": "A long message, or one of several lines",
+        "note": "FROM is always the sender's full address, never the short name: two senders in different groups or owners cannot print alike (mash read and --json already give the full address). Only the FROM column changes; the rest of the case is as today. The message is cut earlier than today (at \"all f…\", not \"all four runn…\") because FROM is wider, to fit 80 columns.",
+        "verbatim": true
+       },
+       {
+        "case": "The oldest has waited longer than the wake age",
+        "text": "3 messages for acme.demo.alice, 3 new, 0 urgent.\nThe oldest has waited 1h 12m.\n\nNUMBER  FROM           WHEN  STATE  URGENT  KIND  MESSAGE\n...",
+        "stream": "stdout",
+        "exit": 0,
+        "issue": "#1045",
+        "replaces": "The oldest has waited longer than the wake age",
+        "note": "FROM is always the sender's full address, never the short name: two senders in different groups or owners cannot print alike (mash read and --json already give the full address). Only the FROM column changes; the rest of the case is as today. ",
+        "verbatim": true
+       },
+       {
+        "case": "Counts include mail read out of order, with --detail",
+        "text": "About 2 messages for acme.demo.alice, about 1 new, about 1 urgent.\nexact: no (mail read out of order may still be counted as urgent)\n\nNUMBER  FROM           WHEN     STATE  URGENT  KIND      MESSAGE\n1       acme.demo.bob  10s ago  new    no      task      lunch at noon?\n2       acme.demo.bob  8s ago   new    yes     question  ready?",
+        "stream": "stdout",
+        "exit": 0,
+        "issue": "#1045",
+        "replaces": "Counts include mail read out of order, with --detail",
+        "note": "FROM is always the sender's full address, never the short name: two senders in different groups or owners cannot print alike (mash read and --json already give the full address). Only the FROM column changes; the rest of the case is as today. ",
+        "verbatim": true
+       },
+       {
+        "case": "Counts without serve running",
+        "text": "About 2 messages for acme.demo.alice, about 2 new, about 1 urgent.\n\nNUMBER  FROM           WHEN     STATE  URGENT  KIND      MESSAGE\n1       acme.demo.bob  10s ago  new    no      task      lunch at noon?\n2       acme.demo.bob  8s ago   new    yes     question  ready?",
+        "stream": "stdout",
+        "exit": 0,
+        "issue": "#1045",
+        "replaces": "Counts without serve running",
+        "note": "FROM is always the sender's full address, never the short name: two senders in different groups or owners cannot print alike (mash read and --json already give the full address). Only the FROM column changes; the rest of the case is as today. ",
+        "verbatim": true
+       },
+       {
+        "case": "Counts without serve running, with --detail",
+        "text": "About 2 messages for acme.demo.alice, about 2 new, about 1 urgent.\nexact: no (mash serve is not running, so unverified mail is counted)\n\nNUMBER  FROM           WHEN     STATE  URGENT  KIND      MESSAGE\n1       acme.demo.bob  10s ago  new    no      task      lunch at noon?\n2       acme.demo.bob  8s ago   new    yes     question  ready?",
+        "stream": "stdout",
+        "exit": 0,
+        "issue": "#1045",
+        "replaces": "Counts without serve running, with --detail",
+        "note": "FROM is always the sender's full address, never the short name: two senders in different groups or owners cannot print alike (mash read and --json already give the full address). Only the FROM column changes; the rest of the case is as today. ",
+        "verbatim": true
+       },
+       {
+        "case": "Counts are capped, with --detail",
+        "text": "About 1000 messages for acme.demo.alice, about 90 new, about 4 urgent.\nexact: no (only the oldest 1000 messages were checked)\n\nNUMBER  FROM           WHEN     STATE  URGENT  KIND      MESSAGE\n1       acme.demo.bob  10s ago  new    no      task      lunch at noon?\n2       acme.demo.bob  8s ago   new    yes     question  ready?",
+        "stream": "stdout",
+        "exit": 0,
+        "issue": "#1045",
+        "replaces": "Counts are capped, with --detail",
+        "note": "FROM is always the sender's full address, never the short name: two senders in different groups or owners cannot print alike (mash read and --json already give the full address). Only the FROM column changes; the rest of the case is as today. ",
+        "verbatim": true
+       },
+       {
+        "case": "Counts are capped and serve is not running, with --detail",
+        "text": "About 1000 messages for acme.demo.alice, about 90 new, about 4 urgent.\nexact: no (only the oldest 1000 messages were checked)\nexact: no (mash serve is not running, so unverified mail is counted)\n\nNUMBER  FROM           WHEN     STATE  URGENT  KIND      MESSAGE\n1       acme.demo.bob  10s ago  new    no      task      lunch at noon?\n2       acme.demo.bob  8s ago   new    yes     question  ready?",
+        "stream": "stdout",
+        "exit": 0,
+        "issue": "#1045",
+        "replaces": "Counts are capped and serve is not running, with --detail",
+        "note": "FROM is always the sender's full address, never the short name: two senders in different groups or owners cannot print alike (mash read and --json already give the full address). Only the FROM column changes; the rest of the case is as today. ",
+        "verbatim": true
+       }
+      ]
      }
     ]
    },
@@ -712,6 +862,21 @@
      {
       "name": "x-notes",
       "value": "What 'read' means. A message is 'new' until the server has been told it reached the endpoint's session: when the hook showed it to the agent, or the agent opened it with the read tool. Until then it is waiting. mash read at a shell shows a message but, with no session online, cannot mark it; it stays 'new' until a session next comes online. That limit is tracked in mash's backlog. The message's text is printed with '> ' before every line, as quoted mail is, and with control characters escaped: everything after '> ' is the sender's words, and nothing the sender writes can pass for mash's own output or for an instruction to an agent reading it. The command and the tool quote alike. --json carries the text unquoted in 'body'."
+     },
+     {
+      "name": "x-output-next",
+      "value": [
+       {
+        "case": "No such message",
+        "text": "error: no message 9\nhint: mash inbox",
+        "stream": "stderr",
+        "exit": 1,
+        "issue": "#1046",
+        "replaces": "No such message",
+        "note": "Not found reads \"no <thing> <value>\": \"no endpoint X\", \"no message N\" (today \"acme.demo.alice has no message 9\"). The hint is unchanged.",
+        "verbatim": true
+       }
+      ]
      }
     ]
    },
@@ -900,6 +1065,20 @@
      {
       "name": "x-notes",
       "value": "A prefix follows the address the way a domain name does: acme is everything under acme, acme.demo is everything under acme.demo, and acme.demo.bob is that one endpoint, never acme.demo.bobby. There is no other pattern matching: capitals are refused, acme.demo.bob.* is refused, and an empty prefix means none. The filters by role, capability and label stay, as --role, --capability and --label, in the command and the tool: an agent uses them to find a peer by what it does. Only the free-text match and the alternative output modes are gone. The JSON and the MCP tool's structured result carry role, host, description, capability and labels for every endpoint. An address is always owner.group.name, with dots. who says whether an endpoint is online, not whether mail is reaching its session: that is known only to the session itself, and is in its own status ('session'). A per-endpoint delivery claim visible to peers would be new data that mash 0.5.5 never had; it is left for a later release."
+     },
+     {
+      "name": "x-output-next",
+      "value": [
+       {
+        "case": "--json",
+        "text": "{\n  \"endpoints\": [\n    {\n      \"address\": \"acme.demo.alice\",\n      \"online\": true,\n      \"role\": \"reviewer\",\n      \"host\": \"myserver\",\n      \"description\": \"reviews pull requests\",\n      \"capability\": [\n        \"review\"\n      ],\n      \"labels\": {\n        \"team\": \"blue\"\n      }\n    },\n    {\n      \"address\": \"acme.demo.bob\",\n      \"online\": false,\n      \"role\": null,\n      \"host\": null,\n      \"description\": null,\n      \"capability\": [],\n      \"labels\": {}\n    }\n  ]\n}",
+        "stream": "stdout",
+        "exit": 0,
+        "issue": "#1042",
+        "note": "--json is shown as it prints at a terminal (indented); piped it is one compact line (rule \"--json prints one object\"). The key stays capability, as today: ADR 0049 says who JSON fields are added, never renamed or removed (the one exception to plural list keys). Unset fields stay null. The same in the MCP tool's structured result, which is the same object.",
+        "verbatim": true
+       }
+      ]
      }
     ]
    },
@@ -1429,6 +1608,20 @@
      {
       "name": "x-notes",
       "value": "The short commit in brackets, seven characters, tells two builds of the same version apart. --json carries the whole commit, so a tool that pins a version can compare it exactly."
+     },
+     {
+      "name": "x-output-next",
+      "value": [
+       {
+        "case": "--json, no plugin",
+        "text": "{\n  \"version\": \"0.5.9\",\n  \"commit\": \"3f9a41c2e0b7d5a1c4e08b2d77f3a95e1b6c4098\",\n  \"plugin\": null\n}",
+        "stream": "stdout",
+        "exit": 0,
+        "issue": "#1042",
+        "note": "--json is shown as it prints at a terminal (indented); piped it is one compact line (rule \"--json prints one object\"). When there is no plugin the value is null (today \"plugin\": \"\"). The key is always present.",
+        "verbatim": true
+       }
+      ]
      }
     ]
    },
@@ -1619,6 +1812,41 @@
      {
       "name": "x-notes",
       "value": "It asks nothing: the file came from whoever runs your mesh. How it works. Whoever runs the mesh runs 'mashctl endpoint create acme.demo.bob --out acme.demo.bob.join' and gets one text file. They get that file to the other machine by any route they trust. There, 'mash join acme.demo.bob.join' copies its three parts into the configuration folder: the server address or addresses, the certificate authority's certificate if the server uses its own, and a NATS creds file (a user JWT and its seed). After that, mash status works. When the endpoint made its own key, the join file holds no seed and --key supplies it. Planned for 0.6.0: a way for mash join to ask to join and wait for approval. THE JOIN FILE is JSON, written with mode 600, with these fields: \"mash_join\": 1 (the format's version); \"address\"; \"servers\": a list of addresses; \"ca\": the certificate authority's certificate as PEM text, or null; and either \"creds\": the whole text of a NATS creds file, or, when the endpoint made its own key, \"user_jwt\": the user JWT alone. One configuration folder serves one mesh; a join file for another mesh needs another folder. The certificate authority's certificate is kept in the folder as ca.pem, and every endpoint in the folder trusts it; a join file that brings a different one, or none where the folder has one, or one where the folder has none and already holds an endpoint or names servers in config.json, is refused, with or without --replace. The first join into an empty folder sets it; a folder that already holds an endpoint and has no ca.pem refuses a join file that brings one, with the same 'different ca' line, and a folder whose config.json already names servers but holds no endpoint refuses it with 'this folder has a server but no endpoint'. A JOIN FILE THAT HOLDS A SEED IS A SECRET FILE, and so is the file --key names: the file --key names is checked before it is read, and a join file is opened to see whether it holds a seed and then checked before anything is installed: it must be a plain file, owned by you, readable by you alone, or join refuses with the two cases above. A join file that holds only a user JWT is not checked for owner or mode, but any join file that is not a plain file (a directory, a FIFO, a device) gets the 'not a plain file of your own' line."
+     },
+     {
+      "name": "x-output-next",
+      "value": [
+       {
+        "case": "Joined",
+        "text": "Joined as acme.demo.bob",
+        "stream": "stdout",
+        "exit": 0,
+        "issue": "#1046",
+        "replaces": "Joined",
+        "note": "One success-line form in both tools, as today but for one thing: a capital first letter and no full stop (Created endpoint acme.demo.bob, Deleted endpoint acme.demo.bob). Only the full stop goes.",
+        "verbatim": true
+       },
+       {
+        "case": "With --detail",
+        "text": "Joined as acme.demo.bob\nservers: tls://myserver:4222\ncreds:   ~/.config/mash/acme.demo.bob.creds",
+        "stream": "stdout",
+        "exit": 0,
+        "issue": "#1046",
+        "replaces": "With --detail",
+        "note": "One success-line form in both tools, as today but for one thing: a capital first letter and no full stop (Created endpoint acme.demo.bob, Deleted endpoint acme.demo.bob). Only the full stop goes.",
+        "verbatim": true
+       },
+       {
+        "case": "With --dry-run",
+        "text": "Would join as acme.demo.bob",
+        "stream": "stdout",
+        "exit": 0,
+        "issue": "#1046",
+        "replaces": "With --dry-run",
+        "note": "One success-line form in both tools, as today but for one thing: a capital first letter and no full stop (Created endpoint acme.demo.bob, Deleted endpoint acme.demo.bob). Only the full stop goes.",
+        "verbatim": true
+       }
+      ]
      }
     ]
    },
@@ -1709,6 +1937,21 @@
        {
         "name": "x-notes",
         "value": "Give the .pub file to whoever runs the mesh: mashctl endpoint create acme.demo.bob --public-key bob.seed.pub"
+       },
+       {
+        "name": "x-output-next",
+        "value": [
+         {
+          "case": "Created",
+          "text": "Created bob.seed and bob.seed.pub",
+          "stream": "stdout",
+          "exit": 0,
+          "issue": "#1046",
+          "replaces": "Created",
+          "note": "One success-line form in both tools, as today but for one thing: a capital first letter and no full stop (Created endpoint acme.demo.bob, Deleted endpoint acme.demo.bob). Only the full stop goes.",
+          "verbatim": true
+         }
+        ]
        }
       ]
      }
