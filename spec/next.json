@@ -85,17 +85,6 @@
   "verbatim": true
  },
  {
-  "id": "unknown-flag",
-  "where": "mash and mashctl, a flag that does not exist",
-  "case": "mashctl --verbose status",
-  "text": "error: unknown flag --verbose",
-  "stream": "stderr",
-  "exit": 2,
-  "issue": "#1047",
-  "note": "An unknown flag is reported as an unknown flag, in both tools, wherever it stands (today mashctl says unknown command \"--verbose\", and mash says \"unknown option --x\" after a command or \"mash has no command --x\" before it). No hint (ADR 0168): a hint is a command that fixes the problem, and no command fixes a flag that does not exist. Exit 2, nothing attempted.",
-  "verbatim": true
- },
- {
   "id": "unknown-command-mash",
   "where": "mash, a command that does not exist",
   "case": "mash nope",
