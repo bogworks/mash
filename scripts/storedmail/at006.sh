@@ -4,11 +4,12 @@
 # Inside the container (image golang:1.27): the release list is derived from the published releases, each release's
 # mash-linux-amd64 is downloaded and checked against its digest, each release's own `mash` writes stored mail, and this
 # tree's endpoint code and `mash inbox` read it (zero refusals, every message delivered once, X1 to X3 count 0); then the
-# duplicate cases of AT-018 run on a copy of origin/main and on this tree, and their outcomes must be identical.
-# Nothing is created on the host, no directory and no file: `git archive origin/main` is streamed into the container on
+# duplicate cases of AT-018 run on a copy of the oracle base ($AT006_BASE, default origin/main) and on this tree, and their outcomes must be identical.
+# Nothing is created on the host, no directory and no file: `git archive $AT006_BASE` is streamed into the container on
 # stdin and extracted there, the container is started and the receipt is printed. The released binaries are downloaded
 # and run only inside the container.
-# Env: MASH_RELEASE_REPO  GitHub repo the releases come from (default bogworks/mash).
+# Env: AT006_BASE       git ref of the AT-018 oracle (default origin/main); must resolve to a commit, printed in the receipt.
+#      MASH_RELEASE_REPO  GitHub repo the releases come from (default bogworks/mash).
 #      AT006_TAGS      space-separated tags replacing the derived list; debugging only, the run exits non-zero.
 #      AT006_DIRTY=1   run on a tree with uncommitted changes (the receipt says so; not a proof run).
 set -uo pipefail
@@ -25,7 +26,8 @@ cleanup() {
 trap cleanup EXIT
 
 commit=$(git -C "$root" rev-parse HEAD)
-main=$(git -C "$root" rev-parse origin/main) || { echo "no origin/main in this repository" >&2; exit 1; }
+base=${AT006_BASE:-origin/main}
+main=$(git -C "$root" rev-parse --verify "${base}^{commit}") || { echo "AT006_BASE $base does not resolve to a commit in this repository" >&2; exit 1; }
 tree=clean
 if [ -n "$(git -C "$root" status --porcelain)" ]; then
 	tree="DIRTY (uncommitted changes: not a proof run)"
@@ -37,17 +39,17 @@ digest=$(docker image inspect "$image" --format '{{.Id}} {{join .RepoDigests ","
 
 echo "== AT-006 / AT-018 run =="
 echo "commit tested:       $commit ($tree)"
-echo "oracle (origin/main): $main"
+echo "oracle ($base): $main"
 echo "release repo:        ${MASH_RELEASE_REPO:-bogworks/mash}"
 echo "venue:               container from $image, image $digest, name $name, docker run --rm --init"
 echo
 
-git -C "$root" archive origin/main | docker run -i --rm --init --name "$name" -e AT006_TAGS="${AT006_TAGS:-}" \
+git -C "$root" archive "$main" | docker run -i --rm --init --name "$name" -e AT006_TAGS="${AT006_TAGS:-}" \
 	-e MASH_RELEASE_REPO="${MASH_RELEASE_REPO:-bogworks/mash}" -e AT006_IN_CONTAINER=1 \
 	-v "$root":/src:ro "$image" bash -c '
 	set -uo pipefail
 	fail=0
-	mkdir /oracle && tar -x -C /oracle || { echo "FAIL: extracting git archive of origin/main from stdin"; exit 1; }
+	mkdir /oracle && tar -x -C /oracle || { echo "FAIL: extracting git archive of the oracle base from stdin"; exit 1; }
 	mkdir /work /out
 	oracle_test() { # dir out: run the AT-018 test in dir, write its outcomes to out, and return the test exit code
 		(cd "$1" && MASH_AT018_OUT="$2" go test ./internal/endpoint -run "^TestStoredDuplicateOracle\$" -count=1 -v >/out/test.log 2>&1)
@@ -57,8 +59,8 @@ git -C "$root" archive origin/main | docker run -i --rm --init --name "$name" -e
 	}
 	tar -C /src --exclude=./.git --exclude=./mash -cf - . | tar -C /work -xf -
 	cp /work/internal/endpoint/stored_dup_oracle_test.go /oracle/internal/endpoint/
-	echo "== AT-018 on origin/main (the oracle) =="
-	oracle_test /oracle /out/main.json || { echo "FAIL: the oracle test did not pass on origin/main"; fail=1; }
+	echo "== AT-018 on the oracle base =="
+	oracle_test /oracle /out/main.json || { echo "FAIL: the oracle test did not pass on the oracle base"; fail=1; }
 	echo "== AT-018 on this tree =="
 	oracle_test /work /out/tree.json || { echo "FAIL: the oracle test did not pass on this tree"; fail=1; }
 	if [ -s /out/main.json ] && [ -s /out/tree.json ]; then

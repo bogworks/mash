@@ -41,6 +41,9 @@ import (
 // releasesURL is set in main from -repo.
 var releasesURL, releaseRepo string
 
+// releasesRead is the number of releases fetchAll read.
+var releasesRead int
+
 var repoRe = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 
 type apiRelease struct {
@@ -101,7 +104,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "FAIL:", err)
 		os.Exit(1)
 	}
-	fmt.Println("RELEASES (derived at run time from " + releasesURL + "):")
+	fmt.Printf("RELEASES (derived at run time from %s, %d pages, %d releases read):\n", releasesURL, pagesRead, releasesRead)
 	for _, r := range rels {
 		fmt.Printf("  %s  sha256 %s  (%s)\n", r.tag, r.sha, r.digest)
 	}
@@ -147,6 +150,63 @@ func counts(m map[string]int) string {
 
 var tagRE = regexp.MustCompile(`^v0\.5\.(\d+)$`)
 
+var verRE = regexp.MustCompile(`^v(\d+)\.(\d+)\.(\d+)$`)
+
+// below058 reports whether tag is an actual version below 0.5.8, compared numerically.
+func below058(tag string) bool {
+	m := verRE.FindStringSubmatch(tag)
+	if m == nil {
+		return false
+	}
+	maj, _ := strconv.Atoi(m[1])
+	min, _ := strconv.Atoi(m[2])
+	pat, _ := strconv.Atoi(m[3])
+	if maj != 0 {
+		return false
+	}
+	return min < 5 || (min == 5 && pat < 8)
+}
+
+const maxPages = 50
+
+// pagesRead is the number of pages fetchAll read.
+var pagesRead int
+
+// fetchAll reads every page of the releases list (page=1, 2, ... until a page is empty) and fails when a page cannot be
+// read or the page cap is reached with a page still non-empty.
+func fetchAll(hc *http.Client) ([]apiRelease, error) {
+	var all []apiRelease
+	for page := 1; ; page++ {
+		if page > maxPages {
+			return nil, fmt.Errorf("releases list: still non-empty after %d pages: the list may be cut off", maxPages)
+		}
+		req, _ := http.NewRequest("GET", releasesURL+"&page="+strconv.Itoa(page), nil)
+		req.Header.Set("Accept", "application/vnd.github+json")
+		req.Header.Set("User-Agent", "storedmail-check")
+		resp, err := hc.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("releases list page %d: %w", page, err)
+		}
+		if resp.StatusCode != 200 {
+			b, _ := io.ReadAll(io.LimitReader(resp.Body, 300))
+			resp.Body.Close()
+			return nil, fmt.Errorf("releases list page %d: %s: %s", page, resp.Status, strings.TrimSpace(string(b)))
+		}
+		var got []apiRelease
+		err = json.NewDecoder(resp.Body).Decode(&got)
+		resp.Body.Close()
+		if err != nil {
+			return nil, fmt.Errorf("releases list page %d: %w", page, err)
+		}
+		if len(got) == 0 {
+			releasesRead = len(all)
+			return all, nil
+		}
+		pagesRead = page
+		all = append(all, got...)
+	}
+}
+
 // derive is REQ-007: every published release v0.5.N, N >= 8, minus the skipped list; fetched here, in one call. It
 // downloads each mash-linux-amd64 into dir and checks its digest.
 func derive(skippedFile string, override []string, dir string) ([]release, error) {
@@ -154,33 +214,21 @@ func derive(skippedFile string, override []string, dir string) ([]release, error
 	if err != nil {
 		return nil, err
 	}
-	req, _ := http.NewRequest("GET", releasesURL, nil)
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("User-Agent", "storedmail-check")
 	hc := &http.Client{Timeout: 60 * time.Second}
-	resp, err := hc.Do(req)
+	all, err := fetchAll(hc)
 	if err != nil {
-		return nil, fmt.Errorf("releases list: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		b, _ := io.ReadAll(io.LimitReader(resp.Body, 300))
-		return nil, fmt.Errorf("releases list: %s: %s", resp.Status, strings.TrimSpace(string(b)))
-	}
-	var all []apiRelease
-	if err := json.NewDecoder(resp.Body).Decode(&all); err != nil {
-		return nil, fmt.Errorf("releases list: %w", err)
+		return nil, err
 	}
 	byTag := map[string]apiRelease{}
 	reachedFloor := false
 	for _, a := range all {
 		byTag[a.Tag] = a
-		if m := tagRE.FindStringSubmatch(a.Tag); m == nil || func() bool { n, _ := strconv.Atoi(m[1]); return n < 8 }() {
-			reachedFloor = true // an older release is on the page: the page reaches below 0.5.8
+		if below058(a.Tag) {
+			reachedFloor = true
 		}
 	}
-	if len(all) >= 100 && !reachedFloor {
-		return nil, errors.New("the releases page is full and holds nothing below v0.5.8: the list may be cut off")
+	if !reachedFloor {
+		return nil, fmt.Errorf("no release older than v0.5.8 was seen in %d releases on %d pages: the history did not reach the floor", len(all), pagesRead)
 	}
 	var tags []string
 	if len(override) > 0 {
