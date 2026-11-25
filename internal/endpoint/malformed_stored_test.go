@@ -414,3 +414,49 @@ func malformedLines(log string) int {
 	}
 	return n
 }
+
+// An endpoint that lost its lease stops the scan: the error says so, the refused-malformed list is not marked Done (a
+// replacement serve may be scanning), and a later serve rescans.
+func TestScanStopsOnLeaseLoss(t *testing.T) {
+	f := newFixture(t, "a", "b")
+	cfg := f.cfgState("a", t.TempDir(), false)
+	_, cases, _, _ := publishMalformedSet(t, f)
+	last := lastInboxSeq(t, f, "a")
+
+	steps := 0
+	_, ev, _, stop, runErr := serveLogged(t, cfg, func(e *Endpoint) {
+		e.scanStep = func(uint64) error {
+			steps++
+			if steps == 2 {
+				e.leaseGone.Store(true)
+			}
+			return nil
+		}
+	})
+	select {
+	case err := <-runErr:
+		if err == nil || !strings.Contains(err.Error(), "lost its lease") {
+			t.Fatalf("Run returned %v, want the lease error", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the scan did not stop on the lost lease")
+	}
+	if steps != 2 {
+		t.Fatalf("the scan took %d steps, want it to stop at the 2nd", steps)
+	}
+	if l := l0(t, cfg); l.Done {
+		t.Fatalf("the list is marked Done after a lost lease: %+v", l)
+	}
+	if len(ev.all()) != 0 {
+		t.Fatalf("delivered after the scan stopped: %v", ev.all())
+	}
+	stop()
+
+	// A later serve rescans and finishes.
+	_, _, _, stop2, _ := serveLogged(t, cfg, nil)
+	waitFor(t, "a later serve to finish the scan", 15*time.Second, func() bool { return l0(t, cfg).Done })
+	if l := l0(t, cfg); l.Scanned != last || len(l.Entries) != len(cases) {
+		t.Fatalf("after the rescan: %+v", l)
+	}
+	stop2()
+}

@@ -325,6 +325,9 @@ func (e *Endpoint) scanStored(ctx context.Context) error {
 		parallel(n, fetchConcurrency, func(i int) { raws[i], errs[i] = s.GetMsg(ctx, from+uint64(i)) })
 		for i := range raws {
 			seq := from + uint64(i)
+			if e.leaseGone.Load() { // a replacement serve may scan now: this one writes nothing more
+				return errors.New("mash: stored mail check: the endpoint lost its lease")
+			}
 			if e.scanStep != nil {
 				if err := e.scanStep(seq); err != nil {
 					return err
@@ -352,6 +355,9 @@ func (e *Endpoint) scanStored(ctx context.Context) error {
 	}
 	refusedMu.Lock()
 	defer refusedMu.Unlock()
+	if e.leaseGone.Load() {
+		return errors.New("mash: stored mail check: the endpoint lost its lease")
+	}
 	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 		return err
 	}
