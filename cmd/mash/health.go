@@ -26,6 +26,8 @@ type healthSvc struct {
 	session bool
 	// mailHeld says, in a session, whether it holds mail because the folder it requires cannot be written. nil at a shell.
 	mailHeld func() bool
+	// scanning says, in a session, whether it is checking the stored mail before it delivers any (TO-14). nil at a shell.
+	scanning func() bool
 	// lease says, in a session, whether it holds its endpoint now: "" when it does (or at a shell, where it is nil),
 	// else cmds.LeaseOther, LeaseLost or LeaseFailed with the cause of the last.
 	lease func() (state, cause string)
@@ -271,6 +273,9 @@ func (h *healthSvc) deliveryCheck() cmds.HealthCheck {
 		}
 		return cmds.HealthCheck{Name: cmds.CheckDelivery, State: cmds.CheckFail, Detail: detail}
 	}
+	if h.scanning != nil && h.scanning() {
+		return cmds.HealthCheck{Name: cmds.CheckDelivery, State: cmds.CheckFail, Detail: cmds.ReasonStoredScan}
+	}
 	if h.hooks != nil {
 		switch h.hooks() {
 		case endpoint.HookNotRun:
@@ -353,9 +358,13 @@ func (h *healthSvc) Health(ctx context.Context) (cmds.HealthReport, error) {
 	}
 	rep.Checks = append(rep.Checks, h.refusedCheck()) // the count is kept on this machine: it shows with the server down
 	rep.MailHeld = h.mailHeld != nil && h.mailHeld()
+	rep.StoredScan = h.scanning != nil && h.scanning()
 	if !h.session { // a shell on the session's machine reads what its serve recorded, as the tool would say it, whatever the sign-in said
 		if rep.Session = h.sessionOnDisk(); rep.Session != nil && rep.Session.Storage == cmds.StorageFailing {
 			rep.MailHeld = true
+		}
+		if dir, err := endpoint.SpoolDir(h.cfg); err == nil && endpoint.ScanOnDisk(spool.Spool{Dir: dir}) {
+			rep.StoredScan = true
 		}
 	}
 	if rep.Lease, rep.LeaseCause = h.leaseNow(); rep.Lease != "" {

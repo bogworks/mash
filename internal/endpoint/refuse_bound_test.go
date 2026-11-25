@@ -26,7 +26,7 @@ func TestUnknownSignerLookupIsCachedForAPollInterval(t *testing.T) {
 	t.Cleanup(func() { fetchRecordHook.Store(nil) })
 	for i := 0; i < 50; i++ {
 		hdr, _ := xid.Sign(subj, []byte("flood"), tkey("b"), time.Now(), "")
-		_, trust, _, ok := a.classify(subj, map[string][]string{sap.HeaderName: {hdr.Encode()}}, []byte("flood"), time.Now())
+		_, trust, _, ok := a.classify(subj, []string{hdr.Encode()}, []byte("flood"), time.Now())
 		if !ok || trust != sap.TrustUnknownSigner {
 			t.Fatalf("message %d: trust %s ok %v", i, trust, ok)
 		}

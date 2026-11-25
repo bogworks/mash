@@ -102,6 +102,11 @@ func TestDoctorDeliveryRowHookTexts(t *testing.T) {
 	// The grace is long enough that the calls of the first phase, on a loaded machine, are not two calls "well apart".
 	w, s := hooklessWorld(t, time.Second)
 	eventually(t, 10*time.Second, "shell sees the session", func() bool { got, _ := shellSession(t, w); return strings.Contains(got, "not_run") })
+	// The first start of the switched-on build checks the stored mail once (CHG-16) and the record shows from its start:
+	// the texts below are of the session once that is over.
+	eventually(t, 10*time.Second, "stored mail checked", func() bool {
+		return !strings.Contains(resultText(s.call(t, 79, "doctor", `{}`)), "stored mail is checked")
+	})
 	const warn = "delivery  warn  hooks have not run in this session yet; they run with\n                the first prompt or tool call\n"
 	if out := resultText(s.call(t, 80, "doctor", `{}`)); !strings.Contains(out, warn) || strings.Contains(out, "hint:") {
 		t.Errorf("not yet run: %q", out) // no hint line after it

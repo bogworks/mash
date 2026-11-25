@@ -32,12 +32,14 @@ const (
 // bound the spool, and which serve wrote it. It exists only while that serve holds the endpoint: serve removes it when it
 // stops holding it. At is when it was written.
 type HookRecord struct {
-	Hooks string    `json:"hooks"` // "", HookSuspected or HookDegraded: what only serve knows
-	Since time.Time `json:"since"`
-	Host  string    `json:"host"`
-	PID   string    `json:"pid"`
-	Start string    `json:"start,omitempty"`
-	At    time.Time `json:"at"`
+	Hooks string `json:"hooks"` // "", HookSuspected or HookDegraded: what only serve knows
+	// Scanning is true while serve checks the stored mail before it delivers any (malformed.go): status at a shell says not ready.
+	Scanning bool      `json:"scanning,omitempty"`
+	Since    time.Time `json:"since"`
+	Host     string    `json:"host"`
+	PID      string    `json:"pid"`
+	Start    string    `json:"start,omitempty"`
+	At       time.Time `json:"at"`
 }
 
 // hookStateOf is the hook state from the spool's own files and the detector's verdict. A hook run since the bind (the
@@ -121,7 +123,7 @@ func (e *Endpoint) recordHookState(ctx context.Context) {
 	if !own {
 		e.hookRecorded.Store(nil)
 	}
-	rec := HookRecord{Since: since, PID: strconv.Itoa(os.Getpid())}
+	rec := HookRecord{Since: since, PID: strconv.Itoa(os.Getpid()), Scanning: e.scanning.Load()}
 	rec.Host, _ = os.Hostname()
 	rec.Start, _ = procStart(os.Getpid())
 	// The detector's state as it stands: no call is ending now, so none is supplied (a synthetic call time would make one
@@ -219,15 +221,8 @@ func (e *Endpoint) clearHookState() {
 // serve of this machine recorded one (no session, or one that no longer holds the endpoint). The serve's process must
 // still exist: a killed serve leaves its file behind.
 func SessionOnDisk(sp spool.Spool) (hooks, storage string, ok bool) {
-	b, found := sp.HookState()
-	if !found {
-		return "", "", false
-	}
-	var rec HookRecord
-	if json.Unmarshal(b, &rec) != nil || rec.PID == "" {
-		return "", "", false
-	}
-	if host, _ := os.Hostname(); rec.Host != host || holderGone(rec.PID, rec.Start) {
+	rec, ok := liveRecord(sp)
+	if !ok {
 		return "", "", false
 	}
 	det := HooklessNone
@@ -242,4 +237,27 @@ func SessionOnDisk(sp spool.Spool) (hooks, storage string, ok bool) {
 		st = StorageFailing
 	}
 	return hookStateOf(sp, rec.Since, det), st, true
+}
+
+// ScanOnDisk is true at a shell when the live serve of this machine's session says it is checking the stored mail
+// (StoredScanRunning), from what it recorded in the spool.
+func ScanOnDisk(sp spool.Spool) bool {
+	rec, ok := liveRecord(sp)
+	return ok && rec.Scanning
+}
+
+// liveRecord is the record of a serve of this machine that still exists.
+func liveRecord(sp spool.Spool) (HookRecord, bool) {
+	b, found := sp.HookState()
+	if !found {
+		return HookRecord{}, false
+	}
+	var rec HookRecord
+	if json.Unmarshal(b, &rec) != nil || rec.PID == "" {
+		return HookRecord{}, false
+	}
+	if host, _ := os.Hostname(); rec.Host != host || holderGone(rec.PID, rec.Start) {
+		return HookRecord{}, false
+	}
+	return rec, true
 }

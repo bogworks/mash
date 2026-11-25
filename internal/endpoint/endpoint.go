@@ -164,6 +164,14 @@ type Endpoint struct {
 	// hookRecorded is what RecordHookState last wrote (hookstate.go), without its time.
 	hookRecorded atomic.Pointer[string]
 
+	// scanning is true while the one-time scan of the stored mail runs (malformed.go): nothing is delivered meanwhile.
+	scanning atomic.Bool
+	// bindInfo is the inbox stream's info as the startup read it (refuse.go bindRefusals, hook.go SetSpool): the scan
+	// reads the stream's range from it, so it costs startup no round trip of its own.
+	bindInfo atomic.Pointer[jetstream.StreamInfo]
+	// scanStep, when set, is called before each message of the scan is read (tests): an error stands for a kill.
+	scanStep func(seq uint64) error
+
 	// The test-only before-ack failpoint (hook.go): nil outside the crash tests.
 	failBeforeAck func(seq uint64)
 }

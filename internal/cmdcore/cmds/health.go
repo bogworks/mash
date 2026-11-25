@@ -31,6 +31,10 @@ const SessionEndpointFix = cmdcore.SessionNoEndpointHint
 // the folder it requires for arriving mail cannot be written.
 const ReasonMailHeld = "mail is held: its folder cannot be written"
 
+// ReasonStoredScan is status's reason, and the delivery row's detail, while the first start of the switched-on build checks
+// the stored mail before it delivers any (TO-14). It happens once; there is nothing to do.
+const ReasonStoredScan = "mail is waiting while stored mail is checked"
+
 // The ways a session can fail to hold its endpoint (HealthReport.Lease), and the words for them. Asked inside a session,
 // status and doctor report on that session itself: "ready, online" means this session holds the endpoint.
 const (
@@ -174,6 +178,9 @@ type HealthReport struct {
 	// MailHeld is true in a session that holds mail because the folder it requires (MASH_SPOOL_REQUIRED) cannot be
 	// written: the rows are fine and mail does not work. Status says so; doctor shows it as the delivery row.
 	MailHeld bool
+	// StoredScan is true while serve checks the stored mail before it delivers any, once, at the first start of the
+	// switched-on build: status says not ready with ReasonStoredScan.
+	StoredScan bool
 	// Lease is "" at a shell and in a session that holds its endpoint; otherwise LeaseOther, LeaseLost or LeaseFailed
 	// (LeaseCause says why, for the last). A session that does not hold its endpoint is not online and not ready.
 	Lease      string
@@ -375,6 +382,10 @@ var Status = cmdcore.Command[StatusParams, StatusResult]{
 		if r.Ready && rep.MailHeld {
 			reason := ReasonMailHeld
 			r.Ready, r.Reason, r.reasonCode = false, &reason, CodeStorageUnwritable
+		}
+		if r.Ready && rep.StoredScan {
+			reason := ReasonStoredScan
+			r.Ready, r.Reason, r.reasonCode = false, &reason, CodeUnknown // the reason says what was seen
 		}
 		r.Online = r.Ready && rep.Online
 		return r, nil

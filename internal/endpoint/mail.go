@@ -18,6 +18,7 @@ import (
 	"github.com/bogworks/mash/internal/kind"
 	"github.com/bogworks/mash/internal/render"
 	"github.com/bogworks/mash/internal/sap"
+	"github.com/bogworks/mash/internal/sapsdk"
 	"github.com/bogworks/mash/internal/spool"
 	"github.com/bogworks/mash/internal/store"
 )
@@ -86,11 +87,11 @@ func senderMarks(hdr nats.Header, trust sap.Trust, h sap.SenderHeader) (replyTo 
 	return replyTo, via
 }
 
-// classify verifies a stored message and names its sender (spec section 4).
-// storedAt is when the stream stored it. ok is false for forged or malformed
+// classify verifies a stored message and names its sender (spec section 4), through the SDK. values is every
+// Agent-Sender value of the message. storedAt is when the stream stored it. ok is false for forged or malformed
 // mail, which is never shown.
-func (e *Endpoint) classify(subject string, hdr nats.Header, data []byte, storedAt time.Time) (from string, trust sap.Trust, h sap.SenderHeader, ok bool) {
-	h, trust = sap.VerifyStored(hdr.Get(sap.HeaderName), subject, data)
+func (e *Endpoint) classify(subject string, values []string, data []byte, storedAt time.Time) (from string, trust sap.Trust, h sap.SenderHeader, ok bool) {
+	h, trust = sapsdk.VerifyStored(values, subject, data)
 	switch trust {
 	case sap.TrustForged, sap.TrustMalformed:
 		return "", trust, h, false
@@ -344,6 +345,11 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 	if _, err := e.bindRefusals(ctx); err != nil {
 		return nil, fmt.Errorf("mash: refused-mail state not tied to the inbox stream: %w", err)
 	}
+	// The one-time scan of the stored mail finishes before the consumer exists: nothing is delivered until the scanned
+	// line is written, and mail that arrives meanwhile waits in the stream (REQ-006 item 3, CHG-16).
+	if err := e.scanStored(ctx); err != nil {
+		return nil, fmt.Errorf("mash: stored mail not checked: %w", err)
+	}
 	cons, err := e.js.Consumer(ctx, stream, store.Consumer)
 	if err != nil {
 		return nil, fmt.Errorf("mash: inbox consumer: %w", err)
@@ -388,7 +394,14 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 		defer e.waking.received(ref)
 		// The sender's signature binds the subject the message was stored under, so classify checks it against the
 		// stored subject.
-		from, trust, h, ok := e.classify(m.Subject(), m.Headers(), m.Data(), meta.Timestamp)
+		from, trust, h, ok := e.classify(m.Subject(), m.Headers().Values(sap.HeaderName), m.Data(), meta.Timestamp)
+		if !ok && trust == sap.TrustMalformed {
+			// A malformed header: never handed to a session, never spooled, one terminal disposition (REQ-006 item 5).
+			// The class comes from the SDK's pure classifier, the function the scan calls too.
+			_, class := sapsdk.Classify(m.Subject(), m.Headers().Values(sap.HeaderName), m.Data())
+			e.refuseMalformedMsg(m, ref.Seq, class)
+			return
+		}
 		if !ok {
 			e.dropped.Add(1)
 			e.log.Printf("dropped #%s: %s sender header (claimed user %s)", FormatMsgRef(ref), trust, h.User)
@@ -959,7 +972,7 @@ func (e *Endpoint) toMail(raw *jetstream.RawStreamMsg) (render.Mail, bool) {
 
 // toMailWith is toMail with the refused-sequences file already read (refusedSnapshot), for a reader of many messages.
 func (e *Endpoint) toMailWith(raw *jetstream.RawStreamMsg, refused refusedSnap) (render.Mail, bool) {
-	from, trust, h, ok := e.classify(raw.Subject, raw.Header, raw.Data, raw.Time)
+	from, trust, h, ok := e.classify(raw.Subject, raw.Header.Values(sap.HeaderName), raw.Data, raw.Time)
 	if !ok {
 		return render.Mail{Seq: raw.Sequence, From: "?", Trust: trust, At: raw.Time}, false
 	}
@@ -1494,5 +1507,28 @@ func (e *Endpoint) deliverBatch(deliver Deliverer, show []pending, seen *seenSet
 			}
 		}
 		e.waking.done(refOf(p.mail))
+	}
+}
+
+// refuseMalformedMsg finishes the serve path for a message with a malformed header: the log line, then the record
+// (refuseMalformed), then one terminal disposition. A message that could not be recorded is retried, as an unverified
+// one is, unless there is no state directory to record in, which waiting cannot mend. Without the lease the new
+// holder gets it, so it is nak'd.
+func (e *Endpoint) refuseMalformedMsg(m jetstream.Msg, seq uint64, class string) {
+	if !e.mayAck(pending{}) {
+		_ = m.Nak()
+		return
+	}
+	added, err := e.refuseMalformed(seq, class)
+	if added {
+		e.dropped.Add(1)
+	}
+	switch {
+	case err != nil && e.cfg.StateDir != "":
+		_ = m.NakWithDelay(time.Second)
+	case e.mayAck(pending{}):
+		_ = m.Ack()
+	default:
+		_ = m.Nak()
 	}
 }
