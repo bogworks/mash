@@ -156,7 +156,7 @@ func TestLimitsApply(t *testing.T) {
 	if code != 0 || out != "Would raise 2 inboxes\nNothing was changed.\n" || errb != "" {
 		t.Fatalf("dry run: %d %q %q", code, out, errb)
 	}
-	if out, _, _ = h.run("limits", "apply", "--dry-run", "--json"); !strings.Contains(out, `"would_raise": 2`) || !strings.Contains(out, `"raised": 0`) {
+	if out, _, _ = h.run("limits", "apply", "--dry-run", "--json"); !strings.Contains(out, `"would_raise": 2`) || !strings.Contains(out, `"raised": 0`) || !strings.Contains(out, `"dry_run": true`) {
 		t.Fatalf("dry run json: %q", out)
 	}
 
@@ -182,9 +182,10 @@ func TestLimitsApply(t *testing.T) {
 	h.setLimits(`{"inbox_max_bytes": "48MiB"}`)
 	out, _, code = h.run("limits", "apply", "--json")
 	var r struct {
-		Raised int `json:"raised"`
+		Raised int  `json:"raised"`
+		DryRun bool `json:"dry_run"`
 	}
-	if err := json.Unmarshal([]byte(out), &r); err != nil || code != 0 || r.Raised != 2 {
+	if err := json.Unmarshal([]byte(out), &r); err != nil || code != 0 || r.Raised != 2 || r.DryRun || !strings.Contains(out, `"dry_run": false`) {
 		t.Fatalf("json: %d %v %q", code, err, out)
 	}
 	// it never lowers: the refusal is an error, and the inboxes keep what they have

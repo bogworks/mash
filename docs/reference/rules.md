@@ -151,11 +151,11 @@ The rules every mash command and tool follows.
 22. Every command that changes the mesh or this machine's setup takes
    --dry-run. It prints the usual line with 'Would' in front and changes
    nothing; with --json the object is the one the real run would print, with
-   "dry_run": true. In every such object, in mashctl and in mash join, the
+   "dry_run": true. In the --json of every command that takes --dry-run
+   (mashctl's changing commands, limits apply included, and mash join) the
    dry_run key is always present: false when the run is real (and mashctl init
-   adds would_change, null unless it is a dry run). That is mashctl's changing
-   commands and mash join. Sending a message is not such a change and has no
-   --dry-run.
+   adds would_change, null unless it is a dry run). Sending a message is not
+   such a change and has no --dry-run.
 
 23. help is also a command. 'mash help' and 'mash help send' print exactly
    what 'mash --help' and 'mash send --help' print, as git, kubectl and gh do.

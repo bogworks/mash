@@ -205,7 +205,8 @@ func runLimitsApply(args []string, g cliframe.Global, env func(string) string, l
 			out := struct {
 				Raised     int  `json:"raised"`
 				WouldRaise *int `json:"would_raise,omitempty"`
-			}{Raised: n}
+				DryRun     bool `json:"dry_run"`
+			}{Raised: n, DryRun: dry}
 			if dry {
 				out.Raised, out.WouldRaise = 0, &n
 			}
