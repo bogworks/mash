@@ -530,6 +530,24 @@ type holdProbe struct {
 }
 
 func (e *Endpoint) takeLease(ctx context.Context) (err error) {
+	// A write follows ctx and, once ctx ends, gets leaseCleanupTimeout more to settle: a cancelled write would return
+	// at once but the request may already be on its way, and the server could apply it after the cleanup below has
+	// looked. A write that settles after ctx ended is deleted at the revision it returned. The deferred dropOwnLease
+	// stays as the fallback for a write that failed, among them one that ran out its extra time.
+	write := func(do func(wctx context.Context) (uint64, error)) (uint64, error) {
+		wctx, wcancel := context.WithCancel(context.WithoutCancel(ctx))
+		defer wcancel()
+		stop := context.AfterFunc(ctx, func() { time.AfterFunc(leaseCleanupTimeout, wcancel) })
+		defer stop()
+		rev, werr := do(wctx)
+		if werr == nil && ctx.Err() != nil {
+			dctx, dcancel := context.WithTimeout(context.Background(), leaseCleanupTimeout)
+			defer dcancel()
+			_ = e.leaseKV.Delete(dctx, e.key, jetstream.LastRevision(rev))
+			return 0, ctx.Err()
+		}
+		return rev, werr
+	}
 	defer func() {
 		if err != nil && ctx.Err() != nil && e.leaseKV != nil {
 			e.dropOwnLease()
@@ -548,13 +566,17 @@ func (e *Endpoint) takeLease(ctx context.Context) (err error) {
 	// marker and the update over it were three round trips. The update over the marker the open saw is one: it takes
 	// the key only if nothing has been written to it since.
 	if e.hold.err != nil && errors.Is(e.hold.err, jetstream.ErrKeyDeleted) && e.hold.rev > 0 {
-		if rev, err := kv.Update(ctx, e.key, val, e.hold.rev); err == nil {
+		rev, err := write(func(wctx context.Context) (uint64, error) { return kv.Update(wctx, e.key, val, e.hold.rev) })
+		if err == nil {
 			e.leaseRev.Store(rev)
 			e.keepLease()
 			return nil
 		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 	}
-	rev, err := kv.Create(ctx, e.key, val)
+	rev, err := write(func(wctx context.Context) (uint64, error) { return kv.Create(wctx, e.key, val) })
 	if errors.Is(err, jetstream.ErrKeyExists) {
 		held := &LeaseHeldError{Name: e.key, Host: "?", PID: "?", Since: "?"}
 		// The compare-and-set loses to any write made since the lease was read, a refresh by the holder among them. It
@@ -589,7 +611,8 @@ func (e *Endpoint) takeLease(ctx context.Context) (err error) {
 			if reason == "" {
 				break
 			}
-			if rev, uerr := kv.Update(ctx, e.key, val, cur.Revision()); uerr == nil {
+			rev, uerr := write(func(wctx context.Context) (uint64, error) { return kv.Update(wctx, e.key, val, cur.Revision()) })
+			if uerr == nil {
 				e.log.Print(e.tookOverLine(reason, lv))
 				if reason == "same" {
 					e.startGrace()
@@ -615,7 +638,8 @@ func (e *Endpoint) takeLease(ctx context.Context) (err error) {
 	return nil
 }
 
-// leaseCleanupTimeout bounds the read and delete that dropOwnLease makes on a context of its own.
+// leaseCleanupTimeout is how long a lease write of takeLease gets to settle once its ctx has ended, and how long the
+// read and delete of the cleanup get; a write follows ctx until then.
 var leaseCleanupTimeout = 2 * time.Second
 
 // dropOwnLease is for a takeLease whose context ended: the server may have stored the lease write before the reply was
