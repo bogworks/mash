@@ -1,0 +1,10 @@
+=== release-check-compat-passed stdout exit 0
+compat: 0.5.10 reads mail written by 0.6.0: passed
+compat: 0.6.0 reads mail written by 0.5.10: passed
+=== release-check-compat-failed stdout exit 3
+compat: 0.5.10 reads mail written by 0.6.0: FAILED
+  message 7: refused: time not in UTC
+=== release-check-compat-usage stderr exit 2
+error: --compat takes two versions: the older, then the newer
+=== release-check-compat-undecided stderr exit 4
+compat: could not decide: 0.6.0 could not be downloaded
