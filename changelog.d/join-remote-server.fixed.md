@@ -1,0 +1,1 @@
+The join guide now says plainly that the local setup cannot be joined from another machine, and links the page that sets up a server both machines can reach ([#1589](https://github.com/bogworks/mash/issues/1589)).
