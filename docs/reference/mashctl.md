@@ -43,7 +43,7 @@ These options work with every `mashctl` command.
 | --- | --- |
 | [`mashctl endpoint`](mashctl-endpoint.md) | Create, change and remove endpoints. |
 
-## Removed in 0.5.8
+## Removed in 0.5.9
 
 | Removed | Why |
 | --- | --- |

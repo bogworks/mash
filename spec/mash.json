@@ -3,7 +3,7 @@
  "opencli": "0.1",
  "info": {
   "title": "mash",
-  "version": "0.5.8-spec.0",
+  "version": "0.5.9-spec.0",
   "description": "Speaks as one endpoint: send and read mail, see who is there, check itself.",
   "x-source": "v0.5.8 (8e8fe56)"
  },
@@ -280,7 +280,7 @@
      },
      {
       "name": "x-release",
-      "value": "0.5.8"
+      "value": "0.5.9"
      },
      {
       "name": "x-output",
@@ -811,7 +811,7 @@
      },
      {
       "name": "x-release",
-      "value": "0.5.8"
+      "value": "0.5.9"
      },
      {
       "name": "x-output",
@@ -931,7 +931,7 @@
      },
      {
       "name": "x-release",
-      "value": "0.5.8"
+      "value": "0.5.9"
      },
      {
       "name": "x-output",
@@ -1091,7 +1091,7 @@
      },
      {
       "name": "x-release",
-      "value": "0.5.8"
+      "value": "0.5.9"
      },
      {
       "name": "x-output",
@@ -1387,7 +1387,7 @@
      },
      {
       "name": "x-release",
-      "value": "0.5.8"
+      "value": "0.5.9"
      },
      {
       "name": "x-output",
@@ -1668,7 +1668,7 @@
        },
        {
         "name": "x-release",
-        "value": "0.5.8"
+        "value": "0.5.9"
        },
        {
         "name": "x-output",
@@ -1733,7 +1733,7 @@
      },
      {
       "name": "x-release",
-      "value": "0.5.8"
+      "value": "0.5.9"
      }
     ]
    },
@@ -1816,7 +1816,7 @@
      },
      {
       "name": "x-release",
-      "value": "0.5.8"
+      "value": "0.5.9"
      },
      {
       "name": "x-output",
@@ -1875,7 +1875,7 @@
      },
      {
       "name": "x-release",
-      "value": "0.5.8"
+      "value": "0.5.9"
      },
      {
       "name": "x-output",
@@ -1962,7 +1962,7 @@
      },
      {
       "name": "x-release",
-      "value": "0.5.8"
+      "value": "0.5.9"
      },
      {
       "name": "x-output",

@@ -1,1 +1,0 @@
-**`mashctl status` with no server configured now says so** (`error: no server is configured`, with the hint `mashctl init --config <file>`) and exits 1, where it printed nothing and exited 0. `mashctl doctor` reads the same: `no server is configured` (#1097).

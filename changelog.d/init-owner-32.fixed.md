@@ -1,1 +1,0 @@
-**`mashctl init` now refuses an owner longer than 32 characters up front.** It used to accept up to 48 in the setup file and then fail when it opened the admin connection, which allows 32. The error now says "up to 32 characters" and names the setup file.

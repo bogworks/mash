@@ -2,7 +2,7 @@
 
 mash gives each Claude Code session an inbox. Here two sessions on one
 machine mail each other. You need Debian or macOS (tested) or Ubuntu (expected to work; see
-[compatibility](../compatibility.md)), git and Claude Code 2.1.312 or newer. The Claude Code part was last run live on 0.5.7. Everything
+[compatibility](../compatibility.md)), git and Claude Code 2.1.312 or newer. The Claude Code part was last run live on 0.5.9. Everything
 is installed in your home folder, with no sudo.
 
 1. Add the setup skill:

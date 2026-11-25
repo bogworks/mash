@@ -3,7 +3,7 @@
  "opencli": "0.1",
  "info": {
   "title": "mashctl",
-  "version": "0.5.8-spec.0",
+  "version": "0.5.9-spec.0",
   "description": "Speaks for the mesh, through a server: set it up, check it, make and remove endpoints.",
   "x-source": "v0.5.8 (8e8fe56)"
  },
@@ -173,7 +173,7 @@
      },
      {
       "name": "x-release",
-      "value": "0.5.8"
+      "value": "0.5.9"
      },
      {
       "name": "x-output",
@@ -327,7 +327,7 @@
      },
      {
       "name": "x-release",
-      "value": "0.5.8"
+      "value": "0.5.9"
      },
      {
       "name": "x-output",
@@ -420,7 +420,7 @@
      },
      {
       "name": "x-release",
-      "value": "0.5.8"
+      "value": "0.5.9"
      },
      {
       "name": "x-output",
@@ -544,7 +544,7 @@
        },
        {
         "name": "x-release",
-        "value": "0.5.8"
+        "value": "0.5.9"
        },
        {
         "name": "x-output",
@@ -626,7 +626,7 @@
        },
        {
         "name": "x-release",
-        "value": "0.5.8"
+        "value": "0.5.9"
        },
        {
         "name": "x-output",
@@ -690,7 +690,7 @@
      },
      {
       "name": "x-release",
-      "value": "0.5.8"
+      "value": "0.5.9"
      },
      {
       "name": "x-mcp",
@@ -779,7 +779,7 @@
        },
        {
         "name": "x-release",
-        "value": "0.5.8"
+        "value": "0.5.9"
        },
        {
         "name": "x-output",
@@ -896,7 +896,7 @@
        },
        {
         "name": "x-release",
-        "value": "0.5.8"
+        "value": "0.5.9"
        },
        {
         "name": "x-output",
@@ -1075,7 +1075,7 @@
        },
        {
         "name": "x-release",
-        "value": "0.5.8"
+        "value": "0.5.9"
        },
        {
         "name": "x-output",
@@ -1169,7 +1169,7 @@
        },
        {
         "name": "x-release",
-        "value": "0.5.8"
+        "value": "0.5.9"
        },
        {
         "name": "x-output",
@@ -1264,7 +1264,7 @@
        },
        {
         "name": "x-release",
-        "value": "0.5.8"
+        "value": "0.5.9"
        },
        {
         "name": "x-output",
@@ -1351,7 +1351,7 @@
        },
        {
         "name": "x-release",
-        "value": "0.5.8"
+        "value": "0.5.9"
        },
        {
         "name": "x-output",
@@ -1424,7 +1424,7 @@
        },
        {
         "name": "x-release",
-        "value": "0.5.8"
+        "value": "0.5.9"
        },
        {
         "name": "x-output",
@@ -1495,7 +1495,7 @@
        },
        {
         "name": "x-release",
-        "value": "0.5.8"
+        "value": "0.5.9"
        },
        {
         "name": "x-output",
@@ -1600,7 +1600,7 @@
        },
        {
         "name": "x-release",
-        "value": "0.5.8"
+        "value": "0.5.9"
        },
        {
         "name": "x-output",
@@ -1707,7 +1707,7 @@
        },
        {
         "name": "x-release",
-        "value": "0.5.8"
+        "value": "0.5.9"
        },
        {
         "name": "x-output",
@@ -1801,7 +1801,7 @@
        },
        {
         "name": "x-release",
-        "value": "0.5.8"
+        "value": "0.5.9"
        },
        {
         "name": "x-output",
@@ -1871,7 +1871,7 @@
      },
      {
       "name": "x-release",
-      "value": "0.5.8"
+      "value": "0.5.9"
      },
      {
       "name": "x-mcp",
@@ -1959,7 +1959,7 @@
      },
      {
       "name": "x-release",
-      "value": "0.5.8"
+      "value": "0.5.9"
      },
      {
       "name": "x-output",

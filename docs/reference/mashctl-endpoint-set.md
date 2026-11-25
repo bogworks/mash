@@ -4,7 +4,7 @@ Generated from spec/*.json by go run ./scripts/refgen. Do not edit.
 
 Set a value on an endpoint's record.
 
-Release: 0.5.8. Group: Endpoints.
+Release: 0.5.9. Group: Endpoints.
 
 ## Usage
 

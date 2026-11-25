@@ -4,6 +4,60 @@ All notable user-facing changes to mash are recorded here. The format follows [K
 
 ## [Unreleased]
 
+## [0.5.9] - 2026-11-25
+
+### Summary
+
+**mash 0.5.9 changes four things a script may notice: `mash doctor` now fails (exit 1) when your Claude Code is older than 2.1.312, `mashctl status` with no server now exits 1, `mashctl init` no longer prints the signing key unless you ask, and `mashctl init --json` adds the signing key's public key as `signing_key_pub`. See Upgrading.** If you never set a signing key and always have a server configured, you will notice little. The rest is smaller: `mash doctor` checks your Claude Code version, deleting an endpoint no longer leaves its key behind, `mash join` and `mashctl init` say what is wrong in plain words, the tools in Claude Code say when an endpoint was deleted, and the installer checks the release against the commit its tag points to. Every download has a build attestation; verify it. The known issues are listed in the release notes.
+
+### Upgrading
+
+**This step is one-way:** a problem found after upgrading is fixed by the next release; you do not go back to 0.5.8.
+
+On each machine with endpoints, then on the administrator's machine, in this order:
+
+1. **Check first:** `mash version`, `mash doctor` and, as administrator, `mashctl doctor`. Good is your current release and each doctor ending with no problem and exit code 0. If you set a `signing_key`, confirm `signing.nk` and `signing.pub` are both in its folder.
+2. **Install `mash` and `mashctl` 0.5.9** from the same release, with the README's install steps. Endpoints, keys and mail stay where they are.
+3. **Update both plugins,** `mash` and `mash-setup`: at a shell `claude plugin update mash@mash` and `claude plugin update mash-setup@mash`, or in a session the plugin menu, Installed, the plugin, Update now. No marketplace refresh first. `mash-setup` carries its skills, so this brings them to 0.5.9. The 0.5.9 plugin that runs the 0.5.9 program is 0.5.9-pin.1, published shortly after the release. A plugin update before then installs 0.5.9 but still runs 0.5.8, so update once more when 0.5.9-pin.1 is out.
+4. **Restart each Claude Code session.** A running session keeps its old hooks and mail process until you restart it.
+5. **A local NATS server set up with the 0.5.8 script** needs nothing: the running server is left alone, and `mash-setup.yaml` and `mash-setup.json` work with the 0.5.9 script's `--start`, `--stop` and `--remove`. Fetch the 0.5.9 script only when you next want one of those.
+6. **Check again** as in step 1; `mash version` now names 0.5.9. With a `signing_key`, if a signing file is missing, 0.5.9 refuses to create or reissue an endpoint, with an `error:` line naming the file, rather than sign with the account's own key. If you set `signing_key` on 0.5.7, run `mashctl init --config <file>` once more.
+
+Machines at mixed versions send and read each other's mail on one server, both ways; a machine left behind keeps working.
+
+**If a script reads exit codes:** `mash doctor` and `mashctl doctor` now exit 1 when they find a problem, and 0 otherwise; a Claude Code older than 2.1.312 is one, a newer one warns. `mashctl status` with no server configured prints `error: no server is configured` and exits 1. `mashctl init --json` now includes `signing_key_pub`; 0.5.8 had no signing field there.
+
+### Added
+
+- **`mash doctor` checks your Claude Code version.** A `claude` row fails below 2.1.312 and warns above the 2.1 series; no `claude` command is skipped. ([#1130](https://github.com/bogworks/mash/issues/1130))
+
+### Changed
+
+- **`mashctl init` no longer prints the signing key by default.** `--detail` adds a `Signing key:` line; `--json` has `signing_key_pub`. ([#1260](https://github.com/bogworks/mash/issues/1260))
+- **A lost or wrong signing key stops with a short `error:` and the command that fixes it.** No endpoint is made with the account's own key instead. ([#1246](https://github.com/bogworks/mash/issues/1246))
+- **`mashctl status` with no server configured says so and exits 1,** where it printed nothing and exited 0. ([#1097](https://github.com/bogworks/mash/issues/1097))
+- **`mashctl init` warns when the account lists signing keys and the setup file has no `signing_key`.** ([#1255](https://github.com/bogworks/mash/issues/1255))
+- **`mashctl endpoint delete` names the address and the cause when a later step fails,** and no longer suggests `--yes` without a terminal. ([#1081](https://github.com/bogworks/mash/issues/1081))
+- **Deleting an endpoint no longer keeps its key:** the `.deleted` marker holds the JWT only. ([#1064](https://github.com/bogworks/mash/issues/1064))
+- **`mash join` says what is wrong when a join file was made for another address.** ([#1303](https://github.com/bogworks/mash/issues/1303))
+
+### Fixed
+
+- **`mashctl init` warns at the account limits mash needs** (6 streams, about 109 MiB), and refuses an owner over 32 characters up front. ([#1156](https://github.com/bogworks/mash/issues/1156))
+- **`mashctl init` and `mashctl` no longer print a bad owner or an unknown setup key** in their errors. ([#1065](https://github.com/bogworks/mash/issues/1065))
+- **`mash inbox` no longer calls its counts exact** when urgent mail was read out of order. ([#1399](https://github.com/bogworks/mash/issues/1399))
+- **The installer checks that the release was built from the commit its tag points to.** ([#1352](https://github.com/bogworks/mash/issues/1352))
+- **`mash join` is refused for a folder already set up when the file brings a private CA,** and says so plainly. ([#1062](https://github.com/bogworks/mash/issues/1062))
+- **The mash tools in Claude Code say when an endpoint was deleted,** and a bad argument keeps its own error. ([#1396](https://github.com/bogworks/mash/issues/1396))
+- **A `mash` session killed inside a container no longer blocks the next session for that agent.** ([#1437](https://github.com/bogworks/mash/issues/1437))
+
+### Security
+
+- **Dependency security upgrades:** `compress` v1.20.2 and `x/crypto` v0.59.0 (GO-2026-6865, GO-2026-5932). mash was not exposed. ([#1401](https://github.com/bogworks/mash/pull/1401))
+
+Known issues: 4 known issues, listed in the [release notes](https://github.com/bogworks/mash/blob/v0.5.9/docs/release-notes/0.5.9.md#known-issues)
+Links: [Release notes](https://github.com/bogworks/mash/blob/v0.5.9/docs/release-notes/0.5.9.md), [full changes](https://github.com/bogworks/mash/compare/v0.5.8...v0.5.9), [verify your download](https://github.com/bogworks/mash/blob/v0.5.9/docs/install.md#verify-what-you-download)
+
 ## [0.5.8] - 2026-11-23
 
 ### Summary

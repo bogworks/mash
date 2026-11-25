@@ -61,7 +61,7 @@ func TestConformance(t *testing.T) {
 		}
 	})
 	if len(tracked) == 0 {
-		t.Fatal("no command of release 0.5.8 in spec/mash.json")
+		t.Fatal("no command of release 0.5.9 in spec/mash.json")
 	}
 
 	help := runMash(env, "--help")
@@ -169,7 +169,7 @@ func TestConformance(t *testing.T) {
 		}
 		inSpec := map[string]bool{}
 		for _, want := range spec.Tools {
-			if want.Release != "0.5.8" {
+			if want.Release != "0.5.9" {
 				continue
 			}
 			want := want

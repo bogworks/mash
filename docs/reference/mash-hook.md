@@ -5,7 +5,7 @@ Generated from spec/*.json by go run ./scripts/refgen. Do not edit.
 Print mail waiting for this session, in the form the agent host expects. Run
 by the host after each tool call and with each prompt.
 
-Release: 0.5.8. Group: Integration.
+Release: 0.5.9. Group: Integration.
 
 Visible and documented for anyone wiring mash into an agent host other than
 Claude Code.
