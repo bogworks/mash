@@ -64,7 +64,7 @@ func TestLivePromptMalformedIs400(t *testing.T) {
 	var reached atomic.Int32
 	f.serve(t, "a", answering(&reached))
 	b := f.client(t, "b")
-	subj, payload := taddr("a").Subjects().Prompt, []byte("hi")
+	subj, payload := mustSubj(taddr("a")).Prompt, []byte("hi")
 	good, err := b.Identity().Sign(subj, payload, tkey("b"), time.Now(), "")
 	if err != nil {
 		t.Fatal(err)
@@ -100,7 +100,7 @@ func TestLivePromptOverNonceCap401(t *testing.T) {
 	a.service.nonces = sapsdk.NewNonceSetCaps(0, 0, 2) // two pairs for one sender
 	a.mu.RUnlock()
 	b := f.client(t, "b")
-	subj := taddr("a").Subjects().Prompt
+	subj := mustSubj(taddr("a")).Prompt
 	for i := 0; i < 2; i++ {
 		var out bytes.Buffer
 		if err := Prompt(context.Background(), b.Conn(), b.Identity(), tkey("b"), subj, "ping", &out); err != nil {
@@ -124,7 +124,7 @@ func TestLivePromptUnlistedReplay403ListedReplayRefused(t *testing.T) {
 	f := newFixture(t, "a", "b")
 	var reached atomic.Int32
 	a := f.serve(t, "a", answering(&reached))
-	subj, payload := taddr("a").Subjects().Prompt, []byte("let me in")
+	subj, payload := mustSubj(taddr("a")).Prompt, []byte("let me in")
 
 	xcreds, _ := f.e.Mint(t, taddr("x")) // a valid user with its own key, never provisioned
 	xnc := f.e.ConnAs(t, xcreds, tkey("x"))
@@ -171,7 +171,7 @@ func TestSigningRefusalSendsNothing(t *testing.T) {
 	var reached, seen atomic.Int32
 	f.serve(t, "a", answering(&reached))
 	b := f.client(t, "b")
-	subj := taddr("a").Subjects().Prompt
+	subj := mustSubj(taddr("a")).Prompt
 	ta := f.e.ConnAs(t, f.creds["a"], tkey("a"))
 	if _, err := ta.Subscribe(subj, func(*nats.Msg) { seen.Add(1) }); err != nil {
 		t.Fatal(err)
@@ -238,7 +238,7 @@ var tsRe = regexp.MustCompile(`"ts":"[^"]*"`)
 func TestStatusProbeSameAnswerAndNoNonceForUnlisted(t *testing.T) {
 	f := newFixture(t, "a", "b")
 	a := f.serve(t, "a", answering(new(atomic.Int32)))
-	subj, payload := taddr("a").Subjects().Status, []byte("status?")
+	subj, payload := mustSubj(taddr("a")).Status, []byte("status?")
 
 	b := f.client(t, "b")
 	bh, err := b.Identity().Sign(subj, payload, tkey("b"), time.Now(), "status-b")
