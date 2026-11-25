@@ -219,7 +219,7 @@ var epRevokeNow = time.Now
 
 // epStagedPub is the public key of the seed in the pending file, or "" when there is none or it holds no seed.
 func epStagedPub(pending string) string {
-	b, err := os.ReadFile(pending)
+	b, err := ctlkeys.ReadOwnedFile(pending, "staged seed")
 	if err != nil {
 		return ""
 	}
@@ -241,19 +241,12 @@ func epCheckCreds(path string, addr sap.Address, dirUser, dirAcct string, staged
 	unreadable := func(why string) *epFail {
 		return &epFail{refused: true, code: "creds_unreadable", detail: fmt.Sprintf("the creds file %s exists but %s; nothing was changed", path, why), hint: fmt.Sprintf("mv %s %s.old", path, path)}
 	}
-	fi, err := os.Stat(path)
+	raw, err := ctlkeys.ReadOwnedFile(path, "creds file")
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
 	if err != nil {
-		return unreadable("cannot be read")
-	}
-	if !fi.Mode().IsRegular() {
-		return unreadable("is not a regular file")
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return unreadable("cannot be read")
+		return &epFail{refused: true, code: "creds_unreadable", detail: fmt.Sprintf("%v; nothing was changed", err), hint: fmt.Sprintf("mv %s %s.old", path, path)}
 	}
 	defer clear(raw)
 	tok, err := jwt.ParseDecoratedJWT(raw)
@@ -579,7 +572,7 @@ func epStageKey(path string) (pub string, seed []byte, made bool, err error) {
 				// A staged seed that others can read is not a secret: never revoke a working key for it.
 				return "", nil, false, fmt.Errorf("%s has mode %04o and exposes the seed; remove it and run the command again", path, fi.Mode().Perm())
 			}
-			b, rerr := os.ReadFile(path)
+			b, rerr := ctlkeys.ReadOwnedFile(path, "staged seed")
 			if rerr != nil {
 				return "", nil, false, rerr
 			}
