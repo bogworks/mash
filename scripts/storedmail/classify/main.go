@@ -118,6 +118,9 @@ func (k *kit) mash(who string, stdin string, args ...string) error {
 }
 
 func run(bin, tag string) (*result, error) {
+	if os.Getenv("MASH_STOREDMAIL_IN_CONTAINER") != "1" { // this program removes its scratch dir and runs released binaries: container only
+		return nil, fmt.Errorf("refusing to run outside the container (use scripts/storedmail/run.sh)")
+	}
 	dir, err := os.MkdirTemp("", "storedmail-"+tag+"-")
 	if err != nil {
 		return nil, err

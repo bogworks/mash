@@ -13,7 +13,9 @@ repo=${MASH_RELEASE_REPO:-bogworks/mash}
 if command -v sha256sum >/dev/null 2>&1; then sha256() { sha256sum "$1"; }; else sha256() { shasum -a 256 "$1"; }; fi
 bins=$(mktemp -d)
 name=mash-storedmail-$$-$RANDOM
-trap 'rm -rf "$bins"; docker rm -f "$name" >/dev/null 2>&1 || true' EXIT
+# No rm on the host: the download dir is moved to ~/archive (herd rule), the container is removed by name.
+archive="${HOME:?}/archive"
+trap 'mkdir -p -- "${archive:?}" && mv -- "${bins:?}" "${archive:?}/${name:?}-bins"; docker rm -f "$name" >/dev/null 2>&1 || true' EXIT
 echo "download dir: $bins"
 
 for t in "${tags[@]}"; do
@@ -28,7 +30,7 @@ for t in "${tags[@]}"; do
 	if [ -n "$want" ]; then echo "$t sha256 $got (matches the release digest)"; else echo "$t sha256 $got (no release digest shown)"; fi
 done
 
-docker run --rm --name "$name" -v "$root":/src:ro -v "$bins":/bins:ro golang:1.27 sh -c '
+docker run --rm --name "$name" -e MASH_STOREDMAIL_IN_CONTAINER=1 -v "$root":/src:ro -v "$bins":/bins:ro golang:1.27 sh -c '
 	set -e
 	mkdir /work && tar -C /src --exclude=./.git --exclude=./mash -cf - . | tar -C /work -xf -
 	cd /work && go run ./scripts/storedmail/classify /bins "$@"
