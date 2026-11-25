@@ -126,7 +126,7 @@ func TestWidth(t *testing.T) {
 }
 
 func TestVerbatimRendersLinesLine(t *testing.T) {
-	out, err := render(fixture(t, `[{"case":"A","text":"short","verbatim":true}]`, ""))
+	out, err := render(fixture(t, `[{"case":"A","text":"short","verbatim":true}]`, ""), "next.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,16 +137,16 @@ func TestVerbatimRendersLinesLine(t *testing.T) {
 
 func TestVerbatimOver80Refused(t *testing.T) {
 	dir := fixture(t, `[{"case":"A","text":"`+strings.Repeat("a", 81)+`","verbatim":true}]`, "")
-	if out, err := render(dir); err == nil || out != "" || !strings.Contains(err.Error(), "81 columns") {
+	if out, err := render(dir, "next.json"); err == nil || out != "" || !strings.Contains(err.Error(), "81 columns") {
 		t.Errorf("want width error, got %v", err)
 	}
-	if _, err := render(fixture(t, `[{"case":"A","text":"`+strings.Repeat("a", 80)+`","verbatim":true}]`, "")); err != nil {
+	if _, err := render(fixture(t, `[{"case":"A","text":"`+strings.Repeat("a", 80)+`","verbatim":true}]`, ""), "next.json"); err != nil {
 		t.Errorf("80 columns is allowed: %v", err)
 	}
 }
 
 func TestVerbatimAbsentUnaffected(t *testing.T) {
-	out, err := render(fixture(t, `[{"case":"A","text":"short","note":"a plain note"}]`, ""))
+	out, err := render(fixture(t, `[{"case":"A","text":"short","note":"a plain note"}]`, ""), "next.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +154,7 @@ func TestVerbatimAbsentUnaffected(t *testing.T) {
 		t.Errorf("no Lines line without the field:\n%s", out)
 	}
 	// Over the flag width without the field: flagged, as before.
-	out, err = render(fixture(t, `[{"case":"A","text":"`+strings.Repeat("a", 75)+`"}]`, ""))
+	out, err = render(fixture(t, `[{"case":"A","text":"`+strings.Repeat("a", 75)+`"}]`, ""), "next.json")
 	if err != nil || !strings.Contains(out, "width: 75 columns") {
 		t.Errorf("want flag, got %v\n%s", err, out)
 	}
