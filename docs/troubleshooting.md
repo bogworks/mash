@@ -14,7 +14,11 @@ The hook's stderr goes to `hook.log` in the state directory (`$MASH_STATE_DIR`, 
 
 ## Claude Code or plugin version differs from the binary
 
-- Claude Code older than 2.1.312: that is the oldest version mash has a passing live receipt on. mash does not refuse older versions, but channels, hook context or hook fields may behave differently. Update Claude Code.
+- The `claude` row of `mash doctor` checks the Claude Code on PATH (`claude --version`) against the versions mash was tested with ([compatibility](compatibility.md)):
+  - `FAIL` with `2.1.311 is below the tested 2.1.312` (your version in place of 2.1.311): 2.1.312 is the oldest version mash has a passing live receipt on. mash still runs, but channels, hook context or hook fields may behave differently, and `mash doctor` exits 1. Update Claude Code.
+  - `warn` with `2.2.0 is above the tested 2.1`: mash was tested with the 2.1 series only. It may work, and this row alone does not make `mash doctor` fail. If mail stops arriving, say which version in a bug report.
+  - `warn` with `the version of claude could not be read`: `claude --version` failed, took more than 3 seconds, or printed no version. Run it yourself to see why.
+  - `skip` with `no claude command found`: there is no `claude` on PATH in the shell you ran `mash doctor` from. That is fine for a shell that only sends mail.
 - Plugin and binary from different releases (different major or minor): the plugin (hooks and MCP command) and the `mash` binary should be the same release. Update both: `claude plugin update mash@mash`, and reinstall the binary with the install line in [install.md](install.md#1-the-binary), pinning the release with `MASH_VERSION=<tag>` (to build from source instead, `go install github.com/bogworks/mash/cmd/mash@<tag>`, not `@latest`). The plugin launcher downloads a pinned binary, so this is mostly a hand-installed binary on PATH that is out of step. `mash version` prints the binary's version.
 
 ## The session has no mail tools, or says it has no mash identity
