@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-mash is pre-1.0. Only the newest version is supported, currently v0.5.8. Fixes go into the next release; older releases are not patched.
+mash is pre-1.0. Only the newest version is supported, currently v0.5.9. Fixes go into the next release; older releases are not patched.
 
 ## Reporting a vulnerability
 

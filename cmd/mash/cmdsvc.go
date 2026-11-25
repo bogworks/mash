@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"os"
 	"strings"
 	"sync/atomic"
@@ -319,10 +320,18 @@ func plainFail(err error) error {
 	return cliframe.Failf("%s", strings.TrimPrefix(err.Error(), "mash: "))
 }
 
+// boundedInt is n as an int, held at the largest int so a sequence number past it cannot wrap negative.
+func boundedInt(n uint64) int {
+	if n > math.MaxInt {
+		return math.MaxInt
+	}
+	return int(n)
+}
+
 // mailItem is a message as the commands read it: the sender's full address, the body safe to print.
 func mailItem(m render.Mail, floor uint64, waiting bool) cmds.MailItem {
-	it := cmds.MailItem{Number: int(m.Seq), From: sap.Display(m.From), Sent: m.At, New: waiting && m.Seq > floor, Urgent: m.Urgent,
-		Kind: m.Kind.String(), Trust: string(m.Trust), Size: len(m.Body), ReplyTo: int(m.ReplyTo), Body: render.Plain(m.Body)}
+	it := cmds.MailItem{Number: boundedInt(m.Seq), From: sap.Display(m.From), Sent: m.At, New: waiting && m.Seq > floor, Urgent: m.Urgent,
+		Kind: m.Kind.String(), Trust: string(m.Trust), Size: len(m.Body), ReplyTo: boundedInt(m.ReplyTo), Body: render.Plain(m.Body)}
 	if origin, seq, ok := strings.Cut(m.Via, " #"); ok {
 		it.Relay = sap.Display(origin) + " #" + seq
 	}
