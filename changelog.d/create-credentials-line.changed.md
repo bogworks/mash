@@ -1,0 +1,1 @@
+**`mashctl endpoint create` prints where the credentials file is.** The text output has a `Credentials: <path>` line after `Created endpoint`, as `--json` already had in "creds" ([#1044](https://github.com/bogworks/mash/issues/1044)).

@@ -251,6 +251,8 @@ func epPrint(w io.Writer, verb string, t epTarget, res epResult, detail, jsonOut
 	}
 	if t.join {
 		fmt.Fprintf(w, "Join file: %s\n", t.outPath)
+	} else if verb == "create" {
+		fmt.Fprintf(w, "Credentials: %s\n", t.outPath)
 	}
 	if verb == "reissue" && detail {
 		fmt.Fprintf(w, "servers acknowledged: %d\n", res.acked)
