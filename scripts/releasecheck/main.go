@@ -338,10 +338,9 @@ func (r *report) step(name string, err error) bool {
 func (r *report) cite(runs []release.CheckRun, at, x string, above int) {
 	for _, c := range runs {
 		line := fmt.Sprintf("      %s: check run %d", c.Name, c.ID)
-		if c.HTMLURL != "" {
-			line += " " + c.HTMLURL
+		if c.HTMLURL != "" { // ADR 0180: with no URL the line is `check run <id>` alone
+			line += " " + c.HTMLURL + " on " + at[:min(12, len(at))]
 		}
-		line += " on " + at[:min(12, len(at))]
 		if at != x {
 			line += fmt.Sprintf(" (tested ancestor of the docs-only candidate, %d docs-only commit(s) above it)", above)
 		}
