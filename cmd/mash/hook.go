@@ -81,7 +81,8 @@ func hook(cfg config.Config, cfgErr error, adapter host.Adapter, env func(string
 		}
 		fmt.Fprintf(stderr, "mash hook: not this session's spool (%s); mail left for its owner\n", why)
 		told := false
-		if host.IsOtherLaunch(why) {
+		// #816: a stopped serve's owner record outlives it until the next serve binds; a gone pid holds nothing.
+		if pid := host.OwnerPID(sp.Owner()); host.IsOtherLaunch(why) && !(pid > 0 && endpoint.PIDGone(pid)) {
 			// Once per (session id, launch token): tell the model in-session, since status is pull-only (ADR 0043).
 			who := id.LaunchToken
 			if who == "" { // no token: the waiting serve's pid tells the copies apart
