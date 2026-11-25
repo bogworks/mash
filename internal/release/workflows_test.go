@@ -1059,6 +1059,11 @@ func TestRelease_everyJobTouchingDistStartsFromAnEmptyDist(t *testing.T) {
 }
 
 func TestRelease_draftScriptCreatesOnlyADraft(t *testing.T) {
+	// The draft step pipes gh output through jq (draft-guard). CI has jq; a machine without it fails the script, not the
+	// code under test (#1323). Outside CI that is a skip with its reason; in CI (CI is set) a missing jq still fails.
+	if _, err := exec.LookPath("jq"); err != nil && os.Getenv("CI") == "" {
+		t.Skip("jq is not installed; the draft script needs it (CI installs it)")
+	}
 	w := load(t, "release.yml")
 	var script string
 	for _, st := range w.Jobs["draft"].Steps {
