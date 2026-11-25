@@ -1,0 +1,1 @@
+`mashctl revoke` and the other account pushes now give each server 5 seconds, not 2, to acknowledge the update, so a loaded server no longer makes a revocation that landed report "pushed but not confirmed" ([#1522](https://github.com/bogworks/mash/issues/1522)).
