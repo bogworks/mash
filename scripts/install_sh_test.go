@@ -1138,6 +1138,12 @@ func TestInstallSh_refusesAPairAtTheWrongVersion(t *testing.T) {
 	refuseStagedPair(t, rel, "error: the downloaded mash reports 0.5.7, expected 0.5.6: nothing was installed\n")
 }
 
+// Swapped assets (the mash asset reports mashctl and the reverse) install nothing, whatever version they report.
+func TestInstallSh_refusesSwappedAssets(t *testing.T) {
+	rel, _, _ := fakeReleaseVersions(t, "mashctl v0.5.6 (3f9a41c)", "mash v0.5.6 (3f9a41c)")
+	refuseStagedPair(t, rel, "error: the downloaded mash reports itself as mashctl, expected mash: nothing was installed\n")
+}
+
 // A program that exits non-zero is refused even when it prints the right version.
 func TestInstallSh_refusesAProgramThatExitsNonZero(t *testing.T) {
 	for _, which := range []string{"mash", "mashctl"} {

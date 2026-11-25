@@ -55,14 +55,30 @@ die() {
     exit 1
 }
 
-# version_of PROGRAM: the version PROGRAM reports, without its name or a leading v
-# ("mash v0.5.6 (3f9a41c)" and "mashctl 0.5.6" both give 0.5.6); empty if it does not run
-# or exits non-zero. PROGRAM runs in an isolated environment (an empty temporary home, no MASH_*
+# version_of PROGRAM NAME: the version PROGRAM reports, without its name or a leading v
+# ("mash v0.5.6 (3f9a41c)" and "mashctl 0.5.6" both give 0.5.6); empty if it does not run,
+# exits non-zero, or reports a first word other than NAME. PROGRAM runs in an isolated environment (an empty temporary home, no MASH_*
 # variables, PATH only), so the user's own configuration cannot make it refuse to report.
 version_of() {
     local out
     out=$(version_line "$1") || return 0
-    printf '%s\n' "$out" | awk 'NR == 1 { sub(/^v/, "", $2); print $2 }'
+    printf '%s\n' "$out" | awk -v want="$2" 'NR == 1 && $1 == want { sub(/^v/, "", $2); print $2 }'
+}
+
+# check_staged PROGRAM NAME: die unless the staged PROGRAM reports itself as NAME and the requested version.
+check_staged() {
+    local ver line other
+    ver=$(version_of "$1" "$2")
+    if [ -z "$ver" ]; then
+        line=$(version_line "$1")
+        other=$(printf '%s\n' "$line" | awk '{print $1}' | tr -cd '[:print:]')
+        other=${other:0:40}
+        if [ -n "$other" ] && [ "$other" != "$2" ]; then
+            die "the downloaded $2 reports itself as $other, expected $2: nothing was installed"
+        fi
+        die "the downloaded $2 did not report its version: nothing was installed"
+    fi
+    [ "$ver" = "${tag#v}" ] || die "the downloaded $2 reports $ver, expected ${tag#v}: nothing was installed"
 }
 
 # version_line PROGRAM: the first line PROGRAM's `version` prints, run as version_of runs it
@@ -310,12 +326,8 @@ main() {
     # The two new programs, still staged and already checked against SHA256SUMS,
     # must each report the requested release's version; if not, refuse before
     # either rename.
-    new_a=$(version_of "${staged_new[0]}")
-    new_b=$(version_of "${staged_new[1]}")
-    [ -n "$new_a" ] || die "the downloaded mash did not report its version: nothing was installed"
-    [ -n "$new_b" ] || die "the downloaded mashctl did not report its version: nothing was installed"
-    [ "$new_a" = "${tag#v}" ] || die "the downloaded mash reports $new_a, expected ${tag#v}: nothing was installed"
-    [ "$new_b" = "${tag#v}" ] || die "the downloaded mashctl reports $new_b, expected ${tag#v}: nothing was installed"
+    check_staged "${staged_new[0]}" mash
+    check_staged "${staged_new[1]}" mashctl
 
     local backup=""
     if [ -f "$real/mash" ]; then
