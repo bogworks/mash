@@ -26,15 +26,15 @@ metadata entry:
 
 ```json
 {"info": {"version": "0.5.9-spec.0"},
- "items": [{"id": "...", "where": "install.sh|policy document|rules",
+ "items": [{"id": "...", "where": "policy document|rules|...",
             "case": "...", "text": "...", "stream": "...", "exit": 0,
             "issue": "#...", "replaces": "...", "note": "..."}],
  "rules_next": [{"rule": "...", "detail": "...",
                  "replaces": "existing rule title"}]}
 ```
 
-For changes not tied to one command: installer messages, the policy document
-field, rules. A `rules_next` entry's `replaces` is a rule title in
+For changes not tied to one command: the policy document field, rules, and
+the signing refusals of mashctl that several commands share. A `rules_next` entry's `replaces` is a rule title in
 `spec/rules.json`.
 
 ## Rendering the Gate 1 demo
@@ -52,6 +52,12 @@ nothing, if any text looks like a secret (an nkey seed, a PEM header, a JWT,
 
 When the code lands, move the case into `x-output` and bump `x-release` in the
 same change, and delete it from the next-places.
-Cases with no `x-output` home (installer, setup script) stay in
-`spec/next.json` until the spec is closed for their release, so the Gate 1
-demo keeps showing them.
+The installer and the setup script have their own spec files, in the same
+OpenCLI shape as `spec/mash.json`: `spec/install.json` (`install.sh`) and
+`spec/mash-local-nats-setup.json` (`mash-local-nats-setup.sh`). Their `x-output`
+cases are held to the scripts by `scripts/spec_scripts_test.go`, which checks
+each line of each case against the script's source (the repository, tag, port,
+pid and folder that vary are named in the test), so a planned change to either
+script is written in `x-output-next` on its command there, like any other
+command, and the Gate 1 demo shows it. `spec/next.json` keeps only what has no
+other home.

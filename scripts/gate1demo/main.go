@@ -278,7 +278,13 @@ func render(dir string) (string, error) {
 	}
 	r := &renderer{rel: rel}
 	r.b.WriteString("# Gate 1 demo: planned " + rel + " output\n\nGenerated from the specification (x-output-next, spec/next.json). Not yet implemented.\n")
-	for _, f := range []string{"mash.json", "mashctl.json"} {
+	// install.json and mash-local-nats-setup.json describe the scripts; a spec folder without them is still valid.
+	for _, f := range []string{"mash.json", "mashctl.json", "install.json", "mash-local-nats-setup.json"} {
+		if f != "mash.json" && f != "mashctl.json" {
+			if _, err := os.Stat(filepath.Join(dir, f)); os.IsNotExist(err) {
+				continue
+			}
+		}
 		var t toolSpec
 		if err := readJSON(filepath.Join(dir, f), &t); err != nil {
 			return "", err
@@ -338,7 +344,7 @@ func render(dir string) (string, error) {
 }
 
 func main() {
-	spec := flag.String("spec", "spec", "directory holding mash.json, mashctl.json, next.json, rules.json")
+	spec := flag.String("spec", "spec", "directory holding mash.json, mashctl.json, install.json, mash-local-nats-setup.json, next.json, rules.json")
 	out := flag.String("out", "", "write the Markdown to this file instead of stdout")
 	flag.Parse()
 	md, err := render(*spec)
