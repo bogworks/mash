@@ -705,7 +705,7 @@ func doctorKeys(rep *doctorReport, ctx context.Context, adm *admin.Admin, cfg co
 		if !auditUsers {
 			// Churn among users mashctl did not issue is not a finding; churn of one of mashctl's users is.
 			if churnIsMashs(attempts, recs) {
-				warns = append(warns, finding{"mashctl's users kept connecting and leaving; " + reads + "\nwait a minute and run it again", "mashctl doctor", true}) // two lines: one would pass 80 columns
+				warns = append(warns, finding{"mashctl's users kept connecting and leaving; " + reads + "\nwait a minute and run it again", "", true}) // two lines: one would pass 80 columns; rerunning is not a fix, so no hint
 			}
 			scan.Incomplete = ""
 		} else {
@@ -747,7 +747,7 @@ func doctorKeys(rep *doctorReport, ctx context.Context, adm *admin.Admin, cfg co
 	if scan.Incomplete != "" {
 		f := finding{incompleteLines(scan.Incomplete), initFix, true} // wrapped or not, it is lines of its own
 		if churn && len(fails) == 0 && len(unrecorded)+keyless == 0 {
-			f = finding{incompleteLines(scan.Incomplete + "; wait a minute and run it again"), "mashctl doctor --audit-users", true}
+			f = finding{incompleteLines(scan.Incomplete + "; wait a minute and run it again"), "", true} // rerunning is not a fix, so no hint
 		}
 		fails = append(fails, f)
 	}

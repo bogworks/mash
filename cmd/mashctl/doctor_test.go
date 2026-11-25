@@ -1032,7 +1032,7 @@ func TestDoctorKeysChurnOfMashUsersWarns(t *testing.T) {
 		*calls = 0
 		_, by, code := doctorJSON(t, e.run, c.args...)
 		k := by["keys"]
-		if code != c.exit || k.State != "warn" || !strings.HasPrefix(k.Detail, line) || k.Fix == nil || *k.Fix != "mashctl doctor" || *calls != 3 {
+		if code != c.exit || k.State != "warn" || !strings.HasPrefix(k.Detail, line) || k.Fix != nil || *calls != 3 {
 			t.Fatalf("%v: %d calls %d %+v", c.args, code, *calls, k)
 		}
 	}
@@ -1048,7 +1048,7 @@ func TestDoctorKeysChurnOfMashUsersWarns(t *testing.T) {
 }
 
 // A row with a revoked key still connected prints no hint, even when a churn warning follows it: rerunning doctor does
-// not end the connection. The churn warning alone keeps its hint.
+// not end the connection. The churn warning alone has no hint either: waiting is not a fix.
 func TestDoctorKeysRevokedAndChurnHasNoHint(t *testing.T) {
 	e := newXYEnv(t)
 	_, xKey := credsSubject(t, e.credsPath(xy("x").String()))
@@ -1067,12 +1067,12 @@ func TestDoctorKeysRevokedAndChurnHasNoHint(t *testing.T) {
 	if c := by["keys"]; c.State != "fail" || c.Fix != nil {
 		t.Fatalf("json: %+v", c)
 	}
-	// Churn alone, with no revoked key, ends with its hint.
+	// Churn alone, with no revoked key, has no hint.
 	e2 := newXYEnv(t)
 	_, x2 := credsSubject(t, e2.credsPath(xy("x").String()))
 	scriptScans(t, keyScan(true, x2), keyScan(true), keyScan(true, x2))
 	out, errb, code = e2.run("doctor")
-	if code != 0 || !strings.Contains(cleanText(e2, out), "warn") || !strings.HasSuffix(strings.TrimSpace(errb), "hint: mashctl doctor") {
+	if code != 0 || !strings.Contains(cleanText(e2, out), "warn") || strings.Contains(errb, "hint:") {
 		t.Fatalf("churn alone: %d %q %q", code, out, errb)
 	}
 }
@@ -1083,7 +1083,7 @@ func TestDoctorAuditUsersFailsOnChurn(t *testing.T) {
 	scriptScans(t, keyScan(true))
 	_, by, code := doctorJSON(t, e.run, "--audit-users")
 	k := by["keys"]
-	if code != 1 || k.State != "fail" || k.Detail != "server s1's connected users kept changing\nread 3 times; wait a minute and run it again" || k.Fix == nil || *k.Fix != "mashctl doctor --audit-users" {
+	if code != 1 || k.State != "fail" || k.Detail != "server s1's connected users kept changing\nread 3 times; wait a minute and run it again" || k.Fix != nil {
 		t.Fatalf("%d %+v", code, k)
 	}
 	if low := strings.ToLower(k.Detail); strings.Contains(low, "connz") || strings.Contains(low, "nats") || strings.Contains(low, "scans") {
@@ -1192,7 +1192,7 @@ func TestDoctorKeysRecordedCIDChangeWarns(t *testing.T) {
 	_, xKey := credsSubject(t, e.credsPath(xy("x").String()))
 	calls := scriptScans(t, cidScan(true, map[string]uint64{xKey: 1}), cidScan(true, map[string]uint64{xKey: 2}), cidScan(true, map[string]uint64{xKey: 2}))
 	runBoth(t, e, calls, "warn", 1, func(c doctorCheck) {
-		if !strings.HasPrefix(c.Detail, "mashctl's users kept connecting and leaving; read 3 times") || c.Fix == nil || *c.Fix != "mashctl doctor" {
+		if !strings.HasPrefix(c.Detail, "mashctl's users kept connecting and leaving; read 3 times") || c.Fix != nil {
 			t.Fatalf("%+v", c)
 		}
 	})

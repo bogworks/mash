@@ -121,7 +121,7 @@ keys       FAIL  1 revoked key is still connected
 
 ### --audit-users: two servers whose users keep changing
 
-Stream: stdout, then the hint on stderr. Exit code: 1.
+Stream: stdout. Exit code: 1.
 
 ```text
 config     ok
@@ -134,7 +134,6 @@ keys       FAIL  server s1's connected users kept changing
                  read 3 times; wait a minute and run it again
 
 1 problem.
-hint: mashctl doctor --audit-users
 ```
 
 ### No server is configured
