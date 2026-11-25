@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -101,6 +102,28 @@ func TestPromptUsageIsStyleAExit2(t *testing.T) {
 		want := "error: mash prompt needs <to> and the message text\nhint: mash prompt --help\n"
 		if code != 2 || stderr.String() != want || stdout.Len() != 0 {
 			t.Errorf("%v: exit %d, stderr %q, stdout %q", args, code, stderr.String(), stdout.String())
+		}
+	}
+}
+
+// A refused plaintext NATS URL is a configuration error: promptFailure keeps the exit code 2 the open failure carries,
+// wrapped or not, and still words it in style A.
+type codedOpenError struct{}
+
+func (codedOpenError) Error() string { return "mash: connect nats://h:4222: plaintext refused" }
+func (codedOpenError) ExitCode() int { return 2 }
+
+func TestPromptFailureKeepsConfigExitCode(t *testing.T) {
+	for name, in := range map[string]error{
+		"bare":    codedOpenError{},
+		"wrapped": fmt.Errorf("mash: connect nats://h:4222: %w", codedOpenError{}),
+	} {
+		var stdout, stderr bytes.Buffer
+		if c := cliframe.Report(&stdout, &stderr, promptFailure(in), false); c != 2 {
+			t.Errorf("%s: exit %d, want 2", name, c)
+		}
+		if !strings.HasPrefix(stderr.String(), "error: connect nats://h:4222: ") || stdout.Len() != 0 {
+			t.Errorf("%s: stderr %q stdout %q", name, stderr.String(), stdout.String())
 		}
 	}
 }

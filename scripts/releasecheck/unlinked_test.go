@@ -30,7 +30,7 @@ func TestLinkedPolicyPackages(t *testing.T) {
 			[]string{"internal/issue/v2", "internal/listset/foo", "internal/reconcile/x/y", "internal/requesterreg/z"}},
 		{"policy subpackage deep, policyfoo subpackage", m + "internal/policyfoo/x\n", []string{"internal/policyfoo/x"}},
 		{"the size constants do not hide a neighbour", m + "internal/policy\n" + m + "internal/policyview\n", []string{"internal/policyview"}},
-		{"sdk caller and host refused, identity allowed", sdk + "/identity\n" + sdk + "/caller\n" + sdk + "/host\n",
+		{"sdk caller and host refused, identity allowed from 0.6.0", sdk + "/identity\n" + sdk + "/caller\n" + sdk + "/host\n",
 			[]string{sdk + "/caller", sdk + "/host"}},
 		{"sdk identity alone allowed", sdk + "/identity\n" + sdk + "/identity/sub\n", nil},
 		{"sdk caller alone", sdk + "/caller\n", []string{sdk + "/caller"}},
@@ -39,20 +39,43 @@ func TestLinkedPolicyPackages(t *testing.T) {
 		{"sdk root allowed", sdk + "\n", nil},
 		{"sdk root and other subpackages allowed", sdk + "\n" + sdk + "/other\n" + sdk + "/identityx\n", nil},
 		{"sdk path as prefix of another module", sdk + "-fork/identity\n" + sdk + ".x/host\n" + "other.example/synadia-agents.go/caller\n", nil},
-		{"sapsdk allowed", m + "internal/sapsdk\n" + m + "internal/sapsdk/sub\n", nil},
+		{"sapsdk allowed from 0.6.0", m + "internal/sapsdk\n" + m + "internal/sapsdk/sub\n", nil},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := linkedPolicyPackages("github.com/bogworks/mash", tc.in); !reflect.DeepEqual(got, tc.want) {
+			if got := linkedPolicyPackages("github.com/bogworks/mash", "0.6.0", tc.in); !reflect.DeepEqual(got, tc.want) {
 				t.Errorf("got %v, want %v", got, tc.want)
 			}
 		})
 	}
 }
 
+// REQ-009: sapsdk and the SDK identity package are out of every 0.5.x binary and allowed from 0.6.0.
+func TestSwitchOnPackagesByVersion(t *testing.T) {
+	const m = "github.com/bogworks/mash"
+	const sdk = "github.com/bogworks/synadia-agents.go"
+	in := m + "/internal/sapsdk\n" + sdk + "/identity\n" + sdk + "/caller\n" + sdk + "/host\n"
+	all := []string{sdk + "/caller", sdk + "/host", sdk + "/identity", "internal/sapsdk"}
+	refusedAlways := []string{sdk + "/caller", sdk + "/host"}
+	for _, tc := range []struct {
+		version string
+		want    []string
+	}{
+		{"0.5.0", all}, {"0.5.9", all}, {"0.5.99", all},
+		{"0.6.0", refusedAlways}, {"0.6.1", refusedAlways}, {"0.7.0", refusedAlways}, {"1.0.0", refusedAlways},
+		{"0.6.0-rc.1", refusedAlways}, {"0.6.0+build5", refusedAlways},
+		{"0.5.9-rc.1", all},
+		{"", all}, {"garbage", all}, {"0.6", all}, {"v", all},
+	} {
+		if got := linkedPolicyPackages(m, tc.version, in); !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("%q: got %v, want %v", tc.version, got, tc.want)
+		}
+	}
+}
+
 func TestLinkedPolicyPackagesOtherModule(t *testing.T) {
 	in := "example.org/other/internal/listset\ngithub.com/bogworks/mash/internal/issue\nexample.org/other/internal/policy\n"
-	got := linkedPolicyPackages("example.org/other", in)
+	got := linkedPolicyPackages("example.org/other", "0.6.0", in)
 	if want := []string{"internal/listset"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v, want %v", got, want)
 	}
