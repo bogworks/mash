@@ -198,8 +198,8 @@ func TestStatusSessionRefusedAndSuspectedAtShellAndTool(t *testing.T) {
 		if got != refused {
 			t.Errorf("shell: %s", got)
 		}
-		id := 60
-		eventually(t, 30*time.Second, "tool says refused", func() bool { id++; got = toolSession(t, s, id+100); return got == refused })
+		id := 160 // each poll is a new tool call, so a new request id
+		eventually(t, 30*time.Second, "tool says refused", func() bool { id++; got = toolSession(t, s, id); return got == refused })
 		if got != refused {
 			t.Errorf("tool: %s", got)
 		}
