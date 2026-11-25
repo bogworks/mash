@@ -49,7 +49,7 @@ go run ./scripts/gate1demo [-spec spec] [-next next.json] [-out demo.md]
 
 One file per release label: `-next` names the planned-cases file in the
 `-spec` directory (default `next.json`). The 0.6.0 cases are in
-`next-0.6.0.json` (`-next next-0.6.0.json`).
+`next-0.6.0.json` (`-next next-0.6.0.json`). A value with a folder in it, such as `spec/next-0.6.0.json`, is a path used as given.
 
 Prints Markdown: for each case, the command (or item id) and issue, the
 "Today" text when `replaces` matches, the new text (headed with the release number, here 0.5.9), stream and exit. The

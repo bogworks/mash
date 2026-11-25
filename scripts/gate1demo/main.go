@@ -272,10 +272,8 @@ func release(v string) (string, error) {
 func render(dir, next string) (string, error) {
 	var nf nextFile
 	np := filepath.Join(dir, next)
-	if _, err := os.Stat(np); err != nil {
-		if _, err2 := os.Stat(next); err2 == nil { // a path from the current folder, as in -next spec/next-0.6.0.json
-			np = next
-		}
+	if filepath.Dir(next) != "." { // a path (as in -next spec/next-0.6.0.json) is used as given, never searched for
+		np = next
 	}
 	if err := readJSON(np, &nf); err != nil {
 		return "", err
@@ -285,7 +283,7 @@ func render(dir, next string) (string, error) {
 		return "", fmt.Errorf("%s: %w", next, err)
 	}
 	r := &renderer{rel: rel}
-	r.b.WriteString("# Gate 1 demo: planned " + rel + " output\n\nGenerated from the specification (x-output-next, spec/" + next + "). Not yet implemented.\n")
+	r.b.WriteString("# Gate 1 demo: planned " + rel + " output\n\nGenerated from the specification (x-output-next, " + filepath.ToSlash(np) + "). Not yet implemented.\n")
 	// install.json and mash-local-nats-setup.json describe the scripts; a spec folder without them is still valid.
 	for _, f := range []string{"mash.json", "mashctl.json", "install.json", "mash-local-nats-setup.json"} {
 		if f != "mash.json" && f != "mashctl.json" {
