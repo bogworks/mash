@@ -68,6 +68,7 @@ func (e *Endpoint) SpoolFaultLine() (line string, ok bool) {
 }
 
 type spoolBind struct {
+	ctx       context.Context // the caller's: the lock wait ends with it, so a stalled hook cannot hold the loop
 	s         spool.Spool
 	owner     string
 	fromStart bool
@@ -78,7 +79,7 @@ type spoolBind struct {
 // the spool. With fromStart it then does SpoolFromStart, and a bound spool ends the fault. It returns SetSpool's error,
 // or ctx's when the loop is not running.
 func (e *Endpoint) BindSpool(ctx context.Context, s spool.Spool, owner string, fromStart bool) error {
-	req := spoolBind{s: s, owner: owner, fromStart: fromStart, res: make(chan error, 1)}
+	req := spoolBind{ctx: ctx, s: s, owner: owner, fromStart: fromStart, res: make(chan error, 1)}
 	select {
 	case e.spoolReq <- req:
 	case <-ctx.Done():
@@ -94,7 +95,7 @@ func (e *Endpoint) BindSpool(ctx context.Context, s spool.Spool, owner string, f
 
 // bindSpool runs on the deliver loop.
 func (e *Endpoint) bindSpool(req spoolBind) {
-	err := e.SetSpool(req.s, req.owner)
+	err := e.SetSpoolContext(req.ctx, req.s, req.owner)
 	if err == nil {
 		if req.fromStart {
 			e.SpoolFromStart()
