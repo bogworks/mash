@@ -11,6 +11,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/bogworks/mash/internal/cliframe"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/ctl"
+	"github.com/bogworks/mash/internal/ctlkeys"
 	"github.com/bogworks/mash/internal/natsauth"
 	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/store"
@@ -633,6 +635,98 @@ func connectedFindings(conns []apply.ConnzServer, recs []store.Issued) (unrecord
 // record is mashctl's own state. It needs the system account credentials; without them it warns and checks nothing,
 // or fails under auditUsers.
 func doctorKeys(rep *doctorReport, ctx context.Context, adm *admin.Admin, cfg config.Config, env func(string) string, auditUsers bool) {
+	if cfg.SysCreds == "" { // the row stops for want of system_creds, and the signing key is not checked either
+		doctorKeysRow(rep, ctx, adm, cfg, env, auditUsers)
+		return
+	}
+	sig := signingKeyFinding(ctx, cfg, env)
+	n := len(rep.Checks)
+	doctorKeysRow(rep, ctx, adm, cfg, env, auditUsers)
+	if sig.text == "" {
+		return
+	}
+	// The signing key failure goes first, on lines of its own; what the row found follows it, as with any two
+	// failures of the row. An ok row has nothing to add but the count of other users.
+	c := &rep.Checks[n]
+	detail := sig.text
+	if c.State != stateOK {
+		detail += "\n" + c.Detail
+	} else if rest, ok := strings.CutPrefix(c.Detail, "mashctl's users ok; "); ok {
+		detail += "\n" + rest
+	}
+	fix := sig.fix
+	if fix == "" && c.Fix != nil {
+		fix = *c.Fix
+	}
+	switch c.State { // the row is counted again, as a failure
+	case stateFail:
+		rep.Problems--
+	case stateWarn:
+		rep.Warnings--
+	}
+	rep.Checks = rep.Checks[:n]
+	rep.add("keys", stateFail, detail, fix)
+}
+
+// signingKeyFinding is the signing key part of the keys row: the key store holds the signing key that config.json's
+// signing_key_pub names, and the account JWT lists it as a plain signing key. A configuration with no signing_key_pub,
+// or an account JWT that cannot be read, is not a finding here (the keys row reports what it cannot read itself).
+func signingKeyFinding(ctx context.Context, cfg config.Config, env func(string) string) finding {
+	if cfg.SigningKeyPub == "" {
+		return finding{}
+	}
+	say := func(what, fix string) finding {
+		return finding{text: "signing key\n" + config.Clean(cfg.SigningKeyPub) + "\n" + what, fix: fix, own: true}
+	}
+	const noStore = "is not in the key store"
+	ks, err := openKeys(cfg, env)
+	if err != nil {
+		return say(noStore, initFix)
+	}
+	kp, pub, err := ks.Signing()
+	if err != nil {
+		return say(noStore, initFix)
+	}
+	kp.Wipe()
+	if pub != cfg.SigningKeyPub {
+		return say(noStore, initFix)
+	}
+	claims, err := doctorAccountClaims(ctx, cfg, env, ks)
+	if err != nil {
+		return finding{}
+	}
+	if !claims.SigningKeys.Contains(pub) {
+		return say("is not listed in the account", "")
+	}
+	if sc, _ := claims.SigningKeys.GetScope(pub); sc != nil { // a scoped key is not a plain signing key
+		return say("is not listed in the account", "")
+	}
+	return finding{}
+}
+
+// doctorAccountClaims is the account's newest verified JWT, read through the system account.
+func doctorAccountClaims(ctx context.Context, cfg config.Config, env func(string) string, ks *ctlkeys.Authority) (*jwt.AccountClaims, error) {
+	acctKP, acctPub, err := ks.Account()
+	if err != nil {
+		return nil, err
+	}
+	acctKP.Wipe()
+	trust, err := apply.LoadTrust(ks)
+	if err != nil {
+		return nil, err
+	}
+	nc, err := connectSys(cfg, "", env)
+	if err != nil {
+		return nil, err
+	}
+	defer nc.Close()
+	ctx, cancel := context.WithTimeout(ctx, applyDeadline)
+	defer cancel()
+	servers := serverCount(cfg)
+	return apply.CurrentAccountClaims(ctx, apply.NATS{Conn: nc, Inventory: servers}, acctPub, trust, servers)
+}
+
+func doctorKeysRow(rep *doctorReport, ctx context.Context, adm *admin.Admin, cfg config.Config, env func(string) string, auditUsers bool) {
 	if cfg.SysCreds == "" && auditUsers {
 		rep.add("keys", stateFail, "no system_creds: connected users cannot be audited", initFix)
 		return

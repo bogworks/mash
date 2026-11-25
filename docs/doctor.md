@@ -70,7 +70,7 @@ server that does not answer shows one `FAIL` line and four `skip` lines, not fiv
 | `sign-in` | the server refuses the admin credentials, or they cannot be used | | `mashctl init --config <file>` |
 | `storage` | the directory or lease bucket is missing, the lease bucket allows rollup writes (it has not been hardened) or cannot be read | another bucket is missing, a bucket's size cap is below the configured one, or a bucket is 90% full or more | `mashctl init --config <file>` |
 | `endpoints` | a directory record cannot be read; an inbox has no endpoint record; a record has no inbox; an inbox lost mail unread; a retirement was started and not finished; the retired-name bucket has no size cap or a bad configuration | an inbox is 90% full or more; the retired-name bucket is at or over 50% of its cap; a lease has no endpoint record | the command for the first finding: `mashctl endpoint show ADDRESS`, `mashctl endpoint inbox ADDRESS`, `mashctl endpoint delete ADDRESS`, `mashctl limits apply ADDRESS` |
-| `keys` | a key recorded as revoked is still connected, not every server answered, or, with `--audit-users`, a connected user was not issued by mashctl (the finding names it) | no `system_creds` in the configuration, so nothing was checked (a failure under `--audit-users`, which cannot audit without it); mashctl's users kept connecting and leaving while they were read (`mashctl's users kept connecting and leaving; read 3 times; wait a minute and run it again`) | `mashctl init --config <file>`; with `--audit-users`, `revoke it with the tool that issued it (mashctl revokes only its own)` |
+| `keys` | the signing key in `config.json` is not in the key folder or not listed in the account JWT, a key recorded as revoked is still connected, not every server answered, or, with `--audit-users`, a connected user was not issued by mashctl (the finding names it) | no `system_creds` in the configuration, so nothing was checked (a failure under `--audit-users`, which cannot audit without it); mashctl's users kept connecting and leaving while they were read (`mashctl's users kept connecting and leaving; read 3 times; wait a minute and run it again`) | `mashctl init --config <file>`; with `--audit-users`, `revoke it with the tool that issued it (mashctl revokes only its own)` |
 
 When a check finds several things its detail lists them, separated by `;` (on the `keys` row, a warning or a long finding starts a line of its own), failures first, and names up to three
 addresses for each (`and N more` after that).
@@ -114,6 +114,10 @@ connected in the mash account, and compares them with the issue record (the `mas
 for every user JWT it issues). A key the record holds as revoked that is still connected means the revocation did not
 take effect (check that every server holds the account JWT with the revocation, and revoke the key again). Only public
 keys are used.
+
+When `config.json` names a signing key (`signing_key_pub`), the row also fails if the key folder does not hold that key
+(`mashctl init --config <file>` restores it) or the account JWT on the server does not list it as a plain signing key,
+which the servers refuse every user it signs for.
 
 #### Other users on the account
 

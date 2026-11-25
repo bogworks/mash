@@ -136,6 +136,42 @@ keys       FAIL  server s1's connected users kept changing
 1 problem.
 ```
 
+### The signing key is not in the key store
+
+Stream: stdout, then the hint on stderr. Exit code: 1.
+
+```text
+config     ok
+server     ok    tls://localhost:4222
+sign-in    ok
+storage    ok
+endpoints  ok    3 records, 3 inboxes
+keys       FAIL  signing key
+                 AAMJX6K7B2X43CQPCBKB6W547SI6SHDUPKG4MWPAP5XY4NUWALQ2HBUS
+                 is not in the key store
+
+1 problem.
+hint: mashctl init --config <file>
+```
+
+### The signing key is not listed in the account
+
+Stream: stdout. Exit code: 1.
+
+```text
+config     ok
+server     ok    tls://localhost:4222
+sign-in    ok
+storage    ok
+endpoints  ok    3 records, 3 inboxes
+keys       FAIL  signing key
+                 AAMJX6K7B2X43CQPCBKB6W547SI6SHDUPKG4MWPAP5XY4NUWALQ2HBUS
+                 is not listed in the account
+                 1 other user, not issued by mashctl
+
+1 problem.
+```
+
 ### No server is configured
 
 Stream: stdout, then the hint on stderr. Exit code: 1.
