@@ -687,7 +687,7 @@ func TestDoctorRevokedStillConnectedFailsWithoutAudit(t *testing.T) {
 	}
 	_, by, code := doctorJSON(t, e.run, "--audit-users")
 	c := by["keys"]
-	if code != 1 || !strings.HasPrefix(c.Detail, "1 revoked key is still connected\n1 connected user was not issued by mashctl:\nU") || c.Fix == nil || *c.Fix != "revoke it with the tool that issued it (mashctl revokes only its own)" {
+	if code != 1 || !strings.HasPrefix(c.Detail, "1 revoked key is still connected\n1 connected user was not issued by mashctl:\nU") || c.Fix != nil {
 		t.Fatalf("audit: %d %+v", code, c)
 	}
 }
@@ -855,7 +855,7 @@ func TestDoctorKeysRevokedAndMashChurnLinesFit80Columns(t *testing.T) {
 	_, by, code := doctorJSON(t, e.run)
 	*calls = 0
 	const want = "1 revoked key is still connected\nmashctl's users kept connecting and leaving; read 3 times\nwait a minute and run it again"
-	if c := by["keys"]; code != 1 || c.State != "fail" || c.Detail != want || c.Fix == nil || *c.Fix != "mashctl doctor" {
+	if c := by["keys"]; code != 1 || c.State != "fail" || c.Detail != want || c.Fix != nil {
 		t.Fatalf("%d %+v", code, c)
 	}
 	out, errb, _ := e.run("doctor")
@@ -1047,6 +1047,36 @@ func TestDoctorKeysChurnOfMashUsersWarns(t *testing.T) {
 	}
 }
 
+// A row with a revoked key still connected prints no hint, even when a churn warning follows it: rerunning doctor does
+// not end the connection. The churn warning alone keeps its hint.
+func TestDoctorKeysRevokedAndChurnHasNoHint(t *testing.T) {
+	e := newXYEnv(t)
+	_, xKey := credsSubject(t, e.credsPath(xy("x").String()))
+	adm, ctx, closeAdm := e.admin()
+	defer closeAdm()
+	if err := adm.MarkRevoked(ctx, xKey, time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+	calls := scriptScans(t, keyScan(true, xKey), keyScan(true), keyScan(true, xKey))
+	out, errb, code := e.run("doctor")
+	if code != 1 || !strings.Contains(cleanText(e, out), "FAIL") || strings.Contains(errb, "hint:") {
+		t.Fatalf("revoked and churn: %d %q %q", code, out, errb)
+	}
+	*calls = 0
+	_, by, _ := doctorJSON(t, e.run)
+	if c := by["keys"]; c.State != "fail" || c.Fix != nil {
+		t.Fatalf("json: %+v", c)
+	}
+	// Churn alone, with no revoked key, ends with its hint.
+	e2 := newXYEnv(t)
+	_, x2 := credsSubject(t, e2.credsPath(xy("x").String()))
+	scriptScans(t, keyScan(true, x2), keyScan(true), keyScan(true, x2))
+	out, errb, code = e2.run("doctor")
+	if code != 0 || !strings.Contains(cleanText(e2, out), "warn") || !strings.HasSuffix(strings.TrimSpace(errb), "hint: mashctl doctor") {
+		t.Fatalf("churn alone: %d %q %q", code, out, errb)
+	}
+}
+
 // With --audit-users an unsettled read fails in plain words, and never names the scan's inner workings.
 func TestDoctorAuditUsersFailsOnChurn(t *testing.T) {
 	e := newXYEnv(t)
@@ -1124,7 +1154,7 @@ func TestDoctorKeysRevokedSeenInEarlierReadFails(t *testing.T) {
 	for _, args := range [][]string{{}, {"--strict"}} {
 		*calls = 0
 		_, by, code := doctorJSON(t, e.run, args...)
-		if c := by["keys"]; code != 1 || c.State != "fail" || !strings.HasPrefix(c.Detail, "1 revoked key is still connected") || c.Fix == nil || *c.Fix != "mashctl doctor" {
+		if c := by["keys"]; code != 1 || c.State != "fail" || !strings.HasPrefix(c.Detail, "1 revoked key is still connected") || c.Fix != nil {
 			t.Fatalf("%v: %d %+v", args, code, c)
 		}
 	}

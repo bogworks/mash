@@ -764,6 +764,14 @@ func doctorKeys(rep *doctorReport, ctx context.Context, adm *admin.Admin, cfg co
 		other = fmt.Sprintf("%s, not issued by mashctl", count(n, "other user"))
 		okDetail = "mashctl's users ok; " + other
 	}
+	if len(revoked) > 0 { // rerunning or revoking elsewhere does not end the connection, so no finding in the row has a hint
+		for i := range fails {
+			fails[i].fix = ""
+		}
+		for i := range warns {
+			warns[i].fix = ""
+		}
+	}
 	addFindings(rep, "keys", okDetail, fails, warns)
 	if c := &rep.Checks[len(rep.Checks)-1]; other != "" && (c.State == stateFail || c.State == stateWarn) { // the count stays on a line of its own
 		c.Detail += "\n" + other

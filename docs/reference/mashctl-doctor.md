@@ -104,7 +104,7 @@ hint: revoke it with the tool that issued it (mashctl revokes only its own)
 
 ### A revoked key is connected and mashctl's users keep connecting and leaving
 
-Stream: stdout, then the hint on stderr. Exit code: 1.
+Stream: stdout. Exit code: 1.
 
 ```text
 config     ok
@@ -117,7 +117,6 @@ keys       FAIL  1 revoked key is still connected
                  wait a minute and run it again
 
 1 problem.
-hint: mashctl doctor
 ```
 
 ### --audit-users: two servers whose users keep changing

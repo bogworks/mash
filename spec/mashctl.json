@@ -451,8 +451,8 @@
        },
        {
         "case": "A revoked key is connected and mashctl's users keep connecting and leaving",
-        "text": "config     ok\nserver     ok    tls://localhost:4222\nsign-in    ok\nstorage    ok\nendpoints  ok    3 records, 3 inboxes\nkeys       FAIL  1 revoked key is still connected\n                 mashctl's users kept connecting and leaving; read 3 times\n                 wait a minute and run it again\n\n1 problem.\nhint: mashctl doctor",
-        "stream": "stdout, then the hint on stderr",
+        "text": "config     ok\nserver     ok    tls://localhost:4222\nsign-in    ok\nstorage    ok\nendpoints  ok    3 records, 3 inboxes\nkeys       FAIL  1 revoked key is still connected\n                 mashctl's users kept connecting and leaving; read 3 times\n                 wait a minute and run it again\n\n1 problem.",
+        "stream": "stdout",
         "exit": 1,
         "issue": "#1361",
         "note": "A warning or a failure with several lines has each on a line of its own, within 80 columns."
