@@ -51,7 +51,7 @@ const (
 	pingSettle = 300 * time.Millisecond
 	// pingTotal is the longest the ping waits for the rest of a cluster that has not all replied yet.
 	pingTotal = 3 * time.Second
-	ackWait   = 2 * time.Second
+	ackWait   = 5 * time.Second // as lookupTimeout and pushTimeout: a loaded resolver can take longer than 2 s (#1522)
 
 	lookupTimeout = 5 * time.Second
 	// pushTimeout bounds the first answer; after it, further servers have settleTimeout each to add theirs.
