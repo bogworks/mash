@@ -43,6 +43,7 @@ Start with the [README](../README.md). What changed in each release: [CHANGELOG]
 
 - [Contributing](../CONTRIBUTING.md) and [change-log fragments](../changelog.d/README.md)
 - [Architecture](architecture.md)
+- [mash and the SAP Go SDK](sdk-mapping.md): which pieces move onto the SDK, which stay in mash, and why
 - [Decisions (ADRs)](decisions/INDEX.md)
 - [Releasing](release.md)
 - [Review gate](review/in-session-loop.md)
