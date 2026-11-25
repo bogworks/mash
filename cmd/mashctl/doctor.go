@@ -14,6 +14,7 @@ import (
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
+	"github.com/nats-io/nkeys"
 
 	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/apply"
@@ -44,7 +45,8 @@ options:
 exit codes:
   0  no problem (and, with --strict, no warning)
   1  a problem was found
-  2  the command line was wrong; nothing was attempted
+  2  the command line was wrong, or the server URL is a plain nats://
+     one that is refused for TLS; nothing was attempted
 
 Example: mashctl doctor
 `
@@ -405,12 +407,26 @@ func keyLines(keys []string, keyless int) string {
 		lines = append(lines, keylessLine(keyless))
 	}
 	room := 3 - len(lines)
-	lines = append(lines, keys[:min(room, len(keys))]...)
+	for _, k := range keys[:min(room, len(keys))] {
+		lines = append(lines, shownKey(k))
+	}
 	out := "\n" + strings.Join(lines, "\n")
 	if len(keys) > room {
 		out += fmt.Sprintf("\nand %d more", len(keys)-room)
 	}
 	return out
+}
+
+// notUserKey is what a connected user's key is shown as when the server's value is not a user key.
+const notUserKey = "(not a user key)"
+
+// shownKey is a key the server reported, for the terminal: as given when it is a public user key, else a placeholder.
+// The value is the server's, so it is never echoed unless it parses.
+func shownKey(k string) string {
+	if nkeys.IsValidPublicUserKey(k) {
+		return k
+	}
+	return notUserKey
 }
 
 // plural picks the verb form for n things: "1 inbox has", "2 inboxes have".
