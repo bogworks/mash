@@ -14,6 +14,10 @@ func OpenNoFollow(path string, flag int, perm os.FileMode) (*os.File, error) {
 	return os.OpenFile(path, flag|syscall.O_NOFOLLOW, perm)
 }
 
+// OpenNonblock is the open flag that keeps opening a FIFO with no writer from blocking; the caller then refuses the
+// descriptor by its type. Reading a regular file is unaffected.
+const OpenNonblock = syscall.O_NONBLOCK
+
 // IsSymlinkRefusal reports whether err is OpenNoFollow refusing a symlink.
 func IsSymlinkRefusal(err error) bool { return errors.Is(err, syscall.ELOOP) }
 

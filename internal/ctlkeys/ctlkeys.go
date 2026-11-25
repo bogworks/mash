@@ -1011,7 +1011,7 @@ const maxCredsFile = 1 << 20
 // mode 0600), and the bytes come from the same descriptor. what names the file in an error ("system_creds"). The error
 // carries the path, never content.
 func ReadOwnedFile(path, what string) ([]byte, error) {
-	f, err := config.OpenNoFollow(path, os.O_RDONLY, 0)
+	f, err := config.OpenNoFollow(path, os.O_RDONLY|config.OpenNonblock, 0)
 	if err != nil {
 		if config.IsSymlinkRefusal(err) {
 			return nil, fmt.Errorf("%s %s is a symlink: refusing it (give the file itself)", what, path)
