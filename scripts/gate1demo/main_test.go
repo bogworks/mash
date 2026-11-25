@@ -41,7 +41,7 @@ func fixture(t *testing.T, next, nextFile string) string {
 
 func TestCommandReplaces(t *testing.T) {
 	dir := fixture(t, `[{"case":"New","text":"new text","stream":"stderr","exit":1,"issue":"#1055","replaces":"Set up","note":"a note"}]`, "")
-	out, err := render(dir)
+	out, err := render(dir, "next.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestCommandReplaces(t *testing.T) {
 
 func TestReplacesMissing(t *testing.T) {
 	dir := fixture(t, `[{"case":"New","text":"x","replaces":"Nope"}]`, "")
-	out, err := render(dir)
+	out, err := render(dir, "next.json")
 	if err == nil || out != "" || !strings.Contains(err.Error(), "mashx init") || !strings.Contains(err.Error(), `"Nope"`) {
 		t.Fatalf("want error naming command and target, got %v\n%s", err, out)
 	}
@@ -65,7 +65,7 @@ func TestReplacesMissing(t *testing.T) {
 
 func TestRuleReplacesMissing(t *testing.T) {
 	dir := fixture(t, `[]`, `{"rules_next":[{"rule":"New rule","detail":"d","replaces":"Nope"}]}`)
-	out, err := render(dir)
+	out, err := render(dir, "next.json")
 	if err == nil || out != "" || !strings.Contains(err.Error(), "New rule") || !strings.Contains(err.Error(), `"Nope"`) {
 		t.Fatalf("want error naming rule and target, got %v\n%s", err, out)
 	}
@@ -76,14 +76,14 @@ func TestMissingNextJSON(t *testing.T) {
 	if err := os.Remove(filepath.Join(dir, "next.json")); err != nil {
 		t.Fatal(err)
 	}
-	if out, err := render(dir); err == nil || out != "" {
+	if out, err := render(dir, "next.json"); err == nil || out != "" {
 		t.Fatalf("want error, got %v\n%s", err, out)
 	}
 }
 
 func TestItemReplacesToday(t *testing.T) {
 	dir := fixture(t, `[]`, `{"items":[{"id":"flag","case":"c","text":"new flag text","replaces":"old flag text","stream":"stderr","exit":2}]}`)
-	out, err := render(dir)
+	out, err := render(dir, "next.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func TestItemReplacesToday(t *testing.T) {
 func TestItemsAndRules(t *testing.T) {
 	dir := fixture(t, `[]`, `{"items":[{"id":"inst","where":"install.sh","case":"c","text":"hello","stream":"stdout","exit":0,"issue":"#9"}],
 	"rules_next":[{"rule":"New rule","detail":"new detail","replaces":"Old rule"}]}`)
-	out, err := render(dir)
+	out, err := render(dir, "next.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,7 @@ func TestItemsAndRules(t *testing.T) {
 func TestWidth(t *testing.T) {
 	l := func(n int) string { return strings.Repeat("a", n) }
 	dir := fixture(t, `[{"case":"A","text":"`+l(69)+`"},{"case":"B","text":"`+l(75)+`"},{"case":"C","text":"`+l(80)+`"}]`, "")
-	out, err := render(dir)
+	out, err := render(dir, "next.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestWidth(t *testing.T) {
 		t.Errorf("flagging wrong:\n%s", out)
 	}
 	dir = fixture(t, `[{"case":"D","text":"ok\n`+l(81)+`"}]`, "")
-	if out, err := render(dir); err == nil || out != "" || !strings.Contains(err.Error(), "81 columns") {
+	if out, err := render(dir, "next.json"); err == nil || out != "" || !strings.Contains(err.Error(), "81 columns") {
 		t.Errorf("want width error, got %v", err)
 	}
 }
@@ -162,7 +162,7 @@ func TestVerbatimAbsentUnaffected(t *testing.T) {
 
 func TestWrappedHereNoteIsJustANote(t *testing.T) {
 	for _, note := range []string{"One line in the program; wrapped here", "Shown WRAPPED HERE for display"} {
-		out, err := render(fixture(t, `[{"case":"A","text":"short","note":"`+note+`"}]`, ""))
+		out, err := render(fixture(t, `[{"case":"A","text":"short","note":"`+note+`"}]`, ""), "next.json")
 		if err != nil || !strings.Contains(out, "Note: "+note) || strings.Contains(out, "Lines:") {
 			t.Errorf("note %q: want a plain note, got %v\n%s", note, err, out)
 		}
@@ -170,7 +170,7 @@ func TestWrappedHereNoteIsJustANote(t *testing.T) {
 }
 
 func TestVerbatimOnNextItem(t *testing.T) {
-	out, err := render(fixture(t, `[]`, `{"items":[{"id":"i","case":"c","text":"t","verbatim":true},{"id":"j","case":"d","text":"u"}]}`))
+	out, err := render(fixture(t, `[]`, `{"items":[{"id":"i","case":"c","text":"t","verbatim":true},{"id":"j","case":"d","text":"u"}]}`), "next.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +181,7 @@ func TestVerbatimOnNextItem(t *testing.T) {
 		t.Errorf("Lines line not after item i's Case:\n%s", out)
 	}
 	bad := fixture(t, `[]`, `{"items":[{"id":"i","case":"c","text":"`+strings.Repeat("a", 81)+`","verbatim":true}]}`)
-	if _, err := render(bad); err == nil || !strings.Contains(err.Error(), "81 columns") {
+	if _, err := render(bad, "next.json"); err == nil || !strings.Contains(err.Error(), "81 columns") {
 		t.Errorf("want width error, got %v", err)
 	}
 }
@@ -202,22 +202,22 @@ func TestSecretsRefused(t *testing.T) {
 			"item":    fixture(t, `[]`, `{"items":[{"id":"i","case":"c","text":"`+s+`"}]}`),
 			"rule":    fixture(t, `[]`, `{"rules_next":[{"rule":"r","detail":"`+s+`"}]}`),
 		} {
-			out, err := render(dir)
+			out, err := render(dir, "next.json")
 			if err == nil || out != "" {
 				t.Errorf("%s %q: not refused", name, s)
 			}
 		}
 	}
 	// The clean cases do not trip it.
-	if _, err := render(fixture(t, `[{"case":"A","text":"seed phrase and SUnshine"}]`, "")); err != nil {
+	if _, err := render(fixture(t, `[{"case":"A","text":"seed phrase and SUnshine"}]`, ""), "next.json"); err != nil {
 		t.Error(err)
 	}
 }
 
 func TestDeterministic(t *testing.T) {
 	dir := fixture(t, `[{"case":"A","text":"a"},{"case":"B","text":"b"}]`, `{"items":[{"id":"i","case":"c","text":"t"}]}`)
-	a, _ := render(dir)
-	b, _ := render(dir)
+	a, _ := render(dir, "next.json")
+	b, _ := render(dir, "next.json")
 	if a == "" || a != b {
 		t.Error("not deterministic")
 	}
@@ -243,7 +243,7 @@ func TestScriptSpecNext(t *testing.T) {
 }
 
 func TestRealSpec(t *testing.T) {
-	out, err := render("../../spec")
+	out, err := render("../../spec", "next.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,7 +256,7 @@ func TestRealSpec(t *testing.T) {
 
 func TestHeadingTakesVersionFromFile(t *testing.T) {
 	dir := fixture(t, `[]`, `{"info":{"version":"1.2.3-spec.4"}}`)
-	out, err := render(dir)
+	out, err := render(dir, "next.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,7 +276,7 @@ func TestMalformedVersionRefused(t *testing.T) {
 	} {
 		dir := fixture(t, `[]`, next)
 		write(t, dir, "next.json", next)
-		out, err := render(dir)
+		out, err := render(dir, "next.json")
 		if err == nil || !strings.Contains(err.Error(), "info.version") {
 			t.Errorf("%s: want a version refusal, got err=%v", next, err)
 		}
@@ -288,7 +288,7 @@ func TestMalformedVersionRefused(t *testing.T) {
 
 func TestBracketedCaseIsDescription(t *testing.T) {
 	dir := fixture(t, `[{"case":"Quiet","text":"(no warning line;\nthe result line is as before)","stream":"stderr","exit":0}]`, "")
-	out, err := render(dir)
+	out, err := render(dir, "next.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -299,5 +299,27 @@ func TestBracketedCaseIsDescription(t *testing.T) {
 		if strings.Contains(out, w) {
 			t.Errorf("description must not render as output (%q) in\n%s", w, out)
 		}
+	}
+}
+
+func TestNextFlagSelectsFile(t *testing.T) {
+	dir := fixture(t, `[]`, "")
+	write(t, dir, "next-0.6.0.json", `{"info":{"version":"0.6.0-spec.0"},"items":[{"id":"six-item","case":"c","text":"six text","stream":"stdout","exit":0}]}`)
+	out, err := render(dir, "next-0.6.0.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(out, "# Gate 1 demo: planned 0.6.0 output") || !strings.Contains(out, "six-item") {
+		t.Errorf("0.6.0 file not rendered:\n%s", out)
+	}
+	out, err = render(dir, "next.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(out, "# Gate 1 demo: planned 0.5.9 output") || strings.Contains(out, "six-item") {
+		t.Errorf("default file wrong:\n%s", out)
+	}
+	if _, err := render(dir, "missing.json"); err == nil || !strings.Contains(err.Error(), "missing.json") {
+		t.Errorf("error should name the file: %v", err)
 	}
 }

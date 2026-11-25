@@ -269,17 +269,17 @@ func release(v string) (string, error) {
 
 // render builds the Markdown for the spec in dir. It returns an error, and no
 // output, when a secrets pattern matches or a line exceeds the hard width.
-func render(dir string) (string, error) {
+func render(dir, next string) (string, error) {
 	var nf nextFile
-	if err := readJSON(filepath.Join(dir, "next.json"), &nf); err != nil {
+	if err := readJSON(filepath.Join(dir, next), &nf); err != nil {
 		return "", err
 	}
 	rel, err := release(nf.Info.Version)
 	if err != nil {
-		return "", fmt.Errorf("next.json: %w", err)
+		return "", fmt.Errorf("%s: %w", next, err)
 	}
 	r := &renderer{rel: rel}
-	r.b.WriteString("# Gate 1 demo: planned " + rel + " output\n\nGenerated from the specification (x-output-next, spec/next.json). Not yet implemented.\n")
+	r.b.WriteString("# Gate 1 demo: planned " + rel + " output\n\nGenerated from the specification (x-output-next, spec/" + next + "). Not yet implemented.\n")
 	// install.json and mash-local-nats-setup.json describe the scripts; a spec folder without them is still valid.
 	for _, f := range []string{"mash.json", "mashctl.json", "install.json", "mash-local-nats-setup.json"} {
 		if f != "mash.json" && f != "mashctl.json" {
@@ -346,10 +346,11 @@ func render(dir string) (string, error) {
 }
 
 func main() {
-	spec := flag.String("spec", "spec", "directory holding mash.json, mashctl.json, install.json, mash-local-nats-setup.json, next.json, rules.json")
+	spec := flag.String("spec", "spec", "directory holding mash.json, mashctl.json, install.json, mash-local-nats-setup.json, the -next file, rules.json")
+	next := flag.String("next", "next.json", "planned-cases file in the -spec directory, one per release label (0.6.0: next-0.6.0.json)")
 	out := flag.String("out", "", "write the Markdown to this file instead of stdout")
 	flag.Parse()
-	md, err := render(*spec)
+	md, err := render(*spec, *next)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "gate1demo:", err)
 		os.Exit(1)
