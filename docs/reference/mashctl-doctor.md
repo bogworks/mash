@@ -245,7 +245,7 @@ With `--json` the result is this shape. The values are an example.
     {
       "name": "config",
       "state": "ok",
-      "detail": "",
+      "detail": null,
       "fix": null
     },
     {

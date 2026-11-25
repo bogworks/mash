@@ -11,7 +11,8 @@
   "address": "o.g.design",
   "installed_here": false,
   "creds": null,
-  "join_file": "OUT/design.join"
+  "join_file": "OUT/design.join",
+  "dry_run": false
 }
 # exists exit 1
 {
@@ -31,5 +32,6 @@
   "address": "o.g.three",
   "installed_here": true,
   "creds": "CONFIG/o.g.three.creds",
-  "join_file": null
+  "join_file": null,
+  "dry_run": false
 }

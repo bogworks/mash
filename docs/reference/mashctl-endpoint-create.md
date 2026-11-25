@@ -98,6 +98,34 @@ Stream: stderr. Exit code: 1.
 error: acme.demo.bob was deleted and its address cannot be used again
 ```
 
+### --json
+
+Stream: stdout. Exit code: 0.
+
+```text
+{
+  "address": "acme.demo.bob",
+  "installed_here": true,
+  "creds": "<config dir>/acme.demo.bob.creds",
+  "join_file": null,
+  "dry_run": false
+}
+```
+
+### --json, with a join file and --dry-run
+
+Stream: stdout. Exit code: 0.
+
+```text
+{
+  "address": "acme.demo.bob",
+  "installed_here": false,
+  "creds": null,
+  "join_file": "acme.demo.bob.join",
+  "dry_run": true
+}
+```
+
 ## JSON
 
 With `--json` the result is this shape. The values are an example.
@@ -107,7 +135,8 @@ With `--json` the result is this shape. The values are an example.
   "address": "acme.demo.bob",
   "installed_here": true,
   "creds": "/home/ada/.config/mash/acme.demo.bob.creds",
-  "join_file": null
+  "join_file": null,
+  "dry_run": false
 }
 ```
 

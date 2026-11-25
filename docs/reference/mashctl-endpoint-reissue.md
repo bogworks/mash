@@ -73,6 +73,18 @@ error: no endpoint acme.demo.dave
 hint: mashctl endpoint list
 ```
 
+### --json
+
+Stream: stdout. Exit code: 0.
+
+```text
+{
+  "address": "acme.demo.bob",
+  "join_file": "acme.demo.bob.join",
+  "dry_run": false
+}
+```
+
 ## JSON
 
 With `--json` the result is this shape. The values are an example.
@@ -80,7 +92,8 @@ With `--json` the result is this shape. The values are an example.
 ```json
 {
   "address": "acme.demo.bob",
-  "join_file": "acme.demo.bob.join"
+  "join_file": "acme.demo.bob.join",
+  "dry_run": false
 }
 ```
 

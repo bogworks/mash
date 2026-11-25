@@ -66,8 +66,9 @@ With `--json` the result is this shape. The values are an example.
 
 ```json
 {
-  "version": "0.5.6",
-  "commit": "3f9a41c2e0b7d5a1c4e08b2d77f3a95e1b6c4098"
+  "version": "0.5.9",
+  "commit": "3f9a41c2e0b7d5a1c4e08b2d77f3a95e1b6c4098",
+  "plugin": null
 }
 ```
 

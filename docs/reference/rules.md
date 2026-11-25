@@ -150,9 +150,12 @@ The rules every mash command and tool follows.
 
 22. Every command that changes the mesh or this machine's setup takes
    --dry-run. It prints the usual line with 'Would' in front and changes
-   nothing; with --json the object is the one the real run would print, plus
-   "dry_run": true. That is mashctl's changing commands and mash join. Sending
-   a message is not such a change and has no --dry-run.
+   nothing; with --json the object is the one the real run would print, with
+   "dry_run": true. In mashctl the dry_run key is in every such object, false
+   when the run is real (and init adds would_change, null when the run is
+   real); mash join prints dry_run only for a dry run. That is mashctl's
+   changing commands and mash join. Sending a message is not such a change and
+   has no --dry-run.
 
 23. help is also a command. 'mash help' and 'mash help send' print exactly
    what 'mash --help' and 'mash send --help' print, as git, kubectl and gh do.
@@ -208,7 +211,9 @@ The rules every mash command and tool follows.
    count is named as a count: endpoint_count, online_count, wake_count. An
    unset field is null: never "" and never left out, so a command's keys are
    the same on every run. An empty list is [] and an empty map is {}. A list's
-   key is plural: capabilities, not capability, everywhere except mash who
-   --json, whose capability ADR 0049 keeps (who JSON fields are added, never
-   renamed or removed); that is the one named exception. A doctor row's state
-   (ok, warn, fail, skip) is a different fact and keeps its name.
+   key is plural: capabilities, not capability. The one exception is mash who
+   --json, which follows ADR 0049 (who JSON fields are added, never renamed or
+   removed) and so keeps capability; it still prints every field for every
+   endpoint, an unset role, host or description as null and no capability as
+   []. A doctor row's state (ok, warn, fail, skip) is a different fact and
+   keeps its name.

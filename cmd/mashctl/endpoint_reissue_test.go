@@ -53,7 +53,7 @@ func TestEndpointReissue(t *testing.T) {
 	}
 	so, se, code = h.run("endpoint", "reissue", a.String(), "--out", nj, "--public-key", newFile, "--json")
 	var doc map[string]any
-	if json.Unmarshal([]byte(so), &doc) != nil || code != 0 || !sameKeys(doc, []string{"address", "join_file"}) || doc["join_file"] != nj || doc["address"] != a.String() {
+	if json.Unmarshal([]byte(so), &doc) != nil || code != 0 || !sameKeys(doc, []string{"address", "join_file", "dry_run"}) || doc["join_file"] != nj || doc["address"] != a.String() {
 		t.Fatalf("doc %d %q %q", code, so, se)
 	}
 	j, m := readJoin(t, nj)
@@ -112,7 +112,7 @@ func TestEndpointReissueInstalledHere(t *testing.T) {
 	}
 	so, _, _ = h.run("endpoint", "reissue", a.String(), "--json")
 	var doc map[string]any
-	if json.Unmarshal([]byte(so), &doc) != nil || !sameKeys(doc, []string{"address", "join_file"}) || doc["join_file"] != nil {
+	if json.Unmarshal([]byte(so), &doc) != nil || !sameKeys(doc, []string{"address", "join_file", "dry_run"}) || doc["join_file"] != nil {
 		t.Errorf("json %q", so)
 	}
 	so, _, _ = h.run("endpoint", "reissue", a.String(), "--detail")

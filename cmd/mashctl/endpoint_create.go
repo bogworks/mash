@@ -198,14 +198,14 @@ type createJSON struct {
 	InstalledHere bool    `json:"installed_here"`
 	Creds         *string `json:"creds"` // the credentials file installed here; null when a join file was written
 	JoinFile      *string `json:"join_file"`
-	DryRun        bool    `json:"dry_run,omitempty"`
+	DryRun        bool    `json:"dry_run"`
 }
 
 // reissueJSON is the JSON of reissue.
 type reissueJSON struct {
 	Address  string  `json:"address"`
 	JoinFile *string `json:"join_file"`
-	DryRun   bool    `json:"dry_run,omitempty"`
+	DryRun   bool    `json:"dry_run"`
 }
 
 // reissueDetailJSON is reissue's JSON with --detail.

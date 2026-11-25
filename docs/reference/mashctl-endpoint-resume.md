@@ -45,6 +45,18 @@ Stream: stdout. Exit code: 0.
 Resumed endpoint acme.demo.bob
 ```
 
+### --json
+
+Stream: stdout. Exit code: 0.
+
+```text
+{
+  "address": "acme.demo.bob",
+  "online": false,
+  "suspended": false
+}
+```
+
 ## JSON
 
 With `--json` the result is this shape. The values are an example.
@@ -52,7 +64,8 @@ With `--json` the result is this shape. The values are an example.
 ```json
 {
   "address": "acme.demo.bob",
-  "state": "offline"
+  "online": false,
+  "suspended": false
 }
 ```
 

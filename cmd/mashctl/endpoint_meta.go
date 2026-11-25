@@ -245,14 +245,14 @@ func (e metaEdit) plan(rec store.Record) (metaChange, error) {
 type setResultJSON struct {
 	Address string         `json:"address"`
 	Set     map[string]any `json:"set"`
-	DryRun  bool           `json:"dry_run,omitempty"`
+	DryRun  bool           `json:"dry_run"`
 }
 
 // unsetResultJSON is the JSON of `endpoint unset`.
 type unsetResultJSON struct {
 	Address string   `json:"address"`
 	Unset   []string `json:"unset"`
-	DryRun  bool     `json:"dry_run,omitempty"`
+	DryRun  bool     `json:"dry_run"`
 }
 
 // runEndpointSet is `mashctl endpoint set`.

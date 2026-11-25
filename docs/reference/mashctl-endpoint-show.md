@@ -95,6 +95,11 @@ With `--json` the result is this shape. The values are an example.
   "suspended": false,
   "created": "2026-11-19T09:40:00Z",
   "waiting": 1,
+  "role": "writer",
+  "host": null,
+  "description": "Bob reviews",
+  "capabilities": [],
+  "note": null,
   "labels": {
     "team": "blue"
   },

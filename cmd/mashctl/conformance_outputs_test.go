@@ -644,6 +644,54 @@ func init() {
 		return confOutRun{ran: ran, subs: []string{"servers acknowledged: 2", "servers acknowledged: 1"}}
 	})
 
+	// the --json forms of the changing commands: dry_run is always present, never left out
+	reg("init With --dry-run, with --json", func(t *testing.T) confOutRun {
+		w := newConfWorld(t, false)
+		return confOutRun{ran: confIndented(w.run("init", "--config", w.a.setupPath(), "--dry-run", "--json")), subs: urlSub(w)}
+	})
+	reg("endpoint create --json", func(t *testing.T) confOutRun {
+		w := newConfWorld(t, true)
+		return confOutRun{ran: confIndented(w.run("endpoint", "create", "acme.demo.bob", "--json")), subs: []string{"<config dir>", w.a.env["MASH_CONFIG_DIR"]}}
+	})
+	reg("endpoint create --json, with a join file and --dry-run", func(t *testing.T) confOutRun {
+		w := newConfWorld(t, true)
+		inTmp(t)
+		return confOutRun{ran: confIndented(w.run("endpoint", "create", "acme.demo.bob", "--out", "acme.demo.bob.join", "--dry-run", "--json"))}
+	})
+	reg("endpoint delete --json, with --yes", func(t *testing.T) confOutRun {
+		w := newConfWorld(t, true)
+		w.do("endpoint", "create", "acme.demo.bob")
+		return confOutRun{ran: confIndented(w.run("endpoint", "delete", "acme.demo.bob", "--yes", "--json"))}
+	})
+	reg("endpoint set --json", func(t *testing.T) confOutRun {
+		w := newConfWorld(t, true)
+		w.do("endpoint", "create", "acme.demo.bob")
+		return confOutRun{ran: confIndented(w.run("endpoint", "set", "acme.demo.bob", "role=reviewer", "--json"))}
+	})
+	reg("endpoint unset --json", func(t *testing.T) confOutRun {
+		w := newConfWorld(t, true)
+		w.do("endpoint", "create", "acme.demo.bob")
+		w.do("endpoint", "set", "acme.demo.bob", "role=reviewer")
+		return confOutRun{ran: confIndented(w.run("endpoint", "unset", "acme.demo.bob", "role", "--json"))}
+	})
+	reg("endpoint suspend --json", func(t *testing.T) confOutRun {
+		w := newConfWorld(t, true)
+		w.do("endpoint", "create", "acme.demo.bob")
+		return confOutRun{ran: confIndented(w.run("endpoint", "suspend", "acme.demo.bob", "--json"))}
+	})
+	reg("endpoint resume --json", func(t *testing.T) confOutRun {
+		w := newConfWorld(t, true)
+		w.do("endpoint", "create", "acme.demo.bob")
+		w.do("endpoint", "suspend", "acme.demo.bob")
+		return confOutRun{ran: confIndented(w.run("endpoint", "resume", "acme.demo.bob", "--json"))}
+	})
+	reg("endpoint reissue --json", func(t *testing.T) confOutRun {
+		w := newConfWorld(t, true)
+		w.do("endpoint", "create", "acme.demo.bob")
+		inTmp(t)
+		return confOutRun{ran: confIndented(w.run("endpoint", "reissue", "acme.demo.bob", "--out", "acme.demo.bob.join", "--json"))}
+	})
+
 	reg("version Version", func(t *testing.T) confOutRun {
 		prevV, prevC, prevB := endpoint.CurrentVersion(), commit, readBuildInfo
 		endpoint.SetVersion("0.5.6")

@@ -108,6 +108,8 @@ Stream: stdout. Exit code: 0.
   ],
   "owner": "acme",
   "changed": true,
+  "dry_run": false,
+  "would_change": null,
   "signing_key_pub": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 }
 ```
@@ -123,6 +125,25 @@ Stream: stdout. Exit code: 0.
   ],
   "owner": "acme",
   "changed": true,
+  "dry_run": false,
+  "would_change": null,
+  "signing_key_pub": null
+}
+```
+
+### With --dry-run, with --json
+
+Stream: stdout. Exit code: 0.
+
+```text
+{
+  "servers": [
+    "tls://localhost:4222"
+  ],
+  "owner": "acme",
+  "changed": false,
+  "dry_run": true,
+  "would_change": true,
   "signing_key_pub": null
 }
 ```
@@ -133,11 +154,14 @@ With `--json` the result is this shape. The values are an example.
 
 ```json
 {
-  "server": [
+  "servers": [
     "tls://localhost:4222"
   ],
   "owner": "acme",
-  "changed": true
+  "changed": true,
+  "dry_run": false,
+  "would_change": null,
+  "signing_key_pub": null
 }
 ```
 

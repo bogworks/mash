@@ -253,8 +253,8 @@ type initResult struct {
 	Servers       []string `json:"servers"`
 	Owner         string   `json:"owner"`
 	Changed       bool     `json:"changed"`
-	DryRun        bool     `json:"dry_run,omitempty"`
-	WouldApply    *bool    `json:"would_change,omitempty"`
+	DryRun        bool     `json:"dry_run"`
+	WouldApply    *bool    `json:"would_change"`    // null unless --dry-run
 	SigningKeyPub *string  `json:"signing_key_pub"` // null when no signing key is set
 }
 

@@ -228,18 +228,26 @@
        },
        {
         "case": "A signing key is set, with --json",
-        "text": "{\n  \"servers\": [\n    \"tls://localhost:4222\"\n  ],\n  \"owner\": \"acme\",\n  \"changed\": true,\n  \"signing_key_pub\": \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"\n}",
+        "text": "{\n  \"servers\": [\n    \"tls://localhost:4222\"\n  ],\n  \"owner\": \"acme\",\n  \"changed\": true,\n  \"dry_run\": false,\n  \"would_change\": null,\n  \"signing_key_pub\": \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"\n}",
         "stream": "stdout",
         "exit": 0,
-        "note": "--json is shown as it prints at a terminal (indented); piped it is one compact line (rule \"--json prints one object\"). The list of servers is named \"servers\" (plural), as in the setup file. signing_key_pub is the signing key's public key, never the seed.",
+        "note": "--json is shown as it prints at a terminal (indented); piped it is one compact line (rule \"--json prints one object\"). The list of servers is named \"servers\" (plural), as in the setup file. signing_key_pub is the signing key's public key, never the seed. dry_run is always present, false when this is not a --dry-run, and would_change is null then.",
         "verbatim": true
        },
        {
         "case": "No signing key is set, with --json",
-        "text": "{\n  \"servers\": [\n    \"tls://localhost:4222\"\n  ],\n  \"owner\": \"acme\",\n  \"changed\": true,\n  \"signing_key_pub\": null\n}",
+        "text": "{\n  \"servers\": [\n    \"tls://localhost:4222\"\n  ],\n  \"owner\": \"acme\",\n  \"changed\": true,\n  \"dry_run\": false,\n  \"would_change\": null,\n  \"signing_key_pub\": null\n}",
         "stream": "stdout",
         "exit": 0,
-        "note": "--json is shown as it prints at a terminal (indented). signing_key_pub is always present: null when no signing key is set, so a script reads one shape.",
+        "note": "--json is shown as it prints at a terminal (indented). signing_key_pub is always present: null when no signing key is set, so a script reads one shape. dry_run is always present, false when this is not a --dry-run, and would_change is null then.",
+        "verbatim": true
+       },
+       {
+        "case": "With --dry-run, with --json",
+        "text": "{\n  \"servers\": [\n    \"tls://localhost:4222\"\n  ],\n  \"owner\": \"acme\",\n  \"changed\": false,\n  \"dry_run\": true,\n  \"would_change\": true,\n  \"signing_key_pub\": null\n}",
+        "stream": "stdout",
+        "exit": 0,
+        "note": "--json is shown as it prints at a terminal (indented). Nothing was changed, so changed is false; would_change says whether a real run would change something. Both keys are always present: dry_run is false and would_change null when this is not a --dry-run.",
         "verbatim": true
        }
       ]
@@ -247,11 +255,14 @@
      {
       "name": "x-json",
       "value": {
-       "server": [
+       "servers": [
         "tls://localhost:4222"
        ],
        "owner": "acme",
-       "changed": true
+       "changed": true,
+       "dry_run": false,
+       "would_change": null,
+       "signing_key_pub": null
       }
      },
      {
@@ -523,7 +534,7 @@
         {
          "name": "config",
          "state": "ok",
-         "detail": "",
+         "detail": null,
          "fix": null
         },
         {
@@ -904,6 +915,22 @@
           "text": "error: acme.demo.bob was deleted and its address cannot be used again",
           "stream": "stderr",
           "exit": 1
+         },
+         {
+          "case": "--json",
+          "text": "{\n  \"address\": \"acme.demo.bob\",\n  \"installed_here\": true,\n  \"creds\": \"<config dir>/acme.demo.bob.creds\",\n  \"join_file\": null,\n  \"dry_run\": false\n}",
+          "stream": "stdout",
+          "exit": 0,
+          "note": "--json is shown as it prints at a terminal (indented); piped it is one compact line. dry_run is always present: false when nothing was asked to be a dry run, so a script reads one shape.",
+          "verbatim": true
+         },
+         {
+          "case": "--json, with a join file and --dry-run",
+          "text": "{\n  \"address\": \"acme.demo.bob\",\n  \"installed_here\": false,\n  \"creds\": null,\n  \"join_file\": \"acme.demo.bob.join\",\n  \"dry_run\": true\n}",
+          "stream": "stdout",
+          "exit": 0,
+          "note": "--json is shown as it prints at a terminal (indented); piped it is one compact line. dry_run is always present: false when nothing was asked to be a dry run, so a script reads one shape.",
+          "verbatim": true
          }
         ]
        },
@@ -913,7 +940,8 @@
          "address": "acme.demo.bob",
          "installed_here": true,
          "creds": "/home/ada/.config/mash/acme.demo.bob.creds",
-         "join_file": null
+         "join_file": null,
+         "dry_run": false
         }
        },
        {
@@ -1087,6 +1115,14 @@
           "stream": "stderr",
           "exit": 1,
           "note": "Same frame, hint and exit as a."
+         },
+         {
+          "case": "--json, with --yes",
+          "text": "{\n  \"address\": \"acme.demo.bob\",\n  \"deleted\": true,\n  \"messages_deleted\": 0,\n  \"dry_run\": false\n}",
+          "stream": "stdout",
+          "exit": 0,
+          "note": "--json is shown as it prints at a terminal (indented); piped it is one compact line. dry_run is always present: false when nothing was asked to be a dry run, so a script reads one shape.",
+          "verbatim": true
          }
         ]
        },
@@ -1095,7 +1131,8 @@
         "value": {
          "address": "acme.demo.bob",
          "deleted": true,
-         "messages_deleted": 1
+         "messages_deleted": 1,
+         "dry_run": false
         }
        },
        {
@@ -1304,6 +1341,11 @@
          "suspended": false,
          "created": "2026-11-19T09:40:00Z",
          "waiting": 1,
+         "role": "writer",
+         "host": null,
+         "description": "Bob reviews",
+         "capabilities": [],
+         "note": null,
          "labels": {
           "team": "blue"
          },
@@ -1389,6 +1431,14 @@
           "text": "Updated endpoint acme.demo.bob",
           "stream": "stdout",
           "exit": 0
+         },
+         {
+          "case": "--json",
+          "text": "{\n  \"address\": \"acme.demo.bob\",\n  \"set\": {\n    \"role\": \"reviewer\"\n  },\n  \"dry_run\": false\n}",
+          "stream": "stdout",
+          "exit": 0,
+          "note": "--json is shown as it prints at a terminal (indented); piped it is one compact line. dry_run is always present: false when nothing was asked to be a dry run, so a script reads one shape.",
+          "verbatim": true
          }
         ]
        },
@@ -1398,7 +1448,8 @@
          "address": "acme.demo.bob",
          "set": {
           "role": "reviewer"
-         }
+         },
+         "dry_run": false
         }
        },
        {
@@ -1476,6 +1527,14 @@
           "text": "Updated endpoint acme.demo.bob",
           "stream": "stdout",
           "exit": 0
+         },
+         {
+          "case": "--json",
+          "text": "{\n  \"address\": \"acme.demo.bob\",\n  \"unset\": [\n    \"role\"\n  ],\n  \"dry_run\": false\n}",
+          "stream": "stdout",
+          "exit": 0,
+          "note": "--json is shown as it prints at a terminal (indented); piped it is one compact line. dry_run is always present: false when nothing was asked to be a dry run, so a script reads one shape.",
+          "verbatim": true
          }
         ]
        },
@@ -1484,8 +1543,9 @@
         "value": {
          "address": "acme.demo.bob",
          "unset": [
-          "label.team"
-         ]
+          "role"
+         ],
+         "dry_run": false
         }
        },
        {
@@ -1549,6 +1609,14 @@
           "text": "Suspended endpoint acme.demo.bob",
           "stream": "stdout",
           "exit": 0
+         },
+         {
+          "case": "--json",
+          "text": "{\n  \"address\": \"acme.demo.bob\",\n  \"online\": false,\n  \"suspended\": true\n}",
+          "stream": "stdout",
+          "exit": 0,
+          "note": "--json is shown as it prints at a terminal (indented). online and suspended are the same two booleans as in endpoint show and endpoint list.",
+          "verbatim": true
          }
         ]
        },
@@ -1556,7 +1624,8 @@
         "name": "x-json",
         "value": {
          "address": "acme.demo.bob",
-         "state": "suspended"
+         "online": false,
+         "suspended": true
         }
        },
        {
@@ -1620,6 +1689,14 @@
           "text": "Resumed endpoint acme.demo.bob",
           "stream": "stdout",
           "exit": 0
+         },
+         {
+          "case": "--json",
+          "text": "{\n  \"address\": \"acme.demo.bob\",\n  \"online\": false,\n  \"suspended\": false\n}",
+          "stream": "stdout",
+          "exit": 0,
+          "note": "--json is shown as it prints at a terminal (indented). online and suspended are the same two booleans as in endpoint show and endpoint list.",
+          "verbatim": true
          }
         ]
        },
@@ -1627,7 +1704,8 @@
         "name": "x-json",
         "value": {
          "address": "acme.demo.bob",
-         "state": "offline"
+         "online": false,
+         "suspended": false
         }
        },
        {
@@ -1737,6 +1815,14 @@
           "text": "error: no endpoint acme.demo.dave\nhint: mashctl endpoint list",
           "stream": "stderr",
           "exit": 1
+         },
+         {
+          "case": "--json",
+          "text": "{\n  \"address\": \"acme.demo.bob\",\n  \"join_file\": \"acme.demo.bob.join\",\n  \"dry_run\": false\n}",
+          "stream": "stdout",
+          "exit": 0,
+          "note": "--json is shown as it prints at a terminal (indented); piped it is one compact line. dry_run is always present: false when nothing was asked to be a dry run, so a script reads one shape.",
+          "verbatim": true
          }
         ]
        },
@@ -1744,7 +1830,8 @@
         "name": "x-json",
         "value": {
          "address": "acme.demo.bob",
-         "join_file": "acme.demo.bob.join"
+         "join_file": "acme.demo.bob.join",
+         "dry_run": false
         }
        },
        {
@@ -2138,8 +2225,9 @@
      {
       "name": "x-json",
       "value": {
-       "version": "0.5.6",
-       "commit": "3f9a41c2e0b7d5a1c4e08b2d77f3a95e1b6c4098"
+       "version": "0.5.9",
+       "commit": "3f9a41c2e0b7d5a1c4e08b2d77f3a95e1b6c4098",
+       "plugin": null
       }
      },
      {
