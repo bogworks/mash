@@ -29,12 +29,14 @@ An example of the output (your versions may differ):
 
 ```
 install.sh: OK
-Fetching mash and mashctl from the v0.5.8 release: https://github.com/bogworks/mash/releases/download/v0.5.8
+Fetching mash and mashctl from the v0.5.9 release: https://github.com/bogworks/mash/releases/download/v0.5.9
 gh not found: the checksums come from the same download, so this trusts github.com's TLS; see docs/install.md to verify the attestation
-Installed mash v0.5.8 (8e8fe56) in ~/.local/bin
-Installed mashctl v0.5.8 (8e8fe56) in ~/.local/bin
+Installed mash v0.5.9 (<commit>) in ~/.local/bin
+Installed mashctl v0.5.9 (<commit>) in ~/.local/bin
 ~/.local/bin is not on your PATH; add it to use mash
 ```
+
+`<commit>` stands for the release's own commit, which the installer prints.
 
 The `gh not found` line appears only when `gh` (the GitHub command-line tool) is not installed or too old (a similar line says so). It is not an error.
 
