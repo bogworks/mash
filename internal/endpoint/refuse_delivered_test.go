@@ -35,9 +35,15 @@ func TestShellShowsWhatServeDelivered(t *testing.T) {
 	f.unknownSignerMsg(t, "a")
 	_, ev, stop := serveCfg(t, serveOn)
 	ev.waitFor(t, 1, 5*time.Second)
-	dir, _ := SpoolDir(serveOn)
-	if _, seqs := readRefusedSeqs(filepath.Join(dir, deliveredSeqsFile)); len(seqs) != 1 || seqs[0] != 1 {
-		t.Fatalf("delivered record: %v", seqs)
+	// serve records the message after the write succeeds, and the write is what ev saw: wait for the record (#1653).
+	var seqs []uint64
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		if seqs = deliveredRecord(serveOn); len(seqs) == 1 && seqs[0] == 1 {
+			break
+		}
+	}
+	if len(seqs) != 1 || seqs[0] != 1 {
+		t.Fatalf("delivered record after 10s: %v", seqs)
 	}
 	stop()
 
