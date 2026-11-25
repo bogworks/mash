@@ -87,6 +87,7 @@ queue_rules:
           - label = lead-approved
       - check-success = @github-actions/pr-check
       - check-success = @github-actions/adr-lint
+      - check-success = @github-actions/label-reset # on this head, so a label left by an earlier push cannot let an exception path in
     merge_conditions:
       - check-success = @github-actions/pr-check
     batch_size:

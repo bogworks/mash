@@ -529,7 +529,7 @@ func docsQueueRegex(t *testing.T, m mergify) string {
 	return ""
 }
 
-// The docs queue is first, holds exactly the conditions a docs-only pull request needs (the docs lint in pr-check, adr-lint,
+// The docs queue is first, holds exactly the conditions a docs-only pull request needs (the docs lint in pr-check, adr-lint, label-reset (so an exception path's label is the one for this head),
 // and the usual blockers), none of the review or approval ones, and merges the same way as the default queue.
 func TestMergify_docsQueue(t *testing.T) {
 	m := loadMergify(t)
@@ -543,7 +543,7 @@ func TestMergify_docsQueue(t *testing.T) {
 	}
 	re := docsQueueRegex(t, m)
 	want := []string{"base = main", "-draft", "-conflict", "label != hold", `#files >= 1`, `#files < 300`, "-files ~= " + re,
-		"check-success = @github-actions/pr-check", "check-success = @github-actions/adr-lint"}
+		"check-success = @github-actions/pr-check", "check-success = @github-actions/adr-lint", "check-success = @github-actions/label-reset"}
 	got := append([]string{}, plain...)
 	sort.Strings(got)
 	sort.Strings(want)
