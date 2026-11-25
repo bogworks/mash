@@ -162,54 +162,29 @@ func TestMergify_waitsOnlyForChecksThatExist(t *testing.T) {
 	}
 }
 
-// The maintainer's login authors agent pull requests too, so authorship proves nothing: entry to the queue needs a
-// recorded approval or the lead-approved label (which label-reset.yml removes on every push), and the hold label
-// stays the brake in both places.
-func TestMergify_entryNeedsApprovalOrLabel(t *testing.T) {
+// A pull request enters the queue by itself (ADR 0177): queue_conditions hold no lead-review status, no approval and no
+// or group, and the hold label stays the brake in queue_conditions and auto_merge_conditions.
+func TestMergify_entryNeedsNoApproval(t *testing.T) {
 	m := loadMergify(t)
 	plain, ors := splitConditions(t, queueRule(t, m, "default").QueueConditions)
-	if len(ors) != 1 {
-		t.Fatalf("want exactly one or group in queue_conditions, got %d", len(ors))
+	if len(ors) != 0 {
+		t.Errorf("queue_conditions have or groups %v: entry needs no approval", ors)
 	}
-	for _, c := range append(append([]string{}, plain...), ors[0]...) {
+	for _, c := range plain {
+		for _, banned := range []string{"lead-review", "approved-reviews-by", "lead-approved"} {
+			if strings.Contains(c, banned) {
+				t.Errorf("queue_conditions contain %q: no lead approval is needed to queue (ADR 0177)", c)
+			}
+		}
 		if strings.HasPrefix(c, "author = ") {
-			t.Errorf("queue_conditions contain %q: the maintainer's login authors agent pull requests, so authorship proves nothing", c)
+			t.Errorf("queue_conditions contain %q: authorship proves nothing", c)
 		}
 	}
-	for _, c := range ors[0] {
-		if strings.Contains(c, "check-success") {
-			t.Errorf("or member %q lets a bare check satisfy the group", c)
-		}
-	}
-	got := append([]string{}, ors[0]...)
-	sort.Strings(got)
-	want := []string{"approved-reviews-by = randybias", "label = lead-approved"}
-	if strings.Join(got, "|") != strings.Join(want, "|") {
-		t.Errorf("entry or group = %v, want exactly %v", got, want)
-	}
-	if !strings.Contains(strings.Join(plain, "\n"), "label != hold") {
+	if !contains(plain, "label != hold") {
 		t.Error("queue_conditions must honour the hold label")
 	}
 	if !strings.Contains(strings.Join(m.Protections.AutoMerge, "\n"), "label != hold") {
 		t.Error("auto_merge_conditions must honour the hold label")
-	}
-}
-
-// The lead's review is a commit status on the exact head (ADR 0116). It must be a plain queue_conditions entry: not in
-// merge_protections (the queue draft's commit has no such status, the #424 deadlock) and not inside the or group (a
-// bare check inside an or is banned, ADR 0078). During the migration week it is required beside the approval gate.
-func TestMergify_queueNeedsLeadReviewStatus(t *testing.T) {
-	m := loadMergify(t)
-	plain, ors := splitConditions(t, queueRule(t, m, "default").QueueConditions)
-	if !contains(plain, "check-success = lead-review") {
-		t.Errorf("queue_conditions lack the plain entry `check-success = lead-review`: %v", plain)
-	}
-	for _, g := range ors {
-		for _, c := range g {
-			if strings.Contains(c, "lead-review") {
-				t.Errorf("or member %q: lead-review must be a plain entry during the migration week", c)
-			}
-		}
 	}
 }
 
@@ -287,22 +262,10 @@ func TestWorkflows_labelResetRemovesApprovalLabels(t *testing.T) {
 }
 
 // A maintainer's approval must not carry over to code an outside author pushes afterwards: a rule dismisses approvals on
-// every push by anyone but the maintainers the queue's or group names.
+// every push by anyone but the maintainer.
 func TestMergify_outsiderApprovalsDieOnPush(t *testing.T) {
 	m := loadMergify(t)
-	_, ors := splitConditions(t, queueRule(t, m, "default").QueueConditions)
-	if len(ors) != 1 {
-		t.Fatalf("want exactly one or group in queue_conditions, got %d", len(ors))
-	}
-	var logins []string
-	for _, c := range ors[0] {
-		if strings.HasPrefix(c, "approved-reviews-by = ") {
-			logins = append(logins, strings.TrimPrefix(c, "approved-reviews-by = "))
-		}
-	}
-	if len(logins) == 0 {
-		t.Fatalf("or group %v has no approved-reviews-by member", ors[0])
-	}
+	logins := []string{"randybias"}
 	found := false
 	for _, r := range m.PullRequestRules {
 		d, ok := r.Actions["dismiss_reviews"]
@@ -333,60 +296,26 @@ func TestMergify_outsiderApprovalsDieOnPush(t *testing.T) {
 	}
 }
 
-// The ruleset requires `Mergify Merge Protections`, which is neutral unless a merge_protections rule exists, so a pull
-// request green on CI but lacking codex-review and an approval could be merged through the API. The rule mirrors the
-// queue's entry conditions (compared as parsed strings so they cannot drift) and must not apply to queue drafts.
+// The ruleset requires `Mergify Merge Protections`, which is neutral unless a merge_protections rule exists. The rule
+// carries only `label != hold` (ADR 0177), the same text as queue_conditions, and must not apply to queue drafts.
 func TestMergify_mergeProtectionsMirrorsQueueEntry(t *testing.T) {
 	m := loadMergify(t)
 	if len(m.MergeProtections) != 1 {
 		t.Fatalf("want exactly one merge_protections rule, got %d", len(m.MergeProtections))
 	}
 	r := m.MergeProtections[0]
-	qPlain, qOrs := splitConditions(t, queueRule(t, m, "default").QueueConditions)
+	if r.Name != "not held before merge" {
+		t.Errorf("rule name = %q, want %q", r.Name, "not held before merge")
+	}
+	qPlain, _ := splitConditions(t, queueRule(t, m, "default").QueueConditions)
 	plain, ors := splitConditions(t, r.SuccessConditions)
-	// Only label conditions: Mergify applies these to the queue draft's commit as merge conditions, so a check-success
+	// Only the label condition: Mergify applies these to the queue draft's commit as merge conditions, so a check-success
 	// condition (adr-lint is skipped on drafts) would deadlock the queue.
-	if len(plain) != 1 || len(ors) != 1 {
-		t.Fatalf("success_conditions = %v, want only `label != hold` and one approval or group", r.SuccessConditions)
+	if len(ors) != 0 || strings.Join(plain, "|") != "label != hold" {
+		t.Fatalf("success_conditions = %v, want exactly [label != hold]", r.SuccessConditions)
 	}
-	for _, want := range []string{"label != hold"} {
-		if !contains(plain, want) {
-			t.Errorf("success_conditions lack %q", want)
-		}
-		if !contains(qPlain, want) {
-			t.Errorf("queue_conditions lack %q, so the rule has drifted from the queue", want)
-		}
-	}
-	// The approver list mirrors queue_conditions deliberately, so changing maintainers is one edit (the same login in
-	// both lists) and this test catches drift between them.
-	got := append([]string{}, ors[0]...)
-	sort.Strings(got)
-	if len(qOrs) != 1 {
-		t.Fatalf("want one or group in queue_conditions, got %d", len(qOrs))
-	}
-	q := append([]string{}, qOrs[0]...)
-	sort.Strings(q)
-	if strings.Join(got, "|") != strings.Join(q, "|") {
-		t.Errorf("approval group = %v, queue_conditions require %v", got, q)
-	}
-	// The expected approver is derived from queue_conditions, not hard-coded here, so this comparison needs no edit when
-	// the maintainer changes (TestMergify_entryNeedsApprovalOrLabel pins the maintainer deliberately).
-	var logins []string
-	for _, c := range q {
-		if l, ok := strings.CutPrefix(c, "approved-reviews-by = "); ok {
-			logins = append(logins, l)
-		}
-	}
-	if len(logins) == 0 || strings.TrimSpace(logins[0]) == "" {
-		t.Fatalf("queue_conditions name no approver login: %v", q)
-	}
-	for _, l := range logins {
-		if !contains(got, "approved-reviews-by = "+l) {
-			t.Errorf("approval group %v lacks approver %q from queue_conditions", got, l)
-		}
-	}
-	if !contains(got, "label = lead-approved") {
-		t.Errorf("approval group %v lacks label = lead-approved", got)
+	if !contains(qPlain, "label != hold") {
+		t.Error("queue_conditions lack `label != hold`, so the rule has drifted from the queue")
 	}
 }
 
@@ -539,7 +468,7 @@ func TestMergify_actionsChecksAreAppQualified(t *testing.T) {
 			t.Errorf("%q is neither a known status (codex-review, lead-review) nor app-qualified", c)
 		}
 	}
-	for _, s := range []string{"codex-review", "lead-review"} {
+	for _, s := range []string{"codex-review"} {
 		if !seen[s] {
 			t.Errorf("queue_conditions lack the plain `check-success = %s`", s)
 		}
@@ -627,7 +556,7 @@ func TestMergify_docsQueue(t *testing.T) {
 }
 
 // The code regex and scripts/ci-changes agree on every path: a pull request touching any path the classifier calls code never
-// matches the docs queue (and keeps the approval rule), and a docs-only one always does.
+// matches the docs queue (and keeps the merge protection rule), and a docs-only one always does.
 func TestMergify_docsRegexAgreesWithTheClassifier(t *testing.T) {
 	re := docsQueueRegex(t, loadMergify(t))
 	paths := []string{
@@ -681,7 +610,7 @@ func TestMergify_docsOnlyPriorityIsHighest(t *testing.T) {
 }
 
 // A pull request with 300 or more changed files is never docs-only for the queue (GitHub returns at most 3000 files and Mergify
-// cannot see past that, codex H1 on the docs queue): the docs queue and the priority rule require fewer than 300, and the approval
+// cannot see past that, codex H1 on the docs queue): the docs queue and the priority rule require fewer than 300, and the merge protection
 // rule stays active from 300 up.
 func TestMergify_aHugePullRequestIsNeverDocsOnly(t *testing.T) {
 	m := loadMergify(t)
@@ -691,7 +620,7 @@ func TestMergify_aHugePullRequestIsNeverDocsOnly(t *testing.T) {
 	}
 	attrs := map[string]string{"base": "main", "head": "pr/x/y", "author": "randybias", "files": strings.Join(docs, "\n")}
 	if !evalCondition(t, m.MergeProtections[0].If, attrs) {
-		t.Error("the approval rule must stay active for 400 docs files")
+		t.Error("the merge protection rule must stay active for 400 docs files")
 	}
 	d := queueRule(t, m, "docs")
 	plain, _ := splitConditions(t, d.QueueConditions)
@@ -709,6 +638,6 @@ func TestMergify_aHugePullRequestIsNeverDocsOnly(t *testing.T) {
 	}
 	small := map[string]string{"base": "main", "head": "pr/x/y", "author": "randybias", "files": "docs/a.md"}
 	if evalCondition(t, m.MergeProtections[0].If, small) {
-		t.Error("the approval rule must be inactive for one docs file")
+		t.Error("the merge protection rule must be inactive for one docs file")
 	}
 }

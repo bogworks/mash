@@ -148,3 +148,4 @@
 | [0169](0169-doctor-looks-up-claude-read-only-to-report-its-version-and-nothing-else-runs-it.md) | Doctor looks up claude, read-only, to report its version; nothing else runs it | accepted | 2026-11-24 |
 | [0170](0170-the-0-5-5-migration-script-and-the-refusal-of-a-0-5-5-configuration-folder-ship-again.md) | The 0.5.5 migration script and the refusal of a 0.5.5 configuration folder ship again | accepted | 2026-11-24 |
 | [0171](0171-install-sh-pins-the-attestation-to-the-tags-commit-and-installs-nothing-when-it-cannot-read-it.md) | install.sh pins the attestation to the tag's commit, and installs nothing when it cannot read it | accepted | 2026-11-24 |
+| [0177](0177-a-pull-request-enters-the-queue-by-itself-when-its-checks-and-codex-are-clean.md) | A pull request enters the queue by itself when its checks and codex are clean | accepted | 2026-11-25 |
