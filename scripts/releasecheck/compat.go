@@ -84,6 +84,8 @@ type compatObs struct {
 	Copies  int    // how many times the message is in the reading binary's stored inbox
 	Shown   int    // how many message blocks the reading binary's `mash hook` (what the session is shown) carried for it, over every hook run
 	Refused string // the class the reading binary gave when it refused the message; empty when it did not
+	// Corrupted: a copy of the message the reader stored or showed carried the marker but not the body that was sent, intact.
+	Corrupted bool
 }
 
 // CompatOptions configure `release-check --compat`. Every external seam is a field a test replaces.
@@ -345,7 +347,8 @@ func compatRun(ctx context.Context, args []string, o CompatOptions, ev *compatEv
 //   - what the session was shown, which is what `mash hook` printed for it (a channel notification is only a one-line
 //     wake for an idle session and is not evidence of delivery): a message shown no time is "not delivered", one shown
 //     more than once (on one hook run or across two) "delivered twice". A version without `mash hook` is judged by the
-//     stored inbox alone, which the driver records as Shown.
+//     stored inbox alone, which the driver records as Shown;
+//   - the content: a message whose marker was stored or shown but whose body differs from the one sent is "corrupted".
 func judgeCompat(corpus []compatMsg, obs []compatObs) (n int, reason string) {
 	by := map[int]compatObs{}
 	for _, ob := range obs {
@@ -364,9 +367,120 @@ func judgeCompat(corpus []compatMsg, obs []compatObs) (n int, reason string) {
 			return m.Number, "delivered twice"
 		case ob.Shown == 0:
 			return m.Number, "not delivered"
+		case ob.Corrupted:
+			return m.Number, "corrupted"
 		}
 	}
 	return 0, ""
+}
+
+// quotedBody is the body a message block shows: render quotes every body line with "> ", so the lines that start so,
+// with that prefix removed, are the body (the header lines never start so). A reader that did not quote shows no lines.
+func quotedBody(block []string) string {
+	var lines []string
+	for _, l := range block {
+		if t, ok := strings.CutPrefix(l, "> "); ok {
+			lines = append(lines, t)
+		} else if l == ">" {
+			lines = append(lines, "")
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// sentText is the text the writer sent for a message with this marker and body, as the reader shows it: render drops
+// the body's trailing newlines.
+func sentText(marker, body string) string { return strings.TrimRight(marker+"\n"+body, "\n") }
+
+// bodyIntact reports whether text (a hook's context, or what `mash read` printed) shows the message carrying marker
+// with exactly the body that was sent. In a full message block the whole quoted body is compared, line for line, so
+// multi-line, long and non-ASCII bodies must come through unchanged. A digest block (the hook prints one for a big
+// batch, by design) shows only the message's first line and its size in bytes, and no body: for it the first line must
+// be the marker's and the size field, when there is one, the size sent; the full body of such a message is compared
+// in the stored inbox (`mash read`), which always prints it in full.
+func bodyIntact(text, marker, body string) bool {
+	want := sentText(marker, body)
+	for _, b := range hookBlocks(hookText(text)) {
+		if !strings.Contains(strings.Join(b, "\n"), marker) {
+			continue
+		}
+		if strings.HasPrefix(b[0], "#") && strings.Contains(b[0], "\tfrom ") { // a digest line
+			if !strings.Contains(b[0], "\t"+marker) && !strings.Contains(b[0], marker) {
+				return false
+			}
+			for _, f := range strings.Split(b[0], "\t") {
+				if n, ok := strings.CutSuffix(f, " B"); ok {
+					if v, err := strconv.Atoi(n); err == nil && v != len(marker)+1+len(body) {
+						return false
+					}
+				}
+			}
+			continue
+		}
+		if quotedBody(b) != want {
+			return false
+		}
+	}
+	return true
+}
+
+// observeHooks runs the hook until every sent message was shown (or wait ends), waits settle, and runs it once more:
+// that run must show nothing new. It records, on each observation, how many blocks showed the message (Shown) and
+// whether any showed its body altered (Corrupted). A hook that exits non-zero on any run is an error of the driver:
+// what it printed proves nothing.
+func observeHooks(ctx context.Context, run func() (string, int, error), obs []compatObs, corpus []compatMsg, marker func(int) string, wait, settle time.Duration) error {
+	shown := map[int]int{}
+	bad := map[int]bool{}
+	runHook := func() error {
+		out, code, err := run()
+		if err != nil {
+			return err
+		}
+		if code != 0 {
+			return fmt.Errorf("`mash hook` exited %d", code)
+		}
+		for i, o := range obs {
+			mk := marker(o.Number)
+			n := shownCount(out, mk)
+			shown[o.Number] += n
+			if n > 0 && !bodyIntact(out, mk, corpus[i].Body) {
+				bad[o.Number] = true
+			}
+		}
+		return nil
+	}
+	allShown := func() bool {
+		for _, o := range obs {
+			if o.Sent && shown[o.Number] == 0 {
+				return false
+			}
+		}
+		return true
+	}
+	for nd := time.Now().Add(wait); ctx.Err() == nil; {
+		if err := runHook(); err != nil {
+			return err
+		}
+		if allShown() || time.Now().After(nd) {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	select {
+	case <-time.After(settle):
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	if err := runHook(); err != nil {
+		return err
+	}
+	for i := range obs {
+		obs[i].Shown = shown[obs[i].Number]
+		if bad[obs[i].Number] {
+			obs[i].Corrupted = true
+		}
+	}
+	return nil
 }
 
 // compatSettle is how long the run waits after the hook showed every message before it runs the hook once more, which
@@ -501,50 +615,21 @@ func driveCompat(ctx context.Context, writer, reader compatBin, corpus []compatM
 	// that run must show nothing new. A version without `mash hook` has only the stored inbox to go by (set below).
 	hooked := !release.TagBelow("v"+reader.Version, release.HookSince)
 	if hooked {
-		shown := map[int]int{}
-		runHook := func() error {
-			out, _, _, err := runBounded(ctx, reader.Path, []string{"hook"}, renv, hookInputs["UserPromptSubmit"])
-			if err != nil {
-				return err
-			}
-			for _, o := range obs {
-				shown[o.Number] += shownCount(out, marker(o.Number))
-			}
-			return nil
+		run := func() (string, int, error) {
+			out, _, code, err := runBounded(ctx, reader.Path, []string{"hook"}, renv, hookInputs["UserPromptSubmit"])
+			return out, code, err
 		}
-		allShown := func() bool {
-			for _, o := range obs {
-				if o.Sent && shown[o.Number] == 0 {
-					return false
-				}
-			}
-			return true
-		}
-		for nd := time.Now().Add(onlineTimeout); ctx.Err() == nil; {
-			if err := runHook(); err != nil {
-				return nil, err
-			}
-			if allShown() || time.Now().After(nd) {
-				break
-			}
-			time.Sleep(200 * time.Millisecond)
-		}
-		select {
-		case <-time.After(compatSettle):
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		}
-		if err := runHook(); err != nil {
+		if err := observeHooks(ctx, run, obs, corpus, marker, onlineTimeout, compatSettle); err != nil {
 			return nil, err
-		}
-		for i := range obs {
-			obs[i].Shown = shown[obs[i].Number]
 		}
 	}
 	for i := range obs {
 		mk := marker(obs[i].Number)
 		for _, b := range bodies {
 			obs[i].Copies += strings.Count(b, mk)
+			if strings.Contains(b, mk) && !bodyIntact(b, mk, corpus[i].Body) {
+				obs[i].Corrupted = true
+			}
 		}
 		if obs[i].Sent && obs[i].Copies == 0 && obs[i].Seq != 0 {
 			out, _, _, err := runBounded(ctx, reader.Path, []string{"read", strconv.Itoa(obs[i].Seq)}, renv, "")

@@ -15,6 +15,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakeDrive answers each direction (keyed "writer>reader") from a table; a direction not in it passes.
@@ -486,5 +487,117 @@ func TestWrapper_relativePathsBecomeAbsolute(t *testing.T) {
 		if got := strings.Split(strings.TrimSuffix(string(out), "\n"), "\n"); strings.Join(got, "\x00") != strings.Join(c.want, "\x00") {
 			t.Errorf("%v\n got %q\nwant %q", c.in, got, c.want)
 		}
+	}
+}
+
+// M1: the reader's content is compared with the corpus body that was sent, not just the marker.
+func TestCompatBodyIntact(t *testing.T) {
+	wrap := func(ctx string) string {
+		b, _ := json.Marshal(map[string]any{"hookSpecificOutput": map[string]any{"hookEventName": "UserPromptSubmit", "additionalContext": ctx}})
+		return string(b)
+	}
+	full := func(marker, body string) string {
+		var q []string
+		for _, l := range strings.Split(sentText(marker, body), "\n") {
+			q = append(q, "> "+l)
+		}
+		return "--- #5 from a.b.c [verified] at 2026-01-01T00:00:00Z\nkind: task\n" + strings.Join(q, "\n") + "\n"
+	}
+	for _, m := range compatCorpus { // every corpus body, plain, multi-line, long and non-ASCII, passes intact
+		mk := fmt.Sprintf("compat-%d-ab", m.Number)
+		if !bodyIntact(wrap(full(mk, m.Body)), mk, m.Body) {
+			t.Errorf("%s: intact body judged corrupted", m.What)
+		}
+	}
+	long, uni := compatCorpus[5], compatCorpus[6]
+	for _, c := range []struct {
+		name, shown string
+		m           compatMsg
+	}{
+		{"body changed", full("compat-1-ab", "Plain mail: tampered"), compatCorpus[0]},
+		{"second line lost", full("compat-5-ab", "Is the second line kept?"), compatCorpus[4]},
+		{"long truncated", full("compat-6-ab", long.Body[:len(long.Body)/2]), long},
+		{"non-ASCII mangled", full("compat-7-ab", strings.ReplaceAll(uni.Body, "日本語", "????")), uni},
+		{"non-ASCII replaced", full("compat-7-ab", strings.ReplaceAll(uni.Body, "é", "�")), uni},
+		{"digest with wrong size", "#5\tfrom a.b.c [verified]\t9 B\tcompat-6-ab\tkind task\n", long},
+	} {
+		mk := fmt.Sprintf("compat-%d-ab", c.m.Number)
+		if bodyIntact(wrap(c.shown), mk, c.m.Body) {
+			t.Errorf("%s: corrupted body judged intact", c.name)
+		}
+	}
+	// A digest (by design no body) with the right size passes; the long body is then compared in the stored inbox.
+	n := len("compat-6-ab") + 1 + len(long.Body)
+	if !bodyIntact(wrap(fmt.Sprintf("#5\tfrom a.b.c [verified]\t%d B\tcompat-6-ab\tkind task\n", n)), "compat-6-ab", long.Body) {
+		t.Error("digest of the right size judged corrupted")
+	}
+	if bodyIntact("--- #5 from a\n> compat-6-ab\n> short\n", "compat-6-ab", long.Body) {
+		t.Error("truncated stored copy judged intact")
+	}
+	obs := make([]compatObs, len(compatCorpus))
+	for i, m := range compatCorpus {
+		obs[i] = compatObs{Number: m.Number, Sent: true, Seq: m.Number + 1, Copies: 1, Shown: 1}
+	}
+	obs[6].Corrupted = true
+	if n, reason := judgeCompat(compatCorpus, obs); n != 7 || reason != "corrupted" {
+		t.Errorf("corrupted: message %d %q", n, reason)
+	}
+}
+
+// M2: a hook that exits non-zero, on the delivery runs or on the required second run, is an error of the driver.
+func TestCompatObserveHooksExit(t *testing.T) {
+	mk := func(n int) string { return fmt.Sprintf("compat-%d-ab", n) }
+	var all strings.Builder
+	for _, m := range compatCorpus {
+		var q []string
+		for _, l := range strings.Split(sentText(mk(m.Number), m.Body), "\n") {
+			q = append(q, "> "+l)
+		}
+		all.WriteString("--- #5 from a\nkind: task\n" + strings.Join(q, "\n") + "\n")
+	}
+	newObs := func() []compatObs {
+		obs := make([]compatObs, len(compatCorpus))
+		for i, m := range compatCorpus {
+			obs[i] = compatObs{Number: m.Number, Sent: true, Seq: m.Number + 1, Copies: 1}
+		}
+		return obs
+	}
+	// The first run shows everything; the second shows nothing new.
+	scripted := func(codes ...int) func() (string, int, error) {
+		i := 0
+		return func() (string, int, error) {
+			c := codes[i]
+			i++
+			if i == 1 {
+				return all.String(), c, nil
+			}
+			return "", c, nil
+		}
+	}
+	obs := newObs()
+	if err := observeHooks(context.Background(), scripted(0, 0), obs, compatCorpus, mk, time.Second, time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	if n, reason := judgeCompat(compatCorpus, obs); n != 0 {
+		t.Errorf("clean runs: message %d %q", n, reason)
+	}
+	for _, c := range []struct {
+		name  string
+		codes []int
+	}{{"first run", []int{3, 0}}, {"second run", []int{0, 1}}} {
+		err := observeHooks(context.Background(), scripted(c.codes...), newObs(), compatCorpus, mk, time.Second, time.Millisecond)
+		if err == nil || !strings.Contains(err.Error(), "exited") {
+			t.Errorf("hook non-zero on the %s: err %v", c.name, err)
+		}
+	}
+	// A corrupted body shown by the hook is recorded.
+	bad := strings.Replace(all.String(), "kept?", "kept!", 1)
+	obs = newObs()
+	run := func() (string, int, error) { return bad, 0, nil }
+	if err := observeHooks(context.Background(), run, obs, compatCorpus, mk, time.Second, time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	if !obs[4].Corrupted || obs[0].Corrupted {
+		t.Errorf("corrupted flags: %+v", obs)
 	}
 }
