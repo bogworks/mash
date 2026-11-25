@@ -261,6 +261,13 @@ func isUnreachable(err error) bool {
 		(errors.As(err, &ne) && ne.Timeout()) || strings.Contains(err.Error(), "connection refused") || strings.Contains(err.Error(), "no such host")
 }
 
+// connectionLost reports whether err on nc shows the connection itself went away, as opposed to a request that got
+// no answer in time (which isUnreachable also matches).
+func connectionLost(nc *nats.Conn, err error) bool {
+	return errors.Is(err, nats.ErrConnectionClosed) || errors.Is(err, nats.ErrDisconnected) || errors.Is(err, nats.ErrNoServers) ||
+		nc.IsClosed() || !nc.IsConnected()
+}
+
 // runInit is `mashctl init --config FILE`: it checks the server, the keys and the credentials the setup file names,
 // keeps what mashctl needs in its key store and config folder, and makes mash's storage on the server. It runs again
 // without changing anything.
@@ -406,6 +413,11 @@ func doInit(setupPath string, dry, jsonOut, detail bool, env func(string) string
 	lctx, lcancel := context.WithTimeout(ctx, lookupWait)
 	tok, err := res.Lookup(lctx, st.acctPub)
 	lcancel()
+	if err != nil && connectionLost(nc, err) {
+		// The connection dropped under the lookup: that says nothing about the account, so it is not "missing". A
+		// lookup that only timed out stays the missing-account answer below.
+		return unreachable()
+	}
 	if err != nil || tok == "" {
 		detail := "the resolver has no answer for it"
 		if err != nil && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, nats.ErrTimeout) {
