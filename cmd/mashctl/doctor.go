@@ -11,6 +11,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/bogworks/mash/internal/cliframe"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/ctl"
+	"github.com/bogworks/mash/internal/ctlkeys"
 	"github.com/bogworks/mash/internal/natsauth"
 	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/store"
@@ -631,8 +633,106 @@ func connectedFindings(conns []apply.ConnzServer, recs []store.Issued) (unrecord
 // doctorKeys is the keys check: no key the issue record holds as revoked is still connected; with auditUsers, every
 // connected user was also issued by mashctl. It fails when the issue record is missing, in every mode, because the
 // record is mashctl's own state. It needs the system account credentials; without them it warns and checks nothing,
-// or fails under auditUsers.
+// or fails under auditUsers; the signing key check of the key store still runs without them.
 func doctorKeys(rep *doctorReport, ctx context.Context, adm *admin.Admin, cfg config.Config, env func(string) string, auditUsers bool) {
+	sig := signingKeyFinding(ctx, cfg, env) // the key store part needs no system_creds; the account lookup does
+	n := len(rep.Checks)
+	doctorKeysRow(rep, ctx, adm, cfg, env, auditUsers)
+	if sig.text == "" {
+		return
+	}
+	// The signing key failure goes first, on lines of its own; what the row found follows it, as with any two
+	// failures of the row. An ok row has nothing to add but the count of other users.
+	c := &rep.Checks[n]
+	detail := sig.text
+	if c.State != stateOK {
+		detail += "\n" + c.Detail
+	} else if rest, ok := strings.CutPrefix(c.Detail, "mashctl's users ok; "); ok {
+		detail += "\n" + rest
+	}
+	// the hint is the signing finding's own, or none: the row's hint (say, mashctl init) cannot fix the signing key
+	fix := sig.fix
+	switch c.State { // the row is counted again, as a failure
+	case stateFail:
+		rep.Problems--
+	case stateWarn:
+		rep.Warnings--
+	}
+	rep.Checks = rep.Checks[:n]
+	rep.add("keys", stateFail, detail, fix)
+}
+
+// signingKeyFinding is the signing key part of the keys row: the key store holds the signing key that config.json's
+// signing_key_pub names, and the account JWT lists it as a plain signing key. A configuration with no signing_key_pub
+// is not a finding here; an account JWT that cannot be read is one, since the key cannot be shown listed.
+func signingKeyFinding(ctx context.Context, cfg config.Config, env func(string) string) finding {
+	if cfg.SigningKeyPub == "" {
+		return finding{}
+	}
+	say := func(what, fix string) finding {
+		return finding{text: what, fix: fix, own: true}
+	}
+	const noStore = "the signing key is not in the key store"
+	ks, err := openKeys(cfg, env)
+	if err != nil {
+		return say(noStore, initFix)
+	}
+	kp, pub, err := ks.Signing()
+	if err != nil {
+		return say(noStore, initFix)
+	}
+	kp.Wipe()
+	if pub != cfg.SigningKeyPub {
+		return say(noStore, initFix)
+	}
+	if cfg.SysCreds == "" { // the account cannot be read without system_creds; the row says so itself
+		return finding{}
+	}
+	copies, err := readAccountCopies(ctx, cfg, env, ks)
+	if errors.Is(err, apply.ErrServerHasNoAccountJWT) { // that server's account lists no key
+		return say("the signing key is not listed in the account", "")
+	}
+	if err != nil { // the key cannot be shown listed, so the row does not pass
+		return say("the account could not be read: "+oneLine(admin.RewordUnavailable(err.Error())), "")
+	}
+	for _, claims := range copies { // every server's copy: an older one that lacks the key is still one a server may act on
+		if !claims.SigningKeys.Contains(pub) {
+			return say("the signing key is not listed in the account", "")
+		}
+		if sc, _ := claims.SigningKeys.GetScope(pub); sc != nil { // a scoped key is not a plain signing key
+			return say("the signing key is not listed in the account", "")
+		}
+	}
+	return finding{}
+}
+
+// readAccountCopies is doctorAccountClaims; a test replaces it.
+var readAccountCopies = doctorAccountClaims
+
+// doctorAccountClaims is every distinct verified copy of the account's JWT the servers hold, read through the system
+// account.
+func doctorAccountClaims(ctx context.Context, cfg config.Config, env func(string) string, ks *ctlkeys.Authority) ([]*jwt.AccountClaims, error) {
+	acctKP, acctPub, err := ks.Account()
+	if err != nil {
+		return nil, err
+	}
+	acctKP.Wipe()
+	trust, err := apply.LoadTrust(ks)
+	if err != nil {
+		return nil, err
+	}
+	nc, err := connectSys(cfg, "", env)
+	if err != nil {
+		return nil, err
+	}
+	defer nc.Close()
+	ctx, cancel := context.WithTimeout(ctx, applyDeadline)
+	defer cancel()
+	servers := serverCount(cfg)
+	return apply.AccountClaimsCopies(ctx, apply.NATS{Conn: nc, Inventory: servers}, acctPub, trust, servers)
+}
+
+func doctorKeysRow(rep *doctorReport, ctx context.Context, adm *admin.Admin, cfg config.Config, env func(string) string, auditUsers bool) {
 	if cfg.SysCreds == "" && auditUsers {
 		rep.add("keys", stateFail, "no system_creds: connected users cannot be audited", initFix)
 		return

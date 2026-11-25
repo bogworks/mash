@@ -35,6 +35,7 @@ import (
 
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
+	"github.com/nats-io/nkeys"
 
 	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/apply"
@@ -380,6 +381,50 @@ func init() {
 		sc.Incomplete = "server s1's connected users kept changing\nserver NABCDEFGHI...LMNOPQRSTUV's connected users kept changing"
 		scriptScans(t, sc)
 		return confOutRun{ran: w.run("doctor", "--audit-users"), subs: urlSub(w)}
+	})
+
+	// strictWorld is an initialised world on a strict operator with a signing key, three endpoints, and the key as
+	// config.json records it.
+	strictWorld := func(t *testing.T) (*confWorld, *applyEnv, nkeys.KeyPair, nkeys.KeyPair) {
+		e, sk, osk := strictEnv(t)
+		w := newConfWorldOn(t, e, true, func(a *initer) {
+			if err := os.WriteFile(a.opSeed, mustRead(t, seedFile(t, t.TempDir(), "op", osk)), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			sc := filepath.Join(a.root, "in", "signer.creds")
+			signingKeyCreds(t, e.acctPub, sk, sc)
+			a.vals["admin_creds"] = sc
+			a.vals["signing_key"] = seedFile(t, filepath.Join(a.root, "in"), "signing.seed", sk)
+		})
+		w.fleet()
+		return w, e, sk, osk
+	}
+	reg("doctor The signing key is not in the key store", func(t *testing.T) confOutRun {
+		w, _, _, _ := strictWorld(t)
+		for _, f := range []string{"signing.nk", "signing.pub"} {
+			if err := os.Remove(filepath.Join(w.a.env["MASH_KEYS_DIR"], f)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return confOutRun{ran: w.run("doctor"), subs: urlSub(w)}
+	})
+	reg("doctor The signing key is not listed in the account", func(t *testing.T) confOutRun {
+		w, e, sk, osk := strictWorld(t)
+		skPub, _ := sk.PublicKey()
+		fk, _ := nkeys.CreateAccount() // the admin creds move to another plain signing key, so that sign-in still works
+		fkPub, _ := fk.PublicKey()
+		fkCreds := filepath.Join(w.a.root, "in", "other.creds")
+		signingKeyCreds(t, e.acctPub, fk, fkCreds)
+		w.a.env["MASH_ADMIN_CREDS"] = fkCreds
+		ac := e.claims()
+		ac.SigningKeys.Add(fkPub)
+		delete(ac.SigningKeys, skPub)
+		tok, err := ac.Encode(osk)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pushAccountJWT(t, e, tok)
+		return confOutRun{ran: w.run("doctor"), subs: urlSub(w)}
 	})
 
 	reg("limits show Limits", func(t *testing.T) confOutRun {
