@@ -694,7 +694,7 @@ func (k cancelAfterCreateKV) Create(ctx context.Context, key string, val []byte,
 		return 0, err
 	}
 	k.cancel()
-	return 0, ctx.Err()
+	return 0, context.Canceled
 }
 
 type cancelAfterCreateJS struct {
@@ -730,6 +730,80 @@ func TestTakeLeaseCancelAfterStoredWriteReleasesOwnLease(t *testing.T) {
 		t.Fatalf("lease still held after a cancelled first write: %s", ent.Value())
 	} else if !errors.Is(err, jetstream.ErrKeyNotFound) && !errors.Is(err, jetstream.ErrKeyDeleted) {
 		t.Fatal(err)
+	}
+}
+
+// lateApplyKV models a server that applies a lease write after the caller has gone: Create hands the write over and,
+// when its context is cancelled first, returns that error at once while the write lands lateBy later. A Create whose
+// context is not cancelled waits for the write to land and returns its result.
+type lateApplyKV struct {
+	jetstream.KeyValue
+	lateBy time.Duration
+}
+
+func (k lateApplyKV) Create(ctx context.Context, key string, val []byte, o ...jetstream.KVCreateOpt) (uint64, error) {
+	type res struct {
+		rev uint64
+		err error
+	}
+	done := make(chan res, 1)
+	go func() {
+		time.Sleep(k.lateBy)
+		rev, err := k.KeyValue.Create(context.Background(), key, val, o...)
+		done <- res{rev, err}
+	}()
+	select {
+	case r := <-done:
+		return r.rev, r.err
+	case <-ctx.Done():
+		return 0, ctx.Err()
+	}
+}
+
+type lateApplyJS struct {
+	jetstream.JetStream
+	lateBy time.Duration
+}
+
+func (j lateApplyJS) KeyValue(ctx context.Context, bucket string) (jetstream.KeyValue, error) {
+	kv, err := j.JetStream.KeyValue(ctx, bucket)
+	if err != nil {
+		return nil, err
+	}
+	return lateApplyKV{kv, j.lateBy}, nil
+}
+
+// A lease write the server applies after the caller was cancelled, and after a cleanup that read the key would have
+// looked, still leaves no lease behind: the write settles before the cleanup.
+func TestTakeLeaseCancelBeforeLateWriteReleasesOwnLease(t *testing.T) {
+	f := newFixture(t, "a")
+	e, err := OpenClient(context.Background(), f.cfg("a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.nc.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	e.js = lateApplyJS{e.js, 200 * time.Millisecond}
+	time.AfterFunc(50*time.Millisecond, cancel)
+	if err := e.takeLease(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("got %v, want context.Canceled", err)
+	}
+	kv := putLeaseKV(t, f)
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		ent, err := kv.Get(context.Background(), tkey("a"))
+		if err != nil {
+			if !errors.Is(err, jetstream.ErrKeyNotFound) && !errors.Is(err, jetstream.ErrKeyDeleted) {
+				t.Fatal(err)
+			}
+			if time.Now().After(deadline.Add(-2500 * time.Millisecond)) {
+				break // free, and given the late write time to land
+			}
+		} else if time.Now().After(deadline) {
+			t.Fatalf("lease still held after a write applied late: %s", ent.Value())
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }
 
