@@ -37,7 +37,7 @@ queue; every other pull request queues by itself as in ADR 0177.
 * **Condition.** The `default` and `docs` queues' `queue_conditions` gain `or: [-files ~= <regex>, label = lead-approved]`. <!-- adrlint:allow vocabulary -->
   The `docs` queue needs it too, because a pull request that changes only `docs/decisions/` is docs-only.
 * **Exception paths** (one regex, the same text in both queues, matched against each changed path):
-  * CI and queue configuration: `.github/`, `.mergify.yml`, `scripts/ci-*` (including `scripts/ci-changes`), `scripts/gate*`;
+  * CI and queue configuration: `.github/`, `.mergify.yml`, `scripts/ci-*` (including `scripts/ci-changes`), `scripts/gate*`, and every script a workflow runs from the pull request (`scripts/build-twice`, `scripts/adrlint`, `scripts/changelog`, `scripts/doclint`, `scripts/draft-guard`, `scripts/lead-approve`, `scripts/notes-base`, `scripts/publishcheck`, `scripts/repofiles`, `scripts/review*`), since a change to one can make its own check pass; the shipped assets (`install.sh`, the `mash-*` scripts) are not included; <!-- adrlint:allow vocabulary -->
   * release tooling: `scripts/release*` (including `scripts/releasecheck/`), `internal/release/`;
   * `spec/`;
   * `docs/decisions/`, the whole folder;

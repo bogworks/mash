@@ -698,7 +698,8 @@ func TestMergify_exceptionPaths(t *testing.T) {
 	for _, p := range []string{".github/workflows/ci.yml", ".mergify.yml", "scripts/ci-changes", "scripts/releasecheck/main.go",
 		"scripts/release-check", "internal/release/checks.go", "spec/mash.json", "docs/decisions/0001-x.md",
 		"contracts/0.5.5-build-plan.md", "internal/policy/x.go", "internal/policyserve/a.go", "internal/policyapply/b.go",
-		"internal/requesterreg/x.go", "internal/issue/request.go", "internal/reconcile/x.go", "internal/listset/check.go"} {
+		"internal/requesterreg/x.go", "internal/issue/request.go", "internal/reconcile/x.go", "internal/listset/check.go",
+		"scripts/build-twice", "scripts/adrlint/main.go", "scripts/doclint/main.go", "scripts/changelog/main.go", "scripts/review-pr"} {
 		if !fileRegexMatches(t, re, p) {
 			t.Errorf("%q must be an exception path", p)
 		}
@@ -783,6 +784,32 @@ func TestMergify_exceptionPathsNeedTheLabelToQueue(t *testing.T) {
 	}{{".mergify.yml", "", false}, {".mergify.yml", "lead-approved", true}, {"cmd/mash/main.go", "", true}} {
 		if got := evalCondition(t, conds, map[string]string{"files": c.files, "label": c.labels}); got != c.eligible {
 			t.Errorf("default queue, files %q labels %q: eligible = %v, want %v", c.files, c.labels, got, c.eligible)
+		}
+	}
+}
+
+// Every script a workflow runs from the pull request itself is an exception path: a change to it can make its own check pass.
+// The shipped assets (install.sh, the mash-* scripts) are product, not CI, and stay out.
+func TestMergify_exceptionRegexCoversTheScriptsWorkflowsRun(t *testing.T) {
+	re := exceptionGroup(t, loadMergify(t), "default")
+	files, err := filepath.Glob("../../.github/workflows/*.yml")
+	if err != nil || len(files) == 0 {
+		t.Fatalf("no workflows found: %v", err)
+	}
+	ref := regexp.MustCompile(`scripts/([A-Za-z0-9_-]+)`)
+	for _, f := range files {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range ref.FindAllStringSubmatch(string(b), -1) {
+			name := m[1]
+			if name == "install" || strings.HasPrefix(name, "mash-") {
+				continue
+			}
+			if !fileRegexMatches(t, re, "scripts/"+name) {
+				t.Errorf("%s runs scripts/%s, which is not an exception path: add it to the regex in .mergify.yml (both queues)", filepath.Base(f), name)
+			}
 		}
 	}
 }
