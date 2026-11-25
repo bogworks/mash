@@ -80,7 +80,7 @@ jobs:
           if ! printf '%s' "$BEFORE" | grep -Eq '^[0-9a-f]{40}$'; then
             echo "keep-label: reset (no old head)"
           elif git -C trusted -c "credential.helper=!f() { echo username=x-access-token; echo \"password=\$GH_TOKEN\"; }; f" \
-                 fetch -q --no-tags "https://github.com/$GH_REPO" "$BASE" "$BEFORE" "$AFTER" 2> "$RUNNER_TEMP/keep.err" \
+                 fetch -q --no-tags "${GITHUB_SERVER_URL:?}/$GH_REPO" "$BASE" "$BEFORE" "$AFTER" 2> "$RUNNER_TEMP/keep.err" \
                && gh api "repos/$GH_REPO/commits/$BEFORE/check-runs?per_page=100" > "$RUNNER_TEMP/before-checks.json" 2>> "$RUNNER_TEMP/keep.err"; then
             echo "fetched=yes" >> "$GITHUB_OUTPUT"
           else
