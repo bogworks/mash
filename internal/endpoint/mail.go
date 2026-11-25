@@ -526,7 +526,6 @@ func (e *Endpoint) deliverLoop(deliver Deliverer, queue <-chan pending, quit <-c
 		if len(show) == 0 {
 			continue
 		}
-		e.recordDeliveredBatch(show) // the mail this serve is about to show or spool: past the lease, the hold and the duplicates
 		if e.hooked() {
 			e.spoolBatch(deliver, show, h, seen)
 			continue
@@ -1462,6 +1461,7 @@ func (e *Endpoint) deliverBatch(deliver Deliverer, show []pending, seen *seenSet
 		}
 		return
 	}
+	e.recordDeliveredBatch(show) // the write succeeded and the lease held: record before any ack
 	for _, p := range show {
 		seen.mark(p)
 		if e.mayAck(p) {
