@@ -143,7 +143,14 @@ fileowner_l() {
     if [ "$BSD" = 1 ]; then stat -L -f %u "$1" 2>/dev/null; else stat -L -c %u "$1" 2>/dev/null; fi
 }
 filemode_l() {
-    if [ "$BSD" = 1 ]; then stat -L -f %Lp "$1" 2>/dev/null; else stat -L -c %a "$1" 2>/dev/null; fi
+    if [ "$BSD" = 1 ]; then
+        # %Lp drops the sticky bit; %p is the type and the permissions (101777),
+        # so keep its last four digits (1777, 0755)
+        _fm=$(stat -L -f %p "$1" 2>/dev/null) || return 1
+        case $_fm in '' | *[!0-7]*) return 1 ;; esac
+        [ "${#_fm}" -le 4 ] || _fm=${_fm#"${_fm%????}"}
+        printf '%s\n' "$_fm"
+    else stat -L -c %a "$1" 2>/dev/null; fi
 }
 
 # not_others_writable MODE: true when neither the group nor others digit of an

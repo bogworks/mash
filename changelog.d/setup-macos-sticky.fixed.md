@@ -1,0 +1,1 @@
+**The local NATS setup script accepts a sticky folder like /tmp on macOS.** It read the folder's mode without the sticky bit, so it refused `--dir` under /tmp (mode 1777) as writable by others; it now reads the full mode, as it already did on Linux ([#1341](https://github.com/bogworks/mash/issues/1341)).
