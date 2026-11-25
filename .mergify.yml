@@ -80,8 +80,14 @@ queue_rules:
       # GitHub returns at most 3000 files of a pull request and Mergify cannot see past that (codex H1): a large pull request is never docs-only here.
       - "#files < 300"
       - -files ~= ^(?!(.*\.md$|docs/))|^docs/(allowed_signers|review/policy\.json|skipped-releases\.txt|release-cutover)$
+      # Exception paths (ADR 0182): a pull request touching one needs the `lead-approved` label (label-reset removes it on every
+      # push). EXCEPTION-PATHS regex: one source, written in the docs queue and the default queue; mergify_test.go fails if they differ.
+      - or:
+          - -files ~= ^(\.github/|\.mergify\.yml$|scripts/(ci-|gate|release|build-twice|buildrelease|adrlint|changelog|doclint|draft-guard|lead-approve|notes-base|publishcheck|repofiles|review)|internal/release/|spec/|docs/decisions/|contracts/|internal/policy|internal/(requesterreg|issue|reconcile|listset)(/|$))
+          - label = lead-approved
       - check-success = @github-actions/pr-check
       - check-success = @github-actions/adr-lint
+      - check-success = @github-actions/label-reset # on this head, so a label left by an earlier push cannot let an exception path in
     merge_conditions:
       - check-success = @github-actions/pr-check
     batch_size:
@@ -95,12 +101,23 @@ queue_rules:
     # not a draft, has no conflict, is not held, and codex-review (the commit status the orchestrator's review watcher,
     # scripts/review-pr, posts on the head), pr-check (ci.yml's aggregate of every required job), adr-lint and
     # label-reset (it must have run on this head, so a push cannot slip in on the previous head's label) are green. No
-    # lead approval is needed (ADR 0177); `hold` is the only brake, and its reason is written on the pull request.
+    # approval is needed (ADR 0177) except on exception paths, which need the `lead-approved` label (removed on every push
+    # by label-reset, ADR 0182); `hold` is the other brake, and its reason is written on the pull request.
     queue_conditions:
       - base = main
       - -draft
       - -conflict
       - label != hold
+      # Exception paths (ADR 0182): a pull request touching one needs the `lead-approved` label (label-reset removes it on every
+      # push). EXCEPTION-PATHS regex: one source, written in the docs queue and the default queue; mergify_test.go fails if they differ.
+      - or:
+          - -files ~= ^(\.github/|\.mergify\.yml$|scripts/(ci-|gate|release|build-twice|buildrelease|adrlint|changelog|doclint|draft-guard|lead-approve|notes-base|publishcheck|repofiles|review)|internal/release/|spec/|docs/decisions/|contracts/|internal/policy|internal/(requesterreg|issue|reconcile|listset)(/|$))
+          - label = lead-approved
+      # GitHub lists at most 3000 files of a pull request and Mergify cannot see past that: a pull request that large could hide an
+      # exception path, so it too needs the label.
+      - or:
+          - "#files < 3000"
+          - label = lead-approved
       - check-success = codex-review
       - check-success = @github-actions/pr-check
       - check-success = @github-actions/adr-lint

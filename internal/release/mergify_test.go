@@ -163,13 +163,16 @@ func TestMergify_waitsOnlyForChecksThatExist(t *testing.T) {
 	}
 }
 
-// A pull request enters the queue by itself (ADR 0177): queue_conditions hold no lead-review status, no approval and no
-// or group, and the hold label stays the brake in queue_conditions and auto_merge_conditions.
+// A pull request enters the queue by itself (ADR 0177): queue_conditions hold no lead-review status and no approval, and
+// the only or group is the exception-path one (ADR 0182); the hold label stays the brake in queue_conditions and
+// auto_merge_conditions.
 func TestMergify_entryNeedsNoApproval(t *testing.T) {
 	m := loadMergify(t)
 	plain, ors := splitConditions(t, queueRule(t, m, "default").QueueConditions)
-	if len(ors) != 0 {
-		t.Errorf("queue_conditions have or groups %v: entry needs no approval", ors)
+	// the exception-path group, and the size group beside it (a pull request GitHub cannot list whole needs the label too)
+	if len(ors) != 2 || len(ors[0]) != 2 || ors[0][1] != "label = lead-approved" || !strings.HasPrefix(ors[0][0], "-files ~= ") ||
+		len(ors[1]) != 2 || ors[1][0] != "#files < 3000" || ors[1][1] != "label = lead-approved" {
+		t.Errorf("queue_conditions or groups = %v, want the exception-path group and the #files < 3000 group (ADR 0182)", ors)
 	}
 	for _, c := range plain {
 		for _, banned := range []string{"lead-review", "approved-reviews-by", "lead-approved"} {
@@ -378,7 +381,7 @@ func evalCondition(t *testing.T, c any, attrs map[string]string) bool {
 		case "~=":
 			if m[2] == "files" { // a list attribute: true when ANY changed file matches (so `-files ~=` means none does)
 				for _, f := range strings.Split(attrs["files"], "\n") {
-					if f != "" && codeRegexMatches(t, m[4], f) {
+					if f != "" && fileRegexMatches(t, m[4], f) {
 						res = true
 					}
 				}
@@ -505,6 +508,16 @@ func codeRegexMatches(t *testing.T, re, path string) bool {
 	return regexp.MustCompile(rest).MatchString(path)
 }
 
+// fileRegexMatches evaluates a `files ~=` regex on one path: the code regex by codeRegexMatches, any other (the exception
+// paths regex) as plain RE2, since it has no lookahead.
+func fileRegexMatches(t *testing.T, re, path string) bool {
+	t.Helper()
+	if strings.HasPrefix(re, "^(?!") {
+		return codeRegexMatches(t, re, path)
+	}
+	return regexp.MustCompile(re).MatchString(path)
+}
+
 // The docs queue's code regex, as written in .mergify.yml.
 func docsQueueRegex(t *testing.T, m mergify) string {
 	t.Helper()
@@ -518,7 +531,7 @@ func docsQueueRegex(t *testing.T, m mergify) string {
 	return ""
 }
 
-// The docs queue is first, holds exactly the conditions a docs-only pull request needs (the docs lint in pr-check, adr-lint,
+// The docs queue is first, holds exactly the conditions a docs-only pull request needs (the docs lint in pr-check, adr-lint, label-reset (so an exception path's label is the one for this head),
 // and the usual blockers), none of the review or approval ones, and merges the same way as the default queue.
 func TestMergify_docsQueue(t *testing.T) {
 	m := loadMergify(t)
@@ -527,12 +540,12 @@ func TestMergify_docsQueue(t *testing.T) {
 	}
 	d := queueRule(t, m, "docs")
 	plain, ors := splitConditions(t, d.QueueConditions)
-	if len(ors) != 0 {
-		t.Errorf("the docs queue has or groups: %v (no approval or label)", ors)
+	if len(ors) != 1 || len(ors[0]) != 2 || ors[0][1] != "label = lead-approved" || !strings.HasPrefix(ors[0][0], "-files ~= ") {
+		t.Errorf("the docs queue or groups = %v, want only the exception-path group (ADR 0182)", ors)
 	}
 	re := docsQueueRegex(t, m)
 	want := []string{"base = main", "-draft", "-conflict", "label != hold", `#files >= 1`, `#files < 300`, "-files ~= " + re,
-		"check-success = @github-actions/pr-check", "check-success = @github-actions/adr-lint"}
+		"check-success = @github-actions/pr-check", "check-success = @github-actions/adr-lint", "check-success = @github-actions/label-reset"}
 	got := append([]string{}, plain...)
 	sort.Strings(got)
 	sort.Strings(want)
@@ -652,5 +665,161 @@ func TestMergify_aHugePullRequestIsNeverDocsOnly(t *testing.T) {
 	small := map[string]string{"base": "main", "head": "pr/x/y", "author": "randybias", "files": "docs/a.md"}
 	if evalCondition(t, m.MergeProtections[0].If, small) {
 		t.Error("the merge protection rule must be inactive for one docs file")
+	}
+}
+
+// exceptionGroup returns the exception-path regex text of a queue rule: the `-files ~=` member of its one or group, whose
+// other member is `label = lead-approved`.
+func exceptionGroup(t *testing.T, m mergify, queue string) string {
+	t.Helper()
+	_, ors := splitConditions(t, queueRule(t, m, queue).QueueConditions)
+	var group []string
+	for _, o := range ors {
+		if len(o) == 2 && strings.HasPrefix(o[0], "-files ~= ") {
+			if group != nil {
+				t.Fatalf("%s queue has more than one `-files ~=` or group: %v", queue, ors)
+			}
+			group = o
+		}
+	}
+	if group == nil || group[1] != "label = lead-approved" {
+		t.Fatalf("%s queue or groups = %v, want one group [-files ~= <regex>, label = lead-approved]", queue, ors)
+	}
+	return strings.TrimPrefix(group[0], "-files ~= ")
+}
+
+// The exception-path regex (ADR 0182) is one source written in two queues: the text must be identical.
+func TestMergify_exceptionRegexIsTheSameInBothQueues(t *testing.T) {
+	m := loadMergify(t)
+	d, def := exceptionGroup(t, m, "docs"), exceptionGroup(t, m, "default")
+	if d != def {
+		t.Errorf("exception-path regex differs:\ndocs:    %s\ndefault: %s", d, def)
+	}
+	if _, err := regexp.Compile(def); err != nil {
+		t.Errorf("exception-path regex does not compile in RE2: %v", err)
+	}
+}
+
+func TestMergify_exceptionPaths(t *testing.T) {
+	re := exceptionGroup(t, loadMergify(t), "default")
+	for _, p := range []string{".github/workflows/ci.yml", ".mergify.yml", "scripts/ci-changes", "scripts/releasecheck/main.go",
+		"scripts/release-check", "internal/release/checks.go", "spec/mash.json", "docs/decisions/0001-x.md",
+		"contracts/0.5.5-build-plan.md", "internal/policy/x.go", "internal/policyserve/a.go", "internal/policyapply/b.go",
+		"internal/requesterreg/x.go", "internal/issue/request.go", "internal/reconcile/x.go", "internal/listset/check.go",
+		"scripts/build-twice", "scripts/adrlint/main.go", "scripts/doclint/main.go", "scripts/changelog/main.go", "scripts/review-pr"} {
+		if !fileRegexMatches(t, re, p) {
+			t.Errorf("%q must be an exception path", p)
+		}
+	}
+	for _, p := range []string{"cmd/mash/main.go", "internal/endpoint/mail.go", "internal/listsetx/x.go", "internal/issuex/x.go",
+		"README.md", "docs/guide/quickstart.md", "scripts/mash-local-nats-setup.sh", "internal/sap/address.go"} {
+		if fileRegexMatches(t, re, p) {
+			t.Errorf("%q must not be an exception path", p)
+		}
+	}
+}
+
+// Every engine package scripts/releasecheck/unlinked.go refuses (policyPrefix and policyNamedElsewhere) is an exception
+// path, so a new engine package added there without the regex fails here.
+func TestMergify_exceptionRegexCoversTheEngineList(t *testing.T) {
+	re := exceptionGroup(t, loadMergify(t), "default")
+	b, err := os.ReadFile(filepath.Join(repoRoot(t), "scripts", "releasecheck", "unlinked.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(b)
+	pm := regexp.MustCompile(`(?m)^const policyPrefix = "([^"]+)"`).FindStringSubmatch(src)
+	lm := regexp.MustCompile(`(?s)var policyNamedElsewhere = \[\]string\{(.*?)\n\}`).FindStringSubmatch(src)
+	if pm == nil || lm == nil {
+		t.Fatal("scripts/releasecheck/unlinked.go: policyPrefix or policyNamedElsewhere not found")
+	}
+	pkgs := []string{pm[1], pm[1] + "x/a.go", pm[1] + "/sub/a.go"}
+	named := regexp.MustCompile(`"([^"]+)"`).FindAllStringSubmatch(lm[1], -1)
+	if len(named) == 0 {
+		t.Fatal("policyNamedElsewhere has no entries")
+	}
+	for _, n := range named {
+		pkgs = append(pkgs, n[1]+"/x.go", n[1]+"/sub/x.go")
+	}
+	for _, p := range pkgs {
+		if !fileRegexMatches(t, re, p) {
+			t.Errorf("%q is in the order-16 engine list of scripts/releasecheck/unlinked.go but is not an exception path: update the regex in .mergify.yml (both queues)", p)
+		}
+	}
+}
+
+// A pull request touching an exception path enters a queue only with `lead-approved`; every other one needs no label.
+func TestMergify_exceptionPathsNeedTheLabelToQueue(t *testing.T) {
+	m := loadMergify(t)
+	for _, queue := range []string{"default", "docs"} {
+		var conds []any // the file and label conditions; checks and the rest are not modelled
+		for _, c := range queueRule(t, m, queue).QueueConditions {
+			if s, ok := c.(string); ok && !(strings.HasPrefix(s, "#files") || strings.HasPrefix(s, "-files")) {
+				continue
+			}
+			conds = append(conds, c)
+		}
+		for _, c := range []struct {
+			name, files, labels string
+			eligible            bool
+		}{
+			{"exception path, no label", "docs/decisions/0001-x.md", "", false},
+			{"exception path, label", "docs/decisions/0001-x.md", "lead-approved", true},
+			{"exception path among others, no label", "docs/a.md\ndocs/decisions/0001-x.md", "", false},
+			{"ordinary docs, no label", "docs/a.md", "", true},
+		} {
+			if queue == "default" {
+				c.files = strings.ReplaceAll(c.files, "docs/a.md", "cmd/mash/main.go")
+			}
+			attrs := map[string]string{"files": c.files, "label": c.labels}
+			// the docs queue only takes docs-only pull requests, so a code file is modelled by the default queue alone
+			if got := evalCondition(t, conds, attrs); got != c.eligible {
+				t.Errorf("%s queue, %s: eligible = %v, want %v", queue, c.name, got, c.eligible)
+			}
+		}
+	}
+	// A code pull request on an exception path (.mergify.yml) and an ordinary code one, in the default queue.
+	var conds []any
+	for _, c := range queueRule(t, m, "default").QueueConditions {
+		if _, ok := c.(map[string]any); ok {
+			conds = append(conds, c)
+		}
+	}
+	for _, c := range []struct {
+		files, labels string
+		eligible      bool
+	}{{".mergify.yml", "", false}, {".mergify.yml", "lead-approved", true}, {"cmd/mash/main.go", "", true},
+		{"scripts/buildrelease/main.go", "", false}, {"scripts/buildrelease/main.go", "lead-approved", true},
+		// GitHub lists at most 3000 files: a pull request that large may hide an exception path
+		{strings.Repeat("cmd/mash/x.go\n", 2999) + "cmd/mash/y.go", "", false}, {strings.Repeat("cmd/mash/x.go\n", 2998) + "cmd/mash/y.go", "", true}} {
+		if got := evalCondition(t, conds, map[string]string{"files": c.files, "label": c.labels}); got != c.eligible {
+			t.Errorf("default queue, files %q labels %q: eligible = %v, want %v", c.files, c.labels, got, c.eligible)
+		}
+	}
+}
+
+// Every script a workflow runs from the pull request itself is an exception path: a change to it can make its own check pass.
+// The shipped assets (install.sh, the mash-* scripts) are product, not CI, and stay out.
+func TestMergify_exceptionRegexCoversTheScriptsWorkflowsRun(t *testing.T) {
+	re := exceptionGroup(t, loadMergify(t), "default")
+	files, err := filepath.Glob(filepath.Join(repoRoot(t), ".github", "workflows", "*.yml"))
+	if err != nil || len(files) == 0 {
+		t.Fatalf("no workflows found: %v", err)
+	}
+	ref := regexp.MustCompile(`scripts/([A-Za-z0-9_-]+)`)
+	for _, f := range files {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range ref.FindAllStringSubmatch(string(b), -1) {
+			name := m[1]
+			if name == "install" || strings.HasPrefix(name, "mash-") {
+				continue
+			}
+			if !fileRegexMatches(t, re, "scripts/"+name) {
+				t.Errorf("%s runs scripts/%s, which is not an exception path: add it to the regex in .mergify.yml (both queues)", filepath.Base(f), name)
+			}
+		}
 	}
 }
