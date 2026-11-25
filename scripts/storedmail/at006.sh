@@ -8,7 +8,8 @@
 # Nothing is created on the host, no directory and no file: `git archive $AT006_BASE` is streamed into the container on
 # stdin and extracted there, the container is started and the receipt is printed. The released binaries are downloaded
 # and run only inside the container.
-# Env: AT006_BASE       git ref of the AT-018 oracle (default origin/main); must resolve to a commit, printed in the receipt.
+# Env: AT006_BASE       git ref of the AT-018 oracle, printed in the receipt. Proof runs use origin/main (the default); any
+#                       other value is a debugging run that exits non-zero; a base equal to the tested commit is refused.
 #      MASH_RELEASE_REPO  GitHub repo the releases come from (default bogworks/mash).
 #      AT006_TAGS      space-separated tags replacing the derived list; debugging only, the run exits non-zero.
 #      AT006_DIRTY=1   run on a tree with uncommitted changes (the receipt says so; not a proof run).
@@ -28,6 +29,14 @@ trap cleanup EXIT
 commit=$(git -C "$root" rev-parse HEAD)
 base=${AT006_BASE:-origin/main}
 main=$(git -C "$root" rev-parse --verify "${base}^{commit}") || { echo "AT006_BASE $base does not resolve to a commit in this repository" >&2; exit 1; }
+if [ "$main" = "$commit" ]; then
+	echo "the oracle base $base is the tested commit $commit; AT-018 needs a base distinct from the tree" >&2
+	exit 1
+fi
+if [ "$base" != origin/main ]; then
+	echo "AT006_BASE override ($base): not a proof run; the run exits non-zero"
+	rc=1
+fi
 tree=clean
 if [ -n "$(git -C "$root" status --porcelain)" ]; then
 	tree="DIRTY (uncommitted changes: not a proof run)"
