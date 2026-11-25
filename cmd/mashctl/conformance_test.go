@@ -298,6 +298,7 @@ func confBuildVerbs(help string) []string {
 }
 
 func TestConformance(t *testing.T) {
+	atTerminal(t) // the specification shows the terminal form of --json (#1043)
 	root := loadConfSpec(t)
 	var tracked []specCommand
 	confEffective := confEffectiveOptions(root)

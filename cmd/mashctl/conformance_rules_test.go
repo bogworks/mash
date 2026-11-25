@@ -28,6 +28,7 @@ func TestConfIsDescription(t *testing.T) {
 
 // The --json shape of a message that names no sender (the case "Messages" of `endpoint inbox`).
 func TestConfInboxMessagesJSON(t *testing.T) {
+	atTerminal(t) // expects the terminal form of --json (#1043)
 	j := confInboxMessagesRun(t, "--json")
 	var doc struct {
 		Messages []map[string]any `json:"messages"`

@@ -579,6 +579,7 @@ func TestEndpointCreateHelp(t *testing.T) {
 }
 
 func TestEndpointCreateGolden(t *testing.T) {
+	atTerminal(t) // expects the terminal form of --json (#1043)
 	h := newFleetEnv(t)
 	fakeKeyRevoked(t, func(string) (bool, error) { return false, nil })
 	out := t.TempDir()

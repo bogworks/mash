@@ -14,11 +14,18 @@
   "join_file": "OUT/design.join"
 }
 # exists exit 1
-{"error":"o.g.design already exists"}
+{
+  "error": "o.g.design already exists"
+}
 # not_an_address exit 2
-{"error":"not an endpoint address (the value is not shown): write owner.group.name, for example acme.demo.bob","hint":"mashctl endpoint create --help"}
+{
+  "error": "not an endpoint address (the value is not shown): write owner.group.name, for example acme.demo.bob",
+  "hint": "mashctl endpoint create --help"
+}
 # path_taken exit 1
-{"error":"OUT/design.join already exists"}
+{
+  "error": "OUT/design.join already exists"
+}
 # installed_here exit 0
 {
   "address": "o.g.three",

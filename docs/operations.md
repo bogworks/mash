@@ -215,7 +215,7 @@ mash who --json                             # machine-readable
 mash who acme.demo.alice --json             # one endpoint: its online state is endpoints[0].online
 ```
 
-`--json` always prints one object, `{"endpoints": [...]}`, in address order, and `{"endpoints":[]}` when none match. The `who` tool's structured result is the same object, byte for byte. `--wide` and the tool's `wide` change only the text: the object always carries every field of every endpoint:
+`--json` always prints one object, `{"endpoints": [...]}`, in address order, and `{"endpoints":[]}` when none match. The `who` tool's structured result is the same object; piped, `--json` prints it as the same one compact line. `--wide` and the tool's `wide` change only the text: the object always carries every field of every endpoint:
 
 | Field | Type | Present |
 |---|---|---|

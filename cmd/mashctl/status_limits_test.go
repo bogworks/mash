@@ -140,6 +140,7 @@ func (h *fleetEnv) setLimits(body string) {
 }
 
 func TestLimitsApply(t *testing.T) {
+	atTerminal(t) // expects the terminal form of --json (#1043)
 	h := newFleetEnv(t)
 	a, b := ad("a"), sap.Address{Owner: testenv.Owner, Group: "h", Instance: "b"}
 	h.seed(a)

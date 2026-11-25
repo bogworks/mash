@@ -159,6 +159,7 @@ func equalRecords(a, b store.Record) bool {
 }
 
 func TestEndpointSetUnsetJSON(t *testing.T) {
+	atTerminal(t) // expects the terminal form of --json (#1043)
 	h := newFleetEnv(t)
 	h.provisionDeclared("b")
 	out, errb, code := h.run("endpoint", "set", "o.g.b", "role=reviewer", "capability=b,a", "label.team=blue", "--json")
@@ -169,9 +170,9 @@ func TestEndpointSetUnsetJSON(t *testing.T) {
 	if code != 0 || errb != "" || out != "{\n  \"address\": \"o.g.b\",\n  \"unset\": [\n    \"label.team\"\n  ]\n}\n" {
 		t.Fatalf("unset --json: %d %q %q", code, out, errb)
 	}
-	// a refusal in JSON mode is one JSON line on stdout and nothing on stderr
+	// a refusal in JSON mode is one JSON object on stdout and nothing on stderr
 	out, errb, code = h.run("endpoint", "set", "o.g.b", "bogus=1", "--json")
-	if code != 2 || errb != "" || !strings.HasPrefix(out, `{"error":"argument 2 has a key that cannot be set`) {
+	if code != 2 || errb != "" || !strings.HasPrefix(out, "{\n  \"error\": \"argument 2 has a key that cannot be set") {
 		t.Fatalf("bad key --json: %d %q %q", code, out, errb)
 	}
 }

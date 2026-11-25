@@ -1,0 +1,1 @@
+**--json output is indented on a terminal and one compact line when piped or written to a file, in both mash and mashctl.** Error objects follow the same rule ([#1043](https://github.com/bogworks/mash/issues/1043)).

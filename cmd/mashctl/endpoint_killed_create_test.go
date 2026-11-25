@@ -196,6 +196,7 @@ func credsSeedPub(t *testing.T, path string) string {
 
 // A killed run with --json prints no document, so there is nothing for the rerun's document to contradict.
 func TestEndpointKilledCreateJSONPrintsNothing(t *testing.T) {
+	atTerminal(t) // expects the terminal form of --json (#1043)
 	h := newFleetEnv(t)
 	fakeRevoke(t, nil)
 	a := ad("killedjson")

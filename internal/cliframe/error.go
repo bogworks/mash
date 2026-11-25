@@ -1,7 +1,6 @@
 package cliframe
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -105,7 +104,8 @@ func wrapError(msg string, width int) string {
 // code 1 and its text as the message.
 //
 // In text mode stderr gets "error: MSG" and, when there is a hint, "hint: HINT"; stdout gets nothing. In JSON mode stdout
-// gets one line, {"error":"MSG","hint":"HINT"} with the hint left out when empty; stderr gets nothing.
+// gets the object {"error":"MSG","hint":"HINT"} with the hint left out when empty, indented when stdout is a terminal and one
+// compact line otherwise (WriteJSON); stderr gets nothing.
 func Report(stdout, stderr io.Writer, err error, jsonOut bool) int {
 	if err == nil {
 		return 0
@@ -129,9 +129,7 @@ func Report(stdout, stderr io.Writer, err error, jsonOut bool) int {
 			Error string `json:"error"`
 			Hint  string `json:"hint,omitempty"`
 		}{msg, hint}
-		enc := json.NewEncoder(stdout) // one line plus newline; keep < > & readable
-		enc.SetEscapeHTML(false)
-		_ = enc.Encode(out)
+		_ = WriteJSON(stdout, out) // indented at a terminal, one compact line otherwise
 		return code
 	}
 	if wrap {

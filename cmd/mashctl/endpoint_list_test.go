@@ -113,6 +113,7 @@ func TestEndpointListWide(t *testing.T) {
 }
 
 func TestEndpointListEmptyAndJSON(t *testing.T) {
+	atTerminal(t) // expects the terminal form of --json (#1043)
 	h := newFleetEnv(t)
 	out, errb, code := h.run("endpoint", "list")
 	if code != 0 || out != "No endpoints.\n" || errb != "" {
