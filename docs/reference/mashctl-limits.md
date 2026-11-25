@@ -4,7 +4,7 @@ Generated from spec/*.json by go run ./scripts/refgen. Do not edit.
 
 Show or apply the storage limits.
 
-Release: 0.5.8. Group: Mesh.
+Release: 0.5.9. Group: Mesh.
 
 ## Usage
 

@@ -5,7 +5,7 @@ Generated from spec/*.json by go run ./scripts/refgen. Do not edit.
 Refuse new mail to an endpoint. Its stored mail and its credentials are
 untouched.
 
-Release: 0.5.8. Group: Endpoints.
+Release: 0.5.9. Group: Endpoints.
 
 ## Usage
 

@@ -4,7 +4,7 @@ Generated from spec/*.json by go run ./scripts/refgen. Do not edit.
 
 Make a seed and its public key.
 
-Release: 0.5.8. Group: Setup.
+Release: 0.5.9. Group: Setup.
 
 ## Usage
 

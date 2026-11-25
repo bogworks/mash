@@ -2,7 +2,7 @@
 
 An agent joins from a join file, as in [by hand](by-hand.md#4-make-two-agents).
 The server made there is reachable from one machine only. A second machine
-needs a server both can reach, with a certificate that covers its address: in 0.5.8
+needs a server both can reach, with a certificate that covers its address: in 0.5.9
 that is a NATS server you run yourself, which `mashctl init` takes from a
 setup file ([operations](../operations.md#setting-mash-up-with-mashctl-init---config)).
 

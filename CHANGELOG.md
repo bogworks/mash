@@ -12,7 +12,22 @@ All notable user-facing changes to mash are recorded here. The format follows [K
 
 ### Upgrading
 
-Update both plugins, `mash` and `mash-setup`, then restart your Claude Code sessions. Install `mash` and `mashctl` from the same release, as before. If you set `signing_key` on 0.5.7, run `mashctl init --config <file>` once more. If a script reads the exit code of `mash doctor` or `mashctl status`, or the output of `mashctl init --json`, see the changes above; if a script runs `mash doctor`, it now exits 1 on a Claude Code older than 2.1.312.
+**This step is one-way.** If you find a problem after upgrading to 0.5.9, the next release fixes it; you do not go back to 0.5.8.
+
+On each machine that has endpoints, then on the administrator's machine, in this order:
+
+1. **Look before you change anything.** Run `mash version`, `mash doctor` and, on the administrator's machine, `mashctl doctor`. A good result is `mash version` naming your current release, and each doctor ending with no problem and exit code 0. If you set a `signing_key`, also check that both `signing.nk` and `signing.pub` are in its folder.
+2. **Install `mash` and `mashctl` 0.5.9 from the same release**, with the install steps in the README. Your endpoints, keys and mail stay where they are.
+3. **Update both plugins,** `mash` and `mash-setup`. At a shell: `claude plugin update mash@mash` and `claude plugin update mash-setup@mash`. In a session: the plugin menu, Installed, the plugin, Update now. You do not refresh the marketplace first. The `mash-setup` plugin carries its skills, so updating it brings them to 0.5.9.
+4. **Restart each Claude Code session.** A running session keeps its old hooks and its old mail process until you restart it; it keeps working as it did, and picks up 0.5.9 only when restarted.
+5. **If you set up a local NATS server with the 0.5.8 script,** you do not have to change it. The running server is left alone, and the files that script wrote, `mash-setup.yaml` and `mash-setup.json`, work with the 0.5.9 script's `--start`, `--stop` and `--remove`. Fetch the 0.5.9 script from this release only when you next want one of those.
+6. **Look again.** Run `mash version`, `mash doctor` and `mashctl doctor`. `mash version` names 0.5.9, and each doctor ends with no problem and exit code 0. If you set a `signing_key`, confirm again that `signing.nk` and `signing.pub` are both present. If they are not, 0.5.9 stops `mashctl endpoint create` and `mashctl endpoint reissue` with an `error:` line that names the missing file and a `hint:` line; it no longer signs with the account's own key instead. If you set `signing_key` on 0.5.7, run `mashctl init --config <file>` once more.
+
+While machines are at mixed versions, 0.5.8 and 0.5.9 machines send and read each other's mail on one server, in both directions. A machine you leave behind keeps working.
+
+### If a script reads a doctor's exit code
+
+`mash doctor` and `mashctl doctor` now exit 1 when they find a problem, and 0 otherwise. A Claude Code older than 2.1.312 is such a problem for `mash doctor`; a newer one warns, and one that cannot be found is skipped. `mashctl status` with no server configured now prints `error: no server is configured` and exits 1. `mashctl init --json` names the signing key's public key `signing_key_pub`.
 
 ### Added
 

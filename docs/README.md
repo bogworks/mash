@@ -1,6 +1,6 @@
 # mash documentation
 
-Start with the [README](../README.md). This index is for version 0.5.6. What changed in each release: [CHANGELOG](../CHANGELOG.md).
+Start with the [README](../README.md). What changed in each release: [CHANGELOG](../CHANGELOG.md).
 
 ## Get started
 
