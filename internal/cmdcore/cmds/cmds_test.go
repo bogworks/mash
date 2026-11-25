@@ -84,7 +84,7 @@ func TestSendArgv(t *testing.T) {
 			if code != 0 || errs != "" {
 				t.Fatalf("code %d stderr %q", code, errs)
 			}
-			if out != "Mail sent (number 42).\n" && !strings.HasSuffix(out, "mail sent (number 42).\n") {
+			if out != "Mail sent (number 42)\n" && !strings.HasSuffix(out, "mail sent (number 42)\n") {
 				t.Errorf("stdout %q", out)
 			}
 			if f.to != tc.to || f.text != tc.text || f.o != tc.o {
@@ -157,7 +157,7 @@ func TestSendFailures(t *testing.T) {
 		err  error
 		want string
 	}{
-		{"no such endpoint", fmt.Errorf("lookup: %w", cmds.ErrNoSuchEndpoint), "error: no endpoint has the address acme.demo.alise\nhint: mash who\n"},
+		{"no such endpoint", fmt.Errorf("lookup: %w", cmds.ErrNoSuchEndpoint), "error: no endpoint acme.demo.alise\nhint: mash who\n"},
 		{"recipient suspended", fmt.Errorf("send: %w", cmds.ErrRecipientSuspended), "error: acme.demo.alise is suspended or was deleted; nothing was sent\nhint: mash who\n"},
 		{"not signed in", &cmds.SignInError{Addr: "acme.demo.bob"}, "error: acme.demo.bob cannot sign in: the server refused its credentials\nhint: mash doctor\n"},
 		{"not signed in, no name", cmds.ErrNotSignedIn, "error: this endpoint cannot sign in: the server refused its credentials\nhint: mash doctor\n"},
@@ -197,17 +197,17 @@ func TestSendText(t *testing.T) {
 		verbose bool
 		want    string
 	}{
-		{"sent", cmds.SendResult{To: "acme.demo.alice", Number: 42, Kind: "task"}, false, "Mail sent (number 42)."},
-		{"no kind", cmds.SendResult{Number: 3}, false, "Mail sent (number 3)."},
-		{"urgent task", cmds.SendResult{Kind: "task", Urgent: true, Number: 5}, false, "Urgent mail sent (number 5)."},
-		{"question", cmds.SendResult{Kind: "question", Number: 6}, false, "Question mail sent (number 6)."},
-		{"urgent question", cmds.SendResult{Kind: "question", Urgent: true, Number: 43}, false, "Urgent question mail sent (number 43)."},
-		{"duplicate", cmds.SendResult{Kind: "task", Duplicate: true, Number: 42}, false, "Mail already sent; nothing new stored."},
-		{"retagged", cmds.SendResult{Kind: "fyi", Retagged: true, Number: 44}, false, "Mail sent as fyi (number 44): a reply marked question that asks nothing."},
-		{"retagged urgent", cmds.SendResult{Kind: "fyi", Urgent: true, Retagged: true, Number: 45}, false, "Urgent mail sent as fyi (number 45): a reply marked question that asks nothing."},
+		{"sent", cmds.SendResult{To: "acme.demo.alice", Number: 42, Kind: "task"}, false, "Mail sent (number 42)"},
+		{"no kind", cmds.SendResult{Number: 3}, false, "Mail sent (number 3)"},
+		{"urgent task", cmds.SendResult{Kind: "task", Urgent: true, Number: 5}, false, "Urgent mail sent (number 5)"},
+		{"question", cmds.SendResult{Kind: "question", Number: 6}, false, "Question mail sent (number 6)"},
+		{"urgent question", cmds.SendResult{Kind: "question", Urgent: true, Number: 43}, false, "Urgent question mail sent (number 43)"},
+		{"duplicate", cmds.SendResult{Kind: "task", Duplicate: true, Number: 42}, false, "Mail already sent; nothing new stored"},
+		{"retagged", cmds.SendResult{Kind: "fyi", Retagged: true, Number: 44}, false, "Mail sent as fyi (number 44): a reply marked question that asks nothing"},
+		{"retagged urgent", cmds.SendResult{Kind: "fyi", Urgent: true, Retagged: true, Number: 45}, false, "Urgent mail sent as fyi (number 45): a reply marked question that asks nothing"},
 		{"retagged verbose", cmds.SendResult{To: "acme.demo.alice", Number: 9, Kind: "fyi", Retagged: true}, true,
-			"Mail sent as fyi (number 9): a reply marked question that asks nothing.\nto:     acme.demo.alice\nkind:   fyi\nurgent: no"},
-		{"duplicate beats retagged", cmds.SendResult{Kind: "fyi", Duplicate: true, Retagged: true}, false, "Mail already sent; nothing new stored."},
+			"Mail sent as fyi (number 9): a reply marked question that asks nothing\nto:     acme.demo.alice\nkind:   fyi\nurgent: no"},
+		{"duplicate beats retagged", cmds.SendResult{Kind: "fyi", Duplicate: true, Retagged: true}, false, "Mail already sent; nothing new stored"},
 		{"verbose", cmds.SendResult{To: "acme.demo.alice", Number: 42, Kind: "task"}, true,
 			"Mail sent (number 42)\nto:     acme.demo.alice\nkind:   task\nurgent: no"},
 		{"verbose urgent", cmds.SendResult{To: "acme.demo.alice", Number: 7, Kind: "fyi", Urgent: true}, true,
@@ -306,7 +306,7 @@ func TestSendTool(t *testing.T) {
 		t.Errorf("tool %q %q", tool.Name, tool.Description)
 	}
 	_, _, err := tool.CallStructured(context.Background(), json.RawMessage(`{"address":"acme.demo.alise","message":"hi"}`))
-	if err == nil || err.Error() != "error: no endpoint has the address acme.demo.alise\nhint: mash who" {
+	if err == nil || err.Error() != "error: no endpoint acme.demo.alise\nhint: mash who" {
 		t.Errorf("err = %v", err)
 	}
 	for _, bad := range []string{`{"address":"a.b.c"}`, `{"message":"m"}`, `{"address":"a.b.c","message":"m","kind":"loud"}`, `{"address":"a.b.c","message":"m","file":"x"}`, `{"address":"a.b.c","message":"m","reply_to":"x"}`, `[]`} {
@@ -318,7 +318,7 @@ func TestSendTool(t *testing.T) {
 	f.err = nil
 	f.rc.Number = 5
 	got, _, err := tool.MCP().CallStructured(context.Background(), json.RawMessage(`{"address":"a.b.c","message":"m"}`))
-	if err != nil || got != "Mail sent (number 5)." {
+	if err != nil || got != "Mail sent (number 5)" {
 		t.Errorf("MCP().CallStructured = %q, %v", got, err)
 	}
 }
@@ -482,7 +482,7 @@ func TestJSONErrorsBothDoors(t *testing.T) {
 		wantJSON string
 	}{
 		{"no such endpoint", []string{"acme.demo.alise", "hi"}, `{"address":"acme.demo.alise","message":"hi"}`, cmds.ErrNoSuchEndpoint, 1,
-			`{"error":"no endpoint has the address acme.demo.alise","hint":"mash who"}`},
+			`{"error":"no endpoint acme.demo.alise","hint":"mash who"}`},
 		{"not signed in", []string{"a.b.c", "hi"}, `{"address":"a.b.c","message":"hi"}`, &cmds.SignInError{Addr: "acme.demo.bob"}, 1,
 			`{"error":"acme.demo.bob cannot sign in: the server refused its credentials","hint":"mash doctor"}`},
 		{"server not answering", []string{"a.b.c", "hi"}, `{"address":"a.b.c","message":"hi"}`, cmdcore.ServerNotAnswering("tls://h:4222"), 1,

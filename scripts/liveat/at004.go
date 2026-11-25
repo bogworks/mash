@@ -998,8 +998,8 @@ func (s *at4) join() {
 		cfg, _ := freshCfg("join-dry")
 		r := run("join-dry", cfg, "join", jf, "--key", seed, "--dry-run")
 		ents, _ := os.ReadDir(cfg)
-		a.C.Check("mash join --dry-run prints Would join as "+who+". and writes nothing",
-			r.Code == 0 && strings.TrimSpace(r.Stdout) == "Would join as "+who+"." && len(ents) == 0, exitDetail(r)+"; files written: "+strconv.Itoa(len(ents)))
+		a.C.Check("mash join --dry-run prints Would join as "+who+" and writes nothing",
+			r.Code == 0 && strings.TrimSpace(r.Stdout) == "Would join as "+who && len(ents) == 0, exitDetail(r)+"; files written: "+strconv.Itoa(len(ents)))
 	}
 
 	// No secret in any output of these runs: the join file holds the user JWT, the seed file is read from --key, and none of

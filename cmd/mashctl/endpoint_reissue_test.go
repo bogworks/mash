@@ -69,7 +69,7 @@ func TestEndpointReissue(t *testing.T) {
 	if len(*calls) != 1 || (*calls)[0].users[0] != oldPub {
 		t.Errorf("revoke calls %+v", *calls)
 	}
-	if _, se, code := h.run("endpoint", "reissue", ad("none").String(), "--out", filepath.Join(out, "n2.join"), "--public-key", newFile); code != 1 || !strings.HasPrefix(se, "error: "+ad("none").String()+" does not exist\nhint: mashctl endpoint create ") {
+	if _, se, code := h.run("endpoint", "reissue", ad("none").String(), "--out", filepath.Join(out, "n2.join"), "--public-key", newFile); code != 1 || !strings.HasPrefix(se, "error: no endpoint "+ad("none").String()+"\nhint: mashctl endpoint list\n") {
 		t.Errorf("missing: %d %q", code, se)
 	}
 	// an existing join file is never replaced

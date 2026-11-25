@@ -107,7 +107,7 @@ func TestEndpointDeleteFinalMarkerNothingLeftDoesNotExist(t *testing.T) {
 		t.Fatal(err)
 	}
 	so, se, code := h.run("endpoint", "delete", a.String(), "--yes")
-	if code != 1 || so != "" || se != "error: o.g.un does not exist\nhint: mashctl endpoint list\n" {
+	if code != 1 || so != "" || se != "error: no endpoint o.g.un\nhint: mashctl endpoint list\n" {
 		t.Fatalf("%d %q %q", code, so, se)
 	}
 }
@@ -115,7 +115,7 @@ func TestEndpointDeleteFinalMarkerNothingLeftDoesNotExist(t *testing.T) {
 func TestEndpointDeleteNeverExistedIsNotFound(t *testing.T) {
 	h := newFleetEnv(t)
 	so, se, code := h.run("endpoint", "delete", "o.g.ghost", "--yes", "--json")
-	if code != 1 || !strings.Contains(so, "o.g.ghost does not exist") {
+	if code != 1 || !strings.Contains(so, "no endpoint o.g.ghost") {
 		t.Fatalf("%d %q %q", code, so, se)
 	}
 }

@@ -287,13 +287,13 @@
       "value": [
        {
         "case": "Sent",
-        "text": "Mail sent (number 42).",
+        "text": "Mail sent (number 42)",
         "stream": "stdout",
         "exit": 0
        },
        {
         "case": "Sent, urgent, with a kind",
-        "text": "Urgent question mail sent (number 43).",
+        "text": "Urgent question mail sent (number 43)",
         "stream": "stdout",
         "exit": 0
        },
@@ -305,13 +305,13 @@
        },
        {
         "case": "A reply marked question that asks nothing",
-        "text": "Mail sent as fyi (number 44): a reply marked question that asks nothing.",
+        "text": "Mail sent as fyi (number 44): a reply marked question that asks nothing",
         "stream": "stdout",
         "exit": 0
        },
        {
         "case": "Repeated --id",
-        "text": "Mail already sent; nothing new stored.",
+        "text": "Mail already sent; nothing new stored",
         "stream": "stdout",
         "exit": 0
        },
@@ -329,7 +329,7 @@
        },
        {
         "case": "No such endpoint",
-        "text": "error: no endpoint has the address acme.demo.alise\nhint: mash who",
+        "text": "error: no endpoint acme.demo.alise\nhint: mash who",
         "stream": "stderr",
         "exit": 1
        },
@@ -385,61 +385,6 @@
      {
       "name": "x-notes",
       "value": "send has no --dry-run: sending is the act itself, not a change to the mesh. The number is the message's number in the recipient's inbox. It is printed because the sender can find it nowhere else, and needs it: an answer arrives marked 'reply to: 42'."
-     },
-     {
-      "name": "x-output-next",
-      "value": [
-       {
-        "case": "Sent",
-        "text": "Mail sent (number 42)",
-        "stream": "stdout",
-        "exit": 0,
-        "issue": "#1046",
-        "replaces": "Sent",
-        "note": "One success-line form in both tools, as today but for one thing: a capital first letter and no full stop (Created endpoint acme.demo.bob, Deleted endpoint acme.demo.bob). Only the full stop goes.",
-        "verbatim": true
-       },
-       {
-        "case": "Sent, urgent, with a kind",
-        "text": "Urgent question mail sent (number 43)",
-        "stream": "stdout",
-        "exit": 0,
-        "issue": "#1046",
-        "replaces": "Sent, urgent, with a kind",
-        "note": "One success-line form in both tools, as today but for one thing: a capital first letter and no full stop (Created endpoint acme.demo.bob, Deleted endpoint acme.demo.bob). Only the full stop goes.",
-        "verbatim": true
-       },
-       {
-        "case": "A reply marked question that asks nothing",
-        "text": "Mail sent as fyi (number 44): a reply marked question that asks nothing",
-        "stream": "stdout",
-        "exit": 0,
-        "issue": "#1046",
-        "replaces": "A reply marked question that asks nothing",
-        "note": "One success-line form in both tools, as today but for one thing: a capital first letter and no full stop (Created endpoint acme.demo.bob, Deleted endpoint acme.demo.bob). Only the full stop goes.",
-        "verbatim": true
-       },
-       {
-        "case": "Repeated --id",
-        "text": "Mail already sent; nothing new stored",
-        "stream": "stdout",
-        "exit": 0,
-        "issue": "#1046",
-        "replaces": "Repeated --id",
-        "note": "One success-line form in both tools, as today but for one thing: a capital first letter and no full stop (Created endpoint acme.demo.bob, Deleted endpoint acme.demo.bob). Only the full stop goes.",
-        "verbatim": true
-       },
-       {
-        "case": "No such endpoint",
-        "text": "error: no endpoint acme.demo.alise\nhint: mash who",
-        "stream": "stderr",
-        "exit": 1,
-        "issue": "#1046",
-        "replaces": "No such endpoint",
-        "note": "Not found reads \"no endpoint <address>\" in both tools, echoing the address as typed (today \"no endpoint has the address ...\"). The hint is unchanged.",
-        "verbatim": true
-       }
-      ]
      }
     ]
    },
@@ -713,7 +658,7 @@
        },
        {
         "case": "No such message",
-        "text": "error: acme.demo.alice has no message 9\nhint: mash inbox",
+        "text": "error: no message 9\nhint: mash inbox",
         "stream": "stderr",
         "exit": 1
        },
@@ -767,21 +712,6 @@
      {
       "name": "x-notes",
       "value": "What 'read' means. A message is 'new' until the server has been told it reached the endpoint's session: when the hook showed it to the agent, or the agent opened it with the read tool. Until then it is waiting. mash read at a shell shows a message but, with no session online, cannot mark it; it stays 'new' until a session next comes online. That limit is tracked in mash's backlog. The message's text is printed with '> ' before every line, as quoted mail is, and with control characters escaped: everything after '> ' is the sender's words, and nothing the sender writes can pass for mash's own output or for an instruction to an agent reading it. The command and the tool quote alike. --json carries the text unquoted in 'body'."
-     },
-     {
-      "name": "x-output-next",
-      "value": [
-       {
-        "case": "No such message",
-        "text": "error: no message 9\nhint: mash inbox",
-        "stream": "stderr",
-        "exit": 1,
-        "issue": "#1046",
-        "replaces": "No such message",
-        "note": "Not found reads \"no <thing> <value>\": \"no endpoint X\", \"no message N\" (today \"acme.demo.alice has no message 9\"). The hint is unchanged.",
-        "verbatim": true
-       }
-      ]
      }
     ]
    },
@@ -1600,13 +1530,13 @@
       "value": [
        {
         "case": "Joined",
-        "text": "Joined as acme.demo.bob.",
+        "text": "Joined as acme.demo.bob",
         "stream": "stdout",
         "exit": 0
        },
        {
         "case": "With --detail",
-        "text": "Joined as acme.demo.bob.\nservers: tls://myserver:4222\ncreds:   ~/.config/mash/acme.demo.bob.creds",
+        "text": "Joined as acme.demo.bob\nservers: tls://myserver:4222\ncreds:   ~/.config/mash/acme.demo.bob.creds",
         "stream": "stdout",
         "exit": 0
        },
@@ -1643,7 +1573,7 @@
        },
        {
         "case": "With --dry-run",
-        "text": "Would join as acme.demo.bob.",
+        "text": "Would join as acme.demo.bob",
         "stream": "stdout",
         "exit": 0
        },
@@ -1717,41 +1647,6 @@
      {
       "name": "x-notes",
       "value": "It asks nothing: the file came from whoever runs your mesh. How it works. Whoever runs the mesh runs 'mashctl endpoint create acme.demo.bob --out acme.demo.bob.join' and gets one text file. They get that file to the other machine by any route they trust. There, 'mash join acme.demo.bob.join' copies its three parts into the configuration folder: the server address or addresses, the certificate authority's certificate if the server uses its own, and a NATS creds file (a user JWT and its seed). After that, mash status works. When the endpoint made its own key, the join file holds no seed and --key supplies it. Planned for 0.6.0: a way for mash join to ask to join and wait for approval. THE JOIN FILE is JSON, written with mode 600, with these fields: \"mash_join\": 1 (the format's version); \"address\"; \"servers\": a list of addresses; \"ca\": the certificate authority's certificate as PEM text, or null; and either \"creds\": the whole text of a NATS creds file, or, when the endpoint made its own key, \"user_jwt\": the user JWT alone. One configuration folder serves one mesh; a join file for another mesh needs another folder. The certificate authority's certificate is kept in the folder as ca.pem, and every endpoint in the folder trusts it; a join file that brings a different one, or none where the folder has one, or one where the folder has none and already holds an endpoint or names servers in config.json, is refused, with or without --replace. The first join into an empty folder sets it; a folder that already holds an endpoint and has no ca.pem refuses a join file that brings one, with the same 'different ca' line, and a folder whose config.json already names servers but holds no endpoint refuses it with 'this folder has a server but no endpoint'. A JOIN FILE THAT HOLDS A SEED IS A SECRET FILE, and so is the file --key names: the file --key names is checked before it is read, and a join file is opened to see whether it holds a seed and then checked before anything is installed: it must be a plain file, owned by you, readable by you alone, or join refuses with the two cases above. A join file that holds only a user JWT is not checked for owner or mode, but any join file that is not a plain file (a directory, a FIFO, a device) gets the 'not a plain file of your own' line."
-     },
-     {
-      "name": "x-output-next",
-      "value": [
-       {
-        "case": "Joined",
-        "text": "Joined as acme.demo.bob",
-        "stream": "stdout",
-        "exit": 0,
-        "issue": "#1046",
-        "replaces": "Joined",
-        "note": "One success-line form in both tools, as today but for one thing: a capital first letter and no full stop (Created endpoint acme.demo.bob, Deleted endpoint acme.demo.bob). Only the full stop goes.",
-        "verbatim": true
-       },
-       {
-        "case": "With --detail",
-        "text": "Joined as acme.demo.bob\nservers: tls://myserver:4222\ncreds:   ~/.config/mash/acme.demo.bob.creds",
-        "stream": "stdout",
-        "exit": 0,
-        "issue": "#1046",
-        "replaces": "With --detail",
-        "note": "One success-line form in both tools, as today but for one thing: a capital first letter and no full stop (Created endpoint acme.demo.bob, Deleted endpoint acme.demo.bob). Only the full stop goes.",
-        "verbatim": true
-       },
-       {
-        "case": "With --dry-run",
-        "text": "Would join as acme.demo.bob",
-        "stream": "stdout",
-        "exit": 0,
-        "issue": "#1046",
-        "replaces": "With --dry-run",
-        "note": "One success-line form in both tools, as today but for one thing: a capital first letter and no full stop (Created endpoint acme.demo.bob, Deleted endpoint acme.demo.bob). Only the full stop goes.",
-        "verbatim": true
-       }
-      ]
      }
     ]
    },
@@ -1809,7 +1704,7 @@
         "value": [
          {
           "case": "Created",
-          "text": "Created bob.seed and bob.seed.pub.",
+          "text": "Created bob.seed and bob.seed.pub",
           "stream": "stdout",
           "exit": 0
          },
@@ -1842,21 +1737,6 @@
        {
         "name": "x-notes",
         "value": "Give the .pub file to whoever runs the mesh: mashctl endpoint create acme.demo.bob --public-key bob.seed.pub"
-       },
-       {
-        "name": "x-output-next",
-        "value": [
-         {
-          "case": "Created",
-          "text": "Created bob.seed and bob.seed.pub",
-          "stream": "stdout",
-          "exit": 0,
-          "issue": "#1046",
-          "replaces": "Created",
-          "note": "One success-line form in both tools, as today but for one thing: a capital first letter and no full stop (Created endpoint acme.demo.bob, Deleted endpoint acme.demo.bob). Only the full stop goes.",
-          "verbatim": true
-         }
-        ]
        }
       ]
      }
@@ -2225,6 +2105,12 @@
       "issue": "#1048",
       "note": "Only the three lines after the first are new: one sentence that says what SAP, NATS and creds are, in the top-level help of both tools and nowhere else. The rest is today's help, unchanged. Same sentence in mashctl --help.",
       "verbatim": true
+     },
+     {
+      "case": "A command that does not exist",
+      "text": "error: unknown command \"nope\"",
+      "stream": "stderr",
+      "exit": 2
      }
     ]
    }

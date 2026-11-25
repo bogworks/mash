@@ -31,7 +31,7 @@ func TestCLISendIDRerunLandsOnce(t *testing.T) {
 		t.Fatalf("first send: %d %q", code, out)
 	}
 	out, code = w.cli(t, "b", "send", tTo("a"), "--id=job-7", "ship it")
-	if code != 0 || out != "Mail already sent; nothing new stored.\n" {
+	if code != 0 || out != "Mail already sent; nothing new stored\n" {
 		t.Fatalf("second send: %d %q, want success naming #1 as a duplicate", code, out)
 	}
 	if n := inboxCount(t, w, "a"); n != 1 {
@@ -95,7 +95,7 @@ func TestServeSendToolID(t *testing.T) {
 		t.Fatalf("first: %q %v", first, bad)
 	}
 	second, bad := call(11, `{"address":"o.dev.b","message":"hi","id":"mcp-1"}`)
-	if bad || second != "Mail already sent; nothing new stored." {
+	if bad || second != "Mail already sent; nothing new stored" {
 		t.Fatalf("second: %q %v", second, bad)
 	}
 	if bad, isErr := call(12, `{"address":"o.dev.b","message":"hi","id":"has space"}`); !isErr || !strings.Contains(bad, "id") {

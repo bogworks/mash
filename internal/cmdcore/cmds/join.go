@@ -59,15 +59,15 @@ type JoinDetail struct {
 	DryRun   bool     `json:"dry_run,omitempty"`
 }
 
-// Text is "Joined as <address>." or, for --dry-run, "Would join as <address>."
+// Text is "Joined as <address>" or, for --dry-run, "Would join as <address>"
 func (r JoinResult) Text(cmdcore.Opts) string {
 	if r.DryRun {
-		return "Would join as " + r.Endpoint + "."
+		return "Would join as " + r.Endpoint
 	}
 	if r.finished {
 		return "Joined as " + r.Endpoint + " (finished an earlier join)"
 	}
-	return "Joined as " + r.Endpoint + "."
+	return "Joined as " + r.Endpoint
 }
 
 // DetailValue is the fuller object, which contains the usual one.

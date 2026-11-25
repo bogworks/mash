@@ -365,7 +365,7 @@ other machines), when mail must wait for days, when you need which-key-signed pr
 
 **Do I need a server per agent?** No. You need one NATS server that you run, and each agent dials out to it.
 
-**What exactly happens after `Mail sent (number N).`?** The message is in the recipient's JetStream inbox: the acknowledgement confirms storage, not that the session saw it. By default the recipient refuses unverified mail without telling the sender. Verified mail is shown to the
+**What exactly happens after `Mail sent (number N)`?** The message is in the recipient's JetStream inbox: the acknowledgement confirms storage, not that the session saw it. By default the recipient refuses unverified mail without telling the sender. Verified mail is shown to the
 session at least once while it is retained: up to 30 days by default, and until a full inbox (16 MiB by default) drops it as the oldest, read or
 not. A repeat after an interrupted hook is flagged. Retrying with the same key within 2 minutes stores nothing new; after
 that, a retry stores a second copy. Inboxes are single-replica, so a host crash or power loss can lose mail acknowledged

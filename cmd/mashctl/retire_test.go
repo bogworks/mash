@@ -79,7 +79,7 @@ func TestRetireNoCredsFileIsFine(t *testing.T) {
 func TestRetireWithNoRecordSaysSo(t *testing.T) {
 	h := newFleetEnv(t)
 	_, errb, code := h.run("endpoint", "delete", "o.g.nothing-here", "--yes")
-	if code != 1 || errb != "error: o.g.nothing-here does not exist\nhint: mashctl endpoint list\n" {
+	if code != 1 || errb != "error: no endpoint o.g.nothing-here\nhint: mashctl endpoint list\n" {
 		t.Fatalf("%d %q", code, errb)
 	}
 }
@@ -126,7 +126,7 @@ func TestRetireNoRecordLeavesCredsFile(t *testing.T) {
 	if err := os.WriteFile(h.creds(ad("zz")), []byte("old"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, errb, code := h.run("endpoint", "delete", "o.g.zz", "--yes"); code != 1 || !strings.Contains(errb, "o.g.zz does not exist") {
+	if _, errb, code := h.run("endpoint", "delete", "o.g.zz", "--yes"); code != 1 || !strings.Contains(errb, "no endpoint o.g.zz") {
 		t.Fatalf("%d %q", code, errb)
 	}
 	if _, err := os.Lstat(h.creds(ad("zz"))); err != nil {
@@ -235,7 +235,7 @@ func TestRetirePartialFailureIsNotReportedAsUnchanged(t *testing.T) {
 	// so the address does not exist
 	deprovisionIfUser = (*admin.Admin).DeprovisionIfUser
 	out, errb, code = h.run("endpoint", "delete", "o.g.b", "--yes")
-	if code != 1 || out != "" || !strings.Contains(errb, "o.g.b does not exist") {
+	if code != 1 || out != "" || !strings.Contains(errb, "no endpoint o.g.b") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
 }

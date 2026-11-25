@@ -52,7 +52,7 @@ func TestServeRefusesUnverifiedMailAndDoctorCountsIt(t *testing.T) {
 	if r := s.call(t, 90, "read", `{"number":1}`); r["isError"] != true || resultText(r) != strings.TrimSuffix(refusedText, "\n") {
 		t.Fatalf("read tool on refused mail: %v", r)
 	}
-	if out, code := w.cli(t, "a", "read", "99"); code != 1 || out != "error: o.dev.a has no message 99\nhint: mash inbox\n" {
+	if out, code := w.cli(t, "a", "read", "99"); code != 1 || out != "error: no message 99\nhint: mash inbox\n" {
 		t.Fatalf("read of a number that never existed: %d %q", code, out)
 	}
 	for _, args := range [][]string{{"inbox", "--after", "0"}, {"inbox", "--new"}, {"inbox", "--limit", "10"}} {

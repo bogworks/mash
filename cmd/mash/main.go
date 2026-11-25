@@ -261,7 +261,7 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 		if len(args) == 1 {
 			args = []string{"--help"}
 		} else if _, known := helpTopic[args[1]]; !known && !commandVerb(args[1]) {
-			return cliframe.Report(stdout, stderr, cliframe.Usagef("mash has no command %s", args[1]).WithHint("mash help"), global.JSON)
+			return cliframe.Report(stdout, stderr, cliframe.Usagef("unknown command %q", args[1]), global.JSON)
 		} else if args[1] == "key" && len(args) > 2 && args[2] == "create" {
 			args = []string{"key", "create", "--help"}
 		} else {
@@ -323,7 +323,7 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 	// A name that is no command is refused before the configuration loads, so a broken or several-endpoint setup never
 	// answers for it.
 	if (strings.Contains(args[0], " ") || !commandVerb(args[0])) && !slices.Contains([]string{"serve", "hook", "send", "inbox", "read", "who", "status", "doctor", "prompt"}, args[0]) {
-		return cliframe.Report(stdout, stderr, cliframe.Usagef("mash has no command %s", args[0]).WithHint("mash --help"), global.JSON)
+		return cliframe.Report(stdout, stderr, cliframe.Usagef("unknown command %q", args[0]), global.JSON)
 	}
 	jsonOut := global.JSON
 	load := config.Load
@@ -406,7 +406,7 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 	case "prompt":
 		return cli(cfg, args, stdin, stdout, stderr)
 	}
-	return cliframe.Report(stdout, stderr, cliframe.Usagef("mash has no command %s", args[0]).WithHint("mash --help"), global.JSON)
+	return cliframe.Report(stdout, stderr, cliframe.Usagef("unknown command %q", args[0]), global.JSON)
 }
 
 // stdinIsTerminal reports whether r is a terminal: a file whose mode is a character device. An agent host gives serve

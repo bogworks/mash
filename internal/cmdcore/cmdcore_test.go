@@ -142,7 +142,7 @@ func TestMCPDecode(t *testing.T) {
 	c.Run = func(context.Context, *cmdcore.Env, demoParams) (demoResult, error) {
 		return demoResult{}, cmdcore.NoSuchEndpoint("a.b.c")
 	}
-	if _, _, err := cmdcore.MCPTool(c, env).CallStructured(context.Background(), json.RawMessage(`{"name":"x"}`)); err.Error() != "error: no endpoint has the address a.b.c\nhint: mash who" {
+	if _, _, err := cmdcore.MCPTool(c, env).CallStructured(context.Background(), json.RawMessage(`{"name":"x"}`)); err.Error() != "error: no endpoint a.b.c\nhint: mash who" {
 		t.Errorf("%v", err)
 	}
 	// env failure
@@ -169,7 +169,7 @@ func TestErrors(t *testing.T) {
 		msg, hint  string
 		wantReport string
 	}{
-		{cmdcore.NoSuchEndpoint("acme.demo.alise"), "no endpoint has the address acme.demo.alise", "mash who", "error: no endpoint has the address acme.demo.alise\nhint: mash who\n"},
+		{cmdcore.NoSuchEndpoint("acme.demo.alise"), "no endpoint acme.demo.alise", "mash who", "error: no endpoint acme.demo.alise\nhint: mash who\n"},
 		{cmdcore.NotSignedIn("acme.demo.bob"), "acme.demo.bob cannot sign in: the server refused its credentials", "mash doctor", "error: acme.demo.bob cannot sign in: the server refused its credentials\nhint: mash doctor\n"},
 	} {
 		if tc.err.Msg != tc.msg || tc.err.Hint != tc.hint || tc.err.Code != 1 {

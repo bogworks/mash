@@ -320,11 +320,11 @@ func TestReadText(t *testing.T) {
 		t.Errorf("relay and lines: %q", out)
 	}
 	code, out, errs = runRead(readBox(), cliframe.Global{}, "9")
-	if code != 1 || out != "" || errs != "error: acme.demo.alice has no message 9\nhint: mash inbox\n" {
+	if code != 1 || out != "" || errs != "error: no message 9\nhint: mash inbox\n" {
 		t.Errorf("no such message: %d %q %q", code, out, errs)
 	}
 	code, out, _ = runRead(readBox(), cliframe.Global{JSON: true}, "9")
-	if code != 1 || out != "{\"error\":\"acme.demo.alice has no message 9\",\"hint\":\"mash inbox\"}\n" {
+	if code != 1 || out != "{\"error\":\"no message 9\",\"hint\":\"mash inbox\"}\n" {
 		t.Errorf("no such message, json: %d %q", code, out)
 	}
 	rb := readBox()

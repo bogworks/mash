@@ -50,7 +50,7 @@ mash join acme.demo.bob.join --key bob.seed
 Stream: stdout. Exit code: 0.
 
 ```text
-Joined as acme.demo.bob.
+Joined as acme.demo.bob
 ```
 
 ### With --detail
@@ -58,7 +58,7 @@ Joined as acme.demo.bob.
 Stream: stdout. Exit code: 0.
 
 ```text
-Joined as acme.demo.bob.
+Joined as acme.demo.bob
 servers: tls://myserver:4222
 creds:   ~/.config/mash/acme.demo.bob.creds
 ```
@@ -114,7 +114,7 @@ hint: mash join <file> --config-dir <folder>
 Stream: stdout. Exit code: 0.
 
 ```text
-Would join as acme.demo.bob.
+Would join as acme.demo.bob
 ```
 
 ### The join file needs your seed

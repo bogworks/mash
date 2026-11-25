@@ -72,7 +72,7 @@ reply to: 42
 Stream: stderr. Exit code: 1.
 
 ```text
-error: acme.demo.alice has no message 9
+error: no message 9
 hint: mash inbox
 ```
 

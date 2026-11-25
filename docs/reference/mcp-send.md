@@ -51,7 +51,7 @@ The structured content of a successful result. The values are an example.
 The call returns this text.
 
 ```text
-Mail sent (number 42).
+Mail sent (number 42)
 ```
 
 ## Errors

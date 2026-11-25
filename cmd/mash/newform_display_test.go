@@ -57,7 +57,7 @@ func TestCLIShowsAndAcceptsTheCanonicalForm(t *testing.T) {
 	// A canonical form that names nothing is refused as an unknown endpoint, in the form it was typed (exit 1).
 	var o, eb strings.Builder
 	if code := run([]string{"send", "acme.team1.nobody", "x"}, envFrom(sendEnv), strings.NewReader(""), &o, &eb); code == 0 ||
-		!strings.Contains(eb.String(), "no endpoint has the address acme.team1.nobody") {
+		!strings.Contains(eb.String(), "no endpoint acme.team1.nobody") {
 		t.Fatalf("unknown: code %d %s", code, eb.String())
 	}
 }

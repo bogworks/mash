@@ -258,7 +258,7 @@ var refusalCases = []refCase{
 	{"reissue_no_account_key", []string{"endpoint", "reissue", "o.g.a"}, noKeys, "no account identity key", 1},
 	{"reissue_server", []string{"endpoint", "reissue", "o.g.a"}, unreachable, "nothing was changed", 1},
 	{"reissue_enroll_server", []string{"endpoint", "reissue", "o.g.a"}, seq(seeded("a"), enrollFails), "the server stopped answering", 1},
-	{"reissue_endpoint_missing", []string{"endpoint", "reissue", "o.g.a"}, nil, "o.g.a does not exist", 1},
+	{"reissue_endpoint_missing", []string{"endpoint", "reissue", "o.g.a"}, nil, "no endpoint o.g.a", 1},
 	{"reissue_deleted", []string{"endpoint", "reissue", "o.g.a"}, burned("a"), "o.g.a was deleted and its address cannot be used again", 1},
 	{"reissue_busy", []string{"endpoint", "reissue", "o.g.a"}, seq(seeded("a"), lockHeld("a")), "another reissue of o.g.a holds the lock", 1},
 	{"reissue_write", []string{"endpoint", "reissue", "o.g.a"}, seq(seeded("a"), groupWritableDir), "nothing was changed", 1},

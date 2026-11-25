@@ -84,7 +84,7 @@ func epErrOf(addr sap.Address, code, detail string) *cliframe.Error {
 	case enroll.CodeKeyRetired:
 		return cliframe.Failf("%s was deleted and its address cannot be used again", addr)
 	case "endpoint_missing":
-		return cliframe.Failf("%s does not exist", addr).WithHint("mashctl endpoint create " + addr.String())
+		return cliframe.Failf("no endpoint %s", addr).WithHint("mashctl endpoint list")
 	}
 	// A remedy that is a command goes to the hint line.
 	for _, sep := range []string{"; make a new key with: ", "; make one with: "} {

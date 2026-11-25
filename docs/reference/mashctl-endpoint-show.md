@@ -52,6 +52,15 @@ labels:      team=blue
 public key:  UDXU4RCSV3GJRXWQ4PNDKYEL7ZBSMSGGTJYNDQGHFM4QWHBRD3ZTQ4LX
 ```
 
+### No such endpoint
+
+Stream: stderr. Exit code: 1.
+
+```text
+error: no endpoint acme.demo.dave
+hint: mashctl endpoint list
+```
+
 ## JSON
 
 With `--json` the result is this shape. The values are an example.

@@ -384,7 +384,7 @@ var Read = cmdcore.Command[ReadParams, ReadResult]{
 			return ReadResult{}, err
 		}
 		if v.Message == nil {
-			return ReadResult{}, cliframe.Failf("%s has no message %d", v.Endpoint, p.Number).WithHint("mash inbox")
+			return ReadResult{}, cliframe.Failf("no message %d", p.Number).WithHint("mash inbox")
 		}
 		m := v.Message
 		r := ReadResult{Number: m.Number, From: m.From, Sent: m.Sent.UTC().Format(time.RFC3339), Trust: m.Trust, Kind: m.Kind,

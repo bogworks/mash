@@ -406,7 +406,7 @@ func TestJoinDetailJSON(t *testing.T) {
 func TestJoinVerbose(t *testing.T) {
 	w := newJoinWorld(t)
 	r := w.run("join", "acme.demo.bob.join", "--detail")
-	if r.code != 0 || r.out != "Joined as acme.demo.bob.\nservers: tls://myserver:4222\ncreds:   ~/.config/mash/acme.demo.bob.creds\n" {
+	if r.code != 0 || r.out != "Joined as acme.demo.bob\nservers: tls://myserver:4222\ncreds:   ~/.config/mash/acme.demo.bob.creds\n" {
 		t.Errorf("%+v", r)
 	}
 }
@@ -414,7 +414,7 @@ func TestJoinVerbose(t *testing.T) {
 func TestJoinDryRunWritesNothing(t *testing.T) {
 	w := newJoinWorld(t)
 	before := treeSnapshot(t, w.home)
-	if r := w.run("join", "acme.demo.bob.join", "--dry-run"); r.code != 0 || r.out != "Would join as acme.demo.bob.\n" || r.errs != "" {
+	if r := w.run("join", "acme.demo.bob.join", "--dry-run"); r.code != 0 || r.out != "Would join as acme.demo.bob\n" || r.errs != "" {
 		t.Fatal(r)
 	}
 	if after := treeSnapshot(t, w.home); after != before {
@@ -434,7 +434,7 @@ func TestJoinDryRunWritesNothing(t *testing.T) {
 	if r := w.run("join", "acme.demo.bob.join", "--dry-run"); r.code != 1 || !strings.Contains(r.errs, "already installed") {
 		t.Errorf("--dry-run over an installed endpoint: %+v", r)
 	}
-	if r := w.run("join", "acme.demo.bob.join", "--dry-run", "--replace"); r.code != 0 || r.out != "Would join as acme.demo.bob.\n" {
+	if r := w.run("join", "acme.demo.bob.join", "--dry-run", "--replace"); r.code != 0 || r.out != "Would join as acme.demo.bob\n" {
 		t.Errorf("--dry-run --replace: %+v", r)
 	}
 }
@@ -454,7 +454,7 @@ func TestJoinReplace(t *testing.T) {
 	if now, _ := os.ReadFile(w.credsFile()); !bytes.Equal(now, before) {
 		t.Error("the creds were replaced without --replace")
 	}
-	if r := w.run("join", "acme.demo.bob.join", "--replace"); r.code != 0 || r.out != "Joined as acme.demo.bob.\n" {
+	if r := w.run("join", "acme.demo.bob.join", "--replace"); r.code != 0 || r.out != "Joined as acme.demo.bob\n" {
 		t.Fatal(r)
 	}
 	now, _ := os.ReadFile(w.credsFile())
@@ -475,7 +475,7 @@ func TestJoinSecondEndpointOfTheSameMesh(t *testing.T) {
 	m := newJoinMaterial(t, "acme.demo.carol")
 	ca := testCAPEM
 	writeJoin(t, "carol.join", joinfile.File{MashJoin: 1, Address: "acme.demo.carol", Servers: []string{"tls://myserver:4222"}, CA: &ca, Creds: string(m.creds)})
-	if r := w.run("join", "carol.join"); r.code != 0 || r.out != "Joined as acme.demo.carol.\n" {
+	if r := w.run("join", "carol.join"); r.code != 0 || r.out != "Joined as acme.demo.carol\n" {
 		t.Fatal(r)
 	}
 	// a join file for another mesh is refused and changes nothing
@@ -512,7 +512,7 @@ func TestJoinUserJWTWithKey(t *testing.T) {
 	w := newJoinWorld(t)
 	writeJoin(t, "own.join", joinfile.File{MashJoin: 1, Address: "acme.demo.bob", Servers: []string{"tls://myserver:4222"}, UserJWT: w.m.token})
 	os.WriteFile("bob.seed", append(bytes.Clone(w.m.seed), '\n'), 0o600)
-	if r := w.run("join", "own.join", "--key", "bob.seed"); r.code != 0 || r.out != "Joined as acme.demo.bob.\n" || r.errs != "" {
+	if r := w.run("join", "own.join", "--key", "bob.seed"); r.code != 0 || r.out != "Joined as acme.demo.bob\n" || r.errs != "" {
 		t.Fatal(r)
 	}
 	got, _ := os.ReadFile(w.credsFile())
@@ -816,7 +816,7 @@ func TestJoinRoundTripFromTheSharedWriter(t *testing.T) {
 	if err := os.WriteFile("rt.join", data, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if r := w.run("join", "rt.join"); r.code != 0 || r.out != "Joined as acme.demo.bob.\n" {
+	if r := w.run("join", "rt.join"); r.code != 0 || r.out != "Joined as acme.demo.bob\n" {
 		t.Fatal(r)
 	}
 	raw, err := os.ReadFile(filepath.Join(w.cfg, "ca.pem"))
@@ -1000,7 +1000,7 @@ func TestJoinReplaceChangesOnlyTheCreds(t *testing.T) {
 	fresh := newJoinMaterial(t, "acme.demo.bob")
 	ca := testCAPEM
 	w.joinFor("re.join", fresh, "acme.demo.bob", &ca)
-	if r := w.run("join", "re.join", "--replace"); r.code != 0 || r.out != "Joined as acme.demo.bob.\n" {
+	if r := w.run("join", "re.join", "--replace"); r.code != 0 || r.out != "Joined as acme.demo.bob\n" {
 		t.Fatal(r)
 	}
 	if got, _ := os.ReadFile(w.credsFile()); !bytes.Equal(got, fresh.creds) {
@@ -1329,7 +1329,7 @@ func TestJoinFinishDetailAndDryRun(t *testing.T) {
 	w := newJoinWorld(t)
 	w.halfDone(true, true)
 	r := w.run("join", "acme.demo.bob.join", "--dry-run")
-	if r.code != 0 || r.out != "Would join as acme.demo.bob.\n" {
+	if r.code != 0 || r.out != "Would join as acme.demo.bob\n" {
 		t.Errorf("--dry-run: %+v", r)
 	}
 	if _, err := os.Stat(filepath.Join(w.cfg, "config.json")); err == nil {
@@ -1389,7 +1389,7 @@ func TestJoinReplaceFinishesAHalfDoneJoin(t *testing.T) {
 	ca := testCAPEM
 	writeJoin(t, "acme.demo.bob.join", joinfile.File{MashJoin: 1, Address: "acme.demo.bob", Servers: []string{"tls://myserver:4222"}, CA: &ca, Creds: string(fresh.creds)})
 	r := w.run("join", "acme.demo.bob.join", "--replace")
-	if r.code != 0 || r.out != "Joined as acme.demo.bob.\n" {
+	if r.code != 0 || r.out != "Joined as acme.demo.bob\n" {
 		t.Fatalf("%+v", r)
 	}
 	if now, _ := os.ReadFile(w.credsFile()); !bytes.Equal(now, fresh.creds) {

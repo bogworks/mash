@@ -192,7 +192,7 @@ func (r *Registry) MCPTools() []mcp.Tool {
 func (r *Registry) RunCLI(name string, args []string, stdin io.Reader, stdout, stderr io.Writer, g cliframe.Global) int {
 	e, ok := r.Lookup(name)
 	if !ok {
-		return cliframe.Report(stdout, stderr, cliframe.Usagef("unknown command %s", name).WithHint("mash --help"), g.JSON)
+		return cliframe.Report(stdout, stderr, cliframe.Usagef("unknown command %q", name), g.JSON)
 	}
 	return e.RunCLI(r.Env, r.Frame, args, stdin, stdout, stderr, g)
 }

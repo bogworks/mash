@@ -41,7 +41,7 @@ mash key create --out bob.seed
 Stream: stdout. Exit code: 0.
 
 ```text
-Created bob.seed and bob.seed.pub.
+Created bob.seed and bob.seed.pub
 ```
 
 ### File exists

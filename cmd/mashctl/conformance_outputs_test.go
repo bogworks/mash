@@ -553,6 +553,15 @@ func init() {
 		w.do("endpoint", "set", "acme.demo.bob", "role=writer", "description=Bob reviews", "label.team=blue")
 		return confOutRun{ran: w.run("endpoint", "show", "acme.demo.bob")}
 	})
+	reg("endpoint show No such endpoint", func(t *testing.T) confOutRun {
+		w := newConfWorld(t, true)
+		return confOutRun{ran: w.run("endpoint", "show", "acme.demo.dave")}
+	})
+	reg("endpoint reissue No such endpoint", func(t *testing.T) confOutRun {
+		w := newConfWorld(t, true)
+		inTmp(t)
+		return confOutRun{ran: w.run("endpoint", "reissue", "acme.demo.dave")}
+	})
 	reg("endpoint set Updated", func(t *testing.T) confOutRun {
 		w := newConfWorld(t, true)
 		w.do("endpoint", "create", "acme.demo.bob")

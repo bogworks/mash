@@ -121,11 +121,11 @@ func TestEndpointDeleteDryRunChangesNothing(t *testing.T) {
 func TestEndpointDeleteMissingIsRefused(t *testing.T) {
 	h := newFleetEnv(t)
 	out, errb, code := h.run("endpoint", "delete", "o.g.none", "--yes")
-	if code != 1 || out != "" || errb != "error: o.g.none does not exist\nhint: mashctl endpoint list\n" {
+	if code != 1 || out != "" || errb != "error: no endpoint o.g.none\nhint: mashctl endpoint list\n" {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
 	out, errb, code = h.run("endpoint", "delete", "o.g.none", "--yes", "--json")
-	if code != 1 || errb != "" || out != "{\"error\":\"o.g.none does not exist\",\"hint\":\"mashctl endpoint list\"}\n" {
+	if code != 1 || errb != "" || out != "{\"error\":\"no endpoint o.g.none\",\"hint\":\"mashctl endpoint list\"}\n" {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
 }
@@ -139,7 +139,7 @@ func TestEndpointDeleteRefusesAsRetireDoes(t *testing.T) {
 	if retCode != 1 || delCode != 1 {
 		t.Fatalf("codes %d %d", retCode, delCode)
 	}
-	if !strings.Contains(retErr, "o.g.zzz does not exist") || !strings.Contains(delErr, "o.g.zzz does not exist") {
+	if !strings.Contains(retErr, "no endpoint o.g.zzz") || !strings.Contains(delErr, "no endpoint o.g.zzz") {
 		t.Errorf("%q %q", retErr, delErr)
 	}
 	if r := h.records(); len(r) != 1 {

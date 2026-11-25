@@ -314,7 +314,7 @@ func TestEndpointDeleteNoRecordNotBurnedStillRefuses(t *testing.T) {
 		t.Fatal(err)
 	}
 	so, _, code := h.run("endpoint", "delete", a.String(), "--yes", "--json")
-	if code != 1 || !strings.Contains(so, `"error": "`) && !strings.Contains(so, `"error":"`) || !strings.Contains(so, a.String()+" does not exist") {
+	if code != 1 || !strings.Contains(so, `"error": "`) && !strings.Contains(so, `"error":"`) || !strings.Contains(so, "no endpoint "+a.String()) {
 		t.Fatalf("%d %q", code, so)
 	}
 	if _, err := os.Lstat(h.creds(a)); err != nil {

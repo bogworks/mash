@@ -9,7 +9,7 @@ import (
 
 // NoSuchEndpoint is the failure for an address nothing answers to (exit 1).
 func NoSuchEndpoint(addr string) *cliframe.Error {
-	return cliframe.Failf("no endpoint has the address %s", addr).WithHint("mash who")
+	return cliframe.Failf("no endpoint %s", addr).WithHint("mash who")
 }
 
 // RefusedMessage is the failure for the number of a message serve refused because it was not verified (exit 1).

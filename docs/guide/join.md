@@ -32,7 +32,7 @@ MASH_ENDPOINT=acme.demo.carol mash status
 ```
 
 ```
-Joined as acme.demo.carol.
+Joined as acme.demo.carol
 acme.demo.carol: ready, offline
 ```
 
@@ -49,7 +49,7 @@ mash key create --out dave.seed
 ```
 
 ```
-Created dave.seed and dave.seed.pub.
+Created dave.seed and dave.seed.pub
 ```
 
 Give the server's owner `dave.seed.pub`. They run:

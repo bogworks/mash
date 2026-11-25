@@ -226,8 +226,8 @@ stdout:
 == reissue_endpoint_missing
 exit 1
 stderr:
-error: o.g.a does not exist
-hint: mashctl endpoint create o.g.a
+error: no endpoint o.g.a
+hint: mashctl endpoint list
 stdout:
 == reissue_deleted
 exit 1

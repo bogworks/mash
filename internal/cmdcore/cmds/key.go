@@ -28,9 +28,9 @@ type KeyCreateResult struct {
 	PublicKey string `json:"public_key"`
 }
 
-// Text is "Created <seed> and <public key file>."
+// Text is "Created <seed> and <public key file>"
 func (r KeyCreateResult) Text(cmdcore.Opts) string {
-	return "Created " + r.Seed + " and " + r.PublicKey + "."
+	return "Created " + r.Seed + " and " + r.PublicKey
 }
 
 // KeyCreate is the key create command: a new user seed (mode 0600) and its public key beside it. It reads no

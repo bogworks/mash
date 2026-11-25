@@ -1267,6 +1267,12 @@
           "text": "address:     acme.demo.bob\nstate:       offline\ncreated:     2026-11-19 09:40 UTC\nwaiting:     1 message\nrole:        writer\ndescription: Bob reviews\nlabels:      team=blue\npublic key:  UDXU4RCSV3GJRXWQ4PNDKYEL7ZBSMSGGTJYNDQGHFM4QWHBRD3ZTQ4LX",
           "stream": "stdout",
           "exit": 0
+         },
+         {
+          "case": "No such endpoint",
+          "text": "error: no endpoint acme.demo.dave\nhint: mashctl endpoint list",
+          "stream": "stderr",
+          "exit": 1
          }
         ]
        },
@@ -1718,6 +1724,12 @@
           "text": "Reissued credentials for acme.demo.bob\nJoin file:            acme.demo.bob.join\nservers acknowledged: 2",
           "stream": "stdout",
           "exit": 0
+         },
+         {
+          "case": "No such endpoint",
+          "text": "error: no endpoint acme.demo.dave\nhint: mashctl endpoint list",
+          "stream": "stderr",
+          "exit": 1
          }
         ]
        },

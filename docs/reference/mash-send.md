@@ -56,7 +56,7 @@ git log -1 | mash send acme.demo.alice --kind fyi --file -
 Stream: stdout. Exit code: 0.
 
 ```text
-Mail sent (number 42).
+Mail sent (number 42)
 ```
 
 ### Sent, urgent, with a kind
@@ -64,7 +64,7 @@ Mail sent (number 42).
 Stream: stdout. Exit code: 0.
 
 ```text
-Urgent question mail sent (number 43).
+Urgent question mail sent (number 43)
 ```
 
 ### With --detail
@@ -83,7 +83,7 @@ urgent: no
 Stream: stdout. Exit code: 0.
 
 ```text
-Mail sent as fyi (number 44): a reply marked question that asks nothing.
+Mail sent as fyi (number 44): a reply marked question that asks nothing
 ```
 
 ### Repeated --id
@@ -91,7 +91,7 @@ Mail sent as fyi (number 44): a reply marked question that asks nothing.
 Stream: stdout. Exit code: 0.
 
 ```text
-Mail already sent; nothing new stored.
+Mail already sent; nothing new stored
 ```
 
 ### An address in another form
@@ -116,7 +116,7 @@ error: no message text arrived on standard input
 Stream: stderr. Exit code: 1.
 
 ```text
-error: no endpoint has the address acme.demo.alise
+error: no endpoint acme.demo.alise
 hint: mash who
 ```
 
