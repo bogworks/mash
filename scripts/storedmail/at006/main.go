@@ -38,7 +38,10 @@ import (
 	"github.com/bogworks/mash/scripts/storedmail/kit"
 )
 
-const releasesURL = "https://api.github.com/repos/bogworks/mash/releases?per_page=100"
+// releasesURL is set in main from -repo.
+var releasesURL, releaseRepo string
+
+var repoRe = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 
 type apiRelease struct {
 	Tag        string `json:"tag_name"`
@@ -68,6 +71,15 @@ type report struct {
 }
 
 func main() {
+	if os.Getenv("AT006_IN_CONTAINER") != "1" {
+		fmt.Fprintln(os.Stderr, "at006 runs only inside the container that scripts/storedmail/at006.sh creates")
+		os.Exit(2)
+	}
+	defRepo := os.Getenv("MASH_RELEASE_REPO")
+	if defRepo == "" {
+		defRepo = "bogworks/mash"
+	}
+	repo := flag.String("repo", defRepo, "the GitHub repository the releases come from, owner/name (default $MASH_RELEASE_REPO or bogworks/mash)")
 	treeMash := flag.String("mash", "", "this tree's mash binary")
 	skippedFile := flag.String("skipped", "docs/skipped-releases.txt", "the skipped-releases file")
 	work := flag.String("work", "", "a directory this run may create files in (it is the container's)")
@@ -76,6 +88,13 @@ func main() {
 		fmt.Fprintln(os.Stderr, "usage: at006 -mash <bin> -skipped <file> -work <dir>")
 		os.Exit(2)
 	}
+	if !repoRe.MatchString(*repo) {
+		fmt.Fprintf(os.Stderr, "-repo %q is not owner/name (letters, digits, '-', '_', '.' and one slash)\n", *repo)
+		os.Exit(2)
+	}
+	releaseRepo = *repo
+	releasesURL = "https://api.github.com/repos/" + *repo + "/releases?per_page=100"
+	fmt.Println("release repo: " + *repo)
 	override := strings.Fields(os.Getenv("AT006_TAGS"))
 	rels, err := derive(*skippedFile, override, filepath.Join(*work, "dl"))
 	if err != nil {
@@ -195,7 +214,7 @@ func derive(skippedFile string, override []string, dir string) ([]release, error
 	}
 	var out []release
 	for _, t := range tags {
-		r := release{tag: t, url: "https://github.com/bogworks/mash/releases/download/" + t + "/mash-linux-amd64", digest: "no digest in the release data"}
+		r := release{tag: t, url: "https://github.com/" + releaseRepo + "/releases/download/" + t + "/mash-linux-amd64", digest: "no digest in the release data"}
 		want := ""
 		if a, ok := byTag[t]; ok {
 			found := false
@@ -291,12 +310,11 @@ func runRelease(r release, treeMash, workRoot string) *report {
 		fail("%v", err)
 		return rep
 	}
-	dir, err := os.MkdirTemp(workRoot, r.tag+"-") // this run's own directory, removed by name below
+	dir, err := os.MkdirTemp(workRoot, r.tag+"-") // this run's own directory inside the container; the container is destroyed at the end
 	if err != nil {
 		fail("%v", err)
 		return rep
 	}
-	defer os.RemoveAll(dir)
 	k, err := kit.New(dir, r.bin, r.tag, names())
 	if err != nil {
 		fail("start: %v", err)

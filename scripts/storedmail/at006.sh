@@ -8,7 +8,8 @@
 # Nothing is created on the host, no directory and no file: `git archive origin/main` is streamed into the container on
 # stdin and extracted there, the container is started and the receipt is printed. The released binaries are downloaded
 # and run only inside the container.
-# Env: AT006_TAGS      space-separated tags replacing the derived list; debugging only, the run exits non-zero.
+# Env: MASH_RELEASE_REPO  GitHub repo the releases come from (default bogworks/mash).
+#      AT006_TAGS      space-separated tags replacing the derived list; debugging only, the run exits non-zero.
 #      AT006_DIRTY=1   run on a tree with uncommitted changes (the receipt says so; not a proof run).
 set -uo pipefail
 
@@ -37,10 +38,12 @@ digest=$(docker image inspect "$image" --format '{{.Id}} {{join .RepoDigests ","
 echo "== AT-006 / AT-018 run =="
 echo "commit tested:       $commit ($tree)"
 echo "oracle (origin/main): $main"
+echo "release repo:        ${MASH_RELEASE_REPO:-bogworks/mash}"
 echo "venue:               container from $image, image $digest, name $name, docker run --rm --init"
 echo
 
 git -C "$root" archive origin/main | docker run -i --rm --init --name "$name" -e AT006_TAGS="${AT006_TAGS:-}" \
+	-e MASH_RELEASE_REPO="${MASH_RELEASE_REPO:-bogworks/mash}" -e AT006_IN_CONTAINER=1 \
 	-v "$root":/src:ro "$image" bash -c '
 	set -uo pipefail
 	fail=0
