@@ -688,7 +688,18 @@ func (s Spool) HookState() ([]byte, bool) {
 // drained marks, so a hook that passed the owner check can never drain mail a new lease holder spooled after it
 // (codex H1 on #21, round 7).
 func (s Spool) Lock() (unlock func(), err error) {
-	return s.LockContext(context.Background())
+	f, err := os.OpenFile(filepath.Join(s.Dir, ".lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		f.Close()
+		return nil, err
+	}
+	return func() {
+		syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		f.Close()
+	}, nil
 }
 
 // lockPoll is the longest LockContext sleeps between attempts.
