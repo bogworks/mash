@@ -117,7 +117,7 @@ The numbered steps are what the command does in each state, and the manual path 
    `scripts/ci-changes`; at most 50 commits back; a failed, cancelled or spoofed run, or a code commit without passing
    checks, is refused). `scripts/release-check` prints the run it accepted for each required check (name, check-run id, URL
    and commit; for a docs-only X, the tested ancestor and how many docs-only commits sit above it), and the release record
-   cites those lines. The record is a queue run (the merge queue's test on the commit `main` fast-forwards to): never a
+   cites those lines. The record is normally the queue run (the merge queue's test on the commit `main` fast-forwards to); the gate does not check which workflow event produced a run, so read the URL and cite a queue run, never a
    nightly or a hand-started run, since the nightly gates nothing ([ADR 0160](decisions/0160-macos-runs-on-tagged-releases-only-and-the-ephemeral-pilot-runs-nightly.md);
    [ADR 0180](decisions/0180-release-check-cites-the-run-it-accepted-for-each-required-check.md)). `test (macos)` runs
    on every `v*` tag (release.yml; macOS runs on tagged releases only, ADR 0160) but is advisory (ADR 0079): the gate neither requires it nor reads its conclusion.
@@ -143,7 +143,7 @@ The numbered steps are what the command does in each state, and the manual path 
    (every page, latest run per name, from `github-actions` only), builds X twice in fresh clones, and runs the binary to
    compare `mash v<version> (<first 7 characters of X>)` exactly. Under the CI step it prints one indented line per required check
    naming the accepted run (`<name>: check run <id> <url> on <12-character commit>`); a release record cites those lines, and
-   only a queue run counts as the record, never a nightly or a hand-started run (step 1). It prints the version and commit in a neutral form, `version: <version> commit: <X>`, that any consumer can copy. Exit 0 passed, 3 refused,
+   the record is the queue run, never a nightly or a hand-started run (step 1). It prints the version and commit in a neutral form, `version: <version> commit: <X>`, that any consumer can copy. Exit 0 passed, 3 refused,
    4 could not decide (gh, the network), 2 usage.
    The release repository (owner/name) is `$RELEASE_CHECK_REPO` if set, else taken from the checkout's `origin` when that
    is a github.com URL (https, `git@github.com:` or `ssh://git@github.com/`), else `bogworks/mash`. Main and the tag

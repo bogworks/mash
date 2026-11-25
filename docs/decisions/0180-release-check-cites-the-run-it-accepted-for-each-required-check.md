@@ -31,7 +31,7 @@ Chosen option: "A". Under `ok    CI check runs succeeded`, `release-check` print
       <name>: check run <id> <html_url> on <first 12 characters of the commit>
 ```
 
-When the deciding commit is not the candidate (a docs-only candidate over a tested ancestor) the line ends with ` (tested ancestor of the docs-only candidate, <n> docs-only commit(s) above it)`. With no `html_url` the line is `check run <id>` alone. The accepted run is the highest-id completed, successful, not-skipped run of the GitHub Actions app on the deciding commit (`release.CitedRuns`); `release.CheckCIWalkCited` returns it from the same walk that decides, and `CheckCIWalk` is a wrapper that drops it. The lines are not steps and add no problem. `docs/release.md` says a release record cites these lines and that a queue run is the record, never a nightly or a hand-started run.
+When the deciding commit is not the candidate (a docs-only candidate over a tested ancestor) the line ends with ` (tested ancestor of the docs-only candidate, <n> docs-only commit(s) above it)`. With no `html_url` the line omits the URL: `<name>: check run <id> on <commit>`. The accepted run is the highest-id completed, successful, not-skipped run of the GitHub Actions app on the deciding commit (`release.CitedRuns`); `release.CheckCIWalkCited` returns it from the same walk that decides, and `CheckCIWalk` is a wrapper that drops it. The lines are not steps and add no problem. `docs/release.md` says a release record cites these lines and that a queue run is the record, never a nightly or a hand-started run.
 
 ### Consequences
 
