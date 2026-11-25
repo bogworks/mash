@@ -20,7 +20,10 @@ func TestAddressSubjectsMatchTheSDK(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := a.Subjects()
+	got, err := a.Subjects()
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, c := range []struct{ verb, mash, sdk string }{
 		{"prompt", got.Prompt, s.Prompt()},
 		{"status", got.Status, s.Status()},

@@ -38,7 +38,7 @@ func TestReplayWithinSignatureAgeIsLabelledVerified(t *testing.T) {
 	f.dup = time.Second
 	f.shortenWindow(t, "a")
 	ctx := context.Background()
-	subj := taddr("a").Subjects().Mail
+	subj := taddr("a").MailSubject()
 
 	// (a) a normal signed message, and its stored bytes.
 	b := f.client(t, "b")

@@ -265,7 +265,7 @@ func (r Record) Address() (sap.Address, error) {
 
 // MailSubjectFor is the mail subject of the endpoint at a.
 func MailSubjectFor(a sap.Address) string {
-	return a.Subjects().Mail
+	return a.MailSubject()
 }
 
 // MaxMetaLen is the longest Role, Host or label value.
@@ -359,7 +359,7 @@ func ParseRecord(key string, value []byte) (Record, error) {
 	if key != a.Flat() {
 		return Record{}, fmt.Errorf("directory %s: not an endpoint of this release: the record must be keyed by its flat key %q", key, a.Flat())
 	}
-	if want := a.Subjects().Mail; r.MailSubject != want {
+	if want := a.MailSubject(); r.MailSubject != want {
 		return Record{}, fmt.Errorf("directory %s: not an endpoint of this release: mail subject %q is not %q", key, r.MailSubject, want)
 	}
 	if r.User == "" {

@@ -27,7 +27,7 @@ func (f *fixture) leanClient(t *testing.T, name string, opts ClientOptions) *End
 // including a signed message whose header names no sender: the key alone is looked up in the directory.
 func TestLeanClientLabelsLikeTheWholeDirectory(t *testing.T) {
 	f := newFixture(t, "a", "b", "c")
-	subj := taddr("a").Subjects().Mail
+	subj := taddr("a").MailSubject()
 	nc := f.e.ConnAs(t, f.creds["b"], tkey("b"))
 	id := identity(t, f.creds["b"])
 	signed := func(name, body string) {

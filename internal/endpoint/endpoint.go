@@ -367,7 +367,21 @@ func identityOf(cfg config.Config) (sap.Address, string, sap.Subjects, error) {
 	if err != nil {
 		return sap.Address{}, "", sap.Subjects{}, err
 	}
-	return id, id.Flat(), id.Subjects(), nil
+	subj, err := subjectsOf(id)
+	if err != nil {
+		return sap.Address{}, "", sap.Subjects{}, err
+	}
+	return id, id.Flat(), subj, nil
+}
+
+// subjectsOf is the subjects of the endpoint at id. A failure is the endpoint's start failing: nothing is started with
+// empty subjects.
+func subjectsOf(id sap.Address) (sap.Subjects, error) {
+	subj, err := id.Subjects()
+	if err != nil {
+		return sap.Subjects{}, fmt.Errorf("the endpoint could not start: %w", err)
+	}
+	return subj, nil
 }
 
 // StateLocation is where an endpoint's state (spool, relay counters) lives under the state directory: its owner and its

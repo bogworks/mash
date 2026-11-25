@@ -21,7 +21,7 @@ func TestFailedLookupFloodDoesNotBlockARealNewSender(t *testing.T) {
 	f := newFixture(t, "a", "b")
 	cfg := f.cfgState("a", t.TempDir(), false)
 	ep, ev, _ := serveCfg(t, cfg)
-	subj := taddr("a").Subjects().Mail
+	subj := taddr("a").MailSubject()
 	for i := 0; i < 2*maxFailedLookups; i++ {
 		ep.reloadSender(sap.SenderHeader{V: 1, User: "UFAKE" + time.Duration(i).String(), Name: tkey("b")})
 	}
@@ -49,7 +49,7 @@ func TestRefusedRedeliveryNotDeliveredAfterAcceptOn(t *testing.T) {
 	f := newFixture(t, "a", "b")
 	state := t.TempDir()
 	off := f.cfgState("a", state, false)
-	subj := taddr("a").Subjects().Mail
+	subj := taddr("a").MailSubject()
 	publishRaw(t, f.e.ConnAs(t, f.creds["b"], tkey("b")), subj, "", "absent body")
 
 	ctx := context.Background()
@@ -112,7 +112,7 @@ func TestRefusedRedeliveryNotDeliveredWithoutSetSpool(t *testing.T) {
 	f := newFixture(t, "a", "b")
 	state := t.TempDir()
 	off := f.cfgState("a", state, false)
-	subj := taddr("a").Subjects().Mail
+	subj := taddr("a").MailSubject()
 	publishRaw(t, f.e.ConnAs(t, f.creds["b"], tkey("b")), subj, "", "absent body")
 
 	ctx := context.Background()
@@ -176,7 +176,7 @@ func TestUnrecordedRefusalLeavesCountAlone(t *testing.T) {
 	}
 	f := newFixture(t, "a", "b")
 	cfg := f.cfgState("a", t.TempDir(), false)
-	subj := taddr("a").Subjects().Mail
+	subj := taddr("a").MailSubject()
 	ctx, cancel := context.WithCancel(context.Background())
 	ep, err := Open(ctx, cfg)
 	if err != nil {
@@ -220,7 +220,7 @@ func TestRefusedRedeliveryRepairsCountThroughConsumer(t *testing.T) {
 	f := newFixture(t, "a", "b")
 	state := t.TempDir()
 	off := f.cfgState("a", state, false)
-	subj := taddr("a").Subjects().Mail
+	subj := taddr("a").MailSubject()
 	publishRaw(t, f.e.ConnAs(t, f.creds["b"], tkey("b")), subj, "", "absent body")
 
 	ctx := context.Background()

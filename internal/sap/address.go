@@ -3,6 +3,8 @@ package sap
 import (
 	"fmt"
 	"strings"
+
+	agents "github.com/bogworks/synadia-agents.go"
 )
 
 // Address is an endpoint's address: SAP's owner, group and instance tokens.
@@ -50,17 +52,45 @@ func (a Address) Validate() error {
 	return err
 }
 
-// Subjects returns the four SAP subjects of a.
-func (a Address) Subjects() Subjects {
-	s := func(verb string) string {
-		return "agents." + verb + "." + a.Owner + "." + a.Group + "." + a.Instance
+// NoSubjectError is the failure of Subjects: the SDK's subject builder refused a's tokens. Its text is mash's own
+// words; the SDK's error is kept for Unwrap and is never in the text.
+type NoSubjectError struct {
+	Address string // owner.group.instance, as given
+	err     error
+}
+
+// Error is "no subject can be built for owner.group.instance".
+func (e *NoSubjectError) Error() string { return "no subject can be built for " + e.Address }
+
+// Unwrap returns the SDK's error, for debugging.
+func (e *NoSubjectError) Unwrap() error { return e.err }
+
+// Subjects returns the four SAP subjects of a. The prompt, status and heartbeat subjects come from the SDK's subject
+// builder, which refuses a token it cannot put in a subject: then Subjects returns the zero Subjects and a
+// *NoSubjectError, and no subject is guessed. Use MailSubject for the mail subject alone: it cannot fail.
+func (a Address) Subjects() (Subjects, error) {
+	// The SDK reads an empty subject token as "use the agent name", which would build another endpoint's subject, so the
+	// owner token is checked by the SDK's own token check first.
+	err := agents.ValidateToken(agents.RoleSubjectToken, a.Owner)
+	var s agents.AgentSubject
+	if err == nil {
+		s, err = agents.NewAgentSubject(AgentName, a.Group, a.Instance, agents.WithSubjectToken(a.Owner))
 	}
-	return Subjects{Prompt: s("prompt"), Status: s("status"), HB: s("hb"), Mail: s("mail")}
+	if err != nil {
+		return Subjects{}, &NoSubjectError{Address: a.String(), err: err}
+	}
+	return Subjects{Prompt: s.Prompt(), Status: s.Status(), HB: s.Heartbeat(), Mail: a.MailSubject()}, nil
+}
+
+// MailSubject is a's mail subject, agents.mail.<owner>.<group>.<instance>. The SDK has no mail verb, so mash builds it;
+// it cannot fail.
+func (a Address) MailSubject() string {
+	return "agents.mail." + a.Owner + "." + a.Group + "." + a.Instance
 }
 
 // MailFilter is the subject filter of a's inbox stream: exactly a's mail
 // subject, with no wildcard.
-func (a Address) MailFilter() string { return a.Subjects().Mail }
+func (a Address) MailFilter() string { return a.MailSubject() }
 
 // Flat is the flat key of a: owner_group_instance. It is injective because
 // tokens contain no underscore.

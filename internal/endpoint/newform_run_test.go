@@ -58,7 +58,7 @@ func (f *fixture) addAt(t *testing.T, group, name string, o addOpts) sap.Address
 			t.Fatal(err)
 		}
 		rec := store.Record{Owner: a.Owner, Group: a.Group, Instance: a.Instance, Agent: sap.AgentName,
-			Account: f.e.Account, User: user, MailSubject: a.Subjects().Mail, Created: time.Now().UTC().Format(time.RFC3339)}
+			Account: f.e.Account, User: user, MailSubject: a.MailSubject(), Created: time.Now().UTC().Format(time.RFC3339)}
 		if o.badRecord {
 			rec.MailSubject = "agents.mail.somewhere.else.entirely"
 		}
@@ -310,7 +310,7 @@ func TestPromptRoundTrip(t *testing.T) {
 	b := f.clientAt(t, idb)
 	ctx := context.Background()
 	subj, err := DiscoverRecipient(ctx, b.Conn(), ida.Flat())
-	if err != nil || subj != ida.Subjects().Prompt {
+	if err != nil || subj != mustSubj(ida).Prompt {
 		t.Fatalf("discover: %q %v", subj, err)
 	}
 	if s2, err := DiscoverRecipient(ctx, b.Conn(), ida.String()); err != nil || s2 != subj {

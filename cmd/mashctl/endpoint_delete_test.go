@@ -38,7 +38,7 @@ func (h *fleetEnv) putMessages(a sap.Address, n int) {
 		h.t.Fatal(err)
 	}
 	for i := 0; i < n; i++ {
-		if _, err := js.Publish(context.Background(), a.Subjects().Mail, []byte(fmt.Sprintf("m%d", i))); err != nil {
+		if _, err := js.Publish(context.Background(), a.MailSubject(), []byte(fmt.Sprintf("m%d", i))); err != nil {
 			h.t.Fatal(err)
 		}
 	}

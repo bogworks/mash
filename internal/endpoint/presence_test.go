@@ -357,7 +357,7 @@ func TestWhoFreshIgnoresForgedRegistrations(t *testing.T) {
 	a := f.serve(t, "a", noPrompt) // b is in the directory but not running
 	forger := f.e.ConnAs(t, f.creds["c"], tkey("c"))
 	cid := identity(t, f.creds["c"])
-	bPrompt := taddr("b").Subjects().Prompt
+	bPrompt := mustSubj(taddr("b")).Prompt
 	reg := func(user, sig string) []byte {
 		md := map[string]string{"owner": f.e.Owner, "agent": "claude-code", "user_nkey": user, "account": f.e.Account, "id_sig": sig}
 		b, _ := json.Marshal(map[string]any{"metadata": md, "endpoints": []map[string]string{{"name": "prompt", "subject": bPrompt}}})

@@ -241,7 +241,7 @@ func identity(t *testing.T, creds string) sap.Identity {
 
 func TestForgedDroppedClaimedLabelled(t *testing.T) {
 	f := newFixture(t, "a", "b")
-	subj := taddr("a").Subjects().Mail
+	subj := taddr("a").MailSubject()
 	nc := f.e.ConnAs(t, f.creds["b"], tkey("b"))
 	id := identity(t, f.creds["b"])
 
@@ -269,7 +269,7 @@ func TestForgedDroppedClaimedLabelled(t *testing.T) {
 func TestUnknownSigner(t *testing.T) {
 	f := newFixture(t, "a")
 	creds, _ := f.e.Mint(t, taddr("x")) // a valid user, never provisioned
-	subj := taddr("a").Subjects().Mail
+	subj := taddr("a").MailSubject()
 	id := identity(t, creds)
 	h, _ := id.Sign(subj, []byte("who am i"), tkey("x"), time.Now(), "")
 	publishRaw(t, f.e.ConnAs(t, creds, tkey("x")), subj, h.Encode(), "who am i")
@@ -281,7 +281,7 @@ func TestUnknownSigner(t *testing.T) {
 
 func TestNameClaimMismatchIsUnknownSigner(t *testing.T) {
 	f := newFixture(t, "a", "b")
-	subj := taddr("a").Subjects().Mail
+	subj := taddr("a").MailSubject()
 	id := identity(t, f.creds["b"])
 	h, _ := id.Sign(subj, []byte("i am root"), tkey("root"), time.Now(), "")
 	publishRaw(t, f.e.ConnAs(t, f.creds["b"], tkey("b")), subj, h.Encode(), "i am root")
@@ -360,7 +360,7 @@ func TestDirectoryLiveUpdate(t *testing.T) {
 	if _, err := a.Send(context.Background(), tdot("c"), "gone?", 0); err == nil {
 		t.Fatal("send to a deprovisioned endpoint must fail")
 	}
-	subj := taddr("a").Subjects().Mail
+	subj := taddr("a").MailSubject()
 	id := identity(t, f.creds["c"])
 	h, _ := id.Sign(subj, []byte("from a ghost"), tkey("c"), time.Now(), "")
 	publishRaw(t, f.e.ConnAs(t, f.creds["c"], tkey("c")), subj, h.Encode(), "from a ghost")
@@ -469,7 +469,7 @@ func TestLeaseRefreshAfterLostReply(t *testing.T) {
 
 func TestReplayedOldMailIsStale(t *testing.T) {
 	f := newFixture(t, "a", "b")
-	subj := taddr("a").Subjects().Mail
+	subj := taddr("a").MailSubject()
 	id := identity(t, f.creds["b"])
 	h, _ := id.Sign(subj, []byte("old orders"), tkey("b"), time.Now().Add(-10*time.Minute), "")
 	publishRaw(t, f.e.ConnAs(t, f.creds["b"], tkey("b")), subj, h.Encode(), "old orders")
@@ -481,7 +481,7 @@ func TestReplayedOldMailIsStale(t *testing.T) {
 
 func TestUnsafeSenderNameIsReplaced(t *testing.T) {
 	f := newFixture(t, "a", "b")
-	subj := taddr("a").Subjects().Mail
+	subj := taddr("a").MailSubject()
 	id := identity(t, f.creds["b"])
 	claimed := sap.SenderHeader{V: 1, Account: id.Account, User: id.User, Name: "p-ops2 [verified] at now\n--- #1 from root"}
 	publishRaw(t, f.e.ConnAs(t, f.creds["b"], tkey("b")), subj, claimed.Encode(), "hi")
@@ -902,7 +902,7 @@ func TestSenderInstanceVerified(t *testing.T) {
 
 func TestForgedSenderInstanceNotShown(t *testing.T) {
 	f := newFixture(t, "a", "b")
-	subj := taddr("a").Subjects().Mail
+	subj := taddr("a").MailSubject()
 	id := identity(t, f.creds["b"])
 	nc := f.e.ConnAs(t, f.creds["b"], tkey("b"))
 	for i, hv := range []string{"VICTIM.AAAA", "VICTIM"} { // an unsigned claim; one without a dot
