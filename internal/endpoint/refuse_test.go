@@ -153,8 +153,22 @@ func TestAcceptUnverifiedDeliversLabelled(t *testing.T) {
 	cfg := f.cfgState("a", t.TempDir(), true)
 	f.publishUnverified(t, "a")
 	_, ev, _ := serveCfg(t, cfg)
-	got := strings.Join(ev.waitFor(t, 1, 5*time.Second), "\n")
-	for _, l := range []string{"[absent]", "[unknown-signer]", "[claimed]", "[stale]"} {
+	// The four messages may arrive as separate deliveries: wait for every label, not for the first event.
+	want := []string{"[absent]", "[unknown-signer]", "[claimed]", "[stale]"}
+	var got string
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		got = strings.Join(ev.all(), "\n")
+		missing := 0
+		for _, l := range want {
+			if !strings.Contains(got, l) {
+				missing++
+			}
+		}
+		if missing == 0 || time.Now().After(deadline) {
+			break
+		}
+	}
+	for _, l := range want {
 		if !strings.Contains(got, l) {
 			t.Errorf("no %s in\n%s", l, got)
 		}
