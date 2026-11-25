@@ -184,6 +184,55 @@ keys       skip  needs sign-in
 hint: mashctl init --config <file>
 ```
 
+### --json, a row with nothing to say
+
+Stream: stdout. Exit code: 0.
+
+```text
+{
+  "problems": 0,
+  "warnings": 0,
+  "checks": [
+    {
+      "name": "config",
+      "state": "ok",
+      "detail": null,
+      "fix": null
+    },
+    {
+      "name": "server",
+      "state": "ok",
+      "detail": "tls://localhost:4222",
+      "fix": null
+    },
+    {
+      "name": "sign-in",
+      "state": "ok",
+      "detail": null,
+      "fix": null
+    },
+    {
+      "name": "storage",
+      "state": "ok",
+      "detail": null,
+      "fix": null
+    },
+    {
+      "name": "endpoints",
+      "state": "ok",
+      "detail": "3 records, 3 inboxes",
+      "fix": null
+    },
+    {
+      "name": "keys",
+      "state": "ok",
+      "detail": "every connected user was issued by mashctl",
+      "fix": null
+    }
+  ]
+}
+```
+
 ## JSON
 
 With `--json` the result is this shape. The values are an example.

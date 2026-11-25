@@ -250,12 +250,12 @@ func (st *initState) recordPub() string {
 
 // initResult is what `mashctl init --json` prints.
 type initResult struct {
-	Server        []string `json:"server"`
+	Servers       []string `json:"servers"`
 	Owner         string   `json:"owner"`
 	Changed       bool     `json:"changed"`
 	DryRun        bool     `json:"dry_run,omitempty"`
 	WouldApply    *bool    `json:"would_change,omitempty"`
-	SigningKeyPub string   `json:"signing_key_pub,omitempty"`
+	SigningKeyPub *string  `json:"signing_key_pub"` // null when no signing key is set
 }
 
 // isUnreachable reports whether err is a server that did not answer, as opposed to one that answered and refused.
@@ -700,7 +700,10 @@ func finishInit(stdout io.Writer, jsonOut, detail, dry, changed bool, sf setupFi
 		shown[i] = maskURL(s)
 	}
 	if jsonOut {
-		r := initResult{Server: shown, Owner: sf.owner, Changed: changed && !dry, SigningKeyPub: signPub}
+		r := initResult{Servers: shown, Owner: sf.owner, Changed: changed && !dry}
+		if signPub != "" {
+			r.SigningKeyPub = &signPub
+		}
 		if dry {
 			r.DryRun = true
 			r.WouldApply = &changed

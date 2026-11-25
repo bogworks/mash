@@ -68,7 +68,7 @@ func TestDoctorAllWell(t *testing.T) {
 		t.Fatalf("%d %+v", code, rep)
 	}
 	raw, _, _ := e.run("doctor", "--json")
-	for _, key := range []string{`"problems": 0`, `"warnings": 0`, `"name": "server"`, `"state": "ok"`, `"detail": ""`, `"fix": null`} {
+	for _, key := range []string{`"problems": 0`, `"warnings": 0`, `"name": "server"`, `"state": "ok"`, `"detail": null`, `"fix": null`} {
 		if !strings.Contains(raw, key) {
 			t.Errorf("JSON lacks %s:\n%s", key, raw)
 		}

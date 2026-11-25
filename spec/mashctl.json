@@ -225,6 +225,22 @@
         "exit": 0,
         "text": "(no warning line; the result line is as in \"A signing key is set\")",
         "note": "With a signing_key set, init writes nothing to stderr. A case in round brackets is a description: the conformance test skips it; init_signing_warn_test.go checks it."
+       },
+       {
+        "case": "A signing key is set, with --json",
+        "text": "{\n  \"servers\": [\n    \"tls://localhost:4222\"\n  ],\n  \"owner\": \"acme\",\n  \"changed\": true,\n  \"signing_key_pub\": \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"\n}",
+        "stream": "stdout",
+        "exit": 0,
+        "note": "--json is shown as it prints at a terminal (indented); piped it is one compact line (rule \"--json prints one object\"). The list of servers is named \"servers\" (plural), as in the setup file. signing_key_pub is the signing key's public key, never the seed.",
+        "verbatim": true
+       },
+       {
+        "case": "No signing key is set, with --json",
+        "text": "{\n  \"servers\": [\n    \"tls://localhost:4222\"\n  ],\n  \"owner\": \"acme\",\n  \"changed\": true,\n  \"signing_key_pub\": null\n}",
+        "stream": "stdout",
+        "exit": 0,
+        "note": "--json is shown as it prints at a terminal (indented). signing_key_pub is always present: null when no signing key is set, so a script reads one shape.",
+        "verbatim": true
        }
       ]
      },
@@ -271,24 +287,6 @@
         "exit": 0,
         "issue": "#1260 / #1299",
         "note": "The key is a clearly fake placeholder of 56 characters (a public account key starts with A). Not shown in dry-run."
-       },
-       {
-        "case": "A signing key is set, with --json",
-        "text": "{\n  \"servers\": [\n    \"tls://localhost:4222\"\n  ],\n  \"owner\": \"acme\",\n  \"changed\": true,\n  \"signing_key_pub\": \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"\n}",
-        "stream": "stdout",
-        "exit": 0,
-        "issue": "#1042",
-        "note": "--json is shown as it prints at a terminal (indented); piped it is one compact line (rule \"--json prints one object\"). The list of servers is named \"servers\" (plural, today \"server\"), as in the setup file and mashctl status --json. signing_key_pub is the signing key's public key, never the seed.",
-        "verbatim": true
-       },
-       {
-        "case": "No signing key is set, with --json",
-        "text": "{\n  \"servers\": [\n    \"tls://localhost:4222\"\n  ],\n  \"owner\": \"acme\",\n  \"changed\": true,\n  \"signing_key_pub\": null\n}",
-        "stream": "stdout",
-        "exit": 0,
-        "issue": "#1042",
-        "note": "--json is shown as it prints at a terminal (indented). signing_key_pub is always present: null when no signing key is set (today it is left out), so a script reads one shape.",
-        "verbatim": true
        },
        {
         "case": "The owner is too long",
@@ -505,6 +503,14 @@
         "exit": 1,
         "issue": "#1097",
         "note": "The rows after the config row are skipped, each saying what it needs."
+       },
+       {
+        "case": "--json, a row with nothing to say",
+        "text": "{\n  \"problems\": 0,\n  \"warnings\": 0,\n  \"checks\": [\n    {\n      \"name\": \"config\",\n      \"state\": \"ok\",\n      \"detail\": null,\n      \"fix\": null\n    },\n    {\n      \"name\": \"server\",\n      \"state\": \"ok\",\n      \"detail\": \"tls://localhost:4222\",\n      \"fix\": null\n    },\n    {\n      \"name\": \"sign-in\",\n      \"state\": \"ok\",\n      \"detail\": null,\n      \"fix\": null\n    },\n    {\n      \"name\": \"storage\",\n      \"state\": \"ok\",\n      \"detail\": null,\n      \"fix\": null\n    },\n    {\n      \"name\": \"endpoints\",\n      \"state\": \"ok\",\n      \"detail\": \"3 records, 3 inboxes\",\n      \"fix\": null\n    },\n    {\n      \"name\": \"keys\",\n      \"state\": \"ok\",\n      \"detail\": \"every connected user was issued by mashctl\",\n      \"fix\": null\n    }\n  ]\n}",
+        "stream": "stdout",
+        "exit": 0,
+        "note": "--json is shown as it prints at a terminal (indented); piped it is one compact line (rule \"--json prints one object\"). A row with no detail has \"detail\": null, as mash doctor --json has. The row's own \"state\" (ok, warn, fail, skip) is a different fact from online and keeps its name.",
+        "verbatim": true
        }
       ]
      },
@@ -557,15 +563,6 @@
         "issue": "#1393",
         "note": "ADR 0168 (REQ-006, Gate 1 ruling): a hint is a command that fixes the problem, or there is no hint. mashctl has no command that revokes a user it did not issue, so there is no hint; the keys FAIL row says what is wrong. v0.5.8 printed 'hint: revoke it with the tool that issued it (mashctl revokes only its own)' on stderr.",
         "replaces": "--audit-users finds a user mashctl did not issue"
-       },
-       {
-        "case": "--json, a row with nothing to say",
-        "text": "{\n  \"problems\": 0,\n  \"warnings\": 0,\n  \"checks\": [\n    {\n      \"name\": \"config\",\n      \"state\": \"ok\",\n      \"detail\": null,\n      \"fix\": null\n    },\n    {\n      \"name\": \"server\",\n      \"state\": \"ok\",\n      \"detail\": \"tls://localhost:4222\",\n      \"fix\": null\n    }\n  ]\n}",
-        "stream": "stdout",
-        "exit": 0,
-        "issue": "#1042",
-        "note": "--json is shown as it prints at a terminal (indented); piped it is one compact line (rule \"--json prints one object\"). A row with no detail has \"detail\": null, as mash doctor --json has (today mashctl doctor prints \"detail\": \"\"). The row's own \"state\" (ok, warn, fail, skip) is a different fact from online and keeps its name.",
-        "verbatim": true
        }
       ]
      }
@@ -1258,6 +1255,14 @@
           "text": "error: no endpoint acme.demo.dave\nhint: mashctl endpoint list",
           "stream": "stderr",
           "exit": 1
+         },
+         {
+          "case": "--json",
+          "text": "{\n  \"address\": \"acme.demo.bob\",\n  \"online\": false,\n  \"suspended\": false,\n  \"created\": \"2026-11-19T09:40:00Z\",\n  \"waiting\": 1,\n  \"role\": \"writer\",\n  \"host\": null,\n  \"description\": \"Bob reviews\",\n  \"capabilities\": [],\n  \"note\": null,\n  \"labels\": {\n    \"team\": \"blue\"\n  },\n  \"public_key\": \"UDXU4RCSV3GJRXWQ4PNDKYEL7ZBSMSGGTJYNDQGHFM4QWHBRD3ZTQ4LX\"\n}",
+          "stream": "stdout",
+          "exit": 0,
+          "note": "--json is shown as it prints at a terminal (indented); piped it is one compact line (rule \"--json prints one object\"). Unset fields are null, never \"\" and never left out. The list key is plural: capabilities, not capability. An empty list is [] and an empty map is {}. online and suspended replace state, as in endpoint list (#1041).",
+          "verbatim": true
          }
         ]
        },
@@ -1288,21 +1293,7 @@
        },
        {
         "name": "x-notes",
-        "value": "role, host, description, capability and note each appear only when set. 'online' here means something holds the endpoint's lease, which lapses 90 seconds after its holder stops; mash who reads the endpoint's own heartbeat over the same 90 seconds. The two answer the same question and can differ for up to that long."
-       },
-       {
-        "name": "x-output-next",
-        "value": [
-         {
-          "case": "--json",
-          "text": "{\n  \"address\": \"acme.demo.bob\",\n  \"online\": false,\n  \"suspended\": false,\n  \"created\": \"2026-11-19T09:40:00Z\",\n  \"waiting\": 1,\n  \"role\": \"writer\",\n  \"host\": null,\n  \"description\": \"Bob reviews\",\n  \"capabilities\": [],\n  \"note\": null,\n  \"labels\": {\n    \"team\": \"blue\"\n  },\n  \"public_key\": \"UDXU4RCSV3GJRXWQ4PNDKYEL7ZBSMSGGTJYNDQGHFM4QWHBRD3ZTQ4LX\"\n}",
-          "stream": "stdout",
-          "exit": 0,
-          "issue": "#1042",
-          "note": "--json is shown as it prints at a terminal (indented); piped it is one compact line (rule \"--json prints one object\"). Unset fields are null, never \"\" and never left out (today role, host, description and note are omitted when unset). The list key is plural: capabilities, not capability. An empty list is [] and an empty map is {}. online and suspended replace state, as in endpoint list (#1041).",
-          "verbatim": true
-         }
-        ]
+        "value": "In --json, role, host, description and note are always present (null when unset) and the list of capabilities is \"capabilities\" (empty: []); the text form shows each only when set. 'online' here means something holds the endpoint's lease, which lapses 90 seconds after its holder stops; mash who reads the endpoint's own heartbeat over the same 90 seconds. The two answer the same question and can differ for up to that long."
        }
       ]
      },
@@ -2090,6 +2081,14 @@
         "text": "mashctl v0.0.0-dev (unknown)",
         "stream": "stdout",
         "exit": 0
+       },
+       {
+        "case": "--json",
+        "text": "{\n  \"version\": \"0.5.9\",\n  \"commit\": \"3f9a41c2e0b7d5a1c4e08b2d77f3a95e1b6c4098\",\n  \"plugin\": null\n}",
+        "stream": "stdout",
+        "exit": 0,
+        "note": "--json is shown as it prints at a terminal (indented); piped it is one compact line (rule \"--json prints one object\"). The same three keys as mash version --json; mashctl has no plugin, so it is null. Text is unchanged.",
+        "verbatim": true
        }
       ]
      },
@@ -2110,20 +2109,6 @@
      {
       "name": "x-today",
       "value": "In 0.5.5, mashctl version printed no commit."
-     },
-     {
-      "name": "x-output-next",
-      "value": [
-       {
-        "case": "--json",
-        "text": "{\n  \"version\": \"0.5.9\",\n  \"commit\": \"3f9a41c2e0b7d5a1c4e08b2d77f3a95e1b6c4098\",\n  \"plugin\": null\n}",
-        "stream": "stdout",
-        "exit": 0,
-        "issue": "#1042",
-        "note": "--json is shown as it prints at a terminal (indented); piped it is one compact line (rule \"--json prints one object\"). The same three keys as mash version --json; mashctl has no plugin, so it is null (today the key is missing). Text is unchanged.",
-        "verbatim": true
-       }
-      ]
      }
     ]
    }

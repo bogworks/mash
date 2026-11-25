@@ -64,7 +64,11 @@ func checkVersion(t *testing.T, r map[string]any, plugin string) {
 	if full == "" {
 		full = "unknown"
 	}
-	if sc["version"] != version || sc["commit"] != full || sc["plugin"] != plugin || len(sc) != 3 {
+	var wantPlugin any = plugin
+	if plugin == "" {
+		wantPlugin = nil // no plugin: null, never ""
+	}
+	if sc["version"] != version || sc["commit"] != full || sc["plugin"] != wantPlugin || len(sc) != 3 {
 		t.Errorf("structuredContent %v, want version %q commit %q plugin %q", sc, version, full, plugin)
 	}
 }

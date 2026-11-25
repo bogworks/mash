@@ -62,9 +62,10 @@ func runVersion(args []string, stdout, stderr io.Writer) int {
 		}
 		// The JSON carries the whole commit (a pin for a tool that needs it exactly); the text shows seven characters.
 		writeJSON(stdout, struct {
-			Version string `json:"version"`
-			Commit  string `json:"commit"`
-		}{version, full})
+			Version string  `json:"version"`
+			Commit  string  `json:"commit"`
+			Plugin  *string `json:"plugin"` // mashctl has no plugin
+		}{Version: version, Commit: full})
 		return 0
 	}
 	fmt.Fprintf(stdout, "mashctl v%s (%s)\n", version, shortCommit(full))

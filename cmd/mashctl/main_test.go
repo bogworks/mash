@@ -161,8 +161,8 @@ func TestVersionJSONPolicyByDestination(t *testing.T) {
 		tty  bool
 		re   string
 	}{
-		{"non-terminal", false, `^\{"version":"[^"\n]+","commit":"[^"\n]+"\}\n$`},
-		{"terminal", true, `^\{\n  "version": "[^"\n]+",\n  "commit": "[^"\n]+"\n\}\n$`},
+		{"non-terminal", false, `^\{"version":"[^"\n]+","commit":"[^"\n]+","plugin":null\}\n$`},
+		{"terminal", true, `^\{\n  "version": "[^"\n]+",\n  "commit": "[^"\n]+",\n  "plugin": null\n\}\n$`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cliframe.IsTerminal = func(io.Writer) bool { return tc.tty }

@@ -219,6 +219,13 @@ func TestSendText(t *testing.T) {
 	}
 }
 
+// noPluginSvc is a build run outside the plugin, at the version and commit of the specification's example.
+type noPluginSvc struct{}
+
+func (noPluginSvc) Version() (string, string, string) {
+	return "0.5.9", "3f9a41c2e0b7d5a1c4e08b2d77f3a95e1b6c4098", ""
+}
+
 func TestVersion(t *testing.T) {
 	f := &fakeSvc{}
 	var o, e bytes.Buffer
@@ -231,6 +238,28 @@ func TestVersion(t *testing.T) {
 	if o.String() != `{"version":"0.5.6","commit":"3f9a41c","plugin":"0.5.6"}`+"\n" {
 		t.Errorf("json: %q", o.String())
 	}
+	// no plugin: "plugin" is null, never "" (the specification's case, word for word)
+	noPlugin := func(context.Context) (*cmdcore.Env, error) { return &cmdcore.Env{Svc: noPluginSvc{}}, nil }
+	o.Reset()
+	cmdcore.CLI(cmds.Version, noPlugin)(nil, nil, &o, &e, cliframe.Global{JSON: true})
+	var ind bytes.Buffer
+	if err := json.Indent(&ind, bytes.TrimSpace(o.Bytes()), "", "  "); err != nil {
+		t.Fatal(err)
+	}
+	_, vmeta := specCommand(t, "version")
+	found := false
+	for _, x := range vmeta["x-output"].([]any) {
+		if oc := x.(map[string]any); oc["case"] == "--json, no plugin" {
+			found = true
+			if ind.String() != oc["text"].(string) {
+				t.Errorf("json, no plugin: %q, spec %q", ind.String(), oc["text"])
+			}
+		}
+	}
+	if !found {
+		t.Error("spec has no case \"--json, no plugin\"")
+	}
+	o.Reset()
 	if code := cmdcore.CLI(cmds.Version, env)([]string{"extra"}, nil, &o, &e, cliframe.Global{}); code != 2 {
 		t.Errorf("extra arg: %d", code)
 	}

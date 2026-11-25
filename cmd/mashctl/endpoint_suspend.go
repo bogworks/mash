@@ -53,8 +53,9 @@ var endpointPermissionsSpec = epSpec{
 
 // stateResultJSON is the JSON of suspend and resume.
 type stateResultJSON struct {
-	Address string `json:"address"`
-	State   string `json:"state"`
+	Address   string `json:"address"`
+	Online    bool   `json:"online"`
+	Suspended bool   `json:"suspended"`
 }
 
 // runEndpointSuspend is `mashctl endpoint suspend` (ADR 0057: the inbox stream's subjects are parked).
@@ -90,7 +91,7 @@ func changeSuspension(rt *epRuntime, suspend bool) error {
 		return failErr(err)
 	}
 	if rt.in.json {
-		writeJSON(rt.stdout, stateResultJSON{Address: addr.String(), State: stateWord(st)})
+		writeJSON(rt.stdout, stateResultJSON{Address: addr.String(), Online: st.Online, Suspended: st.Suspended})
 		return nil
 	}
 	fmt.Fprintf(rt.stdout, "%s endpoint %s\n", done, addr)
