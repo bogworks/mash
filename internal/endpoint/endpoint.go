@@ -67,6 +67,8 @@ type Endpoint struct {
 	wakeInFlight bool
 	wakeCtx      context.Context // cancelled by Close (wakeContext)
 	wakeCancel   context.CancelFunc
+	// wakeRead replaces the wake's read of the inbox (tests that stall or fake it); nil is the real read, waitingNow.
+	wakeRead func(e *Endpoint, now time.Time) (waitingReading, bool)
 
 	heldN  atomic.Int32 // held count as of the last settle pass; read by tests
 	headMu sync.Mutex   // guards the stream-headroom cache (streamHasHeadroom)
