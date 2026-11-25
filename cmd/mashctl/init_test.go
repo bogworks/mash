@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
+	"net"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -993,4 +995,58 @@ func TestDiskNeed(t *testing.T) {
 	if got := diskNeed(def, live); got != 143<<20 {
 		t.Errorf("live: %d", got)
 	}
+}
+
+// A connection that drops while init looks the account up is `cannot reach`, not a missing account (#1563). A relay
+// in front of the server passes everything until the account lookup request, then closes both sides without
+// forwarding it. (A lookup that only times out stays the missing-account answer: TestInitRefusals, "account not on
+// the resolver".)
+func TestInitConnectionLostDuringLookup(t *testing.T) {
+	e := newApplyEnv(t)
+	a := newIniter(t, e)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	target := strings.TrimPrefix(e.srv.ClientURL(), "nats://")
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			up, err := net.Dial("tcp", target)
+			if err != nil {
+				c.Close()
+				continue
+			}
+			go io.Copy(c, up)
+			go func() {
+				defer c.Close()
+				defer up.Close()
+				buf := make([]byte, 64<<10)
+				for {
+					n, err := c.Read(buf)
+					if n > 0 {
+						if bytes.Contains(buf[:n], []byte("CLAIMS.LOOKUP")) {
+							return
+						}
+						up.Write(buf[:n])
+					}
+					if err != nil {
+						return
+					}
+				}
+			}()
+		}
+	}()
+	url := "nats://" + ln.Addr().String()
+	a.vals["servers"] = []string{url}
+	before := tree(t, a.root)
+	out, errb, code := a.init()
+	if want := "error: cannot reach " + url + "\nhint: mashctl doctor\n"; code != 1 || out != "" || errb != want {
+		t.Fatalf("%d %q %q", code, out, errb)
+	}
+	sameTree(t, before, tree(t, a.root))
 }
