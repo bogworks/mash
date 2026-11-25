@@ -229,8 +229,8 @@ func TestEndpointCreateDefaultInstalls(t *testing.T) {
 	// --json
 	so, _, code = h.run("endpoint", "create", ad("same2").String(), "--json")
 	var doc map[string]any
-	if json.Unmarshal([]byte(so), &doc) != nil || code != 0 || !sameKeys(doc, []string{"address", "installed_here", "creds", "join_file"}) ||
-		doc["installed_here"] != true || doc["join_file"] != nil || doc["address"] != ad("same2").String() ||
+	if json.Unmarshal([]byte(so), &doc) != nil || code != 0 || !sameKeys(doc, []string{"address", "installed_here", "creds", "join_file", "dry_run"}) ||
+		doc["dry_run"] != false || doc["installed_here"] != true || doc["join_file"] != nil || doc["address"] != ad("same2").String() ||
 		doc["creds"] != h.creds(ad("same2")) {
 		t.Errorf("json %d %q", code, so)
 	}
@@ -304,8 +304,8 @@ func TestEndpointCreateOut(t *testing.T) {
 	jf2 := filepath.Join(out, "far3.join")
 	so, _, code = h.run("endpoint", "create", ad("far3").String(), "--out", jf2, "--json")
 	var doc map[string]any
-	if json.Unmarshal([]byte(so), &doc) != nil || code != 0 || !sameKeys(doc, []string{"address", "installed_here", "creds", "join_file"}) ||
-		doc["installed_here"] != false || doc["creds"] != nil || doc["join_file"] != jf2 {
+	if json.Unmarshal([]byte(so), &doc) != nil || code != 0 || !sameKeys(doc, []string{"address", "installed_here", "creds", "join_file", "dry_run"}) ||
+		doc["dry_run"] != false || doc["installed_here"] != false || doc["creds"] != nil || doc["join_file"] != jf2 {
 		t.Errorf("json %d %q", code, so)
 	}
 	jf3 := filepath.Join(out, "far4.join")

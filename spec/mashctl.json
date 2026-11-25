@@ -225,17 +225,44 @@
         "exit": 0,
         "text": "(no warning line; the result line is as in \"A signing key is set\")",
         "note": "With a signing_key set, init writes nothing to stderr. A case in round brackets is a description: the conformance test skips it; init_signing_warn_test.go checks it."
+       },
+       {
+        "case": "A signing key is set, with --json",
+        "text": "{\n  \"servers\": [\n    \"tls://localhost:4222\"\n  ],\n  \"owner\": \"acme\",\n  \"changed\": true,\n  \"dry_run\": false,\n  \"would_change\": null,\n  \"signing_key_pub\": \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"\n}",
+        "stream": "stdout",
+        "exit": 0,
+        "note": "--json is shown as it prints at a terminal (indented); piped it is one compact line (rule \"--json prints one object\"). The list of servers is named \"servers\" (plural), as in the setup file. signing_key_pub is the signing key's public key, never the seed. dry_run is always present, false when this is not a --dry-run, and would_change is null then.",
+        "verbatim": true
+       },
+       {
+        "case": "No signing key is set, with --json",
+        "text": "{\n  \"servers\": [\n    \"tls://localhost:4222\"\n  ],\n  \"owner\": \"acme\",\n  \"changed\": true,\n  \"dry_run\": false,\n  \"would_change\": null,\n  \"signing_key_pub\": null\n}",
+        "stream": "stdout",
+        "exit": 0,
+        "note": "--json is shown as it prints at a terminal (indented). signing_key_pub is always present: null when no signing key is set, so a script reads one shape. dry_run is always present, false when this is not a --dry-run, and would_change is null then.",
+        "verbatim": true
+       },
+       {
+        "case": "With --dry-run, with --json",
+        "text": "{\n  \"servers\": [\n    \"tls://localhost:4222\"\n  ],\n  \"owner\": \"acme\",\n  \"changed\": false,\n  \"dry_run\": true,\n  \"would_change\": true,\n  \"signing_key_pub\": null\n}",
+        "stream": "stdout",
+        "exit": 0,
+        "note": "--json is shown as it prints at a terminal (indented). Nothing was changed, so changed is false; would_change says whether a real run would change something. Both keys are always present: dry_run is false and would_change null when this is not a --dry-run.",
+        "verbatim": true
        }
       ]
      },
      {
       "name": "x-json",
       "value": {
-       "server": [
+       "servers": [
         "tls://localhost:4222"
        ],
        "owner": "acme",
-       "changed": true
+       "changed": true,
+       "dry_run": false,
+       "would_change": null,
+       "signing_key_pub": null
       }
      },
      {
@@ -271,24 +298,6 @@
         "exit": 0,
         "issue": "#1260 / #1299",
         "note": "The key is a clearly fake placeholder of 56 characters (a public account key starts with A). Not shown in dry-run."
-       },
-       {
-        "case": "A signing key is set, with --json",
-        "text": "{\n  \"servers\": [\n    \"tls://localhost:4222\"\n  ],\n  \"owner\": \"acme\",\n  \"changed\": true,\n  \"signing_key_pub\": \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"\n}",
-        "stream": "stdout",
-        "exit": 0,
-        "issue": "#1042",
-        "note": "--json is shown as it prints at a terminal (indented); piped it is one compact line (rule \"--json prints one object\"). The list of servers is named \"servers\" (plural, today \"server\"), as in the setup file and mashctl status --json. signing_key_pub is the signing key's public key, never the seed.",
-        "verbatim": true
-       },
-       {
-        "case": "No signing key is set, with --json",
-        "text": "{\n  \"servers\": [\n    \"tls://localhost:4222\"\n  ],\n  \"owner\": \"acme\",\n  \"changed\": true,\n  \"signing_key_pub\": null\n}",
-        "stream": "stdout",
-        "exit": 0,
-        "issue": "#1042",
-        "note": "--json is shown as it prints at a terminal (indented). signing_key_pub is always present: null when no signing key is set (today it is left out), so a script reads one shape.",
-        "verbatim": true
        },
        {
         "case": "The owner is too long",
@@ -505,6 +514,14 @@
         "exit": 1,
         "issue": "#1097",
         "note": "The rows after the config row are skipped, each saying what it needs."
+       },
+       {
+        "case": "--json, a row with nothing to say",
+        "text": "{\n  \"problems\": 0,\n  \"warnings\": 0,\n  \"checks\": [\n    {\n      \"name\": \"config\",\n      \"state\": \"ok\",\n      \"detail\": null,\n      \"fix\": null\n    },\n    {\n      \"name\": \"server\",\n      \"state\": \"ok\",\n      \"detail\": \"tls://localhost:4222\",\n      \"fix\": null\n    },\n    {\n      \"name\": \"sign-in\",\n      \"state\": \"ok\",\n      \"detail\": null,\n      \"fix\": null\n    },\n    {\n      \"name\": \"storage\",\n      \"state\": \"ok\",\n      \"detail\": null,\n      \"fix\": null\n    },\n    {\n      \"name\": \"endpoints\",\n      \"state\": \"ok\",\n      \"detail\": \"3 records, 3 inboxes\",\n      \"fix\": null\n    },\n    {\n      \"name\": \"keys\",\n      \"state\": \"ok\",\n      \"detail\": \"every connected user was issued by mashctl\",\n      \"fix\": null\n    }\n  ]\n}",
+        "stream": "stdout",
+        "exit": 0,
+        "note": "--json is shown as it prints at a terminal (indented); piped it is one compact line (rule \"--json prints one object\"). A row with no detail has \"detail\": null, as mash doctor --json has. The row's own \"state\" (ok, warn, fail, skip) is a different fact from online and keeps its name.",
+        "verbatim": true
        }
       ]
      },
@@ -517,7 +534,7 @@
         {
          "name": "config",
          "state": "ok",
-         "detail": "",
+         "detail": null,
          "fix": null
         },
         {
@@ -587,15 +604,6 @@
         "issue": "#1393",
         "note": "ADR 0168 (REQ-006, Gate 1 ruling): a hint is a command that fixes the problem, or there is no hint. mashctl has no command that revokes a user it did not issue, so there is no hint; the keys FAIL row says what is wrong. v0.5.8 printed 'hint: revoke it with the tool that issued it (mashctl revokes only its own)' on stderr.",
         "replaces": "--audit-users finds a user mashctl did not issue"
-       },
-       {
-        "case": "--json, a row with nothing to say",
-        "text": "{\n  \"problems\": 0,\n  \"warnings\": 0,\n  \"checks\": [\n    {\n      \"name\": \"config\",\n      \"state\": \"ok\",\n      \"detail\": null,\n      \"fix\": null\n    },\n    {\n      \"name\": \"server\",\n      \"state\": \"ok\",\n      \"detail\": \"tls://localhost:4222\",\n      \"fix\": null\n    }\n  ]\n}",
-        "stream": "stdout",
-        "exit": 0,
-        "issue": "#1042",
-        "note": "--json is shown as it prints at a terminal (indented); piped it is one compact line (rule \"--json prints one object\"). A row with no detail has \"detail\": null, as mash doctor --json has (today mashctl doctor prints \"detail\": \"\"). The row's own \"state\" (ok, warn, fail, skip) is a different fact from online and keeps its name.",
-        "verbatim": true
        }
       ]
      }
@@ -736,7 +744,8 @@
        {
         "name": "x-json",
         "value": {
-         "raised": 2
+         "raised": 2,
+         "dry_run": false
         }
        },
        {
@@ -907,6 +916,22 @@
           "text": "error: acme.demo.bob was deleted and its address cannot be used again",
           "stream": "stderr",
           "exit": 1
+         },
+         {
+          "case": "--json",
+          "text": "{\n  \"address\": \"acme.demo.bob\",\n  \"installed_here\": true,\n  \"creds\": \"<config dir>/acme.demo.bob.creds\",\n  \"join_file\": null,\n  \"dry_run\": false\n}",
+          "stream": "stdout",
+          "exit": 0,
+          "note": "--json is shown as it prints at a terminal (indented); piped it is one compact line. dry_run is always present: false when nothing was asked to be a dry run, so a script reads one shape.",
+          "verbatim": true
+         },
+         {
+          "case": "--json, with a join file and --dry-run",
+          "text": "{\n  \"address\": \"acme.demo.bob\",\n  \"installed_here\": false,\n  \"creds\": null,\n  \"join_file\": \"acme.demo.bob.join\",\n  \"dry_run\": true\n}",
+          "stream": "stdout",
+          "exit": 0,
+          "note": "--json is shown as it prints at a terminal (indented); piped it is one compact line. dry_run is always present: false when nothing was asked to be a dry run, so a script reads one shape.",
+          "verbatim": true
          }
         ]
        },
@@ -916,7 +941,8 @@
          "address": "acme.demo.bob",
          "installed_here": true,
          "creds": "/home/ada/.config/mash/acme.demo.bob.creds",
-         "join_file": null
+         "join_file": null,
+         "dry_run": false
         }
        },
        {
@@ -1090,6 +1116,14 @@
           "stream": "stderr",
           "exit": 1,
           "note": "Same frame, hint and exit as a."
+         },
+         {
+          "case": "--json, with --yes",
+          "text": "{\n  \"address\": \"acme.demo.bob\",\n  \"deleted\": true,\n  \"messages_deleted\": 0,\n  \"dry_run\": false\n}",
+          "stream": "stdout",
+          "exit": 0,
+          "note": "--json is shown as it prints at a terminal (indented); piped it is one compact line. dry_run is always present: false when nothing was asked to be a dry run, so a script reads one shape.",
+          "verbatim": true
          }
         ]
        },
@@ -1098,7 +1132,8 @@
         "value": {
          "address": "acme.demo.bob",
          "deleted": true,
-         "messages_deleted": 1
+         "messages_deleted": 1,
+         "dry_run": false
         }
        },
        {
@@ -1288,6 +1323,14 @@
           "text": "error: no endpoint acme.demo.dave\nhint: mashctl endpoint list",
           "stream": "stderr",
           "exit": 1
+         },
+         {
+          "case": "--json",
+          "text": "{\n  \"address\": \"acme.demo.bob\",\n  \"online\": false,\n  \"suspended\": false,\n  \"created\": \"2026-11-19T09:40:00Z\",\n  \"waiting\": 1,\n  \"role\": \"writer\",\n  \"host\": null,\n  \"description\": \"Bob reviews\",\n  \"capabilities\": [],\n  \"note\": null,\n  \"labels\": {\n    \"team\": \"blue\"\n  },\n  \"public_key\": \"UDXU4RCSV3GJRXWQ4PNDKYEL7ZBSMSGGTJYNDQGHFM4QWHBRD3ZTQ4LX\"\n}",
+          "stream": "stdout",
+          "exit": 0,
+          "note": "--json is shown as it prints at a terminal (indented); piped it is one compact line (rule \"--json prints one object\"). Unset fields are null, never \"\" and never left out. The list key is plural: capabilities, not capability. An empty list is [] and an empty map is {}. online and suspended replace state, as in endpoint list (#1041).",
+          "verbatim": true
          }
         ]
        },
@@ -1299,6 +1342,11 @@
          "suspended": false,
          "created": "2026-11-19T09:40:00Z",
          "waiting": 1,
+         "role": "writer",
+         "host": null,
+         "description": "Bob reviews",
+         "capabilities": [],
+         "note": null,
          "labels": {
           "team": "blue"
          },
@@ -1318,21 +1366,7 @@
        },
        {
         "name": "x-notes",
-        "value": "role, host, description, capability and note each appear only when set. 'online' here means something holds the endpoint's lease, which lapses 90 seconds after its holder stops; mash who reads the endpoint's own heartbeat over the same 90 seconds. The two answer the same question and can differ for up to that long."
-       },
-       {
-        "name": "x-output-next",
-        "value": [
-         {
-          "case": "--json",
-          "text": "{\n  \"address\": \"acme.demo.bob\",\n  \"online\": false,\n  \"suspended\": false,\n  \"created\": \"2026-11-19T09:40:00Z\",\n  \"waiting\": 1,\n  \"role\": \"writer\",\n  \"host\": null,\n  \"description\": \"Bob reviews\",\n  \"capabilities\": [],\n  \"note\": null,\n  \"labels\": {\n    \"team\": \"blue\"\n  },\n  \"public_key\": \"UDXU4RCSV3GJRXWQ4PNDKYEL7ZBSMSGGTJYNDQGHFM4QWHBRD3ZTQ4LX\"\n}",
-          "stream": "stdout",
-          "exit": 0,
-          "issue": "#1042",
-          "note": "--json is shown as it prints at a terminal (indented); piped it is one compact line (rule \"--json prints one object\"). Unset fields are null, never \"\" and never left out (today role, host, description and note are omitted when unset). The list key is plural: capabilities, not capability. An empty list is [] and an empty map is {}. online and suspended replace state, as in endpoint list (#1041).",
-          "verbatim": true
-         }
-        ]
+        "value": "In --json, role, host, description and note are always present (null when unset) and the list of capabilities is \"capabilities\" (empty: []); the text form shows each only when set. 'online' here means something holds the endpoint's lease, which lapses 90 seconds after its holder stops; mash who reads the endpoint's own heartbeat over the same 90 seconds. The two answer the same question and can differ for up to that long."
        }
       ]
      },
@@ -1398,6 +1432,14 @@
           "text": "Updated endpoint acme.demo.bob",
           "stream": "stdout",
           "exit": 0
+         },
+         {
+          "case": "--json",
+          "text": "{\n  \"address\": \"acme.demo.bob\",\n  \"set\": {\n    \"role\": \"reviewer\"\n  },\n  \"dry_run\": false\n}",
+          "stream": "stdout",
+          "exit": 0,
+          "note": "--json is shown as it prints at a terminal (indented); piped it is one compact line. dry_run is always present: false when nothing was asked to be a dry run, so a script reads one shape.",
+          "verbatim": true
          }
         ]
        },
@@ -1407,7 +1449,8 @@
          "address": "acme.demo.bob",
          "set": {
           "role": "reviewer"
-         }
+         },
+         "dry_run": false
         }
        },
        {
@@ -1485,6 +1528,14 @@
           "text": "Updated endpoint acme.demo.bob",
           "stream": "stdout",
           "exit": 0
+         },
+         {
+          "case": "--json",
+          "text": "{\n  \"address\": \"acme.demo.bob\",\n  \"unset\": [\n    \"role\"\n  ],\n  \"dry_run\": false\n}",
+          "stream": "stdout",
+          "exit": 0,
+          "note": "--json is shown as it prints at a terminal (indented); piped it is one compact line. dry_run is always present: false when nothing was asked to be a dry run, so a script reads one shape.",
+          "verbatim": true
          }
         ]
        },
@@ -1493,8 +1544,9 @@
         "value": {
          "address": "acme.demo.bob",
          "unset": [
-          "label.team"
-         ]
+          "role"
+         ],
+         "dry_run": false
         }
        },
        {
@@ -1558,6 +1610,14 @@
           "text": "Suspended endpoint acme.demo.bob",
           "stream": "stdout",
           "exit": 0
+         },
+         {
+          "case": "--json",
+          "text": "{\n  \"address\": \"acme.demo.bob\",\n  \"online\": false,\n  \"suspended\": true\n}",
+          "stream": "stdout",
+          "exit": 0,
+          "note": "--json is shown as it prints at a terminal (indented). online and suspended are the same two booleans as in endpoint show and endpoint list.",
+          "verbatim": true
          }
         ]
        },
@@ -1565,7 +1625,8 @@
         "name": "x-json",
         "value": {
          "address": "acme.demo.bob",
-         "state": "suspended"
+         "online": false,
+         "suspended": true
         }
        },
        {
@@ -1629,6 +1690,14 @@
           "text": "Resumed endpoint acme.demo.bob",
           "stream": "stdout",
           "exit": 0
+         },
+         {
+          "case": "--json",
+          "text": "{\n  \"address\": \"acme.demo.bob\",\n  \"online\": false,\n  \"suspended\": false\n}",
+          "stream": "stdout",
+          "exit": 0,
+          "note": "--json is shown as it prints at a terminal (indented). online and suspended are the same two booleans as in endpoint show and endpoint list.",
+          "verbatim": true
          }
         ]
        },
@@ -1636,7 +1705,8 @@
         "name": "x-json",
         "value": {
          "address": "acme.demo.bob",
-         "state": "offline"
+         "online": false,
+         "suspended": false
         }
        },
        {
@@ -1746,6 +1816,14 @@
           "text": "error: no endpoint acme.demo.dave\nhint: mashctl endpoint list",
           "stream": "stderr",
           "exit": 1
+         },
+         {
+          "case": "--json",
+          "text": "{\n  \"address\": \"acme.demo.bob\",\n  \"join_file\": \"acme.demo.bob.join\",\n  \"dry_run\": false\n}",
+          "stream": "stdout",
+          "exit": 0,
+          "note": "--json is shown as it prints at a terminal (indented); piped it is one compact line. dry_run is always present: false when nothing was asked to be a dry run, so a script reads one shape.",
+          "verbatim": true
          }
         ]
        },
@@ -1753,7 +1831,8 @@
         "name": "x-json",
         "value": {
          "address": "acme.demo.bob",
-         "join_file": "acme.demo.bob.join"
+         "join_file": "acme.demo.bob.join",
+         "dry_run": false
         }
        },
        {
@@ -2133,14 +2212,23 @@
         "text": "mashctl v0.0.0-dev (unknown)",
         "stream": "stdout",
         "exit": 0
+       },
+       {
+        "case": "--json",
+        "text": "{\n  \"version\": \"0.5.9\",\n  \"commit\": \"3f9a41c2e0b7d5a1c4e08b2d77f3a95e1b6c4098\",\n  \"plugin\": null\n}",
+        "stream": "stdout",
+        "exit": 0,
+        "note": "--json is shown as it prints at a terminal (indented); piped it is one compact line (rule \"--json prints one object\"). The same three keys as mash version --json; mashctl has no plugin, so it is null. Text is unchanged.",
+        "verbatim": true
        }
       ]
      },
      {
       "name": "x-json",
       "value": {
-       "version": "0.5.6",
-       "commit": "3f9a41c2e0b7d5a1c4e08b2d77f3a95e1b6c4098"
+       "version": "0.5.9",
+       "commit": "3f9a41c2e0b7d5a1c4e08b2d77f3a95e1b6c4098",
+       "plugin": null
       }
      },
      {
@@ -2153,20 +2241,6 @@
      {
       "name": "x-today",
       "value": "In 0.5.5, mashctl version printed no commit."
-     },
-     {
-      "name": "x-output-next",
-      "value": [
-       {
-        "case": "--json",
-        "text": "{\n  \"version\": \"0.5.9\",\n  \"commit\": \"3f9a41c2e0b7d5a1c4e08b2d77f3a95e1b6c4098\",\n  \"plugin\": null\n}",
-        "stream": "stdout",
-        "exit": 0,
-        "issue": "#1042",
-        "note": "--json is shown as it prints at a terminal (indented); piped it is one compact line (rule \"--json prints one object\"). The same three keys as mash version --json; mashctl has no plugin, so it is null (today the key is missing). Text is unchanged.",
-        "verbatim": true
-       }
-      ]
      }
     ]
    }

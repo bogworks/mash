@@ -61,14 +61,7 @@ type deleteJSON struct {
 	Address         string `json:"address"`
 	Deleted         bool   `json:"deleted"`
 	MessagesDeleted uint64 `json:"messages_deleted"`
-}
-
-// deletePlanJSON is the JSON of a delete with --dry-run.
-type deletePlanJSON struct {
-	Address         string `json:"address"`
-	Deleted         bool   `json:"deleted"`
-	MessagesDeleted uint64 `json:"messages_deleted"`
-	DryRun          bool   `json:"dry_run"`
+	DryRun          bool   `json:"dry_run"` // false unless --dry-run
 }
 
 // confirmDelete asks the person to type the address. It runs after the endpoint is found and its messages counted, and
@@ -112,7 +105,7 @@ func runEndpointDelete(args []string, g cliframe.Global, env func(string) string
 	name := in.addr.String()
 	if res.planned {
 		if in.json {
-			writeJSON(stdout, deletePlanJSON{Address: name, Deleted: true, MessagesDeleted: res.messages, DryRun: true})
+			writeJSON(stdout, deleteJSON{Address: name, Deleted: true, MessagesDeleted: res.messages, DryRun: true})
 			return 0
 		}
 		fmt.Fprintf(stdout, "Would delete endpoint %s and %s\n", name, inboxWords(res.messages))

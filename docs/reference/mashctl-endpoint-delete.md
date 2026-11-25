@@ -181,6 +181,19 @@ error: acme.demo.bob is partly deleted: its creds path is not a file
 hint: mashctl endpoint delete acme.demo.bob
 ```
 
+### --json, with --yes
+
+Stream: stdout. Exit code: 0.
+
+```text
+{
+  "address": "acme.demo.bob",
+  "deleted": true,
+  "messages_deleted": 0,
+  "dry_run": false
+}
+```
+
 ## JSON
 
 With `--json` the result is this shape. The values are an example.
@@ -189,7 +202,8 @@ With `--json` the result is this shape. The values are an example.
 {
   "address": "acme.demo.bob",
   "deleted": true,
-  "messages_deleted": 1
+  "messages_deleted": 1,
+  "dry_run": false
 }
 ```
 

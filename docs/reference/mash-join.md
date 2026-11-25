@@ -177,7 +177,8 @@ With `--json` the result is this shape. The values are an example.
 
 ```json
 {
-  "endpoint": "acme.demo.bob"
+  "endpoint": "acme.demo.bob",
+  "dry_run": false
 }
 ```
 
@@ -192,7 +193,8 @@ usual one. The values are an example.
   "servers": [
     "tls://myserver:4222"
   ],
-  "creds": "/home/ada/.config/mash/acme.demo.bob.creds"
+  "creds": "/home/ada/.config/mash/acme.demo.bob.creds",
+  "dry_run": false
 }
 ```
 

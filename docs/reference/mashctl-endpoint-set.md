@@ -52,6 +52,20 @@ Stream: stdout. Exit code: 0.
 Updated endpoint acme.demo.bob
 ```
 
+### --json
+
+Stream: stdout. Exit code: 0.
+
+```text
+{
+  "address": "acme.demo.bob",
+  "set": {
+    "role": "reviewer"
+  },
+  "dry_run": false
+}
+```
+
 ## JSON
 
 With `--json` the result is this shape. The values are an example.
@@ -61,7 +75,8 @@ With `--json` the result is this shape. The values are an example.
   "address": "acme.demo.bob",
   "set": {
     "role": "reviewer"
-  }
+  },
+  "dry_run": false
 }
 ```
 

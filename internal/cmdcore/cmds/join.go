@@ -39,11 +39,11 @@ type JoinParams struct {
 	DryRun  bool   `json:"dry_run,omitempty" flag:"--dry-run" desc:"Print what would change, and change nothing."`
 }
 
-// JoinResult is the endpoint joined as. DryRun is true, and only then present, for a run that changed nothing. The
+// JoinResult is the endpoint joined as. DryRun is always present: false on a real run, true for a run that changed nothing. The
 // servers and the creds file are the fuller answer (--detail).
 type JoinResult struct {
 	Endpoint string `json:"endpoint"`
-	DryRun   bool   `json:"dry_run,omitempty"`
+	DryRun   bool   `json:"dry_run"`
 
 	servers   []string
 	creds     string // as shown, for the text
@@ -56,7 +56,7 @@ type JoinDetail struct {
 	Endpoint string   `json:"endpoint"`
 	Servers  []string `json:"servers"`
 	Creds    string   `json:"creds"`
-	DryRun   bool     `json:"dry_run,omitempty"`
+	DryRun   bool     `json:"dry_run"`
 }
 
 // Text is "Joined as <address>" or, for --dry-run, "Would join as <address>"

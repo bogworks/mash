@@ -401,6 +401,16 @@ func TestWhoMatchesSpec(t *testing.T) {
 			argv = []string{"--offline", "acme.lab"}
 		case "A prefix that is not part of an address":
 			argv = []string{"Acme.Demo"}
+		case "--json":
+			code, out, _ := runWho(&fakeDir{entries: []cmds.WhoEntry{
+				{Address: alice.Address, Online: true, Role: "reviewer", Host: "myserver", Description: "reviews pull requests", Capabilities: []string{"review"},
+					Labels: map[string]string{"team": "blue"}},
+				{Address: bob.Address}}}, cliframe.Global{JSON: true})
+			var b bytes.Buffer
+			if err := json.Indent(&b, []byte(strings.TrimSpace(out)), "", "  "); err != nil || b.String() != oc["text"].(string) || code != 0 {
+				t.Errorf("who output %q: exit %d %q, spec %q", oc["case"], code, b.String(), oc["text"])
+			}
+			continue
 		case "A deleted endpoint here":
 			continue // a stderr failure: cmd/mash/deleted_here_test.go (TestEverydayCommandsDeletedHereMatchSpec) compares it
 		default:

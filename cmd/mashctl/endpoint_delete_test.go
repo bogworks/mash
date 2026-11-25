@@ -169,7 +169,7 @@ func TestEndpointDeleteMessageCountWords(t *testing.T) {
 			if code != 0 || errb != c.want+"Type the address to confirm: " {
 				t.Fatalf("%d %q %q", code, out, errb)
 			}
-			if want := fmt.Sprintf("{\n  \"address\": \"o.g.q\",\n  \"deleted\": true,\n  \"messages_deleted\": %d\n}\n", c.n); out != want {
+			if want := fmt.Sprintf("{\n  \"address\": \"o.g.q\",\n  \"deleted\": true,\n  \"messages_deleted\": %d,\n  \"dry_run\": false\n}\n", c.n); out != want {
 				t.Errorf("json %q, want %q", out, want)
 			}
 		})

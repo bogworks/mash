@@ -22,18 +22,18 @@ var endpointShowSpec = epSpec{
 
 // showJSON is the JSON of one endpoint.
 type showJSON struct {
-	Address     string            `json:"address"`
-	Online      bool              `json:"online"`
-	Suspended   bool              `json:"suspended"`
-	Created     string            `json:"created"`
-	Waiting     uint64            `json:"waiting"`
-	Role        string            `json:"role,omitempty"`
-	Host        string            `json:"host,omitempty"`
-	Description string            `json:"description,omitempty"`
-	Capability  []string          `json:"capability,omitempty"`
-	Note        string            `json:"note,omitempty"`
-	Labels      map[string]string `json:"labels"`
-	PublicKey   string            `json:"public_key"`
+	Address      string            `json:"address"`
+	Online       bool              `json:"online"`
+	Suspended    bool              `json:"suspended"`
+	Created      string            `json:"created"`
+	Waiting      uint64            `json:"waiting"`
+	Role         *string           `json:"role"`
+	Host         *string           `json:"host"`
+	Description  *string           `json:"description"`
+	Capabilities []string          `json:"capabilities"`
+	Note         *string           `json:"note"`
+	Labels       map[string]string `json:"labels"`
+	PublicKey    string            `json:"public_key"`
 }
 
 // runEndpointShow is `mashctl endpoint show`.
@@ -52,8 +52,13 @@ func runEndpointShow(args []string, g cliframe.Global, env func(string) string, 
 			if labels == nil {
 				labels = map[string]string{}
 			}
+			caps := rec.Caps
+			if caps == nil {
+				caps = []string{}
+			}
 			writeJSON(stdout, showJSON{Address: rt.in.addr.String(), Online: st.Online, Suspended: st.Suspended, Created: utcRFC3339(rec.Created), Waiting: st.Waiting,
-				Role: rec.Role, Host: rec.Host, Description: rec.Description, Capability: rec.Caps, Note: rec.Note, Labels: labels, PublicKey: rec.User})
+				Role: nullIfEmpty(rec.Role), Host: nullIfEmpty(rec.Host), Description: nullIfEmpty(rec.Description), Capabilities: caps, Note: nullIfEmpty(rec.Note),
+				Labels: labels, PublicKey: rec.User})
 			return nil
 		}
 		c := config.Clean
@@ -73,4 +78,12 @@ func runEndpointShow(args []string, g cliframe.Global, env func(string) string, 
 		fmt.Fprintln(stdout, cliframe.Block(rows...))
 		return nil
 	})
+}
+
+// nullIfEmpty is the JSON value of an optional text: null when unset, never "".
+func nullIfEmpty(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }

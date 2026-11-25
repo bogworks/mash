@@ -279,6 +279,23 @@ func init() {
 		w := newConfWorld(t, false)
 		return confOutRun{ran: w.run("init", "--config", w.a.setupPath()), subs: urlSub(w)}
 	})
+	reg("init A signing key is set, with --json", func(t *testing.T) confOutRun {
+		e, sk, osk := strictEnv(t)
+		w := newConfWorldOn(t, e, false, func(a *initer) {
+			if err := os.WriteFile(a.opSeed, mustRead(t, seedFile(t, t.TempDir(), "op", osk)), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			sc := filepath.Join(a.root, "in", "signer.creds")
+			signingKeyCreds(t, e.acctPub, sk, sc)
+			a.vals["admin_creds"] = sc
+			a.vals["signing_key"] = seedFile(t, filepath.Join(a.root, "in"), "signing.seed", sk)
+		})
+		return confOutRun{ran: confIndented(w.run("init", "--config", w.a.setupPath(), "--json")), subs: urlSub(w)}
+	})
+	reg("init No signing key is set, with --json", func(t *testing.T) confOutRun {
+		w := newConfWorld(t, false)
+		return confOutRun{ran: confIndented(w.run("init", "--config", w.a.setupPath(), "--json")), subs: urlSub(w)}
+	})
 	reg("init Already set up", func(t *testing.T) confOutRun {
 		w := newConfWorld(t, true)
 		return confOutRun{ran: w.run("init", "--config", w.a.setupPath()), subs: urlSub(w)}
@@ -343,6 +360,11 @@ func init() {
 		w := newConfWorld(t, true)
 		w.fleet()
 		return confOutRun{ran: w.run("doctor"), subs: urlSub(w)}
+	})
+	reg("doctor --json, a row with nothing to say", func(t *testing.T) confOutRun {
+		w := newConfWorld(t, true)
+		w.fleet()
+		return confOutRun{ran: confIndented(w.run("doctor", "--json")), subs: urlSub(w)}
 	})
 	reg("doctor A problem", func(t *testing.T) confOutRun {
 		w := newConfWorld(t, true)
@@ -579,6 +601,12 @@ func init() {
 		inTmp(t)
 		return confOutRun{ran: w.run("endpoint", "reissue", "acme.demo.dave")}
 	})
+	reg("endpoint show --json", func(t *testing.T) confOutRun {
+		w := newConfWorld(t, true)
+		w.fleet()
+		w.do("endpoint", "set", "acme.demo.bob", "role=writer", "description=Bob reviews", "label.team=blue")
+		return confOutRun{ran: confIndented(w.run("endpoint", "show", "acme.demo.bob", "--json"))}
+	})
 	reg("endpoint set Updated", func(t *testing.T) confOutRun {
 		w := newConfWorld(t, true)
 		w.do("endpoint", "create", "acme.demo.bob")
@@ -616,6 +644,54 @@ func init() {
 		return confOutRun{ran: ran, subs: []string{"servers acknowledged: 2", "servers acknowledged: 1"}}
 	})
 
+	// the --json forms of the changing commands: dry_run is always present, never left out
+	reg("init With --dry-run, with --json", func(t *testing.T) confOutRun {
+		w := newConfWorld(t, false)
+		return confOutRun{ran: confIndented(w.run("init", "--config", w.a.setupPath(), "--dry-run", "--json")), subs: urlSub(w)}
+	})
+	reg("endpoint create --json", func(t *testing.T) confOutRun {
+		w := newConfWorld(t, true)
+		return confOutRun{ran: confIndented(w.run("endpoint", "create", "acme.demo.bob", "--json")), subs: []string{"<config dir>", w.a.env["MASH_CONFIG_DIR"]}}
+	})
+	reg("endpoint create --json, with a join file and --dry-run", func(t *testing.T) confOutRun {
+		w := newConfWorld(t, true)
+		inTmp(t)
+		return confOutRun{ran: confIndented(w.run("endpoint", "create", "acme.demo.bob", "--out", "acme.demo.bob.join", "--dry-run", "--json"))}
+	})
+	reg("endpoint delete --json, with --yes", func(t *testing.T) confOutRun {
+		w := newConfWorld(t, true)
+		w.do("endpoint", "create", "acme.demo.bob")
+		return confOutRun{ran: confIndented(w.run("endpoint", "delete", "acme.demo.bob", "--yes", "--json"))}
+	})
+	reg("endpoint set --json", func(t *testing.T) confOutRun {
+		w := newConfWorld(t, true)
+		w.do("endpoint", "create", "acme.demo.bob")
+		return confOutRun{ran: confIndented(w.run("endpoint", "set", "acme.demo.bob", "role=reviewer", "--json"))}
+	})
+	reg("endpoint unset --json", func(t *testing.T) confOutRun {
+		w := newConfWorld(t, true)
+		w.do("endpoint", "create", "acme.demo.bob")
+		w.do("endpoint", "set", "acme.demo.bob", "role=reviewer")
+		return confOutRun{ran: confIndented(w.run("endpoint", "unset", "acme.demo.bob", "role", "--json"))}
+	})
+	reg("endpoint suspend --json", func(t *testing.T) confOutRun {
+		w := newConfWorld(t, true)
+		w.do("endpoint", "create", "acme.demo.bob")
+		return confOutRun{ran: confIndented(w.run("endpoint", "suspend", "acme.demo.bob", "--json"))}
+	})
+	reg("endpoint resume --json", func(t *testing.T) confOutRun {
+		w := newConfWorld(t, true)
+		w.do("endpoint", "create", "acme.demo.bob")
+		w.do("endpoint", "suspend", "acme.demo.bob")
+		return confOutRun{ran: confIndented(w.run("endpoint", "resume", "acme.demo.bob", "--json"))}
+	})
+	reg("endpoint reissue --json", func(t *testing.T) confOutRun {
+		w := newConfWorld(t, true)
+		w.do("endpoint", "create", "acme.demo.bob")
+		inTmp(t)
+		return confOutRun{ran: confIndented(w.run("endpoint", "reissue", "acme.demo.bob", "--out", "acme.demo.bob.join", "--json"))}
+	})
+
 	reg("version Version", func(t *testing.T) confOutRun {
 		prevV, prevC, prevB := endpoint.CurrentVersion(), commit, readBuildInfo
 		endpoint.SetVersion("0.5.6")
@@ -623,6 +699,14 @@ func init() {
 		readBuildInfo = func() (*debug.BuildInfo, bool) { return nil, false }
 		t.Cleanup(func() { endpoint.SetVersion(prevV); commit, readBuildInfo = prevC, prevB })
 		return confOutRun{ran: confRun(t, "version")}
+	})
+	reg("version --json", func(t *testing.T) confOutRun {
+		prevV, prevC, prevB := endpoint.CurrentVersion(), commit, readBuildInfo
+		endpoint.SetVersion("0.5.9")
+		commit = "3f9a41c2e0b7d5a1c4e08b2d77f3a95e1b6c4098"
+		readBuildInfo = func() (*debug.BuildInfo, bool) { return nil, false }
+		t.Cleanup(func() { endpoint.SetVersion(prevV); commit, readBuildInfo = prevC, prevB })
+		return confOutRun{ran: confIndented(confRun(t, "version", "--json"))}
 	})
 	reg("version A build with no version stamped", func(t *testing.T) confOutRun {
 		prevV, prevC, prevB := endpoint.CurrentVersion(), commit, readBuildInfo
@@ -646,16 +730,22 @@ func confIndented(r confRan) confRan {
 var (
 	confTimeRE = regexp.MustCompile(`\d{4}-\d{2}-\d{2} \d{2}:\d{2}`)
 	confKeyRE  = regexp.MustCompile(`[A-Z2-7]{56}`)
+	confUTCRE  = regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z`)
 )
 
 // confPattern is the text as a pattern: literal, except a date and time and a public key, which match their shapes.
 func confPattern(text string) string {
 	var b strings.Builder
 	for len(text) > 0 {
-		t, k := confTimeRE.FindStringIndex(text), confKeyRE.FindStringIndex(text)
-		loc, shape := t, `\d{4}-\d{2}-\d{2} \d{2}:\d{2}`
-		if t == nil || (k != nil && k[0] < t[0]) {
-			loc, shape = k, `[A-Z2-7]{56}`
+		var loc []int
+		shape := ""
+		for _, c := range []struct {
+			re    *regexp.Regexp
+			shape string
+		}{{confTimeRE, `\d{4}-\d{2}-\d{2} \d{2}:\d{2}`}, {confKeyRE, `[A-Z2-7]{56}`}, {confUTCRE, `\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z`}} {
+			if l := c.re.FindStringIndex(text); l != nil && (loc == nil || l[0] < loc[0]) {
+				loc, shape = l, c.shape
+			}
 		}
 		if loc == nil {
 			b.WriteString(regexp.QuoteMeta(text))

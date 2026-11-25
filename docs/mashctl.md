@@ -59,7 +59,7 @@ These change the endpoint's directory record (what `who --wide` shows). They con
 - `unset` clears each key. `unset capability` removes every capability; to remove one, set the list again without it. `unset label.team` removes the label `team`; a label that is not set gives a warning and exit 0.
 - Both print `Updated endpoint ADDRESS`. A command that leaves the record as it is prints `Nothing to change on endpoint ADDRESS`.
 - `--dry-run` prints `Would update endpoint ADDRESS: what` and `Nothing was changed.`, and changes nothing.
-- `--json` prints `{"address": ..., "set": {...}}` or `{"address": ..., "unset": [...]}`, with `"dry_run": true` for a dry run.
+- `--json` prints `{"address": ..., "set": {...}}` or `{"address": ..., "unset": [...]}`, with `"dry_run": true` for a dry run and `"dry_run": false` otherwise.
 - A key that cannot be set, a missing value, a key given twice and an unknown flag exit 2 and are not echoed back. An endpoint with no directory record exits 1.
 
 Labels do not change a minted user: the permissions of an endpoint do not depend on them, so setting one leaves nothing to reissue.
@@ -69,7 +69,7 @@ Labels do not change a minted user: the permissions of an endpoint do not depend
 - `mashctl endpoint suspend ADDRESS` refuses all inbound mail to ADDRESS's inbox and prints `Suspended endpoint ADDRESS`. Suspend does not revoke: it is reversible, and the endpoint can still connect with its creds. Stored mail stays readable and is not purged.
 - `mashctl endpoint resume ADDRESS` restores delivery and prints `Resumed endpoint ADDRESS`.
 - `mashctl endpoint show ADDRESS` shows `state: suspended` for a suspended endpoint, and `endpoint list` shows `suspended` in its STATE column.
-- Both take `--json` (`{"address": ..., "state": ...}`). An endpoint with no inbox stream exits 1.
+- Both take `--json` (`{"address": ..., "online": ..., "suspended": ...}`). An endpoint with no inbox stream exits 1.
 
 See [operations.md](operations.md#suspend-an-endpoints-inbound-mail).
 
@@ -163,13 +163,13 @@ Created endpoint alice.dev.design
 Join file: alice.dev.design.join
 ```
 
-With `--dry-run` it prints one line, and with `--json` the same object plus `"dry_run": true`:
+With `--dry-run` it prints one line, and with `--json` the same object with `"dry_run": true` (it is `false` in a real run):
 
 ```text
 Would create endpoint alice.dev.design
 ```
 
-With `--json`, `{"address": "alice.dev.design", "installed_here": true, "creds": "~/.config/mash/alice.dev.design.creds", "join_file": null}`, where `creds` is the installed credentials file. With `--out`, `installed_here` is `false`, `creds` is `null` and `join_file` is the path. With `--dry-run` the same keys report the planned paths, plus `"dry_run": true`. Neither the seed nor the JWT is printed.
+With `--json`, `{"address": "alice.dev.design", "installed_here": true, "creds": "~/.config/mash/alice.dev.design.creds", "join_file": null, "dry_run": false}`, where `creds` is the installed credentials file. With `--out`, `installed_here` is `false`, `creds` is `null` and `join_file` is the path. With `--dry-run` the same keys report the planned paths, with `"dry_run": true`. Neither the seed nor the JWT is printed.
 
 **Errors** are one line on standard error, `error: WHAT`, and at most one line `hint: COMMAND`; with `--json` they are `{"error": ..., "hint": ...}` on standard output. Exit codes: 0 done or planned, 1 failed, 2 the command line was wrong. For example:
 
@@ -192,7 +192,7 @@ Gives an existing endpoint new credentials and cancels the old ones. It revokes 
 
 With no option the new key pair is made on this host and `<config dir>/<address>.creds` is replaced. With `--out PATH` the command writes a join file for another machine and installs nothing here. With `--out PATH --public-key PATH` it signs the endpoint's new public key and the join file holds the user JWT. `--public-key` needs `--out`.
 
-On success it prints `Reissued credentials for alice.dev.design`, then `Join file: PATH` with `--out`. With `--detail` it adds the line `servers acknowledged: N`, with `Join file:` padded to the same column; with `--json` the object gains `servers_acknowledged`. This is the only place `--detail` changes `mashctl`: every other command prints what it prints without it, in text and in `--json`. With `--dry-run` it prints `Would reissue credentials for alice.dev.design`, and with `--json` the same object plus `"dry_run": true`. If the join file cannot be written after the key changed, the hint is `remove PATH or choose another --out`. With `--json` it prints `{"address": "alice.dev.design", "join_file": null}`; with `--out` `join_file` is the path. There is no bulk form: reissue takes one address.
+On success it prints `Reissued credentials for alice.dev.design`, then `Join file: PATH` with `--out`. With `--detail` it adds the line `servers acknowledged: N`, with `Join file:` padded to the same column; with `--json` the object gains `servers_acknowledged`. This is the only place `--detail` changes `mashctl`: every other command prints what it prints without it, in text and in `--json`. With `--dry-run` it prints `Would reissue credentials for alice.dev.design`, and with `--json` the same object with `"dry_run": true`. If the join file cannot be written after the key changed, the hint is `remove PATH or choose another --out`. With `--json` it prints `{"address": "alice.dev.design", "join_file": null, "dry_run": false}`; with `--out` `join_file` is the path. There is no bulk form: reissue takes one address.
 
 `--public-key` naming the key the endpoint already has is refused: nothing would be rotated. Make a new key with `mash key create --out NAME.seed`. The one exception is a rerun after a killed `--public-key` reissue: the command leaves `<PATH>.pending` while the key changes, and a rerun with the same key and `--out` finishes the join file and removes the file.
 
@@ -215,7 +215,7 @@ Deletes an endpoint, its inbox and its credentials. The address can never be use
 3. burns the address: it is never assigned again, to any key;
 4. sets the creds file aside, if one is in the config directories: it writes `<address>.creds.deleted` (`.deleted.1`, `.deleted.2` and so on if that name is taken; nothing is overwritten) holding the endpoint's JWT and no key, then removes the creds file. The marker is no longer counted as an installed endpoint.
 
-On success it prints `Deleted endpoint <address>`; `--dry-run` prints `Would delete endpoint <address> and the N messages in its inbox`, asks nothing and changes nothing. `--json` prints `{"address", "deleted", "messages_deleted"}`, and with `--dry-run` the same object plus `"dry_run": true`; a failure prints `{"error", "hint"}`. An address that does not exist is `error: <address> does not exist`, exit 1. A killed run finishes when you run the same command again. Exit codes: 0 deleted, 1 refused, partial or error, 2 usage error. After a partial delete (the key was cancelled, a later step failed) the message is `error: <address> is partly deleted: <cause>`, the cause in plain words, with `hint: mashctl endpoint delete <address>`; the credentials already no longer work, and running the same command again is safe and finishes it. The options `--force`, `--delete-creds` and `--no-revoke` no longer exist.
+On success it prints `Deleted endpoint <address>`; `--dry-run` prints `Would delete endpoint <address> and the N messages in its inbox`, asks nothing and changes nothing. `--json` prints `{"address", "deleted", "messages_deleted", "dry_run"}`, with `"dry_run": true` for `--dry-run` and `false` otherwise; a failure prints `{"error", "hint"}`. An address that does not exist is `error: <address> does not exist`, exit 1. A killed run finishes when you run the same command again. Exit codes: 0 deleted, 1 refused, partial or error, 2 usage error. After a partial delete (the key was cancelled, a later step failed) the message is `error: <address> is partly deleted: <cause>`, the cause in plain words, with `hint: mashctl endpoint delete <address>`; the credentials already no longer work, and running the same command again is safe and finishes it. The options `--force`, `--delete-creds` and `--no-revoke` no longer exist.
 
 ## mashctl endpoint list and show
 
@@ -246,11 +246,11 @@ public key: UDXU4RCSV3GJRXWQ4PNDKYEL7ZBSMSGGTJYNDQGHFM4QWHBRD3ZTQ4LX
 
 `role`, `host`, `description`, `capability` and `note` lines appear when the record has them. The labels are padded to the longest label in the block plus one space, so with a `description` the values start one column further right. It exits 1 when the endpoint does not exist. Both change nothing.
 
-`--json` prints, for `list`, `{"endpoints": [{"address", "owner", "group", "name", "online", "suspended"}]}`, and for `show`, `address`, `online`, `suspended`, `created` (RFC 3339), `waiting`, `labels`, `public_key` and the optional fields above.
+`--json` prints, for `list`, `{"endpoints": [{"address", "owner", "group", "name", "online", "suspended"}]}`, and for `show`, `address`, `online`, `suspended`, `created` (RFC 3339), `waiting`, `role`, `host`, `description` and `note` (each `null` when unset, never `""` and never left out), `capabilities` (a list, `[]` when none), `labels` and `public_key`.
 
 ## mashctl version
 
-`mashctl version` prints `mashctl vVERSION (COMMIT)`, where COMMIT is the first seven characters of the commit the binary was built from (`unknown` when the build has none). `--json` prints `{"version": "VERSION", "commit": "COMMIT"}` with the whole commit, all 40 characters (`unknown` when the build has none).
+`mashctl version` prints `mashctl vVERSION (COMMIT)`, where COMMIT is the first seven characters of the commit the binary was built from (`unknown` when the build has none). `--json` prints `{"version": "VERSION", "commit": "COMMIT", "plugin": null}` (the same three keys as `mash version --json`; `mashctl` has no plugin) with the whole commit, all 40 characters (`unknown` when the build has none).
 
 ## mash key create and mash join
 
@@ -263,7 +263,7 @@ mash join FILE [--key SEED] [--replace] [--dry-run]
 
 `mash key create` makes a user key pair. The seed goes to `FILE` (mode 0600; default `mash.seed` in the current folder), and the public key beside it, with `.pub` added to the whole seed path: `bob.seed` and `bob.seed.pub`. It makes a missing parent directory (mode 0700), refuses to overwrite either file (`error: bob.seed already exists; nothing was written`, exit 1), and prints `Created bob.seed and bob.seed.pub` The key itself is never printed. `--json` prints `{"seed": "bob.seed", "public_key": "bob.seed.pub"}`, the two paths.
 
-`mash join` installs the endpoint from a join file, the one text file `mashctl endpoint create --out` writes. It copies the servers and the certificate authority's certificate into the configuration folder (`config.json` `servers`, and `ca.pem` named by `ca`) and writes `<address>.creds` there (mode 0600). A join file made for a public key you supplied holds no seed: give your seed file with `--key`. One configuration folder serves one mesh, so a join file for other servers is refused (`--config-dir` names another folder). A join file for another certificate authority (compared with the file `config.json`'s `ca` names, or `ca.pem`), or none where the folder has one, or one where the folder has none and already holds an endpoint, is refused too, with or without `--replace`; the first join into an empty folder sets it. An endpoint already installed is refused unless `--replace` is given, which replaces its creds and writes only the `config.json` or `ca.pem` an earlier, interrupted join left out. If a join was interrupted after the creds were installed and the creds are the join file's, running the same join again finishes it and says so. `--dry-run` says what it would do and writes nothing. It prints `Joined as alice.dev.design`; with `--detail` the lines `servers:` and `creds:` follow; `--json` prints `{"endpoint"}` and `--detail --json` adds `servers` and `creds` (the creds file's absolute path). The join file's format is described in [the specification](../spec/mash.json) under `join`: JSON with `mash_join` (1), `address`, `servers`, `ca` (PEM text or null), and `creds` (the whole creds file) or `user_jwt`.
+`mash join` installs the endpoint from a join file, the one text file `mashctl endpoint create --out` writes. It copies the servers and the certificate authority's certificate into the configuration folder (`config.json` `servers`, and `ca.pem` named by `ca`) and writes `<address>.creds` there (mode 0600). A join file made for a public key you supplied holds no seed: give your seed file with `--key`. One configuration folder serves one mesh, so a join file for other servers is refused (`--config-dir` names another folder). A join file for another certificate authority (compared with the file `config.json`'s `ca` names, or `ca.pem`), or none where the folder has one, or one where the folder has none and already holds an endpoint, is refused too, with or without `--replace`; the first join into an empty folder sets it. An endpoint already installed is refused unless `--replace` is given, which replaces its creds and writes only the `config.json` or `ca.pem` an earlier, interrupted join left out. If a join was interrupted after the creds were installed and the creds are the join file's, running the same join again finishes it and says so. `--dry-run` says what it would do and writes nothing. It prints `Joined as alice.dev.design`; with `--detail` the lines `servers:` and `creds:` follow; `--json` prints `{"endpoint", "dry_run"}`, with `dry_run` `false` in a real run, and `--detail --json` adds `servers` and `creds` (the creds file's absolute path). The join file's format is described in [the specification](../spec/mash.json) under `join`: JSON with `mash_join` (1), `address`, `servers`, `ca` (PEM text or null), and `creds` (the whole creds file) or `user_jwt`.
 
 ## Errors of create and reissue
 

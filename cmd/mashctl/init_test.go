@@ -399,13 +399,13 @@ func TestInitJSONAndDetail(t *testing.T) {
 	url := e.srv.ClientURL()
 	out, errb, code := a.init("--dry-run", "--json")
 	var r struct {
-		Server      []string `json:"server"`
+		Servers     []string `json:"servers"`
 		Owner       string   `json:"owner"`
 		Changed     bool     `json:"changed"`
 		DryRun      bool     `json:"dry_run"`
 		WouldChange bool     `json:"would_change"`
 	}
-	if err := json.Unmarshal([]byte(out), &r); code != 0 || err != nil || errb != "" || r.Changed || !r.DryRun || !r.WouldChange || r.Owner != "alice" || len(r.Server) != 1 || r.Server[0] != url {
+	if err := json.Unmarshal([]byte(out), &r); code != 0 || err != nil || errb != "" || r.Changed || !r.DryRun || !r.WouldChange || r.Owner != "alice" || len(r.Servers) != 1 || r.Servers[0] != url {
 		t.Fatalf("dry run json: %d %v %q %q", code, err, out, errb)
 	}
 	out, errb, code = a.init("--json")

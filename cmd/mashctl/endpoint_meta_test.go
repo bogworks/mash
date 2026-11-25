@@ -163,11 +163,11 @@ func TestEndpointSetUnsetJSON(t *testing.T) {
 	h := newFleetEnv(t)
 	h.provisionDeclared("b")
 	out, errb, code := h.run("endpoint", "set", "o.g.b", "role=reviewer", "capability=b,a", "label.team=blue", "--json")
-	if code != 0 || errb != "" || out != "{\n  \"address\": \"o.g.b\",\n  \"set\": {\n    \"capability\": [\n      \"a\",\n      \"b\"\n    ],\n    \"label.team\": \"blue\",\n    \"role\": \"reviewer\"\n  }\n}\n" {
+	if code != 0 || errb != "" || out != "{\n  \"address\": \"o.g.b\",\n  \"set\": {\n    \"capability\": [\n      \"a\",\n      \"b\"\n    ],\n    \"label.team\": \"blue\",\n    \"role\": \"reviewer\"\n  },\n  \"dry_run\": false\n}\n" {
 		t.Fatalf("set --json: %d %q %q", code, out, errb)
 	}
 	out, errb, code = h.run("endpoint", "unset", "o.g.b", "label.team", "--json")
-	if code != 0 || errb != "" || out != "{\n  \"address\": \"o.g.b\",\n  \"unset\": [\n    \"label.team\"\n  ]\n}\n" {
+	if code != 0 || errb != "" || out != "{\n  \"address\": \"o.g.b\",\n  \"unset\": [\n    \"label.team\"\n  ],\n  \"dry_run\": false\n}\n" {
 		t.Fatalf("unset --json: %d %q %q", code, out, errb)
 	}
 	// a refusal in JSON mode is one JSON object on stdout and nothing on stderr

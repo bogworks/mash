@@ -66,7 +66,8 @@ With `--json` the result is this shape. The values are an example.
 
 ```json
 {
-  "raised": 2
+  "raised": 2,
+  "dry_run": false
 }
 ```
 
