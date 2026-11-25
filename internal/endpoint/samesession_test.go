@@ -141,6 +141,34 @@ func TestSameSessionTakeoverLosesToLiveWriter(t *testing.T) {
 	}
 }
 
+// A same-session holder that refreshes its lease between the takeover's read and its compare-and-set does not make the
+// later serve give up: the key is read again once and the takeover decided again.
+func TestSameSessionTakeoverRetriesAfterRefreshRace(t *testing.T) {
+	id := ours(t)
+	setSession(t, id)
+	f := newFixture(t, "a")
+	kv := heldBy(t, f, tkey("a"), leaseValue{Machine: needMachine(t), Session: id.Session})
+	refreshed := false
+	stubHolderGone(t, func(string, string) bool {
+		if !refreshed { // the holder's refresh lands once, after the read
+			refreshed = true
+			putLease(t, f, tkey("a"), leaseValue{Instance: "earlier", Host: "h", PID: "4242", Since: "x", Machine: ourMachine(), Session: id.Session})
+		}
+		return false
+	})
+	ep, err := Open(context.Background(), f.cfg("a"))
+	if err != nil {
+		t.Fatalf("the later serve of the same session must take over after a refresh race: %v", err)
+	}
+	defer ep.Close()
+	if !refreshed {
+		t.Fatal("the refresh was never written")
+	}
+	if lv := readLease(t, kv, tkey("a")); lv.Instance == "earlier" {
+		t.Fatalf("lease not taken: %+v", lv)
+	}
+}
+
 // A cross-session holder is not flagged SameSession.
 func TestHeldErrorSameSessionFlagOnlyForSameSession(t *testing.T) {
 	id := ours(t)

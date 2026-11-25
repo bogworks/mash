@@ -552,37 +552,49 @@ func (e *Endpoint) takeLease(ctx context.Context) error {
 	rev, err := kv.Create(ctx, e.key, val)
 	if errors.Is(err, jetstream.ErrKeyExists) {
 		held := &LeaseHeldError{Name: e.key, Host: "?", PID: "?", Since: "?"}
-		if cur, gerr := kv.Get(ctx, e.key); gerr == nil {
+		// The compare-and-set loses to any write made since the lease was read, a refresh by the holder among them. It
+		// is then read once more and the takeover decided again, so a holder that refreshed in between is not mistaken
+		// for one that cannot be taken over from.
+		for attempt := 0; attempt < 2; attempt++ {
+			cur, gerr := kv.Get(ctx, e.key)
+			if gerr != nil {
+				break
+			}
 			if fenced(cur.Value()) {
 				return fmt.Errorf("%w: %s", ErrDeprovisioned, e.Display())
 			}
 			var lv leaseValue
-			if json.Unmarshal(cur.Value(), &lv) == nil {
-				if e.cfg.LaunchToken != "" && lv.LaunchToken == e.cfg.LaunchToken && !e.warnedToken {
-					e.warnedToken = true
-					fmt.Fprintln(os.Stderr, "mash: MASH_LAUNCH_TOKEN is shared with the session holding the lease; hooks cannot tell the two sessions apart (use a fresh value per launch)")
+			if json.Unmarshal(cur.Value(), &lv) != nil {
+				break
+			}
+			if e.cfg.LaunchToken != "" && lv.LaunchToken == e.cfg.LaunchToken && !e.warnedToken {
+				e.warnedToken = true
+				fmt.Fprintln(os.Stderr, "mash: MASH_LAUNCH_TOKEN is shared with the session holding the lease; hooks cannot tell the two sessions apart (use a fresh value per launch)")
+			}
+			held.Host, held.PID, held.Since = lv.Host, lv.PID, lv.Since
+			held.SameSession = e.sameSession(lv)
+			// G270: a restarted session need not wait out the TTL for its dead predecessor. Only a holder on this
+			// machine whose process is gone (holderGone: no such pid, or a pid whose start time is not the one
+			// the lease recorded) is taken over. "This machine" is the lease's Machine equal to ours (boot and
+			// pid namespace), not the hostname: hosts and containers can share a hostname, and a live remote
+			// holder's pid is absent here (codex H1 on #44). A lease with no Machine, or a taker with none, is
+			// never judged and expires normally. The same applies to an earlier serve of this same session, which
+			// is alive but superseded (ADR 0092).
+			reason := e.takeoverReason(lv)
+			if reason == "" {
+				break
+			}
+			if rev, uerr := kv.Update(ctx, e.key, val, cur.Revision()); uerr == nil {
+				e.log.Print(e.tookOverLine(reason, lv))
+				if reason == "same" {
+					e.startGrace()
 				}
-				held.Host, held.PID, held.Since = lv.Host, lv.PID, lv.Since
-				held.SameSession = e.sameSession(lv)
-				// G270: a restarted session need not wait out the TTL for its dead predecessor. Only a holder on this
-				// machine whose process is gone (holderGone: no such pid, or a pid whose start time is not the one
-				// the lease recorded) is taken over. "This machine" is the lease's Machine equal to ours (boot and
-				// pid namespace), not the hostname: hosts and containers can share a hostname, and a live remote
-				// holder's pid is absent here (codex H1 on #44). A lease with no Machine, or a taker with none, is
-				// never judged and expires normally. The same applies to an earlier serve of this same session, which
-				// is alive but superseded (ADR 0092). The compare-and-set loses to any write made since the lease was
-				// read.
-				if reason := e.takeoverReason(lv); reason != "" {
-					if rev, uerr := kv.Update(ctx, e.key, val, cur.Revision()); uerr == nil {
-						e.log.Print(e.tookOverLine(reason, lv))
-						if reason == "same" {
-							e.startGrace()
-						}
-						e.leaseRev.Store(rev)
-						e.keepLease()
-						return nil
-					}
-				}
+				e.leaseRev.Store(rev)
+				e.keepLease()
+				return nil
+			}
+			if ctx.Err() != nil {
+				break
 			}
 		}
 		if ctx.Err() != nil {
