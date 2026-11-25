@@ -1,9 +1,10 @@
 // Package sapsdk reaches the SAP Go SDK's identity package (synadia-agents.go, github.com/bogworks/synadia-agents.go/identity)
 // behind mash's own types. It is the 0.6.0 sender-identity adapter (stage S4 of the SDK adoption contract, REQ-005).
 //
-// It depends on internal/sap for the types (sap.SenderHeader, sap.Trust) and never the other way round. No 0.5.x binary
-// links it: the release check's linked-package guard refuses this package and the SDK in any 0.5.x release. The old code
-// in internal/sap stays as the test oracle.
+// It depends on internal/sap for the types (sap.SenderHeader, sap.Trust) and never the other way round. The binaries
+// link it from the switch-on release (stage W); the release check's linked-package guard no longer refuses this package
+// or the SDK identity package (it still refuses the SDK caller and host, which S5 owns). The old code in internal/sap
+// stays as the test oracle.
 //
 // # What it does
 //
