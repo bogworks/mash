@@ -125,22 +125,64 @@ func TestWidth(t *testing.T) {
 	}
 }
 
-func TestWrappedNoteRefused(t *testing.T) {
-	const msg = "the text is wrapped for display (the note says so); show the program's own lines, which the width rule measures"
+func TestVerbatimRendersLinesLine(t *testing.T) {
+	out, err := render(fixture(t, `[{"case":"A","text":"short","verbatim":true}]`, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "Case: A\n\nLines: the program's own (verbatim)\n\n") {
+		t.Errorf("want Lines line right after Case, got\n%s", out)
+	}
+}
+
+func TestVerbatimOver80Refused(t *testing.T) {
+	dir := fixture(t, `[{"case":"A","text":"`+strings.Repeat("a", 81)+`","verbatim":true}]`, "")
+	if out, err := render(dir); err == nil || out != "" || !strings.Contains(err.Error(), "81 columns") {
+		t.Errorf("want width error, got %v", err)
+	}
+	if _, err := render(fixture(t, `[{"case":"A","text":"`+strings.Repeat("a", 80)+`","verbatim":true}]`, "")); err != nil {
+		t.Errorf("80 columns is allowed: %v", err)
+	}
+}
+
+func TestVerbatimAbsentUnaffected(t *testing.T) {
+	out, err := render(fixture(t, `[{"case":"A","text":"short","note":"a plain note"}]`, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "Lines:") {
+		t.Errorf("no Lines line without the field:\n%s", out)
+	}
+	// Over the flag width without the field: flagged, as before.
+	out, err = render(fixture(t, `[{"case":"A","text":"`+strings.Repeat("a", 75)+`"}]`, ""))
+	if err != nil || !strings.Contains(out, "width: 75 columns") {
+		t.Errorf("want flag, got %v\n%s", err, out)
+	}
+}
+
+func TestWrappedHereNoteIsJustANote(t *testing.T) {
 	for _, note := range []string{"One line in the program; wrapped here", "Shown WRAPPED HERE for display"} {
-		dir := fixture(t, `[{"case":"A","text":"short","note":"`+note+`"}]`, "")
-		if out, err := render(dir); err == nil || out != "" || !strings.Contains(err.Error(), msg) {
-			t.Errorf("note %q: want wrapped refusal, got %v", note, err)
+		out, err := render(fixture(t, `[{"case":"A","text":"short","note":"`+note+`"}]`, ""))
+		if err != nil || !strings.Contains(out, "Note: "+note) || strings.Contains(out, "Lines:") {
+			t.Errorf("note %q: want a plain note, got %v\n%s", note, err, out)
 		}
 	}
-	// An ordinary case is unaffected.
-	if _, err := render(fixture(t, `[{"case":"A","text":"short","note":"a plain note"}]`, "")); err != nil {
-		t.Error(err)
+}
+
+func TestVerbatimOnNextItem(t *testing.T) {
+	out, err := render(fixture(t, `[]`, `{"items":[{"id":"i","case":"c","text":"t","verbatim":true},{"id":"j","case":"d","text":"u"}]}`))
+	if err != nil {
+		t.Fatal(err)
 	}
-	// A normal case with an 81-column line is still refused by width, not as wrapped.
-	dir := fixture(t, `[{"case":"A","text":"`+strings.Repeat("a", 81)+`","note":"a plain note"}]`, "")
-	if _, err := render(dir); err == nil || !strings.Contains(err.Error(), "81 columns") || strings.Contains(err.Error(), "wrapped") {
-		t.Errorf("want width error only, got %v", err)
+	if n := strings.Count(out, "Lines: the program's own (verbatim)"); n != 1 {
+		t.Errorf("want one Lines line (item i only), got %d\n%s", n, out)
+	}
+	if !strings.Contains(out, "Case: c\n\nLines:") {
+		t.Errorf("Lines line not after item i's Case:\n%s", out)
+	}
+	bad := fixture(t, `[]`, `{"items":[{"id":"i","case":"c","text":"`+strings.Repeat("a", 81)+`","verbatim":true}]}`)
+	if _, err := render(bad); err == nil || !strings.Contains(err.Error(), "81 columns") {
+		t.Errorf("want width error, got %v", err)
 	}
 }
 
