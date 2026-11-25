@@ -1222,7 +1222,16 @@
           "stream": "stdout",
           "exit": 0,
           "issue": "#1041",
-          "note": "--json is shown as it prints at a terminal (indented); piped it is one compact line (rule \"--json prints one object\"). The state word (online, offline, suspended) becomes two booleans, online and suspended, so the one fact \"online\" has one name in every --json (mash who already has it). Today: \"state\": \"online\". The text table keeps its STATE column. An endpoint that is suspended has online false and suspended true.",
+          "note": "--json is shown as it prints at a terminal (indented); piped it is one compact line (rule \"--json prints one object\"). The state word (online, offline, suspended) becomes two booleans, online and suspended, so the one fact \"online\" has one name in every --json (mash who already has it). Today: \"state\": \"online\". The text table keeps its STATE column. online is the lease alone and does not depend on suspended: suspending parks inbound mail and leaves the session and its lease running (ADR 0057), so an endpoint can be online and suspended at once. In the text table the STATE column shows suspended in preference to online or offline.",
+          "verbatim": true
+         },
+         {
+          "case": "--json, suspended while online",
+          "text": "{\n  \"endpoints\": [\n    {\n      \"address\": \"acme.demo.alice\",\n      \"owner\": \"acme\",\n      \"group\": \"demo\",\n      \"name\": \"alice\",\n      \"online\": true,\n      \"suspended\": true\n    },\n    {\n      \"address\": \"acme.demo.bob\",\n      \"owner\": \"acme\",\n      \"group\": \"demo\",\n      \"name\": \"bob\",\n      \"online\": false,\n      \"suspended\": false\n    }\n  ]\n}",
+          "stream": "stdout",
+          "exit": 0,
+          "issue": "#1041",
+          "note": "Alice is suspended and her session is still running, so online is true and suspended is true. online comes from the lease and never from suspended. The text table would show her STATE as suspended, which wins over online and offline.",
           "verbatim": true
          }
         ]
