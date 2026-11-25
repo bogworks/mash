@@ -4,8 +4,8 @@
 # since a name CI never publishes can never be satisfied and the queue would time out.
 # Those Actions checks are written `@github-actions/<name>`. A plain `check-success = pr-check` matches a status or a
 # check run of that name by whoever posted it, so anyone who can write commit statuses could forge pr-check, adr-lint or
-# label-reset; qualifying with the app binds the condition to GitHub Actions. codex-review and lead-review stay plain:
-# they ARE commit statuses (scripts/review-pr, scripts/lead-approve), no app posts them as checks.
+# label-reset; qualifying with the app binds the condition to GitHub Actions. codex-review stays plain: it IS a commit
+# status (scripts/review-pr), no app posts it as a check. lead-review (scripts/lead-approve) is no longer a queue condition.
 
 # Commands in a comment (`@mergifyio requeue`): Mergify's default restriction is `sender-permission >= write`. The lanes comment as the miremanager GitHub App
 # (login miremanager[bot]), which Mergify sees with permission none, so a lane's `@mergifyio requeue` was refused (x-lead #1180, 2026-11-21). An App cannot be a
@@ -26,49 +26,43 @@ merge_queue:
 
 # A pull request is queued by itself once it is not a draft and not held; queue_conditions still make it wait for
 # codex-review and pr-check. `hold` is the operator's brake on one PR. These take effect only with Merge Protections
-# enabled on the repository (a dashboard setting; see the PR that added this file). The approval-or-`lead-approved` gate
-# is deliberately not repeated here: queue_conditions apply to every queued pull request however it was queued, so
-# auto-merge only queues it and cannot skip that gate, and a second copy would be one more list to keep in step.
+# enabled on the repository (a dashboard setting; see the PR that added this file). The queue's checks are deliberately
+# not repeated here: queue_conditions apply to every queued pull request however it was queued, so auto-merge only
+# queues it and cannot skip them, and a second copy would be one more list to keep in step.
 merge_protections_settings:
   auto_merge_conditions:
     - -draft
     - label != hold
 
 # The ruleset's one required check is `Mergify Merge Protections` (docs/branch-protection.md). Without a rule here it
-# is neutral on every pull request. This rule carries only the conditions Mergify evaluates on the pull request itself:
-# a recorded approval or `lead-approved`, and not held (same spelling as queue_conditions;
-# internal/release/mergify_test.go fails if they drift). It must NOT hold check-success conditions: Mergify applies the
+# is neutral on every pull request. This rule carries only the condition Mergify evaluates on the pull request itself:
+# not held (same spelling as queue_conditions; internal/release/mergify_test.go fails if they drift). It must NOT hold check-success conditions: Mergify applies the
 # rule's conditions to the queue draft's commit as merge conditions too, and a check such as adr-lint is skipped on a
 # draft, so the queue refused every pull request (#424 deadlocked it). codex-review and adr-lint are enforced by the
 # queue's queue_conditions at entry, and D204's `update` rule on main refuses any merge that is not Mergify's. pr-check
 # and label-reset are not repeated either.
-# The rule is also kept off Mergify's own queue draft pull requests (head ref mergify/merge-queue/<hash>), which have
-# neither approval nor label. The exemption needs BOTH the head ref and the author mergify[bot]: a head ref alone is not
+# The rule is also kept off Mergify's own queue draft pull requests (head ref mergify/merge-queue/<hash>). The exemption needs BOTH the head ref and the author mergify[bot]: a head ref alone is not
 # enough, because any same-repository writer can push a branch named mergify/merge-queue/x and switch the rule off. The
 # `if` is therefore active when the ref does not match or the author is not mergify[bot]. Syntax:
 # https://docs.mergify.com/merge-protections/custom-rules ; a rule whose `if` is not met is inactive.
 merge_protections:
-  - name: codex-review and approval before merge
-    description: A pull request into main needs a maintainer approval or lead-approved, and no hold label.
+  - name: not held before merge
+    description: A pull request into main needs no hold label.
     if:
       - base = main
       - or:
           - -head ~= ^mergify/merge-queue/
           - -author = mergify[bot]
       # Inactive for a docs-only pull request (no changed file matches the code regex, the same text as the docs queue's):
-      # it needs no approval or label, only the docs lint (pr-check) and adr-lint, enforced by the docs queue.
+      # it needs no label, only the docs lint (pr-check) and adr-lint, enforced by the docs queue.
       - or:
           - files ~= ^(?!(.*\.md$|docs/))|^docs/(allowed_signers|review/policy\.json|skipped-releases\.txt|release-cutover)$
           - "#files >= 300"
     success_conditions:
-      - or:
-          # Mirrors the approver in queue_conditions; internal/release/mergify_test.go fails if they differ.
-          - approved-reviews-by = randybias
-          - label = lead-approved
       - label != hold
 
 # A docs-only pull request needs only the docs lint (Randy 2026-11-21: "linting docs is all that's required"): pr-check carries
-# docs-lint, adr-lint is the ADR syntax check, and there is no codex-review, no lead-review, no approval or label. It has its
+# docs-lint, adr-lint is the ADR syntax check, and there is no codex-review and no lead-review. It has its
 # own queue, first, so a docs-only pull request is never batched with a code one (a batch with one code pull request runs the
 # full set) and a batch of docs-only ones clears in about the lint's time. A pull request enters it only when NO changed file
 # matches the code regex below, which is scripts/ci-changes' definition of "not documentation" written as one regular
@@ -97,8 +91,11 @@ queue_rules:
     checks_timeout: 30 min
     merge_method: fast-forward
   - name: default
-    # To enter the queue (evaluated on the pull request). codex-review is the commit status the orchestrator's review
-    # watcher (scripts/review-pr) posts on the head; pr-check is ci.yml's aggregate of every required job.
+    # To enter the queue (evaluated on the pull request): a pull request enters by itself when it has a base of main, is
+    # not a draft, has no conflict, is not held, and codex-review (the commit status the orchestrator's review watcher,
+    # scripts/review-pr, posts on the head), pr-check (ci.yml's aggregate of every required job), adr-lint and
+    # label-reset (it must have run on this head, so a push cannot slip in on the previous head's label) are green. No
+    # lead approval is needed (ADR 0177); `hold` is the only brake, and its reason is written on the pull request.
     queue_conditions:
       - base = main
       - -draft
@@ -106,41 +103,8 @@ queue_rules:
       - label != hold
       - check-success = codex-review
       - check-success = @github-actions/pr-check
-      # The decision gate (adr-lint.yml): a Decision: line in the body, valid ADRs. It is a queue condition as well as a
-      # required check (docs/branch-protection.md), so a pull request cannot merge while it fails.
       - check-success = @github-actions/adr-lint
-      # label-reset (.github/workflows/label-reset.yml) removes lead-approved and decision-confirmed on every push. It
-      # must have run, and succeeded, on this head before it can enter the queue, so a push cannot slip in on the
-      # previous head's label (fail closed).
       - check-success = @github-actions/label-reset
-      # The lead's review, as a commit status `lead-review` = success on the exact head SHA the lead reviewed (posted by
-      # scripts/lead-approve; ADR 0116). A new head has no such status, so a push drops this approval by itself. It is a
-      # PLAIN entry here, not in `merge_protections` (the status does not exist on the queue draft's commit, the #424
-      # deadlock) and not inside the `or` below (a bare check inside an `or` is banned, ADR 0078). Migration week,
-      # 2026-11-14 to 2026-11-21: it is required ALONGSIDE the approval-or-`lead-approved` gate below, so for now it ADDS
-      # a requirement. On 2026-11-21 the `or` below becomes the status-or-approval (the `lead-approved` alternative
-      # drops and this plain entry moves into it as the status alternative), and the files that change are this file,
-      # internal/release/mergify_test.go, .github/workflows/label-reset.yml (stops stripping `lead-approved`), and
-      # docs/branch-protection.md. `check-success` matches a status whoever posted it (Mergify has no creator
-      # filter), so this binds approval to the head commit; it does not authenticate the lead (ADR 0116).
-      - check-success = lead-review
-      # Entry needs a recorded maintainer approval or the `lead-approved` label. Authorship is NOT a condition: the
-      # maintainer's login authors agent pull requests too (every agent pushes as it), so `author = <maintainer>` is
-      # true of any agent pull request and proves nothing; with it, only the `hold` label stood between an agent's
-      # pull request and the queue, and that failed once. The lead applies `lead-approved` at merge time, and
-      # .github/workflows/label-reset.yml removes it on every push, so the label never covers later code
-      # (docs/decisions/0078-*.md). A recorded approval is not reset the same way: the dismiss-approvals rule below
-      # skips pull requests authored by the maintainer's login (agents push as it), so on those a push does not
-      # dismiss an approval through Mergify; it dismisses one only on an outside author's pull request. The queue run executes the pull request's code in CI, and codex-review reads
-      # attacker-controlled text, so neither a green check nor the review is enough on its own
-      # (docs/security/threat-model.md). The approver's login is listed explicitly, not "any approval": Mergify's docs
-      # do not say that `approved-reviews-by` counts only reviewers with write access (they say it of other review
-      # conditions), so the list is what we rely on. Add a maintainer's login to this line and to the
-      # dismiss-approvals rule below. `label != hold` above stays the brake on top of this gate.
-      - or:
-          # Mirrored in merge_protections; internal/release/mergify_test.go fails if the approvers differ.
-          - approved-reviews-by = randybias
-          - label = lead-approved
     # To merge (evaluated on the queue branch's run of the exact combination): pr-check again, since a batch's
     # combined code can break what each pull request passed alone. It needs test (both OSes) and reproducible.
     merge_conditions:
@@ -187,12 +151,10 @@ priority_rules:
 # label was set". That belongs to the review watcher, which sees each head.
 
 # A maintainer's approval on an OUTSIDE author's pull request must not carry over to code pushed after it: the first rule
-# below has Mergify dismiss approvals when that author pushes a new commit (`when: synchronize`), so
-# `approved-reviews-by` in the queue conditions turns false until a maintainer approves the new head. The rule excludes
-# pull requests authored by the maintainer's login (`-author = randybias`), which is the login agents push as, so on
-# those Mergify dismisses nothing; there the label path is the gate that is reset on every push (label-reset.yml), and
-# GitHub does not let an author approve their own pull request. GitHub's own "Dismiss stale pull request approvals
-# when new commits are pushed" setting would do the same for every author, but it is a target in
+# below has Mergify dismiss approvals when that author pushes a new commit (`when: synchronize`). Approval is no longer a
+# queue condition (ADR 0177), so this only keeps a recorded approval honest; it excludes pull requests authored by the
+# maintainer's login (`-author = randybias`), which is the login agents push as. GitHub's own "Dismiss stale pull request
+# approvals when new commits are pushed" setting would do the same for every author, but it is a target in
 # docs/branch-protection.md, not set today (the ruleset has no pull-request rule).
 # Labels and notices, so a session sets only `critical` by hand (Workflow Automation, a dashboard setting).
 pull_request_rules:
