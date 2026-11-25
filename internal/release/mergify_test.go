@@ -1,6 +1,7 @@
 package release
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -217,8 +218,9 @@ func TestWorkflows_labelResetRemovesApprovalLabels(t *testing.T) {
 	if strings.Join(types, ",") != "opened,reopened,synchronize" {
 		t.Errorf("pull_request_target types = %v, want [opened reopened synchronize]", types)
 	}
-	// contents: read is for gh pr view (it may need it on this repository); both are read or label-edit scopes, no write to code.
-	wantPerms := map[string]string{"pull-requests": "write", "contents": "read"}
+	// contents: read is for gh pr view and the fetch of rule A, checks: read for the old head's label-reset run (ADR 0178);
+	// all are read or label-edit scopes, no write to code.
+	wantPerms := map[string]string{"pull-requests": "write", "contents": "read", "checks": "read"}
 	if !reflect.DeepEqual(w.Permissions, wantPerms) {
 		t.Errorf("workflow permissions = %v, want exactly %v", w.Permissions, wantPerms)
 	}
@@ -235,8 +237,16 @@ func TestWorkflows_labelResetRemovesApprovalLabels(t *testing.T) {
 	if strings.Contains(text, `"opened"`) || strings.Contains(text, "exit 0") || strings.Contains(text, "ACTION") {
 		t.Error("label-reset.yml special-cases opened or exits early: labels preset at open must be removed like any other")
 	}
-	if strings.Contains(text, "actions/checkout") {
-		t.Error("label-reset.yml checks out code; a pull_request_target workflow must never run the pull request's code")
+	// The one checkout is the BASE commit (the trusted checker of rule A, ADR 0178); the pull request's code is never checked out.
+	for _, st := range w.Jobs["label-reset"].Steps {
+		if strings.HasPrefix(st.Uses, "actions/checkout@") {
+			if st.With["ref"] != "${{ github.event.pull_request.base.sha }}" || fmt.Sprint(st.With["persist-credentials"]) != "false" {
+				t.Errorf("label-reset.yml checks out %v (persist-credentials %v); only the base sha, with no persisted credentials, may be checked out", st.With["ref"], st.With["persist-credentials"])
+			}
+			if _, unsafe := st.With["allow-unsafe-pr-checkout"]; unsafe || st.With["repository"] != nil {
+				t.Error("label-reset.yml checks out another repository or sets allow-unsafe-pr-checkout")
+			}
+		}
 	}
 	for _, l := range []string{"lead-approved", "decision-confirmed"} {
 		if !strings.Contains(text, l) {
