@@ -262,7 +262,7 @@ func derive(skippedFile string, override []string, dir string) ([]release, error
 	}
 	var out []release
 	for _, t := range tags {
-		r := release{tag: t, url: "https://github.com/" + releaseRepo + "/releases/download/" + t + "/mash-linux-amd64", digest: "no digest in the release data"}
+		r := release{tag: t, url: "https://github.com/" + releaseRepo + "/releases/download/" + t + "/mash-linux-amd64"}
 		want := ""
 		if a, ok := byTag[t]; ok {
 			found := false
@@ -275,6 +275,9 @@ func derive(skippedFile string, override []string, dir string) ([]release, error
 				return nil, fmt.Errorf("%s has no mash-linux-amd64 asset", t)
 			}
 		}
+		if !digestRE.MatchString(want) {
+			return nil, fmt.Errorf("no published sha256 digest for %s mash-linux-amd64: the binary cannot be verified", t)
+		}
 		if err := os.MkdirAll(filepath.Join(dir, t), 0o755); err != nil {
 			return nil, err
 		}
@@ -282,16 +285,16 @@ func derive(skippedFile string, override []string, dir string) ([]release, error
 		if r.sha, err = download(hc, r.url, r.bin); err != nil {
 			return nil, fmt.Errorf("%s: %w", t, err)
 		}
-		if want != "" {
-			if want != "sha256:"+r.sha {
-				return nil, fmt.Errorf("sha256 mismatch for %s: got %s, the release says %s", t, r.sha, want)
-			}
-			r.digest = "matches the release digest " + want
+		if want != "sha256:"+r.sha {
+			return nil, fmt.Errorf("sha256 mismatch for %s: got %s, the release says %s", t, r.sha, want)
 		}
+		r.digest = "matches the release digest " + want
 		out = append(out, r)
 	}
 	return out, nil
 }
+
+var digestRE = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
 func readSkipped(p string) (map[string]bool, error) {
 	b, err := os.ReadFile(p)
