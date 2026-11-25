@@ -1,0 +1,1 @@
+**The send tool's description now names its two required arguments.** It says address is the recipient and message is the text, so the first call is right ([#1209](https://github.com/bogworks/mash/issues/1209)).

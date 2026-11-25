@@ -328,10 +328,10 @@ func TestSendSchema(t *testing.T) {
 	s := cmdcore.Schema[cmds.SendParams]()
 	b, _ := json.Marshal(s)
 	want := `{"additionalProperties":false,"properties":{` +
-		`"address":{"description":"Who to send to, as owner.group.name.","type":"string"},` +
+		`"address":{"description":"The recipient: owner.group.name, as the who tool lists it.","type":"string"},` +
 		`"id":{"description":"A key of your own. A second send with the same key to the same address within two minutes stores nothing new, so a retry cannot deliver twice.","type":"string"},` +
-		`"kind":{"description":"What sort of message this is. blocker, question and task wake an idle recipient that has mash's wake channel on; otherwise, and for result and fyi, the message arrives with its next turn. Default: task. One exception: a reply (--reply-to) marked question whose text has no question mark and is at most 280 characters asks nothing, so it is sent as fyi and the output says so.","enum":["blocker","question","task","result","fyi"],"type":"string"},` +
-		`"message":{"description":"The text.","type":"string"},` +
+		`"kind":{"description":"What sort of message this is. blocker, question and task wake an idle recipient that has mash's wake channel on; otherwise, and for result and fyi, the message arrives with its next turn. Default: task. One exception: a reply (reply_to set) marked question whose text has no question mark and is at most 280 characters asks nothing, so it is sent as fyi and the output says so.","enum":["blocker","question","task","result","fyi"],"type":"string"},` +
+		`"message":{"description":"The text of the mail.","type":"string"},` +
 		`"relay":{"description":"The number of a message in your inbox that this passes on. Signed, so the recipient can trust the link.","minimum":1,"type":"integer"},` +
 		`"reply_to":{"description":"The number of the message in your inbox that this answers. Signed, so the recipient can trust the link.","minimum":1,"type":"integer"},` +
 		`"urgent":{"description":"Deliver at once, into a running turn where the agent host allows it.","type":"boolean"}},` +
