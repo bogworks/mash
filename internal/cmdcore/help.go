@@ -218,8 +218,15 @@ func StaticHelp(fr Frame, c StaticCommand) string {
 	return strings.Join(sections, "\n\n") + "\n"
 }
 
+// Glossary is the one sentence of the tool's own help, in mash and in mashctl and nowhere else, that says what the
+// three words a newcomer meets first are. Already wrapped to 80 columns.
+const Glossary = "SAP is the Synadia Agent Protocol, NATS is the message server mash\ntalks to, and creds are the file that signs an endpoint in to it."
+
 // GlobalOptions is the "Global options:" section of fr: the heading and the table (no trailing newline), "" when fr has none.
-func GlobalOptions(fr Frame) string {
+func GlobalOptions(fr Frame) string { return GlobalOptionsUnder(fr, "Global options:") }
+
+// GlobalOptionsUnder is GlobalOptions with another heading line, "Global options (before or after the verb):".
+func GlobalOptionsUnder(fr Frame, heading string) string {
 	var rows [][2]string
 	for _, g := range fr.Globals {
 		rows = append(rows, [2]string{optionLabel(g.Short, g.Flag, g.Value), g.Desc})
@@ -227,5 +234,5 @@ func GlobalOptions(fr Frame) string {
 	if len(rows) == 0 {
 		return ""
 	}
-	return "Global options:\n" + table(rows)
+	return heading + "\n" + table(rows)
 }

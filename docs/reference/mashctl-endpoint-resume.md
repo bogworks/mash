@@ -2,7 +2,7 @@ Generated from spec/*.json by go run ./scripts/refgen. Do not edit.
 
 # mashctl endpoint resume
 
-Undo suspend.
+Take new mail again, undoing suspend.
 
 Release: 0.5.9. Group: Endpoints.
 

@@ -65,7 +65,8 @@ from the spec.
       from an endpoint's record.
     - [`mashctl endpoint suspend`](mashctl-endpoint-suspend.md): Refuse new
       mail to an endpoint. Its stored mail and its credentials are untouched.
-    - [`mashctl endpoint resume`](mashctl-endpoint-resume.md): Undo suspend.
+    - [`mashctl endpoint resume`](mashctl-endpoint-resume.md): Take new mail
+      again, undoing suspend.
     - [`mashctl endpoint reissue`](mashctl-endpoint-reissue.md): Give an
       endpoint new credentials and cancel the old ones.
     - [`mashctl endpoint inbox`](mashctl-endpoint-inbox.md): List what is in
