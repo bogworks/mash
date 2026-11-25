@@ -1,0 +1,1 @@
+**The quick start says where `bob` and `alice` live.** They are in `~/.local/bin`; if the shell says command not found, open a new terminal or add it to PATH ([#1592](https://github.com/bogworks/mash/issues/1592)).
