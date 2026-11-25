@@ -23,7 +23,7 @@ func addRestricted(t *testing.T, w *world, allowed ...string) {
 			continue
 		}
 		for _, n := range allowed {
-			pub = append(pub, tAddr(n).Subjects().Mail)
+			pub = append(pub, tAddr(n).MailSubject())
 		}
 	}
 	p.Pub.Allow = pub

@@ -118,11 +118,11 @@ func TestOldSenderWithoutAKindWakes(t *testing.T) {
 	nc := f.e.ConnAs(t, f.creds["b"], tkey("b"))
 	id := identity(t, f.creds["b"])
 	for _, v := range []string{"", "urgent-ish"} {
-		h, err := id.Sign(taddr("a").Subjects().Mail, []byte("raw"+v), tkey("b"), time.Now(), "")
+		h, err := id.Sign(taddr("a").MailSubject(), []byte("raw"+v), tkey("b"), time.Now(), "")
 		if err != nil {
 			t.Fatal(err)
 		}
-		m := nats.NewMsg(taddr("a").Subjects().Mail)
+		m := nats.NewMsg(taddr("a").MailSubject())
 		m.Data = []byte("raw" + v)
 		m.Header.Set(sap.HeaderName, h.Encode())
 		if v != "" {
@@ -270,11 +270,11 @@ func TestFyiBacklogCountsHeaders(t *testing.T) {
 	f, ev, sp, _ := kindFixtureSpool(t)
 	nc := f.e.ConnAs(t, f.creds["b"], tkey("b"))
 	id := identity(t, f.creds["b"])
-	h, err := id.Sign(taddr("a").Subjects().Mail, []byte("hi"), tkey("b"), time.Now(), "")
+	h, err := id.Sign(taddr("a").MailSubject(), []byte("hi"), tkey("b"), time.Now(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := nats.NewMsg(taddr("a").Subjects().Mail)
+	m := nats.NewMsg(taddr("a").MailSubject())
 	m.Data = []byte("hi")
 	m.Header.Set(sap.HeaderName, h.Encode())
 	m.Header.Set(KindHeader, "fyi")

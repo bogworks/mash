@@ -33,7 +33,7 @@ func goneAt(t *testing.T, js jetstream.JetStream, addr sap.Address) {
 func drainedFlat(t *testing.T, a *admin.Admin, js jetstream.JetStream, id sap.Address) (string, uint64) {
 	t.Helper()
 	ctx := context.Background()
-	if _, err := js.Publish(ctx, id.Subjects().Mail, []byte("stored")); err != nil {
+	if _, err := js.Publish(ctx, id.MailSubject(), []byte("stored")); err != nil {
 		t.Fatal(err)
 	}
 	st, err := a.Suspend(ctx, id)

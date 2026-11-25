@@ -107,7 +107,10 @@ func TestAddressForms(t *testing.T) {
 	if got := a.String(); got != "acme.ops.w-1" {
 		t.Errorf("String = %q", got)
 	}
-	s := a.Subjects()
+	s, err := a.Subjects()
+	if err != nil {
+		t.Fatal(err)
+	}
 	want := sap.Subjects{
 		Prompt: "agents.prompt.acme.ops.w-1",
 		Status: "agents.status.acme.ops.w-1",
@@ -170,7 +173,10 @@ func TestAddressSubjectRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := a.Subjects()
+	s, err := a.Subjects()
+	if err != nil {
+		t.Fatal(err)
+	}
 	for verb, subj := range map[string]string{"prompt": s.Prompt, "status": s.Status, "hb": s.HB, "mail": s.Mail} {
 		got, v, ok := sap.AddressFromSubject(subj)
 		if !ok || got != a || v != verb {

@@ -3,12 +3,14 @@
 // "mail", which SAP does not reserve.
 package sap
 
-// Protocol constants (SAP §2, §3, Appendix C).
+import agents "github.com/bogworks/synadia-agents.go"
+
+// Protocol constants (SAP §2, §3, Appendix C). The SDK defines all but the agent name.
 const (
 	AgentName       = "claude-code"
-	ServiceName     = "agents"
-	QueueGroup      = "agents"
-	ProtocolVersion = "0.3"
+	ServiceName     = agents.ServiceName
+	QueueGroup      = agents.QueueGroup
+	ProtocolVersion = agents.ProtocolVersion
 )
 
 // Subjects are one endpoint's SAP subjects.

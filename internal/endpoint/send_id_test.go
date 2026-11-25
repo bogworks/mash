@@ -135,7 +135,7 @@ func TestSendIDDoesNotCollideAcrossSendersOrRecipients(t *testing.T) {
 func TestLostAckThenRetryWithTheKeyLandsOnce(t *testing.T) {
 	f := newFixture(t, "a", "b")
 	a := f.client(t, "a")
-	px := testenv.NewAckDropProxy(t, f.e.URL, taddr("a").Subjects().Mail)
+	px := testenv.NewAckDropProxy(t, f.e.URL, taddr("a").MailSubject())
 	cfg := f.cfg("b")
 	cfg.URL = px.URL()
 	lossy, err := OpenClient(context.Background(), cfg)

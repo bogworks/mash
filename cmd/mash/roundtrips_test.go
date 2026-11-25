@@ -52,7 +52,7 @@ func newRTTWorld(t *testing.T, n int) *rttWorld {
 			t.Fatal(err)
 		}
 		rec := store.Record{Owner: w.e.Owner, Group: testGroup, Instance: name, Agent: sap.AgentName, Account: w.e.Account,
-			User: user, MailSubject: tAddr(name).Subjects().Mail, Created: time.Now().UTC().Format(time.RFC3339)}
+			User: user, MailSubject: tAddr(name).MailSubject(), Created: time.Now().UTC().Format(time.RFC3339)}
 		v, _ := json.Marshal(rec)
 		if _, err := dir.Create(ctx, tAddr(name).Flat(), v); err != nil {
 			t.Fatal(err)

@@ -440,7 +440,7 @@ func TestServeExitsWhenLeaseLost(t *testing.T) {
 	}
 	// Its SAP registration is gone with it.
 	nc := w.e.Conn(t, w.e.AdminCreds)
-	if m, err := nc.Request(tAddr("a").Subjects().Status, nil, time.Second); err == nil {
+	if m, err := nc.Request(mustSubj(tAddr("a")).Status, nil, time.Second); err == nil {
 		t.Fatalf("the old session still answers status: %s", m.Data)
 	}
 }
@@ -489,7 +489,7 @@ func TestServeLeaseLossDoesNotHangOnStdout(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("serve hung on a blocked stdout after losing its lease")
 	}
-	if _, err := w.e.Conn(t, w.e.AdminCreds).Request(tAddr("a").Subjects().Status, nil, time.Second); err == nil {
+	if _, err := w.e.Conn(t, w.e.AdminCreds).Request(mustSubj(tAddr("a")).Status, nil, time.Second); err == nil {
 		t.Fatal("the old session still answers status")
 	}
 }

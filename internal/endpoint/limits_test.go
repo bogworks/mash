@@ -127,7 +127,7 @@ func TestInboxConsumerCapsOutstandingAt1000(t *testing.T) {
 	f := newFixture(t, "a")
 	ctx := context.Background()
 	js := adminJS(t, f)
-	subj := taddr("a").Subjects().Mail
+	subj := taddr("a").MailSubject()
 	const total = 1005
 	for i := 0; i < total; i++ {
 		if _, err := js.PublishAsync(subj, []byte("m")); err != nil {
@@ -189,7 +189,7 @@ func TestPromptFromAVerifiedSenderOutsideTheDirectory403(t *testing.T) {
 	creds, _ := f.e.Mint(t, taddr("x")) // a valid user with its own key, never provisioned
 	nc := f.e.ConnAs(t, creds, tkey("x"))
 	id := identity(t, creds)
-	subj := taddr("a").Subjects().Prompt
+	subj := mustSubj(taddr("a")).Prompt
 
 	raw := func(name string) string {
 		t.Helper()

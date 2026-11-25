@@ -319,7 +319,7 @@ var sndKey = ad("snd").Flat()
 func inspectFixture(t *testing.T) (*auditFixture, string) {
 	f := newAuditEnv(t)
 	f.endpoint(t, ad("box"))
-	subject := ad("box").Subjects().Mail
+	subject := ad("box").MailSubject()
 	sndCreds, sndUser := f.e.Mint(t, ad("snd"))
 	f.provision(t, ad("snd"), sndUser)
 	snd := identityOf(t, sndCreds)
@@ -506,7 +506,7 @@ func TestInspectInboxCallKeepsTrustAndCursors(t *testing.T) {
 func TestEndpointInboxNoConsumerAndRefusals(t *testing.T) {
 	f := newAuditEnv(t)
 	f.endpoint(t, ad("plain"))
-	f.publish(t, ad("plain").Subjects().Mail, 2)
+	f.publish(t, ad("plain").MailSubject(), 2)
 	if err := f.js.DeleteConsumer(context.Background(), ad("plain").InboxStream(), store.Consumer); err != nil {
 		t.Fatal(err)
 	}
@@ -545,9 +545,9 @@ func TestEndpointInboxAddressesAreDistinct(t *testing.T) {
 	f := newAuditEnv(t)
 	ops := sap.Address{Owner: testenv.Owner, Group: "team1", Instance: "ops1"}
 	f.endpoint(t, ops)
-	f.publish(t, ops.Subjects().Mail, 2)
+	f.publish(t, ops.MailSubject(), 2)
 	f.endpoint(t, ad("ops1")) // the same instance token in another group is another endpoint
-	f.publish(t, ad("ops1").Subjects().Mail, 1)
+	f.publish(t, ad("ops1").MailSubject(), 1)
 
 	count := func(addr string) (string, int) {
 		out, errb, code := ctlRun(t, f.e, "endpoint", "inbox", addr, "--json")

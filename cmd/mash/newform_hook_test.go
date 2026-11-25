@@ -44,7 +44,7 @@ func provisionNewForm(t *testing.T, e *testenv.Env, owner, group, instance strin
 		t.Fatal(err)
 	}
 	rec := store.Record{Owner: id.Owner, Group: id.Group, Instance: id.Instance, Agent: sap.AgentName, Account: e.Account,
-		User: user, MailSubject: id.Subjects().Mail, Created: time.Now().UTC().Format(time.RFC3339)}
+		User: user, MailSubject: id.MailSubject(), Created: time.Now().UTC().Format(time.RFC3339)}
 	val, _ := json.Marshal(rec)
 	if _, err := kv.Create(ctx, id.Flat(), val); err != nil {
 		t.Fatal(err)

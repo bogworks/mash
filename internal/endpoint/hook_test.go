@@ -484,7 +484,7 @@ func TestHookUrgentWakesAtOnce(t *testing.T) {
 	}
 
 	// A claimed sender (an unverified header) with an urgent mark: spooled as normal mail, no wake.
-	subj := taddr("a").Subjects().Mail
+	subj := taddr("a").MailSubject()
 	nc := f.e.ConnAs(t, f.creds["b"], tkey("b"))
 	id := identity(t, f.creds["b"])
 	// A claimed header (no signature over the message), with an urgent mark that b's key did sign for it.
