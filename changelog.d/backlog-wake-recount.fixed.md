@@ -1,1 +1,1 @@
-**An idle session with held mail from senders it can no longer verify no longer re-reads its whole inbox every minute.** The backlog check now waits until the held mail changes ([#1350](https://github.com/bogworks/mash/issues/1350)).
+**An idle session with held mail from senders it can no longer verify no longer re-reads its whole inbox every minute.** While the held mail is unchanged, the backlog check re-reads the inbox at most every 10 minutes ([#1350](https://github.com/bogworks/mash/issues/1350)).

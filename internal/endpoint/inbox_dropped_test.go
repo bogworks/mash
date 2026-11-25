@@ -648,7 +648,7 @@ func TestReadInboxAfterEviction(t *testing.T) {
 }
 
 // Held mail from senders no longer verified keeps the held set over WakeCount while the count says no. The no stands
-// while the held set is the same, however many wakeRecount intervals pass: the inbox is not read again every minute.
+// while the held set is the same for wakeNoMax: the inbox is not read again every minute, but is every ten.
 func TestBacklogNoStandsWhileTheHeldSetIsUnchanged(t *testing.T) {
 	r, check := connectedRig(t, 3, 4)
 	calls := stubWakeRead(r.e, func(int) (waitingReading, bool) {
@@ -659,12 +659,17 @@ func TestBacklogNoStandsWhileTheHeldSetIsUnchanged(t *testing.T) {
 	check(deliver, wakeCooldown)
 	waitWakeRead(t, r.e)
 	check(deliver, 0)
-	for range 10 {
+	for range 9 {
 		check(deliver, wakeRecount)
 		waitWakeRead(t, r.e)
 	}
 	if n := calls.Load(); n != 1 || woke {
-		t.Fatalf("reads %d, woke %v: want 1 read over ten minutes and no wake", n, woke)
+		t.Fatalf("reads %d, woke %v: want 1 read over nine minutes and no wake", n, woke)
+	}
+	check(deliver, wakeRecount) // wakeNoMax has passed: the inbox is recounted though the held set is unchanged
+	waitWakeRead(t, r.e)
+	if n := calls.Load(); n != 2 {
+		t.Fatalf("reads %d after wakeNoMax: want 2", n)
 	}
 }
 
@@ -678,12 +683,17 @@ func TestBacklogAllDroppedNoStandsWhileTheHeldSetIsUnchanged(t *testing.T) {
 	check(deliver, wakeCooldown)
 	waitWakeRead(t, r.e)
 	check(deliver, 0)
-	for range 10 {
+	for range 9 {
 		check(deliver, wakeRecount)
 		waitWakeRead(t, r.e)
 	}
 	if n := calls.Load(); n != 1 {
 		t.Fatalf("reads %d: want 1", n)
+	}
+	check(deliver, wakeRecount) // wakeNoMax has passed
+	waitWakeRead(t, r.e)
+	if n := calls.Load(); n != 2 {
+		t.Fatalf("reads %d after wakeNoMax: want 2", n)
 	}
 }
 
@@ -755,8 +765,8 @@ func TestBacklogNoRechecksWhenTheAgeCouldHaveFlipped(t *testing.T) {
 	}
 }
 
-// The refused-sequences file is read once per inbox read, not once per message: a read of twenty messages opens it as
-// often as a read of one.
+// The refused-sequences file is read once per batch, not once per message: a read of twenty messages opens it as often
+// as a read of one, and a read of more than one batch (countBatch) opens it again per extra batch.
 func TestInboxReadParsesTheRefusedSeqsOncePerRead(t *testing.T) {
 	f := newFixture(t, "a", "c")
 	ctx := context.Background()
@@ -786,5 +796,10 @@ func TestInboxReadParsesTheRefusedSeqsOncePerRead(t *testing.T) {
 	send(19)
 	if twenty := reads(); twenty != one {
 		t.Fatalf("sequences file read %d times for twenty messages, %d for one: want the same", twenty, one)
+	}
+	send(countBatch)
+	// More than one batch: the file is read again (a refusal recorded mid-read is seen), but per batch, not per message.
+	if many := reads(); many <= one || many >= 20 {
+		t.Fatalf("sequences file read %d times for %d messages, %d for one batch: want more than one batch's, far fewer than one per message", many, 20+countBatch, one)
 	}
 }

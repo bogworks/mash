@@ -1112,7 +1112,7 @@ func (e *Endpoint) readInbox(ctx context.Context, q InboxQuery) (InboxRead, erro
 	dropped := map[uint64]bool{}
 	out.dropped = dropped
 	id := e.inboxID.Load()
-	refused := e.refusedSnapshot() // read once for the whole pass, not once per message
+	var refused refusedSnap // read once per batch below (scan), not once per message: a refusal serve records mid-pass is seen by the next batch
 	drop := func(n uint64) {
 		dropped[n] = true
 		if id != nil && refused.has(n, *id) {
@@ -1131,6 +1131,7 @@ func (e *Endpoint) readInbox(ctx context.Context, q InboxQuery) (InboxRead, erro
 		for len(seqs) > 0 {
 			batch := seqs[:min(len(seqs), countBatch)]
 			seqs = seqs[len(batch):]
+			refused = e.refusedSnapshot()
 			raws := make([]*jetstream.RawStreamMsg, len(batch))
 			errs := make([]error, len(batch))
 			parallel(len(batch), fetchConcurrency, func(i int) { raws[i], errs[i] = s.GetMsg(ctx, batch[i]) })
@@ -1364,12 +1365,12 @@ func (e *Endpoint) collect(ctx context.Context, get getMsg, seqs seqRange, limit
 func (e *Endpoint) collectDropped(ctx context.Context, get getMsg, seqs seqRange, limit int) ([]render.Mail, []uint64, error) {
 	var out []render.Mail
 	var dropped []uint64 // the seqs read that toMail refused
-	refused := e.refusedSnapshot()
 	// Seqs are read a batch at a time, many requests in flight at once. A batch is no larger than what is still
 	// wanted, so the limit is never passed; seqs that turn out to be gone or forged leave the next batch to top up.
 	// A batch is judged in the order given, so the result is what a read one seq at a time would have been.
 	for seqs.remaining() > 0 && len(out) < limit {
 		batch := seqs.take(limit - len(out))
+		refused := e.refusedSnapshot() // once per batch, not once per message or per read
 		n := len(batch)
 		raws := make([]*jetstream.RawStreamMsg, n)
 		errs := make([]error, n)
