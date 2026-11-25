@@ -622,6 +622,40 @@ func TestArchiveNoReplaceRefusesASymlink(t *testing.T) {
 	}
 }
 
+func TestArchiveNoReplaceReplacedBeforeRenameIsRestoredNotArchived(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "n.creds")
+	dest := src + ".deleted"
+	os.WriteFile(src, []byte(markerCreds("eyJoriginal")), 0o600)
+	repl := markerCreds("eyJreplacement")
+	renameHook = func() {
+		tmp := filepath.Join(dir, "swap.tmp")
+		if err := os.WriteFile(tmp, []byte(repl), 0o600); err != nil {
+			t.Error(err)
+			return
+		}
+		if err := os.Rename(tmp, src); err != nil {
+			t.Error(err)
+		}
+	}
+	t.Cleanup(func() { renameHook = nil })
+	if _, err := archiveNoReplace(src, dest); err == nil {
+		t.Fatal("expected an error when src was replaced before the rename")
+	}
+	for _, d := range []string{dest, dest + ".1"} {
+		if _, err := os.Lstat(d); !os.IsNotExist(err) {
+			t.Errorf("marker %s made", d)
+		}
+	}
+	b, err := os.ReadFile(src)
+	if err != nil || string(b) != repl {
+		t.Errorf("replacement not back at src: %v %q", err, b)
+	}
+	if g := stagingFiles(t, src); len(g) != 0 {
+		t.Errorf("staging files left: %v", g)
+	}
+}
+
 func TestArchiveNoReplaceConcurrentLosesNothing(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "n.creds")

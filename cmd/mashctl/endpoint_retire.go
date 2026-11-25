@@ -272,6 +272,10 @@ func retireAddress(addr sap.Address, opts retireOpts, env func(string) string, l
 // production.
 var archiveHook func()
 
+// renameHook is a test seam: called by archiveNoReplace between its Lstat of src and the rename of src to its
+// staging name, so a test can swap the file at src at that moment. Nil in production.
+var renameHook func()
+
 var stageSeq atomic.Uint64
 
 // stageName is a staging name for src that no other attempt uses: the process id, a counter and random bytes.
@@ -309,7 +313,9 @@ func leftovers(src string) ([]string, error) {
 // It first takes ownership of src with an atomic rename to a name unique to this attempt,
 // src+".deleting.<pid>.<n>.<random>", which no other attempt uses, so a rename never overwrites a file. It reads,
 // stats and removes only that file, never src again, so a creds file put at src meanwhile is neither read nor
-// removed. Staging files left by an interrupted run (the names stageName makes, regular files only) are each claimed by a
+// removed. After the rename it checks that the file it took is the one it examined (os.SameFile); if src was
+// replaced between the Lstat and the rename, the replacement is put back at src (never overwriting) and nothing is
+// archived or removed. Staging files left by an interrupted run (the names stageName makes, regular files only) are each claimed by a
 // rename to a fresh unique name, which only one attempt can win, and archived first, each to its own marker; if src
 // is then missing, the last of those markers' path is returned, otherwise src is archived too and its marker's path
 // is returned. If every name is taken, or the marker cannot be made durable, the half marker is deleted and src is
@@ -356,15 +362,24 @@ func archiveNoReplace(src, dest string) (string, error) {
 		return "", fmt.Errorf("%s is not a regular file", src)
 	}
 	own := stageName(src)
+	if renameHook != nil {
+		renameHook()
+	}
 	if err := os.Rename(src, own); err != nil {
 		return "", err
 	}
-	if fi, err := os.Lstat(own); err != nil || !fi.Mode().IsRegular() {
+	ownInfo, err := os.Lstat(own)
+	if err != nil {
 		restoreOwnership(own, src)
-		if err == nil {
-			err = fmt.Errorf("%s is not a regular file", src)
-		}
 		return "", err
+	}
+	if !os.SameFile(fi, ownInfo) {
+		restoreOwnership(own, src)
+		return "", fmt.Errorf("%s changed while it was being moved; nothing was removed", src)
+	}
+	if !ownInfo.Mode().IsRegular() {
+		restoreOwnership(own, src)
+		return "", fmt.Errorf("%s is not a regular file", src)
 	}
 	if archiveHook != nil {
 		archiveHook()
