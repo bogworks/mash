@@ -529,7 +529,12 @@ type holdProbe struct {
 	rev uint64 // the revision of the delete or purge marker when err is ErrKeyDeleted
 }
 
-func (e *Endpoint) takeLease(ctx context.Context) error {
+func (e *Endpoint) takeLease(ctx context.Context) (err error) {
+	defer func() {
+		if err != nil && ctx.Err() != nil && e.leaseKV != nil {
+			e.dropOwnLease()
+		}
+	}()
 	kv := e.hold.kv
 	if kv == nil {
 		var err error
@@ -608,6 +613,26 @@ func (e *Endpoint) takeLease(ctx context.Context) error {
 	e.leaseRev.Store(rev)
 	e.keepLease()
 	return nil
+}
+
+// leaseCleanupTimeout bounds the read and delete that dropOwnLease makes on a context of its own.
+var leaseCleanupTimeout = 2 * time.Second
+
+// dropOwnLease is for a takeLease whose context ended: the server may have stored the lease write before the reply was
+// lost, and Close is not called on a failed Open. The key is read again and, if it holds this process's lease, deleted
+// at that revision, so the name is free at once instead of after the TTL. Errors are ignored: the lease then expires.
+func (e *Endpoint) dropOwnLease() {
+	ctx, cancel := context.WithTimeout(context.Background(), leaseCleanupTimeout)
+	defer cancel()
+	cur, err := e.leaseKV.Get(ctx, e.key)
+	if err != nil || cur == nil {
+		return
+	}
+	var lv leaseValue
+	if json.Unmarshal(cur.Value(), &lv) != nil || lv.Instance != e.instance {
+		return
+	}
+	_ = e.leaseKV.Delete(ctx, e.key, jetstream.LastRevision(cur.Revision()))
 }
 
 // keepLease refreshes the lease from the moment it is taken until Close, so a

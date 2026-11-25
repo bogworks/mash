@@ -682,6 +682,57 @@ func TestTakeLeaseCancelDuringHeldLookupIsNotHeld(t *testing.T) {
 	}
 }
 
+// cancelAfterCreateKV stores the lease write and then loses the reply: the context is cancelled and the caller sees
+// its error, as when a signal arrives after the server stored the write.
+type cancelAfterCreateKV struct {
+	jetstream.KeyValue
+	cancel context.CancelFunc
+}
+
+func (k cancelAfterCreateKV) Create(ctx context.Context, key string, val []byte, o ...jetstream.KVCreateOpt) (uint64, error) {
+	if _, err := k.KeyValue.Create(ctx, key, val, o...); err != nil {
+		return 0, err
+	}
+	k.cancel()
+	return 0, ctx.Err()
+}
+
+type cancelAfterCreateJS struct {
+	jetstream.JetStream
+	cancel context.CancelFunc
+}
+
+func (j cancelAfterCreateJS) KeyValue(ctx context.Context, bucket string) (jetstream.KeyValue, error) {
+	kv, err := j.JetStream.KeyValue(ctx, bucket)
+	if err != nil {
+		return nil, err
+	}
+	return cancelAfterCreateKV{kv, j.cancel}, nil
+}
+
+// A first lease write the server stored but whose reply was lost to a cancelled context leaves no lease behind: the
+// failed Open deletes its own lease at once, and returns the original error.
+func TestTakeLeaseCancelAfterStoredWriteReleasesOwnLease(t *testing.T) {
+	f := newFixture(t, "a")
+	e, err := OpenClient(context.Background(), f.cfg("a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.nc.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	e.js = cancelAfterCreateJS{e.js, cancel}
+	if err := e.takeLease(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("got %v, want context.Canceled", err)
+	}
+	kv := putLeaseKV(t, f)
+	if ent, err := kv.Get(context.Background(), tkey("a")); err == nil {
+		t.Fatalf("lease still held after a cancelled first write: %s", ent.Value())
+	} else if !errors.Is(err, jetstream.ErrKeyNotFound) && !errors.Is(err, jetstream.ErrKeyDeleted) {
+		t.Fatal(err)
+	}
+}
+
 // The version is read by live sessions while a command may resolve it: reads and writes are synchronized.
 func TestVersionAccessorIsRaceFree(t *testing.T) {
 	old := CurrentVersion()
