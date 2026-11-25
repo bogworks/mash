@@ -231,7 +231,7 @@ func TestScriptSpecNext(t *testing.T) {
 	dir := fixture(t, `[]`, "")
 	write(t, dir, "install.json", `{"command":{"name":"install.sh","metadata":[{"name":"x-output","value":[{"case":"Old","text":"old line"}]},
 		{"name":"x-output-next","value":[{"case":"New","text":"new line","stream":"stderr","exit":1,"issue":"#9","replaces":"Old"}]}]}}`)
-	out, err := render(dir)
+	out, err := render(dir, "next.json")
 	if err != nil {
 		t.Fatal(err)
 	}
