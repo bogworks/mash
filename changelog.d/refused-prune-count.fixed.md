@@ -1,0 +1,1 @@
+The unverified-mail refusal count is exact after a kill that follows a prune of the refused-sequence file: the file now records how many sequences it dropped, so the count is no longer left one low (#1302).
