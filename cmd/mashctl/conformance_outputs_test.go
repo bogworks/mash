@@ -21,6 +21,7 @@ package main
 // --help`, which the specification's texts may leave out. A case's text is the whole output.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -316,6 +317,11 @@ func init() {
 		w.fleet()
 		return confOutRun{ran: w.run("status"), subs: urlSub(w)}
 	})
+	reg("status --json", func(t *testing.T) confOutRun {
+		w := newConfWorld(t, true)
+		w.fleet()
+		return confOutRun{ran: confIndented(w.run("status", "--json")), subs: urlSub(w)}
+	})
 	reg("status Several servers: one line each", func(t *testing.T) confOutRun {
 		w := newConfWorld(t, true)
 		w.fleet()
@@ -544,6 +550,17 @@ func init() {
 		w.pair()
 		return confOutRun{ran: w.run("endpoint", "list", "--wide")}
 	})
+	reg("endpoint list --json", func(t *testing.T) confOutRun {
+		w := newConfWorld(t, true)
+		w.pair()
+		return confOutRun{ran: confIndented(w.run("endpoint", "list", "--json"))}
+	})
+	reg("endpoint list --json, suspended while online", func(t *testing.T) confOutRun {
+		w := newConfWorld(t, true)
+		w.pair()
+		w.do("endpoint", "suspend", "acme.demo.alice")
+		return confOutRun{ran: confIndented(w.run("endpoint", "list", "--json"))}
+	})
 	reg("endpoint list None", func(t *testing.T) confOutRun {
 		return confOutRun{ran: newConfWorld(t, true).run("endpoint", "list")}
 	})
@@ -615,6 +632,15 @@ func init() {
 		t.Cleanup(func() { endpoint.SetVersion(prevV); commit, readBuildInfo = prevC, prevB })
 		return confOutRun{ran: confRun(t, "version")}
 	})
+}
+
+// confIndented is a --json run as it prints at a terminal: the spec shows the indented form, and piped it is one line.
+func confIndented(r confRan) confRan {
+	var b bytes.Buffer
+	if json.Indent(&b, []byte(strings.TrimSpace(r.out)), "", "  ") == nil {
+		r.out = b.String() + "\n"
+	}
+	return r
 }
 
 var (

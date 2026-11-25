@@ -24,9 +24,9 @@ func TestStatusOneServerOK(t *testing.T) {
 	out, errb, code = h.run("status", "--json")
 	var r struct {
 		Server    string  `json:"server"`
-		OK        bool    `json:"ok"`
-		Endpoints int     `json:"endpoints"`
-		Online    int     `json:"online"`
+		OK        bool    `json:"ready"`
+		Endpoints int     `json:"endpoint_count"`
+		Online    int     `json:"online_count"`
 		Reason    *string `json:"reason"`
 	}
 	if err := json.Unmarshal([]byte(out), &r); err != nil || code != 0 || errb != "" || r.Server != h.e.URL || !r.OK || r.Endpoints != 3 || r.Online != 1 || r.Reason != nil {
@@ -52,8 +52,8 @@ func TestStatusServerDown(t *testing.T) {
 	out, errb, code = h.run("status", "--json")
 	var r struct {
 		Server    string  `json:"server"`
-		OK        bool    `json:"ok"`
-		Endpoints *int    `json:"endpoints"`
+		OK        bool    `json:"ready"`
+		Endpoints *int    `json:"endpoint_count"`
 		Reason    *string `json:"reason"`
 	}
 	if err := json.Unmarshal([]byte(out), &r); err != nil || code != 1 || errb != "" || r.OK || r.Endpoints != nil || r.Reason == nil || *r.Reason != "the server did not answer" {
@@ -75,7 +75,7 @@ func TestStatusSeveralServers(t *testing.T) {
 	var r struct {
 		Servers []struct {
 			Server string `json:"server"`
-			OK     bool   `json:"ok"`
+			OK     bool   `json:"ready"`
 		} `json:"servers"`
 	}
 	if err := json.Unmarshal([]byte(out), &r); err != nil || code != 1 || len(r.Servers) != 2 || !r.Servers[0].OK || r.Servers[1].OK {

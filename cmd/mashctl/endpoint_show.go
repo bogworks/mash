@@ -23,7 +23,8 @@ var endpointShowSpec = epSpec{
 // showJSON is the JSON of one endpoint.
 type showJSON struct {
 	Address     string            `json:"address"`
-	State       string            `json:"state"`
+	Online      bool              `json:"online"`
+	Suspended   bool              `json:"suspended"`
 	Created     string            `json:"created"`
 	Waiting     uint64            `json:"waiting"`
 	Role        string            `json:"role,omitempty"`
@@ -51,7 +52,7 @@ func runEndpointShow(args []string, g cliframe.Global, env func(string) string, 
 			if labels == nil {
 				labels = map[string]string{}
 			}
-			writeJSON(stdout, showJSON{Address: rt.in.addr.String(), State: stateWord(st), Created: utcRFC3339(rec.Created), Waiting: st.Waiting,
+			writeJSON(stdout, showJSON{Address: rt.in.addr.String(), Online: st.Online, Suspended: st.Suspended, Created: utcRFC3339(rec.Created), Waiting: st.Waiting,
 				Role: rec.Role, Host: rec.Host, Description: rec.Description, Capability: rec.Caps, Note: rec.Note, Labels: labels, PublicKey: rec.User})
 			return nil
 		}

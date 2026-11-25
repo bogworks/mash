@@ -1,6 +1,7 @@
 {
   "address": "o.g.a",
-  "state": "offline",
+  "online": false,
+  "suspended": false,
   "created": "<TIME>",
   "waiting": 0,
   "labels": {},

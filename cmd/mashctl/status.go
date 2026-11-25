@@ -21,9 +21,9 @@ var statusSpec = epSpec{name: "status", verb: "status", min: 0, max: 0}
 // statusRow is the state of one server: the line of `mashctl status` and one object of its JSON.
 type statusRow struct {
 	Server    string  `json:"server"`
-	OK        bool    `json:"ok"`
-	Endpoints *int    `json:"endpoints"`
-	Online    *int    `json:"online"`
+	OK        bool    `json:"ready"`
+	Endpoints *int    `json:"endpoint_count"`
+	Online    *int    `json:"online_count"`
 	Reason    *string `json:"reason"`
 }
 

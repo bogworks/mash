@@ -49,20 +49,22 @@ var endpointListSpec = epSpec{
 
 // listRow is one endpoint of the list.
 type listRow struct {
-	addr    sap.Address
-	state   string
-	created string
-	waiting uint64
-	labels  map[string]string
+	addr              sap.Address
+	state             string
+	online, suspended bool
+	created           string
+	waiting           uint64
+	labels            map[string]string
 }
 
 // listEntryJSON is one endpoint of the JSON list.
 type listEntryJSON struct {
-	Address string `json:"address"`
-	Owner   string `json:"owner"`
-	Group   string `json:"group"`
-	Name    string `json:"name"`
-	State   string `json:"state"`
+	Address   string `json:"address"`
+	Owner     string `json:"owner"`
+	Group     string `json:"group"`
+	Name      string `json:"name"`
+	Online    bool   `json:"online"`
+	Suspended bool   `json:"suspended"`
 }
 
 // recordAddress is the address of a directory record; a record that does not name a valid one is shown by its parts.
@@ -94,13 +96,13 @@ func runEndpointList(args []string, g cliframe.Global, env func(string) string, 
 			if err != nil {
 				return failErr(err)
 			}
-			rows = append(rows, listRow{addr: a, state: stateWord(st), created: r.Created, waiting: st.Waiting, labels: r.Labels})
+			rows = append(rows, listRow{addr: a, state: stateWord(st), online: st.Online, suspended: st.Suspended, created: r.Created, waiting: st.Waiting, labels: r.Labels})
 		}
 		sort.Slice(rows, func(i, j int) bool { return rows[i].addr.String() < rows[j].addr.String() })
 		if rt.in.json {
 			items := make([]listEntryJSON, 0, len(rows))
 			for _, r := range rows {
-				items = append(items, listEntryJSON{Address: r.addr.String(), Owner: r.addr.Owner, Group: r.addr.Group, Name: r.addr.Instance, State: r.state})
+				items = append(items, listEntryJSON{Address: r.addr.String(), Owner: r.addr.Owner, Group: r.addr.Group, Name: r.addr.Instance, Online: r.online, Suspended: r.suspended})
 			}
 			writeJSON(stdout, struct {
 				Endpoints []listEntryJSON `json:"endpoints"`

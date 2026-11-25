@@ -67,6 +67,20 @@ error: no server is configured
 hint: mashctl init --config <file>
 ```
 
+### --json
+
+Stream: stdout. Exit code: 0.
+
+```text
+{
+  "server": "tls://localhost:4222",
+  "ready": true,
+  "endpoint_count": 3,
+  "online_count": 1,
+  "reason": null
+}
+```
+
 ## JSON
 
 With `--json` the result is this shape. The values are an example.
@@ -74,9 +88,9 @@ With `--json` the result is this shape. The values are an example.
 ```json
 {
   "server": "tls://localhost:4222",
-  "ok": true,
-  "endpoints": 3,
-  "online": 1,
+  "ready": true,
+  "endpoint_count": 3,
+  "online_count": 1,
   "reason": null
 }
 ```
