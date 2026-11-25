@@ -29,7 +29,7 @@ Chosen: list and count it. This amends ADR 0147 on this one point; ADR 0147's de
 * `mash inbox` and MCP `inbox` list every refused entry still in the stream as a row with the state `refused`, sender `?` and its class as the reason, no body and no preview, and count it in the header (target output TO-1, TO-2).
 * `mash read <number>` and MCP `read` on a refused message answer with the refusal and its class, never the body (TO-3).
 * `mash status --detail`, `mash doctor` and their JSON give the total and a count per class (TO-4, TO-5). The `doctor` refused row is `ok` whatever it counts, so it never changes doctor's verdict or exit status; today's `warn` for unverified mail becomes `ok`.
-* `mashctl endpoint inbox` lists every message; a message refused for a malformed header has the trust `refused` and its class as the reason, and unverified mail keeps its trust label and gets its class as the reason (TO-6).
+* `mashctl endpoint inbox` lists every message; a message refused for a malformed header has the trust `refused` and its class as the reason, and unverified mail keeps its trust label and gets its class as the reason (TO-6). Its header counts only the messages it finds malformed, as `N refused as malformed`; the endpoint's own count can be higher, because the endpoint also refuses mail it could not verify, by its own setting, which `mashctl` cannot see.
 * `mash status` (the one line) is unchanged.
 
 ### Consequences
