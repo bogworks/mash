@@ -207,3 +207,58 @@ func TestEndpointReissueVerifyPassesOnNormalRun(t *testing.T) {
 		t.Error(err)
 	}
 }
+
+// The creds file is read on one descriptor: a symlink or a file other users can read is refused, not followed or used.
+func TestEndpointReissueCredsReadRefusesSymlink(t *testing.T) {
+	h := newFleetEnv(t)
+	calls := fakeRevoke(t, nil)
+	a := ad("a")
+	h.seed(a)
+	n := len(*calls)
+
+	// a symlink to a valid creds file
+	real := h.creds(a)
+	moved := real + ".real"
+	if err := os.Rename(real, moved); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(moved, real); err != nil {
+		t.Fatal(err)
+	}
+	so, se, code := h.run("endpoint", "reissue", a.String())
+	if code != 1 || so != "" || !strings.Contains(se, "symlink") || !strings.Contains(se, "nothing was changed") || !strings.Contains(se, "mv ") || len(*calls) != n {
+		t.Fatalf("symlink: %d %q %q", code, so, se)
+	}
+}
+
+// A creds file with mode 0644 is refused, not used.
+func TestEndpointReissueCredsReadRefusesWideMode(t *testing.T) {
+	h := newFleetEnv(t)
+	calls := fakeRevoke(t, nil)
+	b := ad("b")
+	h.seed(b)
+	n := len(*calls)
+	if err := os.Chmod(h.creds(b), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	so, se, code := h.run("endpoint", "reissue", b.String())
+	if code != 1 || so != "" || !strings.Contains(se, "0644") || !strings.Contains(se, "nothing was changed") || len(*calls) != n {
+		t.Fatalf("mode 0644: %d %q %q", code, so, se)
+	}
+}
+
+// A staged seed that is a symlink is refused, not read through.
+func TestEpStageKeyRefusesSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target")
+	if err := os.WriteFile(target, []byte("junk"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "pending")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := epStageKey(link); err == nil {
+		t.Fatal("a symlinked staged seed was accepted")
+	}
+}
