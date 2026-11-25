@@ -240,7 +240,11 @@ func retireAddress(addr sap.Address, opts retireOpts, env func(string) string, l
 		switch {
 		case errors.Is(err, os.ErrNotExist):
 			// A crash after the rename leaves the creds at a staging name; rerunning finishes it.
-			archive = len(leftovers(credsPath)) > 0
+			left, lerr := leftovers(credsPath)
+			if lerr != nil {
+				return retireResult{}, partial("its creds file was not moved")
+			}
+			archive = len(left) > 0
 		case err != nil:
 			return retireResult{}, partial("its creds file was not moved")
 		case !fi.Mode().IsRegular():
@@ -277,8 +281,12 @@ func stageName(src string) string {
 }
 
 // leftovers lists the staging files of src, src+".deleting.*", left by interrupted or running attempts, sorted.
-func leftovers(src string) []string {
-	ents, _ := os.ReadDir(filepath.Dir(src))
+// A directory that cannot be listed is an error, not "none": a staged creds file may be in it. A missing one has none.
+func leftovers(src string) ([]string, error) {
+	ents, err := os.ReadDir(filepath.Dir(src))
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("cannot list %s to look for staged creds files: %w", filepath.Dir(src), err)
+	}
 	pre := filepath.Base(src) + ".deleting."
 	var out []string
 	for _, e := range ents {
@@ -286,7 +294,7 @@ func leftovers(src string) []string {
 			out = append(out, filepath.Join(filepath.Dir(src), e.Name()))
 		}
 	}
-	return out
+	return out, nil
 }
 
 // archiveNoReplace sets src aside at dest as a marker that keeps the endpoint's name and its JWT block and no key:
@@ -304,7 +312,11 @@ func leftovers(src string) []string {
 // remain in disk blocks after removal.
 func archiveNoReplace(src, dest string) (string, error) {
 	left := ""
-	for _, l := range leftovers(src) {
+	staged, err := leftovers(src)
+	if err != nil {
+		return "", err
+	}
+	for _, l := range staged {
 		fi, err := os.Lstat(l)
 		if errors.Is(err, os.ErrNotExist) {
 			continue

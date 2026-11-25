@@ -553,6 +553,31 @@ func TestArchiveNoReplaceArchivesALeftoverDeleting(t *testing.T) {
 	}
 }
 
+func TestArchiveNoReplaceUnlistableDirectoryFailsAndKeepsStagedFile(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can list any directory")
+	}
+	dir := t.TempDir()
+	src := filepath.Join(dir, "n.creds")
+	staged := src + ".deleting.1.1.aa"
+	os.WriteFile(staged, []byte(markerCreds("eyJstaged")), 0o600)
+	t.Cleanup(func() { os.Chmod(dir, 0o700) })
+	if err := os.Chmod(dir, 0o300); err != nil {
+		t.Fatal(err)
+	}
+	got, err := archiveNoReplace(src, src+".deleted")
+	if err == nil {
+		t.Fatalf("archive reported success: %q", got)
+	}
+	if !strings.Contains(err.Error(), "cannot list") {
+		t.Errorf("error does not name the cause: %v", err)
+	}
+	os.Chmod(dir, 0o700)
+	if _, err := os.Lstat(staged); err != nil {
+		t.Errorf("staged file gone: %v", err)
+	}
+}
+
 func TestArchiveNoReplaceRefusesASymlink(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "target")
