@@ -146,9 +146,7 @@ server     ok    tls://localhost:4222
 sign-in    ok
 storage    ok
 endpoints  ok    3 records, 3 inboxes
-keys       FAIL  signing key
-                 AAMJX6K7B2X43CQPCBKB6W547SI6SHDUPKG4MWPAP5XY4NUWALQ2HBUS
-                 is not in the key store
+keys       FAIL  the signing key is not in the key store
 
 1 problem.
 hint: mashctl init --config <file>
@@ -164,9 +162,7 @@ server     ok    tls://localhost:4222
 sign-in    ok
 storage    ok
 endpoints  ok    3 records, 3 inboxes
-keys       FAIL  signing key
-                 AAMJX6K7B2X43CQPCBKB6W547SI6SHDUPKG4MWPAP5XY4NUWALQ2HBUS
-                 is not listed in the account
+keys       FAIL  the signing key is not listed in the account
                  1 other user, not issued by mashctl
 
 1 problem.

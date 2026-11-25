@@ -65,6 +65,8 @@ type doctorCheck struct {
 	State  string  `json:"state"`
 	Detail string  `json:"detail"`
 	Fix    *string `json:"fix"`
+	// SigningKey is the public key of the signing key the keys row found missing; only --json shows it.
+	SigningKey string `json:"signing_key,omitempty"`
 }
 
 // doctorReport is what `mashctl doctor --json` prints.
@@ -666,19 +668,20 @@ func doctorKeys(rep *doctorReport, ctx context.Context, adm *admin.Admin, cfg co
 	}
 	rep.Checks = rep.Checks[:n]
 	rep.add("keys", stateFail, detail, fix)
+	rep.Checks[n].SigningKey = config.Clean(cfg.SigningKeyPub) // the one key the finding is about
 }
 
 // signingKeyFinding is the signing key part of the keys row: the key store holds the signing key that config.json's
-// signing_key_pub names, and the account JWT lists it as a plain signing key. A configuration with no signing_key_pub,
-// or an account JWT that cannot be read, is not a finding here (the keys row reports what it cannot read itself).
+// signing_key_pub names, and the account JWT lists it as a plain signing key. A configuration with no signing_key_pub
+// is not a finding here; an account JWT that cannot be read is one, since the key cannot be shown listed.
 func signingKeyFinding(ctx context.Context, cfg config.Config, env func(string) string) finding {
 	if cfg.SigningKeyPub == "" {
 		return finding{}
 	}
 	say := func(what, fix string) finding {
-		return finding{text: "signing key\n" + config.Clean(cfg.SigningKeyPub) + "\n" + what, fix: fix, own: true}
+		return finding{text: what, fix: fix, own: true}
 	}
-	const noStore = "is not in the key store"
+	const noStore = "the signing key is not in the key store"
 	ks, err := openKeys(cfg, env)
 	if err != nil {
 		return say(noStore, initFix)
@@ -692,14 +695,14 @@ func signingKeyFinding(ctx context.Context, cfg config.Config, env func(string) 
 		return say(noStore, initFix)
 	}
 	claims, err := doctorAccountClaims(ctx, cfg, env, ks)
-	if err != nil {
-		return finding{}
+	if err != nil { // the key cannot be shown listed, so the row does not pass
+		return say("the account could not be read: "+oneLine(admin.RewordUnavailable(err.Error())), "")
 	}
 	if !claims.SigningKeys.Contains(pub) {
-		return say("is not listed in the account", "")
+		return say("the signing key is not listed in the account", "")
 	}
 	if sc, _ := claims.SigningKeys.GetScope(pub); sc != nil { // a scoped key is not a plain signing key
-		return say("is not listed in the account", "")
+		return say("the signing key is not listed in the account", "")
 	}
 	return finding{}
 }

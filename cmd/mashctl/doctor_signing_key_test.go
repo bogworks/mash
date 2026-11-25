@@ -60,7 +60,10 @@ func TestDoctorKeysSigningKeyNotInTheKeyStore(t *testing.T) {
 		}
 	}
 	c, code := doctorKeysRowOf(t, a)
-	want := "signing key\n" + skPub + "\nis not in the key store"
+	want := "the signing key is not in the key store"
+	if c.SigningKey != skPub {
+		t.Fatalf("signing_key %q, want %q", c.SigningKey, skPub)
+	}
 	if code != 1 || c.State != "fail" || c.Detail != want || c.Fix == nil || *c.Fix != "mashctl init --config <file>" {
 		t.Fatalf("%d %+v", code, c)
 	}
@@ -92,12 +95,27 @@ func TestDoctorKeysSigningKeyNotListedInTheAccount(t *testing.T) {
 		}
 		pushAccountJWT(t, e, tok)
 		c, code := doctorKeysRowOf(t, a)
-		want := "signing key\n" + skPub + "\nis not listed in the account"
-		if code != 1 || c.State != "fail" || !strings.HasPrefix(c.Detail, want) || c.Fix != nil {
+		want := "the signing key is not listed in the account"
+		if code != 1 || c.State != "fail" || !strings.HasPrefix(c.Detail, want+"\n") || c.SigningKey != skPub || c.Fix != nil {
 			t.Fatalf("scoped=%v: %d %+v", scoped, code, c)
 		}
 		if strings.Contains(c.Detail, "every connected") { // the ok text of the row does not stay beside a failure
 			t.Fatalf("an ok finding stays: %q", c.Detail)
 		}
+	}
+}
+
+// The account JWT cannot be read (here the account key is gone from the key store, so the lookup cannot start): the
+// keys row fails rather than passing unchecked, with no hint.
+func TestDoctorKeysSigningKeyAccountUnreadable(t *testing.T) {
+	e, sk, osk := strictEnv(t)
+	skPub, _ := sk.PublicKey()
+	a := initStrict(t, e, sk, osk, true)
+	if err := os.Remove(filepath.Join(a.env["MASH_KEYS_DIR"], "account.nk")); err != nil {
+		t.Fatal(err)
+	}
+	c, code := doctorKeysRowOf(t, a)
+	if code != 1 || c.State != "fail" || !strings.HasPrefix(c.Detail, "the account could not be read: ") || c.SigningKey != skPub || c.Fix != nil {
+		t.Fatalf("%d %+v", code, c)
 	}
 }

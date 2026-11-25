@@ -467,15 +467,15 @@
        },
        {
         "case": "The signing key is not in the key store",
-        "text": "config     ok\nserver     ok    tls://localhost:4222\nsign-in    ok\nstorage    ok\nendpoints  ok    3 records, 3 inboxes\nkeys       FAIL  signing key\n                 AAMJX6K7B2X43CQPCBKB6W547SI6SHDUPKG4MWPAP5XY4NUWALQ2HBUS\n                 is not in the key store\n\n1 problem.\nhint: mashctl init --config <file>",
+        "text": "config     ok\nserver     ok    tls://localhost:4222\nsign-in    ok\nstorage    ok\nendpoints  ok    3 records, 3 inboxes\nkeys       FAIL  the signing key is not in the key store\n\n1 problem.\nhint: mashctl init --config <file>",
         "stream": "stdout, then the hint on stderr",
         "exit": 1,
         "issue": "#1288",
-        "note": "The signing key is the one config.json names (signing_key_pub); the key folder has no signing.nk and signing.pub for it. It is part of the keys row, so a run with no problem prints the row as before, and a configuration with no signing_key_pub is not checked. The key is on a line of its own so that no line passes 80 columns."
+        "note": "The signing key is the one config.json names (signing_key_pub); the key folder has no signing.nk and signing.pub for it. It is part of the keys row, so a run with no problem prints the row as before, and a configuration with no signing_key_pub is not checked. The text does not name the key; `--json` has it as `signing_key` on the keys check."
        },
        {
         "case": "The signing key is not listed in the account",
-        "text": "config     ok\nserver     ok    tls://localhost:4222\nsign-in    ok\nstorage    ok\nendpoints  ok    3 records, 3 inboxes\nkeys       FAIL  signing key\n                 AAMJX6K7B2X43CQPCBKB6W547SI6SHDUPKG4MWPAP5XY4NUWALQ2HBUS\n                 is not listed in the account\n                 1 other user, not issued by mashctl\n\n1 problem.",
+        "text": "config     ok\nserver     ok    tls://localhost:4222\nsign-in    ok\nstorage    ok\nendpoints  ok    3 records, 3 inboxes\nkeys       FAIL  the signing key is not listed in the account\n                 1 other user, not issued by mashctl\n\n1 problem.",
         "stream": "stdout",
         "exit": 1,
         "issue": "#1288",
