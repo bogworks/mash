@@ -181,7 +181,7 @@ func (w *confWorld) messages(addr string, n int) {
 		w.t.Fatal(err)
 	}
 	for i := 0; i < n; i++ {
-		if _, err := w.js.Publish(w.ctx, a.Subjects().Mail, []byte(fmt.Sprintf("m%d", i))); err != nil {
+		if _, err := w.js.Publish(w.ctx, a.MailSubject(), []byte(fmt.Sprintf("m%d", i))); err != nil {
 			w.t.Fatal(err)
 		}
 	}
@@ -196,7 +196,7 @@ func confInboxMessagesRun(t *testing.T, args ...string) confOutRun {
 	w.do("endpoint", "create", "acme.demo.alice")
 	w.do("endpoint", "create", "acme.demo.bob")
 	bob, _ := sap.ParseAddress("acme.demo.bob")
-	subject := bob.Subjects().Mail
+	subject := bob.MailSubject()
 	raw, err := os.ReadFile(filepath.Join(w.a.env["MASH_CONFIG_DIR"], "acme.demo.alice.creds"))
 	if err != nil {
 		t.Fatal(err)

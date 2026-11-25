@@ -102,7 +102,7 @@ func TestOtherOwnerCannotForgeDiscoveryAnswer(t *testing.T) {
 	forged, _ := json.Marshal(map[string]any{
 		"name": "agents", "type": "io.nats.micro.v1.info_response",
 		"metadata":  map[string]string{"owner": f.e.Owner},
-		"endpoints": []map[string]string{{"name": "prompt", "subject": taddr("ghost").Subjects().Prompt}},
+		"endpoints": []map[string]string{{"name": "prompt", "subject": mustSubj(taddr("ghost")).Prompt}},
 	})
 	stop := make(chan struct{})
 	defer close(stop)
@@ -250,7 +250,7 @@ func answerInfo(t *testing.T, c *Endpoint, md map[string]string, subject string)
 // Discovery matches the prompt subject only: a registration with another metadata owner is found when its subject is
 // the wanted one, and one whose metadata claims the wanted address is refused when its subject is not.
 func TestDiscoverMatchesSubjectNotMetadata(t *testing.T) {
-	want := taddr("ghost").Subjects().Prompt
+	want := mustSubj(taddr("ghost")).Prompt
 	for _, c := range []struct {
 		desc, subject string
 		md            map[string]string
@@ -258,8 +258,8 @@ func TestDiscoverMatchesSubjectNotMetadata(t *testing.T) {
 	}{
 		{"other metadata owner, wanted subject", want, map[string]string{"owner": "someone-else"}, true},
 		{"no metadata, wanted subject", want, nil, true},
-		{"metadata claims the address, other subject", taddr("other").Subjects().Prompt, map[string]string{"owner": "acme", "instance": "ghost"}, false},
-		{"metadata owner is ours, other subject", taddr("other").Subjects().Prompt, map[string]string{"owner": taddr("ghost").Owner}, false},
+		{"metadata claims the address, other subject", mustSubj(taddr("other")).Prompt, map[string]string{"owner": "acme", "instance": "ghost"}, false},
+		{"metadata owner is ours, other subject", mustSubj(taddr("other")).Prompt, map[string]string{"owner": taddr("ghost").Owner}, false},
 	} {
 		f := newFixture(t, "a", "b")
 		answerInfo(t, f.client(t, "a"), c.md, c.subject)
@@ -276,7 +276,7 @@ func TestDiscoverMatchesSubjectNotMetadata(t *testing.T) {
 // Discovery accepts a subject only when it is exactly the wanted prompt subject: a wildcard, an extra token or
 // another verb on the same T3.T4.T5 is not an answer for the address.
 func TestDiscoverRefusesMalformedSubjects(t *testing.T) {
-	want := taddr("ghost").Subjects().Prompt
+	want := mustSubj(taddr("ghost")).Prompt
 	tail := strings.TrimPrefix(want, "agents.prompt.")
 	for _, c := range []struct{ desc, subject string }{
 		{"wildcard token", "agents.prompt.*.o.s"},

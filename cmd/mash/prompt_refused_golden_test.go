@@ -27,7 +27,7 @@ func TestPromptRefusalReachesStderrUnchanged(t *testing.T) {
 			text := strings.TrimSuffix(strings.TrimPrefix(string(want), "mash: prompt refused: "+code+" "), "\n")
 			w := newWorld(t, "alpha", "beta")
 			target := w.e.ConnAs(t, w.env["beta"]["MASH_CREDS"], "beta")
-			subj := tAddr("beta").Subjects().Prompt
+			subj := mustSubj(tAddr("beta")).Prompt
 			svc, err := micro.AddService(target, micro.Config{
 				Name: sap.ServiceName, Version: "0.0.1",
 				Metadata: map[string]string{"owner": w.e.Owner},

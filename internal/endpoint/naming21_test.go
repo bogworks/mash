@@ -96,7 +96,7 @@ func TestAddressEndToEnd(t *testing.T) {
 	peer := f.provision(t, "x", "peer")
 	key := sdk.Flat()
 	rec := f.record(t, key)
-	if rec.Instance != "sap-go-sdk" || rec.Group != "x" || rec.Owner != f.e.Owner || rec.Agent != sap.AgentName || rec.MailSubject != sdk.Subjects().Mail {
+	if rec.Instance != "sap-go-sdk" || rec.Group != "x" || rec.Owner != f.e.Owner || rec.Agent != sap.AgentName || rec.MailSubject != sdk.MailSubject() {
 		t.Fatalf("record %+v", rec)
 	}
 	prompts := make(chan PromptEvent, 1)
@@ -151,7 +151,7 @@ func TestAddressEndToEnd(t *testing.T) {
 
 	// Prompt round trip on the five-token prompt subject.
 	subj, err := DiscoverRecipient(ctx, b.Conn(), key)
-	if err != nil || subj != sdk.Subjects().Prompt {
+	if err != nil || subj != mustSubj(sdk).Prompt {
 		t.Fatalf("discover: %q %v", subj, err)
 	}
 	var out strings.Builder
@@ -166,7 +166,7 @@ func TestAddressEndToEnd(t *testing.T) {
 	}
 
 	// Heartbeat: exactly agents.hb.<owner>.x.sap-go-sdk. Subscribe and flush before it is published.
-	hbSubj := sdk.Subjects().HB
+	hbSubj := mustSubj(sdk).HB
 	sub, err := b.Conn().SubscribeSync(hbSubj)
 	if err != nil {
 		t.Fatal(err)

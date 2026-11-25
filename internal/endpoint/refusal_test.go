@@ -38,7 +38,7 @@ func (f *fixture) restrictedSender(t *testing.T, allowed ...string) *Endpoint {
 	for _, s := range p.Pub.Allow {
 		if s == wide {
 			for _, n := range allowed {
-				pub = append(pub, taddr(n).Subjects().Mail)
+				pub = append(pub, taddr(n).MailSubject())
 			}
 			continue
 		}
@@ -96,7 +96,7 @@ func TestSendToADeniedRecipientFailsFast(t *testing.T) {
 	wantRefused(t, err, "denied", took)
 	var re *RefusedError
 	errors.As(err, &re)
-	if re.Subject != taddr("denied").Subjects().Mail {
+	if re.Subject != taddr("denied").MailSubject() {
 		t.Fatalf("subject %q", re.Subject)
 	}
 	if _, err := timedSend(s, "ok"); err != nil {
@@ -191,7 +191,7 @@ func TestAmbiguousTimeoutCarriesClause(t *testing.T) {
 	const clause = "; a permission violation on this subject was seen while several sends were in flight, so it could not be attributed (mashctl endpoint permissions ADDRESS shows what an endpoint may publish)"
 	f := newFixture(t, "ok")
 	s := f.restrictedSender(t, "ok")
-	subj := taddr("ok").Subjects().Mail
+	subj := taddr("ok").MailSubject()
 	expired := func() error {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel() // the send ends at its deadline, whatever the server would have said
@@ -218,7 +218,7 @@ func TestAmbiguousTimeoutCarriesClause(t *testing.T) {
 func TestAllowedSendAckedAfterStrayViolationSucceeds(t *testing.T) {
 	f := newFixture(t, "ok")
 	s := f.restrictedSender(t, "ok")
-	subj := taddr("ok").Subjects().Mail
+	subj := taddr("ok").MailSubject()
 	s.refusals.note(violation(subj)) // no waiter: dropped
 	if _, err := timedSend(s, "ok"); err != nil {
 		t.Fatalf("allowed send: %v", err)
@@ -279,7 +279,7 @@ func TestDeniedAndAllowedConcurrentSendsDoNotInterfere(t *testing.T) {
 func TestViolationWithNoWaiterIsDropped(t *testing.T) {
 	f := newFixture(t, "ok", "denied")
 	s := f.restrictedSender(t)
-	subj := taddr("denied").Subjects().Mail
+	subj := taddr("denied").MailSubject()
 	s.refusals.note(fmt.Errorf("%w: Permissions Violation for Publish to %q", nats.ErrPermissionViolation, subj))
 	if n := s.refusals.pending(); n != 0 {
 		t.Fatalf("%d waiters", n)
@@ -295,10 +295,10 @@ func TestViolationWithNoWaiterIsDropped(t *testing.T) {
 func TestViolationForAnotherSubjectDoesNotRefuse(t *testing.T) {
 	f := newFixture(t, "ok", "denied")
 	s := f.restrictedSender(t, "ok")
-	ch, release := s.refusals.register(taddr("ok").Subjects().Mail, false)
+	ch, release := s.refusals.register(taddr("ok").MailSubject(), false)
 	defer release(true)
-	s.refusals.note(fmt.Errorf("%w: Permissions Violation for Publish to %q", nats.ErrPermissionViolation, taddr("other").Subjects().Mail))
-	s.refusals.note(fmt.Errorf("%w: Permissions Violation for Subscription to %q", nats.ErrPermissionViolation, taddr("ok").Subjects().Mail))
+	s.refusals.note(fmt.Errorf("%w: Permissions Violation for Publish to %q", nats.ErrPermissionViolation, taddr("other").MailSubject()))
+	s.refusals.note(fmt.Errorf("%w: Permissions Violation for Subscription to %q", nats.ErrPermissionViolation, taddr("ok").MailSubject()))
 	select {
 	case <-ch:
 		t.Fatal("waiter signalled by an unrelated violation")
@@ -369,7 +369,7 @@ func cancelledSend(s *Endpoint, to string) error {
 func TestDelayedViolationFromTimedOutSendDoesNotRefuseNext(t *testing.T) {
 	f := newFixture(t, "ok")
 	s := f.restrictedSender(t, "ok")
-	subj := taddr("ok").Subjects().Mail
+	subj := taddr("ok").MailSubject()
 	var te *SendTimeoutError
 	if err := cancelledSend(s, "ok"); !errors.As(err, &te) {
 		t.Fatalf("send 1: %v", err)
@@ -650,7 +650,7 @@ func TestUnsettledEndTaintsTheRemainingWaiter(t *testing.T) {
 func TestTaintedSoleSendEndsAsAmbiguousTimeout(t *testing.T) {
 	f := newFixture(t, "ok", "denied")
 	s := f.restrictedSender(t, "ok")
-	subj := taddr("denied").Subjects().Mail
+	subj := taddr("denied").MailSubject()
 	_, rel1 := s.refusals.register(subj, false) // another send on the subject, still in flight
 	ctx, cancel := context.WithTimeout(context.Background(), 700*time.Millisecond)
 	defer cancel()

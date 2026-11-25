@@ -77,8 +77,8 @@ func TestPermissionsLongestAddress(t *testing.T) {
 	p := Permissions(a)
 	sameLines(t, "sub allow", p.Sub.Allow, []string{
 		"_INBOX." + a.Owner + "." + a.Flat() + ".>",
-		a.Subjects().Prompt,
-		a.Subjects().Status,
+		mustSubj(a).Prompt,
+		mustSubj(a).Status,
 		"$SRV.>",
 		"agents.hb." + a.Owner + ".*.*",
 	})
@@ -104,7 +104,7 @@ func TestPermissionsNeverReachAnotherOwner(t *testing.T) {
 				if toks[2] != a.Owner {
 					t.Errorf("%s: %q does not carry the owner as a literal in slot 1", a, s)
 				}
-				if toks[1] == "hb" && slices.Contains(p.Pub.Allow, s) && s != a.Subjects().HB {
+				if toks[1] == "hb" && slices.Contains(p.Pub.Allow, s) && s != mustSubj(a).HB {
 					t.Errorf("%s: heartbeat publication beyond its own subject: %q", a, s)
 				}
 				continue
@@ -187,5 +187,44 @@ func TestPermissionsPeerLinesPassValidateGrant(t *testing.T) {
 func TestGoldenLockKey(t *testing.T) {
 	if got := lockKey("alice_dev_design"); got != "limits-lock.alice_dev_design" {
 		t.Errorf("lockKey = %q", got)
+	}
+}
+
+// An address the SDK builder refuses gets no permission set: nil, never an empty one that allows everything. Validate
+// refuses these first, so this is the path through it; the builder's own refusal is covered in internal/sap.
+func TestPermissionsNilWhenNoSubject(t *testing.T) {
+	for _, a := range []sap.Address{
+		{Owner: "acme", Group: "o.ps", Instance: "alpha"},
+		{Owner: "acme", Group: "ops", Instance: "al pha"},
+		{Owner: "Acme", Group: "ops", Instance: "alpha"},
+		{},
+	} {
+		if p := Permissions(a); p != nil {
+			t.Errorf("%+v: got %+v, want nil", a, p)
+		}
+		if f := NSCFlags(a); f != nil {
+			t.Errorf("%+v: NSCFlags %v", a, f)
+		}
+	}
+}
+
+// A builder-refused address and an invalid one give the same caller output. The builder's error in Permissions is
+// unreachable through the callers because Permissions validates first; both paths return nil.
+func TestPermissionsRefusedAndInvalidAddressesAgree(t *testing.T) {
+	refused := sap.Address{Owner: "acme", Group: "o.ps", Instance: "alpha"} // the SDK builder refuses it
+	if _, err := refused.Subjects(); err == nil {
+		t.Fatal("the SDK builder accepted the refused address")
+	}
+	invalid := sap.Address{Owner: "Acme", Group: "ops", Instance: "alpha"} // invalid for mash; the SDK builder accepts it
+	for name, a := range map[string]sap.Address{"refused": refused, "invalid": invalid} {
+		if p := Permissions(a); p != nil {
+			t.Errorf("%s: Permissions = %+v, want nil", name, p)
+		}
+		if f := NSCFlags(a); f != nil {
+			t.Errorf("%s: NSCFlags = %q, want nil", name, f)
+		}
+	}
+	if !slices.Equal(NSCFlags(refused), NSCFlags(invalid)) {
+		t.Error("NSCFlags differs between the refused and the invalid address")
 	}
 }

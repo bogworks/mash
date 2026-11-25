@@ -117,7 +117,7 @@ func TestCompatForgedAndMalformedAreDropped(t *testing.T) {
 	f := newFixture(t, "a", "b")
 	ctx := context.Background()
 	b := f.client(t, "b")
-	subj := taddr("a").Subjects().Mail
+	subj := mustSubj(taddr("a")).Mail
 	nc := f.e.ConnAs(t, f.creds["b"], tkey("b"))
 	id := identity(t, f.creds["b"])
 

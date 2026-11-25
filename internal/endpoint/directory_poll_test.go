@@ -324,7 +324,7 @@ func TestUnparseableDirectoryRecordIsSkipped(t *testing.T) {
 	for key, val := range map[string]string{
 		"old":             `{"name":"old","owner":"o","agent":"claude-code","agent_token":"cc","user":"U1","mail_subject":"agents.mail.cc.o.old"}`,
 		tkey("wrongmail"): `{"owner":"o","group":"dev","instance":"wrongmail","user":"U2","mail_subject":"agents.mail.o.dev.other"}`,
-		tkey("nouser"):    `{"owner":"o","group":"dev","instance":"nouser","mail_subject":"` + taddr("nouser").Subjects().Mail + `"}`,
+		tkey("nouser"):    `{"owner":"o","group":"dev","instance":"nouser","mail_subject":"` + taddr("nouser").MailSubject() + `"}`,
 		"o_dev_junk":      `not json`,
 	} {
 		if _, err := kv.Put(context.Background(), key, []byte(val)); err != nil {

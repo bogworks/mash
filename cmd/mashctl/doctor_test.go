@@ -307,7 +307,7 @@ func TestDoctorEndpoints(t *testing.T) {
 
 	f.endpoint(t, ad("c"))
 	f.capInbox(t, ad("c"), 4096)
-	f.publishBig(t, ad("c").Subjects().Mail, 20) // nothing read: the cap dropped the oldest
+	f.publishBig(t, ad("c").MailSubject(), 20) // nothing read: the cap dropped the oldest
 	_, by, _ = doctorJSON(t, f.run(t))
 	c := by["endpoints"]
 	if c.State != "fail" || !strings.HasSuffix(c.Detail, "; 1 inbox has lost mail unread: o.g.c") || c.Fix == nil || *c.Fix != "mashctl endpoint show o.g.b" {
@@ -320,7 +320,7 @@ func TestDoctorNearFullInboxWarns(t *testing.T) {
 	f := newAuditEnv(t)
 	f.endpoint(t, ad("full"))
 	f.capInbox(t, ad("full"), 4096)
-	f.publishBig(t, ad("full").Subjects().Mail, 7) // about 3.8 KiB of 4 KiB, nothing dropped
+	f.publishBig(t, ad("full").MailSubject(), 7) // about 3.8 KiB of 4 KiB, nothing dropped
 	rep, by, code := doctorJSON(t, f.run(t))
 	c := by["endpoints"]
 	if code != 0 || rep.Problems != 0 || c.State != "warn" || c.Detail != "1 inbox is 90% full or more: o.g.full" || c.Fix == nil || *c.Fix != "mashctl limits apply o.g.full" {

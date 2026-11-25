@@ -17,7 +17,7 @@ import (
 func TestUnknownSignerLookupIsCachedForAPollInterval(t *testing.T) {
 	f := newFixture(t, "a", "b")
 	a := f.client(t, "a")
-	subj := taddr("a").Subjects().Mail
+	subj := taddr("a").MailSubject()
 	xcreds, _ := f.e.Mint(t, taddr("x")) // a valid user, never provisioned, claiming b's name
 	xid := identity(t, xcreds)
 	var lookups atomic.Int64
@@ -95,7 +95,7 @@ func TestRecordedRefusalSurvivesSettingAndDirectoryChange(t *testing.T) {
 func TestRefusalRechecksLeaseBeforeAck(t *testing.T) {
 	f := newFixture(t, "a", "b")
 	cfg := f.cfgState("a", t.TempDir(), false)
-	subj := taddr("a").Subjects().Mail
+	subj := taddr("a").MailSubject()
 	ctx, cancel := context.WithCancel(context.Background())
 	ep, err := Open(ctx, cfg)
 	if err != nil {
@@ -136,7 +136,7 @@ func TestRefusalNotAckedWhenSequenceUnrecordable(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, refusedSeqsFile), 0o700); err != nil { // a directory where the file goes
 		t.Fatal(err)
 	}
-	subj := taddr("a").Subjects().Mail
+	subj := taddr("a").MailSubject()
 	ctx, cancel := context.WithCancel(context.Background())
 	ep, err := Open(ctx, cfg)
 	if err != nil {

@@ -12,7 +12,7 @@ import (
 func publishUnsigned(t *testing.T, w *world, to, from, body string) {
 	t.Helper()
 	nc := w.e.ConnAs(t, w.env[from]["MASH_CREDS"], tAddr(from).Flat())
-	if _, err := nc.Request(tAddr(to).Subjects().Mail, []byte(body), 5*time.Second); err != nil {
+	if _, err := nc.Request(tAddr(to).MailSubject(), []byte(body), 5*time.Second); err != nil {
 		t.Fatal(err)
 	}
 }

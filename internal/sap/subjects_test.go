@@ -13,8 +13,9 @@ func TestAddressSubjectsAndInbox(t *testing.T) {
 		HB:     "agents.hb.acme.ops.p1",
 		Mail:   "agents.mail.acme.ops.p1",
 	}
-	if a.Subjects() != want || a.MailFilter() != want.Mail {
-		t.Fatalf("got %+v filter %q", a.Subjects(), a.MailFilter())
+	got, err := a.Subjects()
+	if err != nil || got != want || a.MailFilter() != want.Mail || a.MailSubject() != want.Mail {
+		t.Fatalf("got %+v err %v filter %q", got, err, a.MailFilter())
 	}
 	if a.InboxPrefix() != "_INBOX.acme.acme_ops_p1" {
 		t.Fatal(a.InboxPrefix())

@@ -31,7 +31,7 @@ func TestPromptRefusedGoldens(t *testing.T) {
 			f := newFixture(t, "a", "b")
 			f.serve(t, "a", func(*Endpoint, PromptEvent) { t.Error("a refused prompt reached the session") })
 			b := f.client(t, "b")
-			subj := taddr("a").Subjects().Prompt
+			subj := mustSubj(taddr("a")).Prompt
 			var got string
 			var out bytes.Buffer
 			if tc.code == "403" {
