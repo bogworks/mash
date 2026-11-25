@@ -132,12 +132,12 @@ func TestCLIRoundTrips(t *testing.T) {
 		check func(t *testing.T, out string)
 	}{
 		{"inbox-limit-1", "", []string{"inbox", "--limit", "1"}, func(t *testing.T, out string) {
-			if !strings.HasPrefix(out, "25 messages for ") || !strings.Contains(out, "\n25      sender  ") || strings.Count(out, "\n") != 5 {
+			if !strings.HasPrefix(out, "25 messages for ") || !strings.Contains(out, "\n25      o.dev.sender  ") || strings.Count(out, "\n") != 5 {
 				t.Fatalf("inbox --limit 1: %q", out)
 			}
 		}},
 		{"inbox-limit-20", "", []string{"inbox", "--limit", "20"}, func(t *testing.T, out string) {
-			if !strings.Contains(out, "\n6       sender  ") || strings.Contains(out, "\n5       sender  ") || strings.Count(out, "\n") != 20+4 {
+			if !strings.Contains(out, "\n6       o.dev.sender  ") || strings.Contains(out, "\n5       o.dev.sender  ") || strings.Count(out, "\n") != 20+4 {
 				t.Fatalf("inbox --limit 20: %q", out)
 			}
 		}},

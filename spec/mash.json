@@ -526,13 +526,13 @@
       "value": [
        {
         "case": "Messages",
-        "text": "2 messages for acme.demo.alice, 2 new, 1 urgent.\n\nNUMBER  FROM  WHEN     STATE  URGENT  KIND      MESSAGE\n1       bob   10s ago  new    no      task      lunch at noon?\n2       bob   8s ago   new    yes     question  ready?",
+        "text": "2 messages for acme.demo.alice, 2 new, 1 urgent.\n\nNUMBER  FROM           WHEN     STATE  URGENT  KIND      MESSAGE\n1       acme.demo.bob  10s ago  new    no      task      lunch at noon?\n2       acme.demo.bob  8s ago   new    yes     question  ready?",
         "stream": "stdout",
         "exit": 0
        },
        {
         "case": "A long message, or one of several lines",
-        "text": "NUMBER  FROM  WHEN    STATE  URGENT  KIND    MESSAGE\n3       bob   1m ago  new    no      result  The build passed on all four runn…",
+        "text": "NUMBER  FROM           WHEN    STATE  URGENT  KIND    MESSAGE\n3       acme.demo.bob  1m ago  new    no      result  The build passed on all …",
         "stream": "stdout",
         "exit": 0
        },
@@ -550,7 +550,7 @@
        },
        {
         "case": "The oldest has waited longer than the wake age",
-        "text": "3 messages for acme.demo.alice, 3 new, 0 urgent.\nThe oldest has waited 1h 12m.\n\nNUMBER  FROM  WHEN  STATE  URGENT  KIND  MESSAGE\n...",
+        "text": "3 messages for acme.demo.alice, 3 new, 0 urgent.\nThe oldest has waited 1h 12m.\n\nNUMBER  FROM           WHEN  STATE  URGENT  KIND  MESSAGE\n...",
         "stream": "stdout",
         "exit": 0
        },
@@ -574,7 +574,7 @@
        },
        {
         "case": "Counts include mail read out of order, with --detail",
-        "text": "About 2 messages for acme.demo.alice, about 1 new, about 1 urgent.\nexact: no (mail read out of order may still be counted as urgent)\n\nNUMBER  FROM  WHEN     STATE  URGENT  KIND      MESSAGE\n1       bob   10s ago  new    no      task      lunch at noon?\n2       bob   8s ago   new    yes     question  ready?",
+        "text": "About 2 messages for acme.demo.alice, about 1 new, about 1 urgent.\nexact: no (mail read out of order may still be counted as urgent)\n\nNUMBER  FROM           WHEN     STATE  URGENT  KIND      MESSAGE\n1       acme.demo.bob  10s ago  new    no      task      lunch at noon?\n2       acme.demo.bob  8s ago   new    yes     question  ready?",
         "stream": "stdout",
         "exit": 0,
         "issue": "#1399",
@@ -582,7 +582,7 @@
        },
        {
         "case": "Counts without serve running",
-        "text": "About 2 messages for acme.demo.alice, about 2 new, about 1 urgent.\n\nNUMBER  FROM  WHEN     STATE  URGENT  KIND      MESSAGE\n1       bob   10s ago  new    no      task      lunch at noon?\n2       bob   8s ago   new    yes     question  ready?",
+        "text": "About 2 messages for acme.demo.alice, about 2 new, about 1 urgent.\n\nNUMBER  FROM           WHEN     STATE  URGENT  KIND      MESSAGE\n1       acme.demo.bob  10s ago  new    no      task      lunch at noon?\n2       acme.demo.bob  8s ago   new    yes     question  ready?",
         "stream": "stdout",
         "exit": 0,
         "issue": "#958",
@@ -598,7 +598,7 @@
        },
        {
         "case": "Counts without serve running, with --detail",
-        "text": "About 2 messages for acme.demo.alice, about 2 new, about 1 urgent.\nexact: no (mash serve is not running, so unverified mail is counted)\n\nNUMBER  FROM  WHEN     STATE  URGENT  KIND      MESSAGE\n1       bob   10s ago  new    no      task      lunch at noon?\n2       bob   8s ago   new    yes     question  ready?",
+        "text": "About 2 messages for acme.demo.alice, about 2 new, about 1 urgent.\nexact: no (mash serve is not running, so unverified mail is counted)\n\nNUMBER  FROM           WHEN     STATE  URGENT  KIND      MESSAGE\n1       acme.demo.bob  10s ago  new    no      task      lunch at noon?\n2       acme.demo.bob  8s ago   new    yes     question  ready?",
         "stream": "stdout",
         "exit": 0,
         "issue": "#958",
@@ -606,7 +606,7 @@
        },
        {
         "case": "Counts are capped, with --detail",
-        "text": "About 1000 messages for acme.demo.alice, about 90 new, about 4 urgent.\nexact: no (only the oldest 1000 messages were checked)\n\nNUMBER  FROM  WHEN     STATE  URGENT  KIND      MESSAGE\n1       bob   10s ago  new    no      task      lunch at noon?\n2       bob   8s ago   new    yes     question  ready?",
+        "text": "About 1000 messages for acme.demo.alice, about 90 new, about 4 urgent.\nexact: no (only the oldest 1000 messages were checked)\n\nNUMBER  FROM           WHEN     STATE  URGENT  KIND      MESSAGE\n1       acme.demo.bob  10s ago  new    no      task      lunch at noon?\n2       acme.demo.bob  8s ago   new    yes     question  ready?",
         "stream": "stdout",
         "exit": 0,
         "issue": "#955",
@@ -614,7 +614,7 @@
        },
        {
         "case": "Counts are capped and serve is not running, with --detail",
-        "text": "About 1000 messages for acme.demo.alice, about 90 new, about 4 urgent.\nexact: no (only the oldest 1000 messages were checked)\nexact: no (mash serve is not running, so unverified mail is counted)\n\nNUMBER  FROM  WHEN     STATE  URGENT  KIND      MESSAGE\n1       bob   10s ago  new    no      task      lunch at noon?\n2       bob   8s ago   new    yes     question  ready?",
+        "text": "About 1000 messages for acme.demo.alice, about 90 new, about 4 urgent.\nexact: no (only the oldest 1000 messages were checked)\nexact: no (mash serve is not running, so unverified mail is counted)\n\nNUMBER  FROM           WHEN     STATE  URGENT  KIND      MESSAGE\n1       acme.demo.bob  10s ago  new    no      task      lunch at noon?\n2       acme.demo.bob  8s ago   new    yes     question  ready?",
         "stream": "stdout",
         "exit": 0,
         "issue": "#958",
@@ -662,92 +662,7 @@
      },
      {
       "name": "x-notes",
-      "value": "FROM shows only the name when the sender is in your own owner and group. MESSAGE is the sender's words, as untrusted as the full text; it is not quoted because the column already marks it. It shows the first line of the text, cut to fit 80 columns and ending in … when there is more; mash read shows all of it. The JSON carries the same cut text as 'preview'."
-     },
-     {
-      "name": "x-output-next",
-      "value": [
-       {
-        "case": "Messages",
-        "text": "2 messages for acme.demo.alice, 2 new, 1 urgent.\n\nNUMBER  FROM           WHEN     STATE  URGENT  KIND      MESSAGE\n1       acme.demo.bob  10s ago  new    no      task      lunch at noon?\n2       acme.demo.bob  8s ago   new    yes     question  ready?",
-        "stream": "stdout",
-        "exit": 0,
-        "issue": "#1045",
-        "replaces": "Messages",
-        "note": "FROM is always the sender's full address, never the short name: two senders in different groups or owners cannot print alike (mash read and --json already give the full address). Only the FROM column changes; the rest of the case is as today. The x-notes sentence \"FROM shows only the name when the sender is in your own owner and group\" goes.",
-        "verbatim": true
-       },
-       {
-        "case": "A long message, or one of several lines",
-        "text": "NUMBER  FROM           WHEN    STATE  URGENT  KIND    MESSAGE\n3       acme.demo.bob  1m ago  new    no      result  The build passed on all f…",
-        "stream": "stdout",
-        "exit": 0,
-        "issue": "#1045",
-        "replaces": "A long message, or one of several lines",
-        "note": "FROM is always the sender's full address, never the short name: two senders in different groups or owners cannot print alike (mash read and --json already give the full address). Only the FROM column changes; the rest of the case is as today. The message is cut earlier than today (at \"all f…\", not \"all four runn…\") because FROM is wider, to fit 80 columns.",
-        "verbatim": true
-       },
-       {
-        "case": "The oldest has waited longer than the wake age",
-        "text": "3 messages for acme.demo.alice, 3 new, 0 urgent.\nThe oldest has waited 1h 12m.\n\nNUMBER  FROM           WHEN  STATE  URGENT  KIND  MESSAGE\n...",
-        "stream": "stdout",
-        "exit": 0,
-        "issue": "#1045",
-        "replaces": "The oldest has waited longer than the wake age",
-        "note": "FROM is always the sender's full address, never the short name: two senders in different groups or owners cannot print alike (mash read and --json already give the full address). Only the FROM column changes; the rest of the case is as today. ",
-        "verbatim": true
-       },
-       {
-        "case": "Counts include mail read out of order, with --detail",
-        "text": "About 2 messages for acme.demo.alice, about 1 new, about 1 urgent.\nexact: no (mail read out of order may still be counted as urgent)\n\nNUMBER  FROM           WHEN     STATE  URGENT  KIND      MESSAGE\n1       acme.demo.bob  10s ago  new    no      task      lunch at noon?\n2       acme.demo.bob  8s ago   new    yes     question  ready?",
-        "stream": "stdout",
-        "exit": 0,
-        "issue": "#1045",
-        "replaces": "Counts include mail read out of order, with --detail",
-        "note": "FROM is always the sender's full address, never the short name: two senders in different groups or owners cannot print alike (mash read and --json already give the full address). Only the FROM column changes; the rest of the case is as today. ",
-        "verbatim": true
-       },
-       {
-        "case": "Counts without serve running",
-        "text": "About 2 messages for acme.demo.alice, about 2 new, about 1 urgent.\n\nNUMBER  FROM           WHEN     STATE  URGENT  KIND      MESSAGE\n1       acme.demo.bob  10s ago  new    no      task      lunch at noon?\n2       acme.demo.bob  8s ago   new    yes     question  ready?",
-        "stream": "stdout",
-        "exit": 0,
-        "issue": "#1045",
-        "replaces": "Counts without serve running",
-        "note": "FROM is always the sender's full address, never the short name: two senders in different groups or owners cannot print alike (mash read and --json already give the full address). Only the FROM column changes; the rest of the case is as today. ",
-        "verbatim": true
-       },
-       {
-        "case": "Counts without serve running, with --detail",
-        "text": "About 2 messages for acme.demo.alice, about 2 new, about 1 urgent.\nexact: no (mash serve is not running, so unverified mail is counted)\n\nNUMBER  FROM           WHEN     STATE  URGENT  KIND      MESSAGE\n1       acme.demo.bob  10s ago  new    no      task      lunch at noon?\n2       acme.demo.bob  8s ago   new    yes     question  ready?",
-        "stream": "stdout",
-        "exit": 0,
-        "issue": "#1045",
-        "replaces": "Counts without serve running, with --detail",
-        "note": "FROM is always the sender's full address, never the short name: two senders in different groups or owners cannot print alike (mash read and --json already give the full address). Only the FROM column changes; the rest of the case is as today. ",
-        "verbatim": true
-       },
-       {
-        "case": "Counts are capped, with --detail",
-        "text": "About 1000 messages for acme.demo.alice, about 90 new, about 4 urgent.\nexact: no (only the oldest 1000 messages were checked)\n\nNUMBER  FROM           WHEN     STATE  URGENT  KIND      MESSAGE\n1       acme.demo.bob  10s ago  new    no      task      lunch at noon?\n2       acme.demo.bob  8s ago   new    yes     question  ready?",
-        "stream": "stdout",
-        "exit": 0,
-        "issue": "#1045",
-        "replaces": "Counts are capped, with --detail",
-        "note": "FROM is always the sender's full address, never the short name: two senders in different groups or owners cannot print alike (mash read and --json already give the full address). Only the FROM column changes; the rest of the case is as today. ",
-        "verbatim": true
-       },
-       {
-        "case": "Counts are capped and serve is not running, with --detail",
-        "text": "About 1000 messages for acme.demo.alice, about 90 new, about 4 urgent.\nexact: no (only the oldest 1000 messages were checked)\nexact: no (mash serve is not running, so unverified mail is counted)\n\nNUMBER  FROM           WHEN     STATE  URGENT  KIND      MESSAGE\n1       acme.demo.bob  10s ago  new    no      task      lunch at noon?\n2       acme.demo.bob  8s ago   new    yes     question  ready?",
-        "stream": "stdout",
-        "exit": 0,
-        "issue": "#1045",
-        "replaces": "Counts are capped and serve is not running, with --detail",
-        "note": "FROM is always the sender's full address, never the short name: two senders in different groups or owners cannot print alike (mash read and --json already give the full address). Only the FROM column changes; the rest of the case is as today. ",
-        "verbatim": true
-       }
-      ]
+      "value": "FROM is the sender's full address. MESSAGE is the sender's words, as untrusted as the full text; it is not quoted because the column already marks it. It shows the first line of the text, cut to fit 80 columns and ending in … when there is more; mash read shows all of it. The JSON carries the same cut text as 'preview'."
      }
     ]
    },

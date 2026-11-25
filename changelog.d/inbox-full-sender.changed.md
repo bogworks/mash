@@ -1,0 +1,1 @@
+**`mash inbox` prints the sender's full address in the FROM column.** It no longer shortens a sender in your own owner and group to its name, so two senders cannot print alike ([#1045](https://github.com/bogworks/mash/issues/1045)).
