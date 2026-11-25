@@ -50,7 +50,7 @@ To check the script and the attestation yourself, with a current `gh`:
 ```sh
 BASE=https://github.com/bogworks/mash/releases/download/v0.5.8   # use the tag of the release you want, on every line; for another repository (MASH_REPO) change bogworks/mash on every line too
 curl -fsSLO $BASE/install.sh -O $BASE/SHA256SUMS -O $BASE/mash.intoto.jsonl &&
-COMMIT=$(curl -fsSL -H 'Accept: application/vnd.github.sha' https://api.github.com/repos/bogworks/mash/commits/v0.5.8) &&
+COMMIT=$(curl -fsSL -H 'Accept: application/vnd.github.sha' https://api.github.com/repos/bogworks/mash/commits/v0.5.9) &&
 gh attestation verify SHA256SUMS -R bogworks/mash --bundle mash.intoto.jsonl \
   --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/v0.5.8 --source-digest "$COMMIT" &&
 grep ' install.sh$' SHA256SUMS | sha256sum -c - &&           # macOS: shasum -a 256 -c -
@@ -63,7 +63,7 @@ If `gh` is missing or older than 2.102.0, skip the `gh attestation verify` lines
 
 An agent does not pipe a download into a shell: the setup skill downloads each script, checks it against `SHA256SUMS`, shows you what it is about to run and runs it after a yes. Both scripts are also the repository's own `scripts/` files at the release commit, byte for byte; the release check compares them ([ADR 0150](decisions/0150-releases-carry-install-and-local-nats-setup-scripts-as-attested-assets.md)).
 
-To build from source instead, `go install github.com/bogworks/mash/cmd/mash@v0.5.8` and `go install github.com/bogworks/mash/cmd/mashctl@v0.5.8` need Go 1.27.4 or newer; the result is not the attested build. Use the tag of the release you want, not `@latest`.
+To build from source instead, `go install github.com/bogworks/mash/cmd/mash@v0.5.9` and `go install github.com/bogworks/mash/cmd/mashctl@v0.5.9` need Go 1.27.4 or newer; the result is not the attested build. Use the tag of the release you want, not `@latest`.
 
 ## 2. The plugin
 
@@ -218,7 +218,7 @@ The CLI never takes the lease, so it works alongside the running session.
 |---|---|
 | `nats-server` | 2.10.7 or newer (tested on 2.15), only where you run the server |
 | Claude Code | 2.1.312 or newer (older ones are not refused, but are not tested) |
-| `mash`, `mashctl` and the `mash` plugin | the same release (for example 0.5.8) |
+| `mash`, `mashctl` and the `mash` plugin | the same release (for example 0.5.9) |
 | Go, to build from source | 1.27.4 or newer |
 
 ## Uninstall
