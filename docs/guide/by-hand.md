@@ -30,7 +30,7 @@ An example of the output (your versions may differ):
 ```
 install.sh: OK
 Fetching mash and mashctl from the v0.5.9 release: https://github.com/bogworks/mash/releases/download/v0.5.9
-gh not found: the checksums come from the same download, so this trusts github.com's TLS; see docs/install.md to verify the attestation
+warning: gh not found: checked checksums only, not verified
 Installed mash v0.5.9 (<commit>) in ~/.local/bin
 Installed mashctl v0.5.9 (<commit>) in ~/.local/bin
 ~/.local/bin is not on your PATH; add it to use mash
@@ -38,7 +38,7 @@ Installed mashctl v0.5.9 (<commit>) in ~/.local/bin
 
 `<commit>` stands for the release's own commit, which the installer prints.
 
-The `gh not found` line appears only when `gh` (the GitHub command-line tool) is not installed or too old (a similar line says so). It is not an error.
+A `warning: gh ...` line means `gh` (the GitHub command-line tool) could not verify the release: `gh not found`, `gh did not run`, `gh version unreadable` or `gh is below 2.102.0`. The checksums were still checked, so it is not an error; [verify what you download](../install.md#verify-what-you-download) says how to verify the release yourself.
 
 If it says `~/.local/bin` is not on your PATH, add it and open a new terminal window (a script or an `ssh` command does not read `~/.zshrc`, so the line only takes effect in a new interactive terminal):
 
