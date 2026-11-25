@@ -490,3 +490,59 @@ func TestRecordRefusalFailsWhenSequenceUnwritable(t *testing.T) {
 		t.Fatalf("count %d, want 1", got)
 	}
 }
+
+// Seq 4 is refused before seq 3 is redelivered (out of order), and a handover left seq 3 on two lines. The count is
+// exact after the redelivery, and the duplicate line does not keep an overcount (#1310).
+func TestRefusalCountExactOutOfOrderWithDuplicateLine(t *testing.T) {
+	cfg := config.Config{Owner: "acme", Group: "demo", Name: "bob", StateDir: t.TempDir()}
+	e := &Endpoint{cfg: cfg}
+	id := "inbox@now"
+	e.refusedStream.Store(&id)
+	for _, s := range []uint64{1, 2} {
+		if _, added, err := e.recordRefusalNew(s); err != nil || !added {
+			t.Fatalf("refusal %d: added=%v err=%v", s, added, err)
+		}
+	}
+	// The kill: seq 3 recorded (twice, as two handover processes can append it), the count still 2.
+	dir, _ := SpoolDir(cfg)
+	p := filepath.Join(dir, refusedSeqsFile)
+	f, err := os.OpenFile(p, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = f.WriteString("3\n3\n")
+	f.Close()
+	// Seq 4 is refused before seq 3 is redelivered; the repair inside it counts 3 once, then 4.
+	if n, added, err := e.recordRefusalNew(4); err != nil || !added || n != 4 {
+		t.Fatalf("seq 4: n=%d added=%v err=%v", n, added, err)
+	}
+	if n := RefusedCount(cfg); n != 4 {
+		t.Fatalf("count after seq 4 = %d, want 4", n)
+	}
+	// Now seq 3 is redelivered: already counted, nothing more.
+	if n, added, err := e.recordRefusalNew(3); err != nil || added || n != 4 {
+		t.Fatalf("redelivery of 3: n=%d added=%v err=%v", n, added, err)
+	}
+	if err := e.reconcileRefusedCount(id); err != nil {
+		t.Fatal(err)
+	}
+	if n := RefusedCount(cfg); n != 4 {
+		t.Fatalf("count after redelivery = %d, want 4", n)
+	}
+	if _, seqs := readRefusedSeqs(p); len(seqs) != 4 {
+		t.Fatalf("distinct sequences %v, want 4", seqs)
+	}
+	if got := e.refusedStored(1, 4, id); got != 4 {
+		t.Fatalf("stored %d, want 4", got)
+	}
+	// Duplicate line with the count already exact: the repair leaves it alone (no overcount).
+	f, _ = os.OpenFile(p, os.O_APPEND|os.O_WRONLY, 0o600)
+	_, _ = f.WriteString("4\n4\n")
+	f.Close()
+	if err := e.reconcileRefusedCount(id); err != nil {
+		t.Fatal(err)
+	}
+	if n := RefusedCount(cfg); n != 4 {
+		t.Fatalf("count with a duplicate line = %d, want 4", n)
+	}
+}
