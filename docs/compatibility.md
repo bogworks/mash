@@ -21,7 +21,7 @@ The mixed 0.5.8 and 0.5.9 runs below were made on 2026-11-25 in throwaway Linux 
 | Synadia Cloud | Untested on 0.5.9. | Not stated. | Not supported ([#876](https://github.com/bogworks/mash/issues/876)). |
 | SAP protocol | 0.3, the version the source declares and the only one it implements. | 0.3. | Other SAP versions: not expected to work. |
 | Go toolchain (only to build from source) | 1.27.4: the automated checks use it (`go.mod`). | 1.27.4. | Later Go releases. |
-| Linux, amd64 | The automated tests on the release commit. The mixed-version runs of 2026-11-25 were on a Go 1.27 container image. **PENDING:** the nightly run on the candidate. | Not stated. | Any current Linux distribution. |
+| Linux, amd64 | The automated tests on the release commit. The mixed-version runs of 2026-11-25 were on a Go 1.27 container image. The nightly run on the candidate (commit `3fd115b1`, job `test (linux, eph)`, run 45567864348, 2026-11-25) passed. | Not stated. | Any current Linux distribution. |
 | Linux, arm64 | The release binary is built and checked for a reproducible build. Tests are not run on it. Untested. | Not stated. | Works as on amd64. |
 | macOS, amd64 (Intel) | The release binary is built and checked for a reproducible build. Tests are not run on it. Untested. | Not stated. | Works as on arm64. |
 | macOS, arm64 (Apple silicon) | The automated tests on the release commit. **PENDING:** the macOS upgrade runs. | Not stated. | Other current macOS releases. |
