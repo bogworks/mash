@@ -198,8 +198,12 @@ func subjectClass(value string) string {
 	if sub == "" && field(value, "sig") != "" {
 		return ClassIncomplete // mash read a signed header with an empty sub as incomplete
 	}
+	// A control character (a tab and a newline are controls) is unreadable, ahead of the space test (ADR 0173).
+	if strings.IndexFunc(sub, func(r rune) bool { return r <= 0x1f || (r >= 0x7f && r <= 0x9f) }) >= 0 {
+		return ClassUnreadable
+	}
 	if strings.IndexFunc(sub, func(r rune) bool { return unicode.IsSpace(r) || r == 0xFEFF }) >= 0 {
 		return ClassSpaceInSubject
 	}
-	return ClassUnreadable // an empty token or a control character: the SDK refuses it, not one of the ten
+	return ClassUnreadable // an empty token: the SDK refuses it, not one of the ten
 }
