@@ -17,6 +17,7 @@ type CheckRun struct {
 	Name       string `json:"name"`
 	Status     string `json:"status"`
 	Conclusion string `json:"conclusion"`
+	HTMLURL    string `json:"html_url"`
 	App        struct {
 		Slug string `json:"slug"`
 	} `json:"app"`

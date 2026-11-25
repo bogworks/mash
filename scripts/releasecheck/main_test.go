@@ -326,6 +326,30 @@ func TestCheck_passesAndPrintsTheVersionAndCommit(t *testing.T) {
 	}
 }
 
+func TestCheck_printsTheAcceptedRunForEachRequiredCheck(t *testing.T) {
+	f := newFixture(t)
+	var runs []map[string]any
+	for i, n := range release.RequiredChecks {
+		r := ciRun(i+1, n, f.x)
+		r["html_url"] = fmt.Sprintf("https://github.com/bogworks/mash/runs/%d", i+1)
+		runs = append(runs, r)
+	}
+	f.setCIPages(f.x, 100, runs)
+	if err := f.check(); err != nil {
+		t.Fatal(err)
+	}
+	out := f.o.Out.(*bytes.Buffer).String()
+	for i, n := range release.RequiredChecks {
+		want := fmt.Sprintf("      %s: check run %d https://github.com/bogworks/mash/runs/%d on %s\n", n, i+1, i+1, f.x[:12])
+		if !strings.Contains(out, want) {
+			t.Errorf("missing the citation line %q in:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "tested ancestor") {
+		t.Errorf("a direct pass must not mention an ancestor:\n%s", out)
+	}
+}
+
 func TestCheck_refusals(t *testing.T) {
 	cases := map[string]func(f *fixture){
 		"a commit that is not on main of the release repository": func(f *fixture) {
