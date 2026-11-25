@@ -1,0 +1,112 @@
+{
+ "$schema": "https://opencli.org/draft.json",
+ "opencli": "0.1",
+ "info": {
+  "title": "install.sh",
+  "version": "0.5.9-spec.0",
+  "description": "Installs mash and mashctl from one release.",
+  "x-source": "v0.5.8 (8e8fe56)"
+ },
+ "command": {
+  "name": "install.sh",
+  "description": "Finds this machine's type (linux or darwin, amd64 or arm64), downloads mash, mashctl and the release's SHA256SUMS, checks each binary against them, and puts the two binaries in ~/.local/bin. It asks nothing and needs no sudo. If gh is installed (2.102.0 or newer) it first verifies SHA256SUMS against the release's attestation, checked against the commit the release tag points to. It takes no arguments; it is configured by environment variables.",
+  "exitCodes": [
+   {
+    "code": 0,
+    "description": "Installed."
+   },
+   {
+    "code": 1,
+    "description": "Nothing was installed; one line on stderr says why."
+   }
+  ],
+  "metadata": [
+   {
+    "name": "x-env",
+    "value": [
+     {
+      "name": "MASH_INSTALL_DIR",
+      "description": "The folder to install into, an absolute path. Default: ~/.local/bin."
+     },
+     {
+      "name": "MASH_VERSION",
+      "description": "Pin a release, for example v0.5.6. Default: the latest, resolved to its tag first, so the attestation is always checked against that tag."
+     },
+     {
+      "name": "MASH_REPO",
+      "description": "The GitHub repository, as owner/name. Default: bogworks/mash. Used for the download address, the tag lookup and the attestation check."
+     },
+     {
+      "name": "MASH_API_BASE",
+      "description": "Where the tag's commit is looked up when gh cannot. Default: https://api.github.com."
+     },
+     {
+      "name": "MASH_RELEASE_BASE",
+      "description": "Where the release files are (an https:// address, a mirror). Needs MASH_VERSION, which names the tag the attestation is checked against."
+     }
+    ]
+   },
+   {
+    "name": "x-output",
+    "value": [
+     {
+      "case": "Not authenticated: gh not found",
+      "text": "warning: gh not found: checked checksums only, not verified",
+      "stream": "stderr",
+      "exit": 0,
+      "issue": "#1274",
+      "note": "The installer still installs (checksums only); one line on stderr."
+     },
+     {
+      "case": "Not authenticated: gh did not run",
+      "text": "warning: gh did not run: checked checksums only, not verified",
+      "stream": "stderr",
+      "exit": 0,
+      "issue": "#1274",
+      "note": "The installer still installs (checksums only); one line on stderr."
+     },
+     {
+      "case": "Not authenticated: gh's version could not be read",
+      "text": "warning: gh version unreadable: checked checksums only, not verified",
+      "stream": "stderr",
+      "exit": 0,
+      "issue": "#1274",
+      "note": "The installer still installs (checksums only); one line on stderr."
+     },
+     {
+      "case": "Not authenticated: gh is below 2.102.0",
+      "text": "warning: gh is below 2.102.0: checked checksums only, not verified",
+      "stream": "stderr",
+      "exit": 0,
+      "issue": "#1274",
+      "note": "The installer still installs (checksums only); one line on stderr."
+     },
+     {
+      "case": "Verified",
+      "text": "Verified the release attestation for bogworks/mash v0.5.9",
+      "stream": "stdout",
+      "exit": 0,
+      "issue": "#1152",
+      "note": "One line on stdout. The repo (MASH_REPO, default bogworks/mash) and the tag vary with the release installed."
+     },
+     {
+      "case": "A failed verification",
+      "text": "error: the release failed verification; nothing was installed",
+      "stream": "stderr",
+      "exit": 1,
+      "issue": "#1274",
+      "note": "One line on stderr; nothing is installed."
+     },
+     {
+      "case": "The tag's commit cannot be read",
+      "text": "error: could not read the commit of bogworks/mash v0.5.9; nothing was installed\nhint: gh auth login, then run the install again",
+      "stream": "stderr",
+      "exit": 1,
+      "issue": "#1352",
+      "note": "gh is there and 2.102.0 or newer, but neither gh api nor the public GitHub API gave the commit the release tag points to, so the attestation cannot be pinned to it; nothing is installed. The repo and tag vary with the release. The hint line is printed only when gh is not logged in; with gh logged in, only the error line is printed."
+     }
+    ]
+   }
+  ]
+ }
+}

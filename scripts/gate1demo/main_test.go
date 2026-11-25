@@ -184,12 +184,28 @@ func TestDeterministic(t *testing.T) {
 	}
 }
 
+// A planned change to a script is written in x-output-next on its command in install.json, and shows in the demo.
+func TestScriptSpecNext(t *testing.T) {
+	dir := fixture(t, `[]`, "")
+	write(t, dir, "install.json", `{"command":{"name":"install.sh","metadata":[{"name":"x-output","value":[{"case":"Old","text":"old line"}]},
+		{"name":"x-output-next","value":[{"case":"New","text":"new line","stream":"stderr","exit":1,"issue":"#9","replaces":"Old"}]}]}}`)
+	out, err := render(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range []string{"install.sh / New (#9)", "old line", "new line"} {
+		if !strings.Contains(out, w) {
+			t.Errorf("missing %q in\n%s", w, out)
+		}
+	}
+}
+
 func TestRealSpec(t *testing.T) {
 	out, err := render("../../spec")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, w := range []string{"installer-verified [install.sh]"} {
+	for _, w := range []string{"signing-lost-both [mashctl endpoint create / reissue (strict signing)]"} {
 		if !strings.Contains(out, w) {
 			t.Errorf("missing %q in\n%s", w, out)
 		}

@@ -4,86 +4,6 @@
  },
  "items": [
   {
-   "id": "installer-unauth-gh-not-found",
-   "where": "install.sh",
-   "case": "Not authenticated: gh not found",
-   "text": "warning: gh not found: checked checksums only, not verified",
-   "stream": "stderr",
-   "exit": 0,
-   "issue": "#1274",
-   "note": "The installer still installs (checksums only); one line on stderr. Stays in spec/next.json until the spec is closed for 0.5.9: the installer has no x-output home."
-  },
-  {
-   "id": "installer-unauth-gh-did-not-run",
-   "where": "install.sh",
-   "case": "Not authenticated: gh did not run",
-   "text": "warning: gh did not run: checked checksums only, not verified",
-   "stream": "stderr",
-   "exit": 0,
-   "issue": "#1274",
-   "note": "The installer still installs (checksums only); one line on stderr. Stays in spec/next.json until the spec is closed for 0.5.9: the installer has no x-output home."
-  },
-  {
-   "id": "installer-unauth-gh-version-unreadable",
-   "where": "install.sh",
-   "case": "Not authenticated: gh's version could not be read",
-   "text": "warning: gh version unreadable: checked checksums only, not verified",
-   "stream": "stderr",
-   "exit": 0,
-   "issue": "#1274",
-   "note": "The installer still installs (checksums only); one line on stderr. Stays in spec/next.json until the spec is closed for 0.5.9: the installer has no x-output home."
-  },
-  {
-   "id": "installer-unauth-gh-too-old",
-   "where": "install.sh",
-   "case": "Not authenticated: gh is below 2.102.0",
-   "text": "warning: gh is below 2.102.0: checked checksums only, not verified",
-   "stream": "stderr",
-   "exit": 0,
-   "issue": "#1274",
-   "note": "The installer still installs (checksums only); one line on stderr. Stays in spec/next.json until the spec is closed for 0.5.9: the installer has no x-output home."
-  },
-  {
-   "id": "installer-verified",
-   "where": "install.sh",
-   "case": "Verified",
-   "text": "Verified the release attestation for bogworks/mash v0.5.9",
-   "stream": "stdout",
-   "exit": 0,
-   "issue": "#1152",
-   "note": "One line on stdout. The repo (MASH_REPO, default bogworks/mash) and the tag vary with the release installed. Stays in spec/next.json until the spec is closed for 0.5.9: the installer has no x-output home."
-  },
-  {
-   "id": "installer-verify-failed",
-   "where": "install.sh",
-   "case": "A failed verification",
-   "text": "error: the release failed verification; nothing was installed",
-   "stream": "stderr",
-   "exit": 1,
-   "issue": "#1274",
-   "note": "One line on stderr; nothing is installed. Stays in spec/next.json until the spec is closed for 0.5.9: the installer has no x-output home."
-  },
-  {
-   "id": "installer-commit-unread",
-   "where": "install.sh",
-   "case": "The tag's commit cannot be read",
-   "text": "error: could not read the commit of bogworks/mash v0.5.9; nothing was installed\nhint: gh auth login, then run the install again",
-   "stream": "stderr",
-   "exit": 1,
-   "issue": "#1352",
-   "note": "gh is there and 2.102.0 or newer, but neither gh api nor the public GitHub API gave the commit the release tag points to, so the attestation cannot be pinned to it; nothing is installed. The repo and tag vary with the release. The hint line is printed only when gh is not logged in; with gh logged in, only the error line is printed."
-  },
-  {
-   "id": "setup-nats-server-sbin",
-   "where": "setup script",
-   "case": "nats-server found off PATH",
-   "text": "Using /usr/sbin/nats-server (not on your PATH)",
-   "stream": "stdout",
-   "exit": 0,
-   "issue": "#1151",
-   "note": "Printed once, only when nats-server is not on PATH and a root-owned, not group- or other-writable one (not a symbolic link, in a folder whose every ancestor is the same) is in /usr/sbin, /usr/local/sbin or /sbin (in that order); the folder in the line is the one found. No \"nats-server:\" prefix: only \"error:\" and \"warning:\" are prefixes."
-  },
-  {
    "id": "signing-lost-both",
    "where": "mashctl endpoint create / reissue (strict signing)",
    "case": "signing.nk and signing.pub are both missing",
@@ -152,17 +72,6 @@
    "exit": 1,
    "issue": "#1390",
    "note": "From ctl #1390. The signing refusals print in the specification's error rule: `error: <what>` then `hint: <command>`, on stderr, exit 1. <dir> is the key folder as the error carries it (the plain path). The public keys the earlier text printed are not in default output. They are left out of --json too: the error object has only `error` and `hint`, and cliframe has no detail slot for errors. Printed by every mashctl command that signs (endpoint create, reissue, delete) and by init for the first two cases. Its mode, owner or type is refused, or reading it failed."
-  },
-  {
-   "id": "setup-remove-port-held",
-   "where": "mash-local-nats-setup.sh --remove",
-   "case": "The port is held",
-   "text": "error: port 4222 is in use (pid 12); nothing was removed\nhint: mash-local-nats-setup.sh --remove",
-   "stream": "stderr",
-   "exit": 1,
-   "issue": "#1287",
-   "note": "From mash-sdk (lead #833). One wording for one situation. --remove still refuses whenever the port is held, and the error names the holder by pid: \"(pid 12)\" for one, \"(pids 12, 34)\" for several, listed once each and nothing else printed about them; the pid and the port vary. No paths. The hint is the retry: the script has already run --stop before it checks the port, so what holds it is something else (for example a wrapper that runs nats-server); once that is stopped, --remove finishes. With a folder other than the default (~/mash-nats), the hint adds --dir <folder>. v0.5.8 printed a sentence for the hint. The \"removing anyway\" line is dropped: there is no remove-anyway path. The case where no pid is visible is not changed here.",
-   "replaces": "error: something still listens on 127.0.0.1:PORT; nothing was removed"
   }
  ],
  "rules_next": []

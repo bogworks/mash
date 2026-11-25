@@ -1,0 +1,102 @@
+{
+ "$schema": "https://opencli.org/draft.json",
+ "opencli": "0.1",
+ "info": {
+  "title": "mash-local-nats-setup.sh",
+  "version": "0.5.9-spec.0",
+  "description": "Makes, starts, stops or removes a local NATS server for mash.",
+  "x-source": "v0.5.8 (8e8fe56)"
+ },
+ "command": {
+  "name": "mash-local-nats-setup.sh",
+  "description": "Makes a local NATS server for mash (operator mode, TLS, JetStream, 127.0.0.1 only) and starts it, using nats-server (2.10.7 or newer), the nats command and openssl. It does not need nsc and installs nothing. Works on Linux and macOS. Needs ss (Linux) or lsof (macOS) to look at ports. Refuses root.",
+  "options": [
+   {
+    "name": "--dir",
+    "description": "A new folder to use, an absolute path. Default: $HOME/mash-nats.",
+    "arguments": [
+     {
+      "name": "path",
+      "required": true,
+      "arity": {
+       "minimum": 1,
+       "maximum": 1
+      }
+     }
+    ]
+   },
+   {
+    "name": "--owner",
+    "description": "Owner name; asked once on the terminal if not given.",
+    "arguments": [
+     {
+      "name": "name",
+      "required": true,
+      "arity": {
+       "minimum": 1,
+       "maximum": 1
+      }
+     }
+    ]
+   },
+   {
+    "name": "--stop",
+    "description": "Stop the server."
+   },
+   {
+    "name": "--start",
+    "description": "Start an existing server again (after a reboot)."
+   },
+   {
+    "name": "--remove",
+    "description": "Stop the server and delete the folder (you type the path)."
+   },
+   {
+    "name": "--help",
+    "description": "Print the usage text."
+   }
+  ],
+  "exitCodes": [
+   {
+    "code": 0,
+    "description": "It worked."
+   },
+   {
+    "code": 1,
+    "description": "It failed; an error line, and a hint line when there is one, on stderr."
+   },
+   {
+    "code": 2,
+    "description": "The command line was wrong; nothing was attempted."
+   },
+   {
+    "code": 4,
+    "description": "--remove needs a terminal to confirm."
+   }
+  ],
+  "metadata": [
+   {
+    "name": "x-output",
+    "value": [
+     {
+      "case": "nats-server found off PATH",
+      "text": "Using /usr/sbin/nats-server (not on your PATH)",
+      "stream": "stdout",
+      "exit": 0,
+      "issue": "#1151",
+      "note": "Printed once, only when nats-server is not on PATH and a root-owned, not group- or other-writable one (not a symbolic link, in a folder whose every ancestor is the same) is in /usr/sbin, /usr/local/sbin or /sbin (in that order); the folder in the line is the one found. No \"nats-server:\" prefix: only \"error:\" and \"warning:\" are prefixes."
+     },
+     {
+      "case": "The port is held",
+      "text": "error: port 4222 is in use (pid 12); nothing was removed\nhint: mash-local-nats-setup.sh --remove",
+      "stream": "stderr",
+      "exit": 1,
+      "issue": "#1287",
+      "note": "From mash-sdk (lead #833). One wording for one situation. --remove still refuses whenever the port is held, and the error names the holder by pid: \"(pid 12)\" for one, \"(pids 12, 34)\" for several, listed once each and nothing else printed about them; the pid and the port vary. No paths. The hint is the retry: the script has already run --stop before it checks the port, so what holds it is something else (for example a wrapper that runs nats-server); once that is stopped, --remove finishes. With a folder other than the default (~/mash-nats), the hint adds --dir <folder>. v0.5.8 printed a sentence for the hint. The \"removing anyway\" line is dropped: there is no remove-anyway path. The case where no pid is visible is not changed here.",
+      "replaces": "error: something still listens on 127.0.0.1:PORT; nothing was removed"
+     }
+    ]
+   }
+  ]
+ }
+}
