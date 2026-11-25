@@ -3,6 +3,7 @@
 //	adrlint docs [--root r] [--base <git ref>] [dir]   lint every NNNN-title.md in dir (default docs/decisions)
 //	adrlint pr --files <path> [--root r] [--dir dir]   check a pull request's "Decision:" line
 //	adrlint index [--write|--check] [--root r] [--dir dir]   print, write or verify docs/decisions/INDEX.md
+//	adrlint keep-label --base B --before X --after Y --before-checks FILE [--repo dir]   may a push keep decision-confirmed
 //
 // --root (default ".") is the tree being judged: dir resolves under it and, with --base, git runs as "git -C root". The
 // workflow runs a checker built from the base branch with --root pointing at the pull request's checkout, so a pull
@@ -40,6 +41,10 @@
 // index generates INDEX.md in dir from every NNNN-title.md's front matter and first heading (internal/adrindex): a
 // table of number, title, status and date, sorted by number. Without a flag it prints the file; --write writes it;
 // --check exits 1 when the file is missing or differs from what would be generated, naming the first difference.
+//
+// keep-label answers whether a push leaves the pull request's own change unchanged, so that the decision-confirmed label
+// stays on it (ADR 0178, extending ADR 0078): it prints "keep" and exits 0, or "reset: <reason>" and exits 1 (any doubt is
+// a reset). Both label-reset.yml and adr-lint.yml run it, from the base branch, on commits fetched as data.
 //
 // Exit 0: ok. Exit 1: violations. Exit 2: usage or an unreadable input.
 package main
@@ -158,6 +163,8 @@ func run(args []string, e env) int {
 		return runPR(args[1:], e)
 	case "index":
 		return runIndex(args[1:], e)
+	case "keep-label":
+		return runKeepLabel(args[1:], e.stdout, e.stderr, realGitIO)
 	}
 	return usage(e, "unknown mode "+args[0])
 }
@@ -756,7 +763,7 @@ func runPR(args []string, e env) int {
 	files := fs.String("files", "", "file listing the changed paths, one per line")
 	dir := fs.String("dir", defaultDir, "the decisions directory (under --root unless absolute)")
 	root := fs.String("root", ".", "the tree to judge; dir resolves under it")
-	action := fs.String("action", "", "the pull_request event action (default: PR_ACTION); synchronize, reopened and opened ignore the "+confirmedLabel+" label")
+	action := fs.String("action", "", "the pull_request event action (default: PR_ACTION); synchronize, reopened and opened ignore the "+confirmedLabel+" label (a synchronize with PR_KEEP=yes, the verdict of keep-label, does not)")
 	pos, err := parseFlags(fs, args)
 	if err != nil || len(pos) != 0 || *files == "" {
 		return usage(e, "pr takes --files <path> [--root r] [--dir dir] [--action a]")
@@ -782,10 +789,15 @@ func runPR(args []string, e env) int {
 		*action = e.getenv("PR_ACTION")
 	}
 	// The confirmation must come from a "labeled" run on the current head: a push, a reopen and an open each reset the
-	// label (label-reset.yml), possibly after this run read it, and that removal starts no new run.
+	// label (label-reset.yml), possibly after this run read it, and that removal starts no new run. The one exception is
+	// a push that "adrlint keep-label" judged to leave the pull request's own change unchanged (ADR 0178): the workflow
+	// then sets PR_KEEP=yes, and label-reset.yml leaves the label alone on the same verdict. Only exactly "yes", and only
+	// on synchronize; anything else is no exception.
 	switch *action {
 	case "synchronize", "reopened", "opened":
-		labels = slices.DeleteFunc(labels, func(l string) bool { return l == confirmedLabel })
+		if !(*action == "synchronize" && e.getenv("PR_KEEP") == "yes") {
+			labels = slices.DeleteFunc(labels, func(l string) bool { return l == confirmedLabel })
+		}
 	}
 	fsDir, rel := resolveDir(*root, *dir)
 	vs, err := checkPR(e.getenv("PR_BODY"), changed, labels, fsDir, rel)

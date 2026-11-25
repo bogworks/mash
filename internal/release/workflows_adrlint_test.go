@@ -302,3 +302,136 @@ func TestADRLint_concurrencyNeverCancelsTheSameHead(t *testing.T) {
 		t.Errorf("concurrency queue is %q, want max: the default single queue cancels a pending run when another event arrives in the group", w.Concurrency.Queue)
 	}
 }
+
+// Rule A (ADR 0178): label-reset.yml and adr-lint.yml reach one verdict with one checker. Each runs `adrlint keep-label`,
+// built from the BASE commit, on a push only, on commits fetched as data. Only the fetch step holds the token; the build and
+// the verdict run without it, every step but the last of label-reset.yml is gated on synchronize, and a missing verdict is
+// "no" (KEEP and PR_KEEP stay empty). The labels are still read live, never from the event payload.
+func TestRuleA_bothWorkflowsRunTheSameKeepLabelVerdict(t *testing.T) {
+	const onlyPush = "github.event.action == 'synchronize'"
+	for _, c := range []struct{ file, job, checker string }{
+		{"label-reset.yml", "label-reset", "$RUNNER_TEMP/adrlint"},
+		{"adr-lint.yml", "adr-lint", "$RUNNER_TEMP/adrlint"},
+	} {
+		t.Run(c.file, func(t *testing.T) {
+			steps := load(t, c.file).Jobs[c.job].Steps
+			byID := map[string]step{}
+			for _, st := range steps {
+				if st.ID != "" {
+					byID[st.ID] = st
+				}
+			}
+			fetch, ok := byID["fetch-keep"]
+			if !ok {
+				t.Fatal("no step fetch-keep")
+			}
+			keep, ok := byID["keep"]
+			if !ok {
+				t.Fatal("no step keep")
+			}
+			for id, st := range map[string]step{"fetch-keep": fetch, "keep": keep} {
+				if !strings.Contains(st.If, onlyPush) {
+					t.Errorf("step %s must run only on a push (%s): %q", id, onlyPush, st.If)
+				}
+			}
+			for _, want := range []string{"keep-label", "--base \"$BASE\"", "--before \"$BEFORE\"", "--after \"$AFTER\"", "--before-checks", "--repo trusted", c.checker} {
+				if !strings.Contains(keep.Run, want) {
+					t.Errorf("the keep step lacks %q:\n%s", want, keep.Run)
+				}
+			}
+			for env, want := range map[string]string{
+				"BASE": "${{ github.event.pull_request.base.sha }}", "BEFORE": "${{ github.event.before }}",
+				"AFTER": "${{ github.event.pull_request.head.sha }}",
+			} {
+				if keep.Env[env] != want || fetch.Env[env] != want {
+					t.Errorf("%s must come from %s in the fetch and keep steps, got %q and %q", env, want, fetch.Env[env], keep.Env[env])
+				}
+			}
+			// The token is in the fetch step only: the verdict step runs the checker on a pull request's objects without it.
+			if fetch.Env["GH_TOKEN"] == "" {
+				t.Error("the fetch step needs the token (fetch and check runs)")
+			}
+			for _, st := range steps {
+				if st.ID == "keep" || st.ID == "build-keep" {
+					if _, has := st.Env["GH_TOKEN"]; has {
+						t.Errorf("step %q must not hold the token", st.Name)
+					}
+				}
+			}
+			// The old head's check runs are read (the chain), the commits are fetched as data, and nothing swallows an error as a keep.
+			for _, want := range []string{"/check-runs", "fetch -q --no-tags", "keep-label: reset", "fetched=yes"} {
+				if !strings.Contains(fetch.Run, want) {
+					t.Errorf("the fetch step lacks %q:\n%s", want, fetch.Run)
+				}
+			}
+			if !strings.Contains(keep.Run, "keep=no") || !strings.Contains(keep.Run, `echo "keep=$keep" >> "$GITHUB_OUTPUT"`) {
+				t.Errorf("the keep step must default to keep=no and write the verdict to its output:\n%s", keep.Run)
+			}
+			if !strings.Contains(keep.If, "steps.fetch-keep.outputs.fetched == 'yes'") {
+				t.Errorf("the keep step must run only after a successful fetch: %q", keep.If)
+			}
+		})
+	}
+}
+
+// label-reset.yml: lead-approved always resets; decision-confirmed resets unless the verdict was exactly yes; the removal
+// step always runs, so a failed build or fetch above is a reset; the build step is from the base checkout.
+func TestRuleA_labelResetKeepsOnlyDecisionConfirmed(t *testing.T) {
+	steps := load(t, "label-reset.yml").Jobs["label-reset"].Steps
+	var build, rm step
+	var checkouts int
+	for _, st := range steps {
+		switch {
+		case st.ID == "build-keep":
+			build = st
+		case strings.Contains(st.Name, "Remove lead-approved"):
+			rm = st
+		case strings.HasPrefix(st.Uses, "actions/checkout@"):
+			checkouts++
+		}
+	}
+	if checkouts != 1 {
+		t.Errorf("label-reset.yml has %d checkouts, want exactly 1 (the base commit)", checkouts)
+	}
+	if !strings.Contains(build.Run, "cd trusted && go build") || !strings.Contains(build.Run, "./scripts/adrlint") {
+		t.Errorf("the checker must be built from the base checkout (trusted/):\n%s", build.Run)
+	}
+	if !strings.Contains(build.If, "github.event.action == 'synchronize'") {
+		t.Errorf("the build step must run only on a push: %q", build.If)
+	}
+	if !strings.Contains(rm.If, "always()") {
+		t.Errorf("the removal step must always run, so an infrastructure failure resets: %q", rm.If)
+	}
+	if rm.Env["KEEP"] != "${{ steps.keep.outputs.keep }}" {
+		t.Errorf("the removal step must read the verdict from steps.keep.outputs.keep, got %q", rm.Env["KEEP"])
+	}
+	if !strings.Contains(rm.Run, `[ "${KEEP:-no}" = yes ]`) || !strings.Contains(rm.Run, "LABELS=lead-approved") {
+		t.Errorf("only a verdict of exactly yes may narrow the removal, and then only to lead-approved:\n%s", rm.Run)
+	}
+	if !strings.Contains(rm.Env["LABELS"], "lead-approved") || !strings.Contains(rm.Env["LABELS"], "decision-confirmed") {
+		t.Errorf("both labels must be on the removal list by default: %q", rm.Env["LABELS"])
+	}
+	if rm.Env["GH_TOKEN"] == "" {
+		t.Error("the removal step needs the token")
+	}
+}
+
+// adr-lint.yml hands the same verdict to the checker, which counts decision-confirmed on a synchronize run only for
+// exactly yes (scripts/adrlint tests), and still reads the labels from the API, never from the event payload.
+func TestRuleA_adrLintPassesTheVerdictAndReadsLabelsLive(t *testing.T) {
+	var found bool
+	for _, st := range load(t, adrLintWorkflow).Jobs["adr-lint"].Steps {
+		if strings.Contains(st.Run, "adrlint\" pr ") {
+			found = true
+			if st.Env["PR_KEEP"] != "${{ steps.keep.outputs.keep }}" {
+				t.Errorf("the pr step must get PR_KEEP from the keep step, got %q", st.Env["PR_KEEP"])
+			}
+			if !strings.Contains(st.Run, "gh pr view") || strings.Contains(fmt.Sprint(st.Env), "labels") {
+				t.Errorf("the labels must be read live with gh pr view, not from the event:\n%s %v", st.Run, st.Env)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("no step runs adrlint pr")
+	}
+}

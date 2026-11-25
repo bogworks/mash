@@ -189,7 +189,7 @@ func TestDocs_reportsEveryViolation(t *testing.T) {
 }
 
 func TestUsage(t *testing.T) {
-	for _, args := range [][]string{nil, {"bogus"}, {"docs", "a", "b"}, {"docs", "--nope"}, {"pr"}, {"pr", "--files", filepath.Join(t.TempDir(), "absent")}, {"docs", filepath.Join(t.TempDir(), "absent")}} {
+	for _, args := range [][]string{nil, {"bogus"}, {"docs", "a", "b"}, {"docs", "--nope"}, {"pr"}, {"pr", "--files", filepath.Join(t.TempDir(), "absent")}, {"keep-label", "--bogus"}, {"docs", filepath.Join(t.TempDir(), "absent")}} {
 		if code, _, _ := runCLI(t, nil, nil, args...); code != 2 {
 			t.Errorf("%v: exit %d, want 2", args, code)
 		}
@@ -565,6 +565,37 @@ func TestPRConfirmationNeedsALabeledRun(t *testing.T) {
 				args = append(args, "--action", tc.action)
 			}
 			code, out, errs := runCLI(t, nil, envs, args...)
+			if tc.pass && (code != 0 || out != "") {
+				t.Fatalf("want pass, got %d %q %q", code, out, errs)
+			}
+			if !tc.pass && (code != 1 || !strings.Contains(out, "decision-confirmed")) {
+				t.Fatalf("want exit 1 naming the label, got %d %q %q", code, out, errs)
+			}
+		})
+	}
+}
+
+// A push that keep-label judged to leave the change unchanged (PR_KEEP=yes) keeps the label on synchronize only; reopened
+// and opened never do, and a value other than "yes" is no exception.
+func TestPRKeepVerdictCountsOnlyOnSynchronize(t *testing.T) {
+	for _, tc := range []struct {
+		action, keep string
+		pass         bool
+	}{
+		{"synchronize", "yes", true}, {"synchronize", "no", false}, {"synchronize", "", false}, {"synchronize", "YES", false},
+		{"synchronize", "true", false}, {"reopened", "yes", false}, {"opened", "yes", false}, {"labeled", "no", true},
+	} {
+		t.Run(tc.action+"/"+tc.keep, func(t *testing.T) {
+			root := t.TempDir()
+			dir := filepath.Join(root, "docs", "decisions")
+			os.MkdirAll(dir, 0o755)
+			for n, c := range with(good(), "README.md", goodReadme) {
+				os.WriteFile(filepath.Join(dir, n), []byte(c), 0o644)
+			}
+			fl := filepath.Join(t.TempDir(), "files")
+			os.WriteFile(fl, []byte("internal/sap/x.go\n"), 0o644)
+			envs := map[string]string{"PR_BODY": "Decision: none", "PR_LABELS": "decision-confirmed", "PR_ACTION": tc.action, "PR_KEEP": tc.keep}
+			code, out, errs := runCLI(t, nil, envs, "pr", "--files", fl, "--root", root)
 			if tc.pass && (code != 0 || out != "") {
 				t.Fatalf("want pass, got %d %q %q", code, out, errs)
 			}

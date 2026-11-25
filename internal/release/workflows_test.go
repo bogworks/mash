@@ -1551,6 +1551,9 @@ func TestADRLint_confirmationNeedsALabeledRun(t *testing.T) {
 	if st.Env["PR_ACTION"] != "${{ github.event.action }}" {
 		t.Errorf("the event action must reach the checker as PR_ACTION, got %q", st.Env["PR_ACTION"])
 	}
+	if st.Env["PR_KEEP"] != "${{ steps.keep.outputs.keep }}" {
+		t.Errorf("the keep-label verdict must reach the checker as PR_KEEP, got %q", st.Env["PR_KEEP"])
+	}
 	if !strings.Contains(st.Run, "gh pr view") || !strings.Contains(st.Run, "--json labels") || !strings.Contains(st.Run, "PR_LABELS=") {
 		t.Errorf("the labels must be read live with gh pr view --json labels:\n%s", st.Run)
 	}
@@ -1715,8 +1718,9 @@ func TestADRLint_runsTheBaseBranchsCheckerOnThePullRequestsTree(t *testing.T) {
 	if _, ok := on["pull_request_target"]; !ok || len(on) != 1 {
 		t.Errorf("adr-lint must trigger on pull_request_target only, got %v", wf.On)
 	}
-	if len(wf.Permissions) != 1 || wf.Permissions["contents"] != "read" || len(j.Permissions) != 0 {
-		t.Errorf("permissions must be exactly contents: read, got %v / job %v", wf.Permissions, j.Permissions)
+	// checks: read is for rule A, the old head's label-reset check run (ADR 0178); no scope writes anything.
+	if len(wf.Permissions) != 2 || wf.Permissions["contents"] != "read" || wf.Permissions["checks"] != "read" || len(j.Permissions) != 0 {
+		t.Errorf("permissions must be exactly contents: read and checks: read, got %v / job %v", wf.Permissions, j.Permissions)
 	}
 	for _, st := range j.Steps {
 		if st.WorkingDirectory == "pr" || strings.HasPrefix(st.WorkingDirectory, "pr/") {

@@ -5,25 +5,37 @@ name: label-reset
 # open (a pull request can be created with labels) does not count. It running on open also means the label-reset check
 # exists on every head: the queue requires it (fail closed), and a head with no green label-reset check cannot enter.
 #
+# Rule A (ADR 0178, extending ADR 0078): decision-confirmed is the exception. A push that leaves the pull request's OWN change
+# unchanged (a rebase onto a newer main and nothing else) keeps it, because the label vouches for that change and nothing a
+# reviewer read has moved. `adrlint keep-label` decides, on a push (synchronize) only; opened and reopened always reset, and
+# lead-approved always resets. Every doubt is a reset: a checker that did not build, objects that did not fetch, an old head
+# whose own label-reset was not a success (the chain), a different patch, path set or file. adr-lint.yml runs the same
+# verdict, so the label counts there on the same push. `edited` stays out of the types: an edit moves no head, and a base
+# change by retarget never reset the labels in this workflow, as before.
+#
 # The lead's other approval, the `lead-review` commit status (scripts/lead-approve, ADR 0116), needs no reset here: it is
 # set on one head SHA, so a new head has no `lead-review` status and the approval drops by itself. The `lead-approved`
 # strip below stays through the migration week (to 2026-11-21), while the label is still an accepted alternative.
 #
 # Trust: pull_request_target gives a token that can edit labels on a pull request from a fork, and runs THIS file from
-# the base branch. So there is no checkout and nothing from the pull request is built, sourced or run; the only inputs
-# are the pull request number from the event, passed through env, never through the text of the script.
+# the base branch. Nothing from the pull request is checked out, built, sourced or run: the only checkout is the BASE
+# commit (the trusted checker, built here), and the pull request's commits reach it as git objects fetched as data
+# (git diff runs with --no-ext-diff --no-textconv). The inputs are the pull request number and the commit ids from the
+# event, passed through env, never through the text of the script. The token is used in one step only (the fetch); the
+# build and the verdict run without it.
 # It runs on the self-hosted labels like every job (ADR 0079), and no GitHub-hosted runner is used. That is safe because
 # the job runs from the base branch (pull_request_target) and checks out and executes nothing from the pull request. If
 # no runner with those labels is online the job never starts, the label-reset check never appears and the queue condition
 # keeps the pull request out (fail closed).
-# The token holds pull-requests: write (edit labels) and contents: read (read-only; gh pr view may need it) and nothing
-# else. Nothing here swallows an error: a failed API call fails the job.
+# The token holds pull-requests: write (edit labels), contents: read (gh pr view, the fetch) and checks: read (the old
+# head's label-reset check run, for the chain) and nothing else. Nothing here swallows an error: a failed API call fails the job.
 on:
   pull_request_target:
     types: [opened, reopened, synchronize]
 permissions:
   pull-requests: write
   contents: read
+  checks: read
 concurrency:
   group: label-reset-${{ github.event.pull_request.number }}
   cancel-in-progress: false
@@ -33,16 +45,81 @@ jobs:
     runs-on: [self-hosted, rh-gate]
     timeout-minutes: 5
     steps:
+      # Rule A: built from the BASE branch, run on objects fetched as data. A base without keep-label (the pull request that
+      # adds it) fails to build or run, which is a reset. All steps but the last run on a push only; the last always runs.
+      - name: Check out the base branch (the trusted checker)
+        if: ${{ github.event.action == 'synchronize' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: trusted
+          fetch-depth: 0 # full history: keep-label needs merge-base(base, old head)
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        if: ${{ github.event.action == 'synchronize' }}
+        with:
+          go-version-file: trusted/go.mod
+          cache: false
+      - name: Build the checker from the base branch (no token here)
+        id: build-keep
+        if: ${{ github.event.action == 'synchronize' }}
+        run: |
+          set -uo pipefail
+          (cd trusted && go build -o "$RUNNER_TEMP/adrlint" ./scripts/adrlint) 2> "$RUNNER_TEMP/keep.err" && echo "built=yes" >> "$GITHUB_OUTPUT" || echo "keep-label: reset (the checker did not build): $(head -c 300 "$RUNNER_TEMP/keep.err" | tr -c '[:print:]' '?' | sed 's/::/:?/g')"
+      - name: Fetch the commits and the old head's check runs (the only step with the token)
+        id: fetch-keep
+        if: ${{ github.event.action == 'synchronize' && steps.build-keep.outputs.built == 'yes' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -uo pipefail
+          if ! printf '%s' "$BEFORE" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "keep-label: reset (no old head)"
+          elif git -C trusted -c "credential.helper=!f() { echo username=x-access-token; echo \"password=\$GH_TOKEN\"; }; f" \
+                 fetch -q --no-tags "https://github.com/$GH_REPO" "$BASE" "$BEFORE" "$AFTER" 2> "$RUNNER_TEMP/keep.err" \
+               && gh api "repos/$GH_REPO/commits/$BEFORE/check-runs?per_page=100" > "$RUNNER_TEMP/before-checks.json" 2>> "$RUNNER_TEMP/keep.err"; then
+            echo "fetched=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "keep-label: reset (could not fetch the commits or the check runs): $(head -c 300 "$RUNNER_TEMP/keep.err" | tr -c '[:print:]' '?' | sed 's/::/:?/g')"
+          fi
+      - name: Decide whether decision-confirmed survives this push (rule A, no token here)
+        id: keep
+        if: ${{ github.event.action == 'synchronize' && steps.fetch-keep.outputs.fetched == 'yes' }}
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -uo pipefail
+          keep=no
+          if verdict=$("$RUNNER_TEMP/adrlint" keep-label --base "$BASE" --before "$BEFORE" --after "$AFTER" --before-checks "$RUNNER_TEMP/before-checks.json" --repo trusted 2>> "$RUNNER_TEMP/keep.err"); then
+            keep=yes
+          fi
+          echo "keep-label: $verdict"
+          echo "keep=$keep" >> "$GITHUB_OUTPUT"
       - name: Remove lead-approved and decision-confirmed
+        # An infrastructure failure above must reset, never leave a label: KEEP is then empty, which is no.
+        if: ${{ always() }}
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
+          KEEP: ${{ steps.keep.outputs.keep }}
           LABELS: |
             lead-approved
             decision-confirmed
         run: |
           set -euo pipefail
+          # lead-approved always goes; decision-confirmed goes unless rule A kept it (KEEP is exactly yes only on a push
+          # that left the pull request's own change unchanged).
+          if [ "${KEEP:-no}" = yes ]; then
+            LABELS=lead-approved
+            echo "decision-confirmed stays on #$PR: the pull request's own change is unchanged"
+          fi
           # The current labels, not the event payload's snapshot, which can be stale.
           current=$(gh pr view "$PR" --json labels --jq '.labels[].name')
           for label in $LABELS; do
