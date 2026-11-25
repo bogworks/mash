@@ -128,7 +128,7 @@ The numbered steps are what the command does in each state, and the manual path 
    go run ./scripts/changelog assemble --version X.Y.Z --date YYYY-MM-DD   # fragments and Unreleased into CHANGELOG.md
    go run ./scripts/adrlint index --write                                    # docs/decisions/INDEX.md
    ```
-   and set the `version` of both `plugin/.claude-plugin/plugin.json` and `mash-setup/.claude-plugin/plugin.json` to `X.Y.Z`. `assemble --dry-run` prints the section first.
+   and set the `version` of both `plugin/.claude-plugin/plugin.json` and `mash-setup/.claude-plugin/plugin.json` to `X.Y.Z`, and the supported version named in `SECURITY.md` ("currently vX.Y.Z") to the same `X.Y.Z`. `assemble --dry-run` prints the section first.
    **Then replace the two placeholders.** (0.5.6 and earlier: a release's notes and its change-log section are the same text, and it opens
    with prose before any list; from 0.5.7 see "Two documents for a release" below.) ([ADR 0105](decisions/0105-a-releases-notes-are-its-change-log-section-and-open-with-a-summary-and-an-upgrading-section-and-the-release-gate-refuses-one-that-does-not.md)).
    `assemble` writes, directly under the new `## [X.Y.Z] - date` heading, a `### Summary` whose paragraph starts
