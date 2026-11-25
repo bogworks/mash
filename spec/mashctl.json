@@ -1851,6 +1851,19 @@
         ]
        },
        {
+        "name": "x-output-next",
+        "value": [
+         {
+          "case": "Messages, one refused (TO-6)",
+          "text": "3 messages for acme.demo.alice, 2 not delivered, 1 refused as malformed.\n\nNUMBER  FROM  WHEN     TRUST     DELIVERED  KIND  SIZE  REASON\n1       bob   2h ago   verified  yes        task  48 B\n2       bob   10s ago  verified  no         task  61 B\n3       ?     5s ago   refused   no         -     52 B  control character in n…",
+          "stream": "stdout",
+          "exit": 0,
+          "issue": "#1142",
+          "note": "Contract 0.6.0 SDK adoption r8, TO-6, CHG-9. The header counts only the messages refused for a header fault, and says what it counts (planner #3665); a not-verified message keeps today's label and its cursor-based DELIVERED, and is not in the refused count. The endpoint's own count (`mash inbox`, `mash status --detail`) can be higher, because it also refuses mail it could not verify, by its own setting: the reference page for `mashctl endpoint inbox` says so in one line. The refused messages are among the not-delivered ones. TRUST is `refused` where it was `forged` for a message with a header fault; a not-verified message keeps today's trust label. The table cuts the last cell with `…` at 79 columns; --json carries the whole class. In --json, `trust` is `refused` where it was `forged`, `reason` is a string on each entry that has one, a refused entry's class or a not-verified entry's class, and absent on an entry with neither, and the object gains \"refused\": 1 (always present). No existing field becomes null or changes type. Promoted with W."
+         }
+        ]
+       },
+       {
         "name": "x-json",
         "value": {
          "address": "acme.demo.bob",
