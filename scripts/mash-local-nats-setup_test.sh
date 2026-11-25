@@ -271,7 +271,7 @@ fi
 echo "stat OK \$fol -f \$fmt \$1" >>"$SHIMLOG"
 case \$fmt in
 %u) exec $REALSTAT \$fol -c %u "\$1" ;;
-%Lp) exec $REALSTAT \$fol -c %a "\$1" ;;
+%Lp) m=\$($REALSTAT \$fol -c %a "\$1") || exit 1; echo "\${m#\${m%???}}" ;; # BSD: permission bits only, no sticky
 %p) h=\$($REALSTAT \$fol -c %f "\$1") || exit 1; printf '%o\n' "\$((0x\$h))" ;;
 *) echo "stat REJECT format \$fmt" >>"$SHIMLOG"; echo "stat: bad format" >&2; exit 1 ;;
 esac
@@ -949,7 +949,7 @@ case15() { # macOS support: no refusal, the BSD branches (darwin mode), neither 
     check_success "$d" acme
     chk "darwin: the create line says the port" has "$W/out" 'port: 4222'
     chk "darwin: the script asked stat -L -f %u" has "$SHIMLOG" 'stat OK -L -f %u /'
-    chk "darwin: the script asked stat -L -f %Lp" has "$SHIMLOG" 'stat OK -L -f %Lp /'
+    chk "darwin: the script asked stat -L -f %p (full mode, sticky bit included)" has "$SHIMLOG" 'stat OK -L -f %p /'
     chk "darwin: the script asked lsof -iTCP:PORT" hasre "$SHIMLOG" '^lsof OK port=4222 pid= F=1$'
     chk "darwin: the script asked ps for the state (the start loop)" hasre "$SHIMLOG" '^ps OK -p [0-9]+ -o stat=$'
     run --stop --dir "$d"
@@ -1026,6 +1026,18 @@ case17() { # a parent folder others can write to is refused unless sticky
         chk "parent mode $m: the dir is made" [ -d "$par/y$m" ]
         stopdir "$par/y$m"
     done
+    if [ "$SIM" = darwin ]; then # BSD stat -f %Lp has no sticky bit; the script must read %p
+        chmod 1777 "$par"
+        run --owner acme --dir "$par/s1777"
+        chk "darwin: sticky parent 1777 accepted (exit 0)" rc_is 0
+        chk "darwin: sticky parent 1777: the dir is made" [ -d "$par/s1777" ]
+        chk "darwin: the script asked stat -L -f %p" has "$SHIMLOG" 'stat OK -L -f %p '"$par"
+        stopdir "$par/s1777"
+        chmod 777 "$par"
+        run --owner acme --dir "$par/s777"
+        chk "darwin: parent 0777 without sticky still refused (exit 1)" rc_is 1
+        chk "darwin: parent 0777: error says writable by others" hasre "$W/err" '^error: .*writable by others: '"$par"
+    fi
     mkdir -p "$H/gp/q"; chmod 775 "$H/gp"
     run --owner acme --dir "$H/gp/q/z"
     chk "group-writable grandparent under \$HOME: exit 1" rc_is 1
