@@ -37,6 +37,10 @@ AT-011 alone. `release-check publish` takes `--receipts <dir>` and passes it to 
 resumable command is unchanged for a release that has its receipts. The 0.5.x releases that give no `--receipts` are
 gated exactly as before.
 
+The receipt's `SHA256SUMS` is the gate's checksum list of the binaries and the scripts. The eight SBOMs are made only
+when the draft is published, and the gate runs before that, so the gate cannot list them. `install.sh` checks only the
+binary and script lines, so the binding covers everything a user runs.
+
 ### Consequences
 
 * Good, because the switch-on release cannot be tagged on a missing, failed or mismatched proof.
