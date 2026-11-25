@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -65,6 +66,10 @@ func cli(cfg config.Config, args []string, stdin io.Reader, stdout, stderr io.Wr
 func promptFailure(err error) *cliframe.Error {
 	msg := strings.TrimPrefix(err.Error(), "mash: ")
 	e := cliframe.Failf("%s", msg)
+	var xc interface{ ExitCode() int } // an error that carries its own code (a refused plain NATS URL is 2)
+	if errors.As(err, &xc) && xc.ExitCode() == 2 {
+		e.Code = 2
+	}
 	switch {
 	case strings.HasSuffix(msg, " is not online (no SAP registration answered)"):
 		return e.WithHint("mash who")
