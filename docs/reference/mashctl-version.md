@@ -2,7 +2,7 @@ Generated from spec/*.json by go run ./scripts/refgen. Do not edit.
 
 # mashctl version
 
-Print the version.
+Print the version. It can also be run as --version.
 
 Release: 0.5.9. Group: Mesh.
 
@@ -19,6 +19,7 @@ The global options of `mashctl` also apply: see
 
 ```text
 mashctl version
+mashctl --version
 ```
 
 ## Exit codes

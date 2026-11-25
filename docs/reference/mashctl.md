@@ -35,7 +35,7 @@ These options work with every `mashctl` command.
 | [`mashctl status`](mashctl-status.md) | Say in one line whether the server is working, and how many endpoints it has. |
 | [`mashctl doctor`](mashctl-doctor.md) | Check the server, mash's storage on it and every endpoint's records, and say how to fix what is wrong. Changes nothing. |
 | [`mashctl limits`](mashctl-limits.md) | Show or apply the storage limits. |
-| [`mashctl version`](mashctl-version.md) | Print the version. |
+| [`mashctl version`](mashctl-version.md) | Print the version. It can also be run as --version. |
 
 ### Endpoints
 

@@ -1,0 +1,1 @@
+**`mash --version` and `mashctl --version` now print the version, the same as `version`,** where `mash` used to refuse it as an unknown command; and a malformed address is now described as `owner.group.name`, the form the rest of mash uses. [#1374](https://github.com/bogworks/mash/issues/1374)

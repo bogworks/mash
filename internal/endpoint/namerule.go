@@ -43,7 +43,7 @@ func parseRecipient(arg string) (sap.Address, error) {
 		a, err = sap.AddressFromFlat(arg)
 	}
 	if err != nil {
-		return sap.Address{}, fmt.Errorf("mash: %q is not an endpoint address: give the full address owner.group.instance as who shows it (the flat owner_group_instance is accepted too)", arg)
+		return sap.Address{}, fmt.Errorf("mash: %q is not an endpoint address: give the full address owner.group.name as who shows it (the flat owner_group_name is accepted too)", arg)
 	}
 	return a, nil
 }

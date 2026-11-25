@@ -132,7 +132,7 @@ func (r Request) Validate() *Refusal {
 		return refuse(CodeMalformed, "version must be %d", RequestVersion)
 	}
 	if _, err := r.AddressParts(); err != nil {
-		return refuse(CodeMalformed, "address is not owner.group.instance")
+		return refuse(CodeMalformed, "address is not owner.group.name")
 	}
 	if !nkeys.IsValidPublicUserKey(r.PublicKey) {
 		return refuse(CodeBadKey, "public_key is not a NATS user public key")

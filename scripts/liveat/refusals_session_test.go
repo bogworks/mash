@@ -34,7 +34,7 @@ func TestToolNamesIn(t *testing.T) {
 }
 
 func TestNamesBadAddress(t *testing.T) {
-	good := `mash: not ready: MASH_ENDPOINT: sap: address "alice.ghost" has 2 dot-separated parts: want exactly three (owner.group.instance)`
+	good := `mash: not ready: MASH_ENDPOINT: sap: address "alice.ghost" has 2 dot-separated parts: want exactly three (owner.group.name)`
 	if !namesBadAddress(good, "alice.ghost") {
 		t.Error("a reason with the address and the rule must pass")
 	}

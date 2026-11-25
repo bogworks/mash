@@ -1362,9 +1362,10 @@
    },
    {
     "name": "version",
-    "description": "Print the version.",
+    "description": "Print the version. It can also be run as --version.",
     "examples": [
-     "mash version"
+     "mash version",
+     "mash --version"
     ],
     "exitCodes": [
      {

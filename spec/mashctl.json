@@ -1934,9 +1934,10 @@
    },
    {
     "name": "version",
-    "description": "Print the version.",
+    "description": "Print the version. It can also be run as --version.",
     "examples": [
-     "mashctl version"
+     "mashctl version",
+     "mashctl --version"
     ],
     "exitCodes": [
      {

@@ -74,7 +74,7 @@ func (a Address) String() string { return a.Owner + "." + a.Group + "." + a.Inst
 func AddressFromFlat(flat string) (Address, error) {
 	p := strings.Split(flat, "_")
 	if len(p) != 3 {
-		return Address{}, fmt.Errorf("sap: flat %q has %d underscore-separated parts: want exactly three (owner_group_instance)", flat, len(p))
+		return Address{}, fmt.Errorf("sap: flat %q has %d underscore-separated parts: want exactly three (owner_group_name)", flat, len(p))
 	}
 	return NewAddress(p[0], p[1], p[2])
 }
@@ -84,7 +84,7 @@ func AddressFromFlat(flat string) (Address, error) {
 func ParseAddress(s string) (Address, error) {
 	p := strings.Split(s, ".")
 	if len(p) != 3 {
-		return Address{}, fmt.Errorf("sap: address %q has %d dot-separated parts: want exactly three (owner.group.instance)", s, len(p))
+		return Address{}, fmt.Errorf("sap: address %q has %d dot-separated parts: want exactly three (owner.group.name)", s, len(p))
 	}
 	return NewAddress(p[0], p[1], p[2])
 }

@@ -14,12 +14,12 @@ func TestRecipientErrorNamesTheAddressForm(t *testing.T) {
 		if err == nil {
 			t.Fatalf("%q: no error", arg)
 		}
-		for _, want := range []string{`"` + arg + `" is not an endpoint address`, "owner.group.instance", "owner_group_instance"} {
+		for _, want := range []string{`"` + arg + `" is not an endpoint address`, "owner.group.name", "owner_group_name"} {
 			if !strings.Contains(err.Error(), want) {
 				t.Errorf("%q: missing %q in %v", arg, want, err)
 			}
 		}
-		if _, err := parseRecipient(arg); err == nil || !strings.Contains(err.Error(), "owner.group.instance") {
+		if _, err := parseRecipient(arg); err == nil || !strings.Contains(err.Error(), "owner.group.name") {
 			t.Errorf("parseRecipient(%q): %v", arg, err)
 		}
 	}

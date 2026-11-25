@@ -464,7 +464,7 @@ func (id Identity) SignVia(h SenderHeader, origin string, seq uint64) (string, e
 		return "", errors.New("sap: identity has no seed")
 	}
 	if !validViaOrigin(origin) {
-		return "", errors.New("sap: via origin is not an endpoint flat key (owner_group_instance)")
+		return "", errors.New("sap: via origin is not an endpoint flat key (owner_group_name)")
 	}
 	if seq == 0 {
 		return "", errors.New("sap: via sequence is 0")

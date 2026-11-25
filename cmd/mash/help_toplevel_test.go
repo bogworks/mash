@@ -26,7 +26,8 @@ Everyday:
                                                for this endpoint, and say how to
                                                fix what is wrong. Changes
                                                nothing.
-  mash version                                 Print the version.
+  mash version                                 Print the version. It can also be
+                                               run as --version.
 
 Setup:
   mash join <file> [options]                   Install an endpoint's credentials

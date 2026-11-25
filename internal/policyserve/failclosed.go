@@ -97,7 +97,7 @@ const SuspendedReason = ": its inbox is suspended; resume it first"
 func (p Provisioner) MissingInbox(ctx context.Context, address string) (string, error) {
 	id, err := sap.ParseAddress(address)
 	if err != nil {
-		return "", fmt.Errorf("address %.64q is not owner.group.instance: %w", address, err)
+		return "", fmt.Errorf("address %.64q is not owner.group.name: %w", address, err)
 	}
 	if p.Inboxes == nil {
 		return address + " has no inbox stream", nil

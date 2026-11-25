@@ -200,3 +200,15 @@ func TestAddressFromSubjectRefusals(t *testing.T) {
 		}
 	}
 }
+
+// A malformed address names the owner.group.name form (and the flat owner_group_name), never "instance".
+func TestMalformedAddressNamesName(t *testing.T) {
+	_, err := sap.ParseAddress("bad")
+	if err == nil || !strings.Contains(err.Error(), "owner.group.name") || strings.Contains(err.Error(), "instance") {
+		t.Errorf("ParseAddress: %v", err)
+	}
+	_, err = sap.AddressFromFlat("bad")
+	if err == nil || !strings.Contains(err.Error(), "owner_group_name") || strings.Contains(err.Error(), "instance") {
+		t.Errorf("AddressFromFlat: %v", err)
+	}
+}
