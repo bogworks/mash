@@ -390,9 +390,10 @@ func TestServeUnreadablePolicyIsConfigError(t *testing.T) {
 // falls well after serve has returned (#1523).
 const cancelWait = 30 * time.Second
 
-// exitWait bounds serve returning after a cancel. It stays short: a regression that makes serve wait out an open's
-// 20 s timeout must fail, so only the server's connection count gets the long ceiling.
-const exitWait = 5 * time.Second
+// exitWait bounds serve returning after a cancel. It stays under an open's 20 s timeout, so a regression that makes
+// serve wait that timeout out still fails, but it is far above the milliseconds serve takes: 5 s was too tight for a
+// loaded runner, where the cancelled attempt's goroutines starve (#1490).
+const exitWait = 15 * time.Second
 
 // stdin closing at any point of the wait must end serve and leave no connection or lease behind.
 func waitGone(t *testing.T, w *world, base int, name string, kv jetstream.KeyValue, planted bool) {
@@ -476,14 +477,14 @@ func TestServeCancelBeforeAttemptAndParentCancel(t *testing.T) {
 	select {
 	case <-reached:
 	case <-time.After(cancelWait):
-		t.Fatal("no attempt started")
+		t.Fatalf("no attempt started within %v", cancelWait)
 	}
 	cancel()
 	letGo()
 	select {
 	case <-done:
 	case <-time.After(exitWait):
-		t.Fatal("serve did not exit on parent cancel")
+		t.Fatalf("serve did not exit within %v of the parent cancel", exitWait)
 	}
 	waitGone(t, w, base, tAddr("a").Flat(), kv, false)
 }
