@@ -174,7 +174,7 @@
  },
  {
   "rule": "A list is a plain table",
-  "detail": "A header row in capitals, two spaces between columns, no borders. Every cell is printed on every row, so a line stands on its own and can be grepped or cut: a repeated owner or group is not left blank. A sender or an endpoint is always its full address. --wide adds columns. An empty list is one sentence.",
+  "detail": "A header row in capitals, two spaces between columns, no borders. Every cell is printed on every row, so a line stands on its own and can be grepped or cut: a repeated owner or group is not left blank. A sender or an endpoint is always its full address. --wide adds columns, and may show the address in place of NAME where both would not fit in 80 (the address carries the name). An empty list is one sentence.",
   "replaces": "A list is a plain table"
  },
  {
@@ -198,7 +198,7 @@
  },
  {
   "rule": "--help has one layout, generated from this specification",
-  "detail": "For a command, in this order: the one-line description; 'Usage:' and the synopsis; 'Examples:'; 'Arguments:'; 'Options:'; 'Global options:'. Nothing else, 80 columns. For the tool itself: its one-line description, then one sentence that says what SAP, NATS and creds are (here and in no other help), then one heading per group in the specification's order ('Everyday:', 'Setup:', 'Integration:', 'Raw SAP:' for mash; 'Mesh:', 'Endpoints:', 'Owners:' for mashctl) with each command and its one-line description indented beneath, then 'Global options:' in both tools. A command is described once, in the specification, and that one description is used wherever the command is listed. Help is never written by hand beside the specification.",
+  "detail": "For a command, in this order: the one-line description; 'Usage:' and the synopsis; 'Examples:'; 'Arguments:'; 'Options:'; 'Global options:'. Nothing else, 80 columns. For the tool itself: its one-line description, then one sentence that says what SAP, NATS and creds are (here and in no other help), then, for mash, one heading per group in the specification's order ('Everyday:', 'Setup:', 'Integration:', 'Raw SAP:') with each command and its one-line description indented beneath; mashctl's top-level help stays one flat list of its verbs in 0.5.10 (grouping it is not part of this item); then 'Global options:' in both tools, followed only by the configuration text that help already carries. A command is described once, in the specification, and that one description is used wherever the command is listed. Help is never written by hand beside the specification.",
   "replaces": "--help has one layout, generated from this specification"
  }
  ]
