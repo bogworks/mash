@@ -25,7 +25,7 @@ const (
 func installTools(t *testing.T, extra map[string]string) string {
 	t.Helper()
 	bin := t.TempDir()
-	for _, tool := range []string{"bash", "curl", "awk", "sha256sum", "mktemp", "tr", "head", "ls", "dirname", "mkdir", "cp", "chmod", "mv", "rm", "rmdir", "cat", "uname", "id"} {
+	for _, tool := range []string{"bash", "curl", "awk", "sha256sum", "mktemp", "tr", "head", "ls", "dirname", "mkdir", "cp", "chmod", "mv", "rm", "rmdir", "cat", "uname", "id", "env"} {
 		if _, ok := extra[tool]; ok {
 			continue
 		}
@@ -76,13 +76,19 @@ func hostPlatform(t *testing.T) (string, string) {
 // fakeRelease makes a release directory: fake mash and mashctl for the host, a real SHA256SUMS, and a bundle file.
 func fakeRelease(t *testing.T) (dir, mashName, ctlName string) {
 	t.Helper()
+	return fakeReleaseVersions(t, fakeMashVersion, fakeCtlVersion)
+}
+
+// fakeReleaseVersions is fakeRelease with the version line each program prints.
+func fakeReleaseVersions(t *testing.T, mashVersion, ctlVersion string) (dir, mashName, ctlName string) {
+	t.Helper()
 	goos, goarch := hostPlatform(t)
 	dir = t.TempDir()
 	mashName = "mash-" + goos + "-" + goarch
 	ctlName = "mashctl-" + goos + "-" + goarch
 	files := map[string]string{
-		mashName: "#!/bin/sh\n[ \"$1\" = version ] && echo '" + fakeMashVersion + "'\nexit 0\n",
-		ctlName:  "#!/bin/sh\n[ \"$1\" = version ] && echo '" + fakeCtlVersion + "'\nexit 0\n",
+		mashName: "#!/bin/sh\n[ \"$1\" = version ] && echo '" + mashVersion + "'\nexit 0\n",
+		ctlName:  "#!/bin/sh\n[ \"$1\" = version ] && echo '" + ctlVersion + "'\nexit 0\n",
 	}
 	var sums strings.Builder
 	for _, n := range []string{mashName, ctlName} {
@@ -468,6 +474,49 @@ func TestInstallSh_groupWritableLocalNamesTheFix(t *testing.T) {
 			t.Errorf("%s not installed: %v", n, err)
 		}
 	}
+}
+
+// Every writable folder on the walk is named in one refusal with one fix command; a single folder keeps the one-folder text.
+func TestInstallSh_oneRefusalNamesEveryWritableFolder(t *testing.T) {
+	rel, _, _ := fakeRelease(t)
+	tools := installTools(t, nil)
+	home := tempHome(t)
+	local := filepath.Join(home, ".local")
+	dest := filepath.Join(local, "bin")
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range []string{local, dest} {
+		if err := os.Chmod(d, 0o775); err != nil {
+			t.Fatal(err)
+		}
+	}
+	realLocal, err := filepath.EvalSymlinks(local)
+	if err != nil {
+		t.Fatal(err)
+	}
+	realDest := filepath.Join(realLocal, "bin")
+
+	r := runInstallIn(t, rel, tools, home, dest, "install.sh")
+	want := realDest + " is writable by its group or other users (so is " + realLocal + "): not installing there. " +
+		"Fix: chmod go-w '" + realDest + "' '" + realLocal + "', then run the installer again"
+	if r.err == nil || !strings.Contains(r.out, want) {
+		t.Fatalf("want %q, got err=%v\n%s", want, r.err, r.out)
+	}
+	if n := strings.Count(r.out, "chmod go-w"); n != 1 {
+		t.Errorf("want exactly one chmod go-w command, got %d\n%s", n, r.out)
+	}
+	assertNothingInstalled(t, dest)
+
+	if err := os.Chmod(dest, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	r = runInstallIn(t, rel, tools, home, dest, "install.sh")
+	want = realLocal + " is writable by its group or other users: not installing there. Fix: chmod go-w '" + realLocal + "', then run the installer again"
+	if r.err == nil || !strings.Contains(r.out, want) || strings.Contains(r.out, "(so is") {
+		t.Fatalf("want %q, got err=%v\n%s", want, r.err, r.out)
+	}
+	assertNothingInstalled(t, dest)
 }
 
 func TestInstallSh_aTruncatedScriptInstallsNothing(t *testing.T) {
@@ -1029,5 +1078,235 @@ func TestInstallSh_noGhMeansNoCommitLookup(t *testing.T) {
 	r := runInstall(t, rel, installTools(t, nil), "MASH_API_BASE=file:///nonexistent")
 	if r.err != nil || strings.Contains(r.out, "commit") {
 		t.Errorf("want a plain checksums-only install, got err=%v\n%s", r.err, r.out)
+	}
+}
+
+// A hard kill between the two renames leaves mash and mashctl at different versions. A rerun installs the requested pair over both.
+func TestInstallSh_aSplitPairIsRepairedOnRerun(t *testing.T) {
+	rel, _, _ := fakeRelease(t)
+	home := tempHome(t)
+	dest := filepath.Join(home, "bin")
+	if err := os.Mkdir(dest, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for n, v := range map[string]string{"mash": "mash v0.5.5 (aaaaaaa)", "mashctl": "mashctl 0.5.6"} {
+		if err := os.WriteFile(filepath.Join(dest, n), []byte("#!/bin/sh\necho '"+v+"'\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := runInstallIn(t, rel, installTools(t, nil), home, dest, "install.sh")
+	if r.err != nil {
+		t.Fatalf("rerun failed: %v\n%s", r.err, r.out)
+	}
+	// The old programs are never run, so a version difference in the old pair is not noted, only repaired.
+	if strings.Contains(r.out, "differ") || strings.Contains(r.out, "only one") {
+		t.Errorf("a note for an old pair at two versions:\n%s", r.out)
+	}
+	for _, want := range []string{"Installed " + fakeMashVersion + " in ~/bin", "Installed " + fakeCtlVersion + " in ~/bin"} {
+		if !strings.Contains(r.out, want+"\n") {
+			t.Errorf("output lacks %q:\n%s", want, r.out)
+		}
+	}
+	// One program missing is a split too.
+	if err := os.Remove(filepath.Join(dest, "mashctl")); err != nil {
+		t.Fatal(err)
+	}
+	r = runInstallIn(t, rel, installTools(t, nil), home, dest, "install.sh")
+	if r.err != nil || !strings.Contains(r.out, "only one of mash and mashctl is in ") || !strings.Contains(r.out, ": installing v0.5.6 of both\n") {
+		t.Fatalf("missing-program rerun: err=%v\n%s", r.err, r.out)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "mashctl")); err != nil {
+		t.Errorf("mashctl not repaired: %v", err)
+	}
+	// A pair at one version says nothing.
+	r = runInstallIn(t, rel, installTools(t, nil), home, dest, "install.sh")
+	if r.err != nil || strings.Contains(r.out, "differ") || strings.Contains(r.out, "only one") {
+		t.Errorf("a whole pair was called split: err=%v\n%s", r.err, r.out)
+	}
+}
+
+// A release whose two programs report different versions is refused before either rename: the previous install
+// is left byte for byte as it was.
+func TestInstallSh_refusesAPairAtDifferentVersions(t *testing.T) {
+	rel, _, _ := fakeReleaseVersions(t, fakeMashVersion, "mashctl 0.5.7")
+	refuseStagedPair(t, rel, "error: the downloaded mashctl reports 0.5.7, expected 0.5.6: nothing was installed\n")
+}
+
+// Two programs that agree with each other but not with the requested tag are refused too.
+func TestInstallSh_refusesAPairAtTheWrongVersion(t *testing.T) {
+	rel, _, _ := fakeReleaseVersions(t, "mash v0.5.7 (3f9a41c)", "mashctl 0.5.7")
+	refuseStagedPair(t, rel, "error: the downloaded mash reports 0.5.7, expected 0.5.6: nothing was installed\n")
+}
+
+// Swapped assets (the mash asset reports mashctl and the reverse) install nothing, whatever version they report.
+func TestInstallSh_refusesSwappedAssets(t *testing.T) {
+	rel, _, _ := fakeReleaseVersions(t, "mashctl v0.5.6 (3f9a41c)", "mash v0.5.6 (3f9a41c)")
+	refuseStagedPair(t, rel, "error: the downloaded mash reports itself as mashctl, expected mash: nothing was installed\n")
+}
+
+// A program that exits non-zero is refused even when it prints the right version.
+func TestInstallSh_refusesAProgramThatExitsNonZero(t *testing.T) {
+	for _, which := range []string{"mash", "mashctl"} {
+		t.Run(which, func(t *testing.T) {
+			rel, mashName, ctlName := fakeRelease(t)
+			name, line := mashName, fakeMashVersion
+			if which == "mashctl" {
+				name, line = ctlName, fakeCtlVersion
+			}
+			body := "#!/bin/sh\n[ \"$1\" = version ] && echo '" + line + "'\nexit 3\n"
+			writeFile(t, filepath.Join(rel, name), body)
+			sum := sha256.Sum256([]byte(body))
+			sums, err := os.ReadFile(filepath.Join(rel, "SHA256SUMS"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var out []string
+			for _, l := range strings.Split(strings.TrimSpace(string(sums)), "\n") {
+				if strings.HasSuffix(l, "  "+name) {
+					l = hex.EncodeToString(sum[:]) + "  " + name
+				}
+				out = append(out, l)
+			}
+			writeFile(t, filepath.Join(rel, "SHA256SUMS"), strings.Join(out, "\n")+"\n")
+			refuseStagedPair(t, rel, "error: the downloaded "+which+" did not report its version: nothing was installed\n")
+		})
+	}
+}
+
+// The staged version checks run in an isolated environment: a user's 0.5.5 configuration, in HOME or named by
+// MASH_CONFIG_DIR, must not make the new programs refuse to report their version.
+func TestInstallSh_stagedVersionChecksIgnoreTheUsersConfiguration(t *testing.T) {
+	rel, mashName, ctlName := fakeRelease(t)
+	var sums strings.Builder
+	for _, n := range []string{mashName, ctlName} {
+		line := fakeMashVersion
+		if n == ctlName {
+			line = fakeCtlVersion
+		}
+		// Only the staged copies (dot-named, as install.sh stages them) refuse; the post-install "Installed" lines
+		// still run with the user's configuration and are out of scope here.
+		body := "#!/bin/sh\ncase \"${0##*/}\" in .*) ;; *) [ \"$1\" = version ] && echo '" + line + "'; exit 0 ;; esac\nif [ -e \"$HOME/.config/mash/config.json\" ] || [ -n \"${MASH_CONFIG_DIR:-}\" ]; then\n" +
+			"  echo 'refusing 0.5.5 config' >&2\n  exit 1\nfi\n[ \"$1\" = version ] && echo '" + line + "'\nexit 0\n"
+		writeFile(t, filepath.Join(rel, n), body)
+		h := sha256.Sum256([]byte(body))
+		fmt.Fprintf(&sums, "%s  %s\n", hex.EncodeToString(h[:]), n)
+	}
+	writeFile(t, filepath.Join(rel, "SHA256SUMS"), sums.String())
+	home := tempHome(t)
+	cfg := filepath.Join(home, ".config", "mash")
+	if err := os.MkdirAll(cfg, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(cfg, "config.json"), "{}\n")
+	dest := filepath.Join(home, "bin")
+	r := runInstallIn(t, rel, installTools(t, nil), home, dest, "install.sh", "MASH_CONFIG_DIR="+cfg)
+	if r.err != nil {
+		t.Fatalf("install failed with a 0.5.5 configuration present: %v\n%s", r.err, r.out)
+	}
+	for _, n := range []string{"mash", "mashctl"} {
+		if _, err := os.Stat(filepath.Join(dest, n)); err != nil {
+			t.Errorf("%s not installed: %v", n, err)
+		}
+	}
+}
+
+// refuseStagedPair installs rel over an old 0.5.4 pair, wants the refusal line, and checks the old pair is intact.
+func refuseStagedPair(t *testing.T, rel, refusal string) {
+	t.Helper()
+	home := tempHome(t)
+	dest := filepath.Join(home, "bin")
+	if err := os.Mkdir(dest, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old := map[string]string{"mash": "#!/bin/sh\necho 'mash v0.5.4 (aaaaaaa)'\n", "mashctl": "#!/bin/sh\necho 'mashctl 0.5.4'\n"}
+	for n, body := range old {
+		if err := os.WriteFile(filepath.Join(dest, n), []byte(body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := runInstallIn(t, rel, installTools(t, nil), home, dest, "install.sh")
+	if r.err == nil {
+		t.Fatalf("want a refusal:\n%s", r.out)
+	}
+	if !strings.Contains(r.out, refusal) {
+		t.Errorf("refusal does not name both versions:\n%s", r.out)
+	}
+	if strings.Contains(r.out, "Installed ") {
+		t.Errorf("success was reported:\n%s", r.out)
+	}
+	for n, body := range old {
+		got, err := os.ReadFile(filepath.Join(dest, n))
+		if err != nil || string(got) != body {
+			t.Errorf("%s changed by a refused install: err=%v got %q", n, err, got)
+		}
+	}
+	ents, _ := os.ReadDir(dest)
+	if len(ents) != 2 {
+		t.Errorf("staged files left in the folder: %v", ents)
+	}
+}
+
+// A real mash 0.5.5 configuration folder holds the keys url and tls_ca. The current mash and mashctl refuse every
+// command, version included, when they find them (ADR 0170). The installer's version checks, before the renames and
+// in the final report, must not see the user's configuration, so the install completes and says what it installed.
+func TestInstallSh_a055ConfigurationDoesNotStopTheInstallOrItsReport(t *testing.T) {
+	const cfg = `{"url":"nats://nats.example.com:4222","owner":"alice","name":"alice-laptop","tls_ca":"/home/alice/ca.pem"}` + "\n"
+	refuser := func(line string) string {
+		return "#!/bin/sh\n" +
+			"if [ \"$1\" = version ]; then\n" +
+			"  for f in \"$HOME/.config/mash/config.json\" \"$XDG_CONFIG_HOME/mash/config.json\"; do\n" +
+			"    [ -f \"$f\" ] || continue\n" +
+			"    case \"$(cat \"$f\")\" in *'\"url\"'*|*'\"tls_ca\"'*) echo 'error: a mash 0.5.5 configuration' >&2; exit 1;; esac\n" +
+			"  done\n" +
+			"  echo '" + line + "'\n" +
+			"fi\nexit 0\n"
+	}
+	for _, viaXDG := range []bool{false, true} {
+		name := "HOME"
+		if viaXDG {
+			name = "XDG_CONFIG_HOME"
+		}
+		t.Run(name, func(t *testing.T) {
+			goos, goarch := hostPlatform(t)
+			rel := t.TempDir()
+			var sums strings.Builder
+			for n, line := range map[string]string{"mash-" + goos + "-" + goarch: fakeMashVersion, "mashctl-" + goos + "-" + goarch: fakeCtlVersion} {
+				body := refuser(line)
+				writeFile(t, filepath.Join(rel, n), body)
+				h := sha256.Sum256([]byte(body))
+				fmt.Fprintf(&sums, "%s  %s\n", hex.EncodeToString(h[:]), n)
+			}
+			writeFile(t, filepath.Join(rel, "SHA256SUMS"), sums.String())
+			writeFile(t, filepath.Join(rel, "mash.intoto.jsonl"), "{}\n")
+
+			home := tempHome(t)
+			cfgDir := filepath.Join(home, ".config", "mash")
+			if err := os.MkdirAll(cfgDir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			writeFile(t, filepath.Join(cfgDir, "config.json"), cfg)
+			var env []string
+			if viaXDG {
+				env = append(env, "XDG_CONFIG_HOME="+filepath.Join(home, ".config"))
+			}
+			r := runInstallIn(t, rel, installTools(t, nil), home, filepath.Join(home, "bin"), "install.sh", env...)
+			if r.err != nil {
+				t.Fatalf("install failed: %v\n%s", r.err, r.out)
+			}
+			for _, want := range []string{"Installed " + fakeMashVersion + " in ~/bin\n", "Installed " + fakeCtlVersion + " in ~/bin\n"} {
+				if !strings.Contains(r.out, want) {
+					t.Errorf("output lacks %q:\n%s", want, r.out)
+				}
+			}
+			// the fake does refuse with that configuration when run as the user
+			c := exec.Command(filepath.Join(r.dest, "mash"), "version")
+			c.Env = []string{"PATH=" + installTools(t, nil), "HOME=" + home}
+			if viaXDG {
+				c.Env = append(c.Env, "XDG_CONFIG_HOME="+filepath.Join(home, ".config"))
+			}
+			if err := c.Run(); err == nil {
+				t.Error("the fake mash did not refuse under the 0.5.5 configuration; the test proves nothing")
+			}
+		})
 	}
 }

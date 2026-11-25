@@ -34,6 +34,7 @@ WORKDIR=""
 BASE=""
 STAGED=()  # temporary files made in the install folder
 FETCHED=() # files downloaded into WORKDIR
+VHOME=""   # the empty home the staged version checks run in, inside WORKDIR
 
 cleanup() {
     local f
@@ -44,6 +45,7 @@ cleanup() {
         for f in "${FETCHED[@]+"${FETCHED[@]}"}"; do
             rm -f -- "$f"
         done
+        [ -n "$VHOME" ] && rm -rf -- "$VHOME"
         rmdir -- "$WORKDIR" 2>/dev/null || true
     fi
 }
@@ -51,6 +53,42 @@ cleanup() {
 die() {
     echo "error: $*" >&2
     exit 1
+}
+
+# version_of PROGRAM NAME: the version PROGRAM reports, without its name or a leading v
+# ("mash v0.5.6 (3f9a41c)" and "mashctl 0.5.6" both give 0.5.6); empty if it does not run,
+# exits non-zero, or reports a first word other than NAME. PROGRAM runs in an isolated environment (an empty temporary home, no MASH_*
+# variables, PATH only), so the user's own configuration cannot make it refuse to report.
+version_of() {
+    local out
+    out=$(version_line "$1") || return 0
+    printf '%s\n' "$out" | awk -v want="$2" 'NR == 1 && $1 == want { sub(/^v/, "", $2); print $2 }'
+}
+
+# check_staged PROGRAM NAME: die unless the staged PROGRAM reports itself as NAME and the requested version.
+check_staged() {
+    local ver line other
+    ver=$(version_of "$1" "$2")
+    if [ -z "$ver" ]; then
+        line=$(version_line "$1")
+        other=$(printf '%s\n' "$line" | awk '{print $1}' | tr -cd '[:print:]')
+        other=${other:0:40}
+        if [ -n "$other" ] && [ "$other" != "$2" ]; then
+            die "the downloaded $2 reports itself as $other, expected $2: nothing was installed"
+        fi
+        die "the downloaded $2 did not report its version: nothing was installed"
+    fi
+    [ "$ver" = "${tag#v}" ] || die "the downloaded $2 reports $ver, expected ${tag#v}: nothing was installed"
+}
+
+# version_line PROGRAM: the first line PROGRAM's `version` prints, run as version_of runs it
+# (isolated); empty if it does not run or exits non-zero.
+version_line() {
+    local out
+    mkdir -p -- "$VHOME" || return 0 # VHOME is set in main: an assignment here would die with the command substitution
+    out=$(env -i HOME="$VHOME" PATH="$PATH" XDG_CONFIG_HOME="$VHOME/config" \
+        XDG_STATE_HOME="$VHOME/state" XDG_DATA_HOME="$VHOME/data" "$1" version 2>/dev/null) || return 0
+    printf '%s\n' "$out" | head -n 1
 }
 
 # sha256_of FILE: the hex SHA-256 of FILE, with sha256sum or shasum.
@@ -81,13 +119,18 @@ tilde() {
 }
 
 # unsafe_path DIR: DIR is a real path (no symlinks). Say, as the whole error
-# line, why it may not be installed into, or print nothing: DIR owned by someone other than this user
-# or root, or DIR or any folder above it writable by group or others (except a
-# sticky folder owned by root above DIR, such as /tmp). A writable folder's
-# reason names the fix, chmod go-w.
+# line, why it may not be installed into, or print nothing. DIR owned by
+# someone other than this user or root is refused first and alone. Otherwise
+# every folder on the walk up from DIR that is writable by group or others
+# (except a sticky folder owned by root above DIR, such as /tmp) is collected,
+# nearest first, and ONE line names them all with one fix: chmod go-w with each
+# folder in single quotes. With one folder the line reads "<dir> is writable by
+# its group or other users: not installing there. Fix: ..."; with several it
+# adds "(so is <second>, <third>)" after the first folder's name.
 unsafe_path() {
-    local target=$1 c perms owner me sq q
+    local target=$1 c perms owner me sq q first="" others="" fix="" n=0
     me=$(id -u)
+    sq="'\\''"
     c=$target
     while :; do
         # shellcheck disable=SC2012 # ls -ld is the portable way to read a mode
@@ -101,16 +144,28 @@ unsafe_path() {
         case "${perms:5:1}${perms:8:1}" in
         *w*)
             if [ "$c" = "$target" ] || [ "${perms:9:1}" != t ] || [ "$owner" != 0 ]; then
-                sq="'\\''"
                 q=${c//\'/$sq}
-                echo "$c is writable by its group or other users: not installing there. Fix: chmod go-w '$q', then run the installer again"
-                return
+                fix="$fix '$q'"
+                if [ "$n" = 0 ]; then
+                    first=$c
+                elif [ "$n" = 1 ]; then
+                    others=$c
+                else
+                    others="$others, $c"
+                fi
+                n=$((n + 1))
             fi
             ;;
         esac
-        [ "$c" = / ] && return
+        [ "$c" = / ] && break
         c=$(dirname -- "$c")
     done
+    [ "$n" = 0 ] && return
+    if [ "$n" = 1 ]; then
+        echo "$first is writable by its group or other users: not installing there. Fix: chmod go-w$fix, then run the installer again"
+    else
+        echo "$first is writable by its group or other users (so is $others): not installing there. Fix: chmod go-w$fix, then run the installer again"
+    fi
 }
 
 main() {
@@ -186,6 +241,7 @@ main() {
     # A private place to download to, removed on exit.
     WORKDIR=$(mktemp -d "${TMPDIR:-/tmp}/mash-install.XXXXXX") || die "could not make a temporary folder"
     chmod 0700 "$WORKDIR"
+    VHOME="$WORKDIR/home"
     trap cleanup EXIT
 
     sumsname=SHA256SUMS
@@ -247,6 +303,15 @@ main() {
         [ "$got" = "$want" ] || die "$name does not match SHA256SUMS: nothing was installed"
     done
 
+    # A split pair left by a hard kill between the two renames (one program
+    # missing) is not "installed": the install below replaces both, which
+    # repairs it. The old programs are never run.
+    if [ -f "$real/mash" ] || [ -f "$real/mashctl" ]; then
+        if [ ! -f "$real/mash" ] || [ ! -f "$real/mashctl" ]; then
+            echo "only one of mash and mashctl is in $real: installing $tag of both"
+        fi
+    fi
+
     # Stage both binaries (and a copy of what they replace) in the folder, then
     # rename them back to back; if the second rename fails the first is undone.
     staged_new=()
@@ -257,6 +322,13 @@ main() {
         chmod 0755 "$tmp"
         staged_new+=("$tmp")
     done
+
+    # The two new programs, still staged and already checked against SHA256SUMS,
+    # must each report the requested release's version; if not, refuse before
+    # either rename.
+    check_staged "${staged_new[0]}" mash
+    check_staged "${staged_new[1]}" mashctl
+
     local backup=""
     if [ -f "$real/mash" ]; then
         backup=$(mktemp "$real/.mash-old.XXXXXX") || die "could not write in $real"
@@ -281,7 +353,7 @@ main() {
 
     shown=$(tilde "$dir")
     for name in mash mashctl; do
-        line=$("$real/$name" version 2>/dev/null | head -n 1) || true
+        line=$(version_line "$real/$name")
         [ -n "$line" ] || die "the installed $name did not report its version"
         echo "Installed $line in $shown"
     done
