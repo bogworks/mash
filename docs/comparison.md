@@ -190,7 +190,7 @@ In v0.5.6 the NATS server enforces one fixed rule, not a per-sender policy:
   `mashctl doctor` reports a connected key mash did not issue.
 
 What this does not do: it does not encrypt mail, it has no per-sender allow or deny list, and whoever holds the account's
-keys can still mint credentials (see "What you run" in section 2). Policy, who may send to whom, is planned for 0.6.0 and
+keys can still mint credentials (see "What you run" in section 2). Policy, who may send to whom, is planned, with no release named (see the [roadmap](../ROADMAP.md)), and
 is not in v0.5.6.
 
 ## 3. Choose mash when, choose something else when

@@ -151,7 +151,7 @@ mash is a SAP agent per session, with one departure: an endpoint is addressed `o
 - **Unique endpoints.** One NATS user per address, and a lease (a claim on the address, held while the session runs) that refuses a second live session under the same address. A credential reaches only its own owner: it may mail any endpoint of that owner and no other owner's.
 - **Live prompts too.** Because each session is a SAP agent, you can `mash prompt` it (or use any SAP client) and get a streamed answer.
 
-Messaging policy is not in this release; see [what is coming in 0.6.0](docs/reference/coming-in-0-6-0.md).
+Messaging policy is not in this release; it is planned, with no release named (see the [roadmap](ROADMAP.md)).
 
 ## How it works
 
