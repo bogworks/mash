@@ -203,20 +203,9 @@ func readBack(ctx context.Context, r Resolver, acct string, trust Trust, need in
 // complete set is compared: the highest iat wins (see chooseBase, which refuses a copy that does not verify and two
 // different copies with the same iat). An account no server has a JWT for is an error.
 func CurrentAccountClaims(ctx context.Context, r Resolver, acct string, trust Trust, servers int) (*jwt.AccountClaims, error) {
-	set, err := r.Servers(ctx)
+	toks, need, err := completeLookup(ctx, r, acct, servers)
 	if err != nil {
-		return nil, fmt.Errorf("server set: %w", err)
-	}
-	if !set.Complete(servers) {
-		return nil, fmt.Errorf("the server set is not complete (%s): the account JWT must be read from every expected server, so list every server under `servers` in the setup file and run mashctl init --config (a named cluster needs it)", set.Why(servers))
-	}
-	need := serverExpect(set, servers)
-	toks, err := r.LookupAll(ctx, acct, need)
-	if err != nil {
-		return nil, fmt.Errorf("account JWT lookup: %w", err)
-	}
-	if len(toks) < need {
-		return nil, fmt.Errorf("only %d of %d servers answered the account JWT lookup: a silent server may hold a newer JWT", len(toks), need)
+		return nil, err
 	}
 	b, err := chooseBase(toks, acct, trust, need)
 	if err != nil {
@@ -226,4 +215,55 @@ func CurrentAccountClaims(ctx context.Context, r Resolver, acct string, trust Tr
 		return nil, fmt.Errorf("no server holds a JWT for account %s", acct)
 	}
 	return b.claims, nil
+}
+
+// AccountClaimsCopies is every distinct account JWT the servers hold, each verified against trust, newest first, for a
+// reader that must hold every copy to a rule (the doctor's signing key check: an older copy that lacks the key is
+// still one a server may act on). It shares CurrentAccountClaims's completeness and all-servers-answered checks, and
+// refuses a copy that does not verify. A server that holds no JWT adds no copy. An account no server has a JWT for is
+// an error.
+func AccountClaimsCopies(ctx context.Context, r Resolver, acct string, trust Trust, servers int) ([]*jwt.AccountClaims, error) {
+	toks, _, err := completeLookup(ctx, r, acct, servers)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	var out []*jwt.AccountClaims
+	for _, t := range toks {
+		if t == "" || seen[t] {
+			continue
+		}
+		seen[t] = true
+		claims, verr := VerifyAccountJWT(t, acct, trust)
+		if verr != nil {
+			return nil, fmt.Errorf("refusing the resolver's account JWT: %w", verr)
+		}
+		out = append(out, claims)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("no server holds a JWT for account %s", acct)
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].IssuedAt > out[j].IssuedAt })
+	return out, nil
+}
+
+// completeLookup is the part CurrentAccountClaims and AccountClaimsCopies share: the server set must be complete and
+// every expected server must have answered the account JWT lookup. It returns the answers and the expected count.
+func completeLookup(ctx context.Context, r Resolver, acct string, servers int) ([]string, int, error) {
+	set, err := r.Servers(ctx)
+	if err != nil {
+		return nil, 0, fmt.Errorf("server set: %w", err)
+	}
+	if !set.Complete(servers) {
+		return nil, 0, fmt.Errorf("the server set is not complete (%s): the account JWT must be read from every expected server, so list every server under `servers` in the setup file and run mashctl init --config (a named cluster needs it)", set.Why(servers))
+	}
+	need := serverExpect(set, servers)
+	toks, err := r.LookupAll(ctx, acct, need)
+	if err != nil {
+		return nil, 0, fmt.Errorf("account JWT lookup: %w", err)
+	}
+	if len(toks) < need {
+		return nil, 0, fmt.Errorf("only %d of %d servers answered the account JWT lookup: a silent server may hold a newer JWT", len(toks), need)
+	}
+	return toks, need, nil
 }

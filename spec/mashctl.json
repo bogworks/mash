@@ -471,7 +471,7 @@
         "stream": "stdout, then the hint on stderr",
         "exit": 1,
         "issue": "#1288",
-        "note": "The signing key is the one config.json names (signing_key_pub); the key folder has no signing.nk and signing.pub for it. It is part of the keys row, so a run with no problem prints the row as before, and a configuration with no signing_key_pub is not checked. The text does not name the key; `--json` has it as `signing_key` on the keys check."
+        "note": "The signing key is the one config.json names (signing_key_pub); the key folder has no signing.nk and signing.pub for it. It is part of the keys row, so a run with no problem prints the row as before, and a configuration with no signing_key_pub is not checked. The finding does not name the key, in the text or in --json (ADR 0168)."
        },
        {
         "case": "The signing key is not listed in the account",
@@ -479,7 +479,7 @@
         "stream": "stdout",
         "exit": 1,
         "issue": "#1288",
-        "note": "The account JWT on the server does not list the key as a plain signing key (a scoped key counts as not listed): the servers refuse every user it signs. No hint: no mashctl command adds a signing key to an account (ADR 0168). The other user is the admin, who signs in with creds from another signing key."
+        "note": "The account JWT on any server does not list the key as a plain signing key (a scoped key counts as not listed): the servers refuse every user it signs. No hint: no mashctl command adds a signing key to an account (ADR 0168). The other user is the admin, who signs in with creds from another signing key."
        },
        {
         "case": "No server is configured",

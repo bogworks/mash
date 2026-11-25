@@ -65,8 +65,6 @@ type doctorCheck struct {
 	State  string  `json:"state"`
 	Detail string  `json:"detail"`
 	Fix    *string `json:"fix"`
-	// SigningKey is the public key of the signing key the keys row found missing; only --json shows it.
-	SigningKey string `json:"signing_key,omitempty"`
 }
 
 // doctorReport is what `mashctl doctor --json` prints.
@@ -635,13 +633,9 @@ func connectedFindings(conns []apply.ConnzServer, recs []store.Issued) (unrecord
 // doctorKeys is the keys check: no key the issue record holds as revoked is still connected; with auditUsers, every
 // connected user was also issued by mashctl. It fails when the issue record is missing, in every mode, because the
 // record is mashctl's own state. It needs the system account credentials; without them it warns and checks nothing,
-// or fails under auditUsers.
+// or fails under auditUsers; the signing key check of the key store still runs without them.
 func doctorKeys(rep *doctorReport, ctx context.Context, adm *admin.Admin, cfg config.Config, env func(string) string, auditUsers bool) {
-	if cfg.SysCreds == "" { // the row stops for want of system_creds, and the signing key is not checked either
-		doctorKeysRow(rep, ctx, adm, cfg, env, auditUsers)
-		return
-	}
-	sig := signingKeyFinding(ctx, cfg, env)
+	sig := signingKeyFinding(ctx, cfg, env) // the key store part needs no system_creds; the account lookup does
 	n := len(rep.Checks)
 	doctorKeysRow(rep, ctx, adm, cfg, env, auditUsers)
 	if sig.text == "" {
@@ -668,7 +662,6 @@ func doctorKeys(rep *doctorReport, ctx context.Context, adm *admin.Admin, cfg co
 	}
 	rep.Checks = rep.Checks[:n]
 	rep.add("keys", stateFail, detail, fix)
-	rep.Checks[n].SigningKey = config.Clean(cfg.SigningKeyPub) // the one key the finding is about
 }
 
 // signingKeyFinding is the signing key part of the keys row: the key store holds the signing key that config.json's
@@ -694,21 +687,27 @@ func signingKeyFinding(ctx context.Context, cfg config.Config, env func(string) 
 	if pub != cfg.SigningKeyPub {
 		return say(noStore, initFix)
 	}
-	claims, err := doctorAccountClaims(ctx, cfg, env, ks)
+	if cfg.SysCreds == "" { // the account cannot be read without system_creds; the row says so itself
+		return finding{}
+	}
+	copies, err := doctorAccountClaims(ctx, cfg, env, ks)
 	if err != nil { // the key cannot be shown listed, so the row does not pass
 		return say("the account could not be read: "+oneLine(admin.RewordUnavailable(err.Error())), "")
 	}
-	if !claims.SigningKeys.Contains(pub) {
-		return say("the signing key is not listed in the account", "")
-	}
-	if sc, _ := claims.SigningKeys.GetScope(pub); sc != nil { // a scoped key is not a plain signing key
-		return say("the signing key is not listed in the account", "")
+	for _, claims := range copies { // every server's copy: an older one that lacks the key is still one a server may act on
+		if !claims.SigningKeys.Contains(pub) {
+			return say("the signing key is not listed in the account", "")
+		}
+		if sc, _ := claims.SigningKeys.GetScope(pub); sc != nil { // a scoped key is not a plain signing key
+			return say("the signing key is not listed in the account", "")
+		}
 	}
 	return finding{}
 }
 
-// doctorAccountClaims is the account's newest verified JWT, read through the system account.
-func doctorAccountClaims(ctx context.Context, cfg config.Config, env func(string) string, ks *ctlkeys.Authority) (*jwt.AccountClaims, error) {
+// doctorAccountClaims is every distinct verified copy of the account's JWT the servers hold, read through the system
+// account.
+func doctorAccountClaims(ctx context.Context, cfg config.Config, env func(string) string, ks *ctlkeys.Authority) ([]*jwt.AccountClaims, error) {
 	acctKP, acctPub, err := ks.Account()
 	if err != nil {
 		return nil, err
@@ -726,7 +725,7 @@ func doctorAccountClaims(ctx context.Context, cfg config.Config, env func(string
 	ctx, cancel := context.WithTimeout(ctx, applyDeadline)
 	defer cancel()
 	servers := serverCount(cfg)
-	return apply.CurrentAccountClaims(ctx, apply.NATS{Conn: nc, Inventory: servers}, acctPub, trust, servers)
+	return apply.AccountClaimsCopies(ctx, apply.NATS{Conn: nc, Inventory: servers}, acctPub, trust, servers)
 }
 
 func doctorKeysRow(rep *doctorReport, ctx context.Context, adm *admin.Admin, cfg config.Config, env func(string) string, auditUsers bool) {

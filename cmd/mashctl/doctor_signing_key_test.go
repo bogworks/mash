@@ -61,8 +61,8 @@ func TestDoctorKeysSigningKeyNotInTheKeyStore(t *testing.T) {
 	}
 	c, code := doctorKeysRowOf(t, a)
 	want := "the signing key is not in the key store"
-	if c.SigningKey != skPub {
-		t.Fatalf("signing_key %q, want %q", c.SigningKey, skPub)
+	if out, _, _ := a.run("doctor", "--json"); strings.Contains(out, skPub) || strings.Contains(out, "signing_key") {
+		t.Fatalf("--json names the signing key: %s", out)
 	}
 	if code != 1 || c.State != "fail" || c.Detail != want || c.Fix == nil || *c.Fix != "mashctl init --config <file>" {
 		t.Fatalf("%d %+v", code, c)
@@ -96,7 +96,7 @@ func TestDoctorKeysSigningKeyNotListedInTheAccount(t *testing.T) {
 		pushAccountJWT(t, e, tok)
 		c, code := doctorKeysRowOf(t, a)
 		want := "the signing key is not listed in the account"
-		if code != 1 || c.State != "fail" || !strings.HasPrefix(c.Detail, want+"\n") || c.SigningKey != skPub || c.Fix != nil {
+		if code != 1 || c.State != "fail" || !strings.HasPrefix(c.Detail, want+"\n") || c.Fix != nil {
 			t.Fatalf("scoped=%v: %d %+v", scoped, code, c)
 		}
 		if strings.Contains(c.Detail, "every connected") { // the ok text of the row does not stay beside a failure
@@ -109,13 +109,83 @@ func TestDoctorKeysSigningKeyNotListedInTheAccount(t *testing.T) {
 // keys row fails rather than passing unchecked, with no hint.
 func TestDoctorKeysSigningKeyAccountUnreadable(t *testing.T) {
 	e, sk, osk := strictEnv(t)
-	skPub, _ := sk.PublicKey()
 	a := initStrict(t, e, sk, osk, true)
 	if err := os.Remove(filepath.Join(a.env["MASH_KEYS_DIR"], "account.nk")); err != nil {
 		t.Fatal(err)
 	}
 	c, code := doctorKeysRowOf(t, a)
-	if code != 1 || c.State != "fail" || !strings.HasPrefix(c.Detail, "the account could not be read: ") || c.SigningKey != skPub || c.Fix != nil {
+	if code != 1 || c.State != "fail" || !strings.HasPrefix(c.Detail, "the account could not be read: ") || c.Fix != nil {
 		t.Fatalf("%d %+v", code, c)
+	}
+}
+
+// withoutSysCreds drops system_creds from the configuration a holds, so the keys row cannot read anything from the
+// server's system account.
+func withoutSysCreds(t *testing.T, a *initer) {
+	t.Helper()
+	path := filepath.Join(a.env["MASH_CONFIG_DIR"], "config.json")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := m["system_creds"]; !ok {
+		t.Fatalf("no system_creds in %s", raw)
+	}
+	delete(m, "system_creds")
+	raw, _ = json.Marshal(m)
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// No system_creds: the key store part of the check still runs. A lost signing key fails the row with the init hint,
+// followed by what the row found (it cannot read connected keys, and says so), and --json does not name the key.
+func TestDoctorKeysSigningKeyNotInTheKeyStoreWithoutSysCreds(t *testing.T) {
+	e, sk, osk := strictEnv(t)
+	skPub, _ := sk.PublicKey()
+	a := initStrict(t, e, sk, osk, true)
+	withoutSysCreds(t, a)
+	for _, f := range []string{"signing.nk", "signing.pub"} {
+		if err := os.Remove(filepath.Join(a.env["MASH_KEYS_DIR"], f)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c, code := doctorKeysRowOf(t, a)
+	want := "the signing key is not in the key store\nno system_creds in the configuration; connected keys were not checked"
+	if code != 1 || c.State != "fail" || c.Detail != want || c.Fix == nil || *c.Fix != "mashctl init --config <file>" {
+		t.Fatalf("%d %+v", code, c)
+	}
+	if out, _, _ := a.run("doctor", "--json"); strings.Contains(out, skPub) {
+		t.Fatalf("--json names the signing key: %s", out)
+	}
+}
+
+// No system_creds and the signing key in the key store: nothing to add, so the row is what it was (the warning, or
+// under --audit-users the failure), and the account is not read.
+func TestDoctorKeysSigningKeyInTheKeyStoreWithoutSysCreds(t *testing.T) {
+	e, sk, osk := strictEnv(t)
+	a := initStrict(t, e, sk, osk, true)
+	withoutSysCreds(t, a)
+	c, code := doctorKeysRowOf(t, a)
+	if code != 0 || c.State != "warn" || c.Detail != "no system_creds in the configuration; connected keys were not checked" {
+		t.Fatalf("%d %+v", code, c)
+	}
+	out, errb, code := a.run("doctor", "--audit-users", "--json")
+	var rep doctorReport
+	if err := json.Unmarshal([]byte(out), &rep); err != nil {
+		t.Fatalf("%v\n%s\n%s", err, out, errb)
+	}
+	var got doctorCheck
+	for _, ck := range rep.Checks {
+		if ck.Name == "keys" {
+			got = ck
+		}
+	}
+	if code != 1 || got.State != "fail" || got.Detail != "no system_creds: connected users cannot be audited" {
+		t.Fatalf("%d %+v", code, got)
 	}
 }

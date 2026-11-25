@@ -116,8 +116,8 @@ take effect (check that every server holds the account JWT with the revocation, 
 keys are used.
 
 When `config.json` names a signing key (`signing_key_pub`), the row also fails if the key folder does not hold that key
-(`mashctl init --config <file>` restores it) or the account JWT on the server does not list it as a plain signing key,
-which the servers refuse every user it signs for. The text names no key; `--json` gives the key as `signing_key` on the `keys` check.
+(`mashctl init --config <file>` restores it) or the account JWT on a server (every server's copy is checked) does not list it as a plain signing key,
+which the servers refuse every user it signs for. The key store part runs without `system_creds`; the account part needs them. The finding does not name the key.
 
 #### Other users on the account
 
