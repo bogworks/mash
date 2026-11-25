@@ -2107,7 +2107,7 @@
       "verbatim": true
      },
      {
-      "case": "A command that does not exist",
+      "case": "mash nope",
       "text": "error: unknown command \"nope\"",
       "stream": "stderr",
       "exit": 2

@@ -70,7 +70,7 @@ hint: mash send --help
 The call returns this text with `isError` set.
 
 ```text
-error: no endpoint has the address acme.demo.alise
+error: no endpoint acme.demo.alise
 hint: mash who
 ```
 
