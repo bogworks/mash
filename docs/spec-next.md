@@ -15,12 +15,15 @@ metadata entry:
 {"name": "x-output-next", "value": [
   {"case": "...", "text": "...", "stream": "stderr", "exit": 1,
    "issue": "#1055", "replaces": "existing x-output case name",
-   "note": "..."}
+   "verbatim": true, "note": "..."}
 ]}
 ```
 
 `replaces` (optional) names a current `x-output` case of the same command;
-`note` is optional.
+`note` is optional. `verbatim` (optional boolean, absent by default; the same on
+`spec/next.json` items) says `text` is exactly the lines the program prints; the
+demo then shows the line `Lines: the program's own (verbatim)` under the case,
+and the 80-column rule applies to those lines as written.
 
 ## Everything else: `spec/next.json`
 
@@ -28,7 +31,8 @@ metadata entry:
 {"info": {"version": "0.5.9-spec.0"},
  "items": [{"id": "...", "where": "policy document|rules|...",
             "case": "...", "text": "...", "stream": "...", "exit": 0,
-            "issue": "#...", "replaces": "...", "note": "..."}],
+            "issue": "#...", "replaces": "...", "verbatim": true,
+            "note": "..."}],
  "rules_next": [{"rule": "...", "detail": "...",
                  "replaces": "existing rule title"}]}
 ```
