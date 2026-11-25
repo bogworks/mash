@@ -244,6 +244,28 @@ func (a *Admin) MissingBuckets(ctx context.Context) ([]string, error) {
 	return missing, nil
 }
 
+// BucketCaps reads the live MaxBytes of each bucket Init makes that exists (a missing bucket is left out). It reads and
+// changes nothing.
+func (a *Admin) BucketCaps(ctx context.Context) (map[string]int64, error) {
+	caps := map[string]int64{}
+	for b := range store.InitBucketCaps(a.limits) {
+		kv, err := a.js.KeyValue(ctx, b)
+		if errors.Is(err, jetstream.ErrBucketNotFound) {
+			continue
+		} else if err != nil {
+			return nil, fmt.Errorf("mash: bucket %s: %w", b, err)
+		}
+		st, err := kv.Status(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("mash: bucket %s: %w", b, err)
+		}
+		if bs, ok := st.(*jetstream.KeyValueBucketStatus); ok {
+			caps[b] = bs.StreamInfo().Config.MaxBytes
+		}
+	}
+	return caps, nil
+}
+
 func (a *Admin) initBuckets(ctx context.Context) error {
 	for _, cfg := range []jetstream.KeyValueConfig{store.DirectoryConfigFor(a.limits), store.LeaseConfigFor(a.limits), store.RetiredConfig()} {
 		if cfg.Bucket == store.LeaseBucket {

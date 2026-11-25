@@ -2,8 +2,10 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -19,9 +21,12 @@ import (
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats-server/v2/server"
 	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 	"github.com/nats-io/nkeys"
 
+	madmin "github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/ctlkeys"
+	"github.com/bogworks/mash/internal/natsauth"
 	"github.com/bogworks/mash/internal/natsfixture"
 	"github.com/bogworks/mash/internal/store"
 )
@@ -897,5 +902,95 @@ func TestIsUnreachable_aDisconnectedRequestIsUnreachable(t *testing.T) {
 		if !isUnreachable(err) {
 			t.Errorf("%s: isUnreachable(%v) is false, want true", name, err)
 		}
+	}
+}
+
+// limitsEnv is newApplyEnvTweak with the MASH account limited to 140 MiB of disk (the configured need is 109 MiB).
+func limitsEnv(t *testing.T) *applyEnv {
+	return newApplyEnvTweak(t, func(e *applyEnv) {
+		opKP, _, err := e.ks.Operator()
+		if err != nil {
+			t.Fatal(err)
+		}
+		conf := e.pl.ConfPath()
+		cb := string(mustRead(t, conf))
+		m := regexp.MustCompile(`(?m)^  ` + e.acctPub + `: "([^"]+)"$`).FindStringSubmatch(cb)
+		if m == nil {
+			t.Fatal("JWT of the MASH account not found in server.conf")
+		}
+		ac, err := jwt.DecodeAccountClaims(m[1])
+		if err != nil {
+			t.Fatal(err)
+		}
+		ac.Limits.JetStreamLimits.DiskStorage = 140 << 20
+		tok, err := ac.Encode(opKP)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(conf, []byte(strings.Replace(cb, m[1], tok, 1)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+// raiseDirectoryCap raises the directory bucket's MaxBytes to 50 MiB, as an earlier init with a larger cap did.
+func raiseDirectoryCap(t *testing.T, e *applyEnv) {
+	t.Helper()
+	nc, err := nats.Connect(e.srv.ClientURL(), nats.Timeout(15*time.Second), natsauth.UserCredentials(e.pl.Creds))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer nc.Close()
+	js, err := jetstream.New(nc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	s, err := js.Stream(ctx, "KV_"+store.DirectoryBucket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc := s.CachedInfo().Config
+	sc.MaxBytes = 50 << 20
+	if _, err := js.UpdateStream(ctx, sc); err != nil {
+		t.Fatal(err)
+	}
+}
+
+const liveDiskWarning = "warning: the account has 140MiB of disk; one endpoint needs 143MiB\n"
+
+// TestInitDiskWarningCountsLiveCaps: a re-init over a bucket whose cap was raised above the config warns with the live
+// need (143 MiB), though the configured need (109 MiB) fits the account's 140 MiB; a first init warns nothing; a failed
+// live read falls back to the configured caps without failing init.
+func TestInitDiskWarningCountsLiveCaps(t *testing.T) {
+	e := limitsEnv(t)
+	a := newIniter(t, e)
+	if _, errb, code := a.init(); code != 0 || strings.Contains(errb, "of disk") {
+		t.Fatalf("first init: %d\n%s", code, errb)
+	}
+	raiseDirectoryCap(t, e)
+
+	old := bucketCaps
+	bucketCaps = func(context.Context, *madmin.Admin) (map[string]int64, error) { return nil, errors.New("boom") }
+	_, errb, code := a.init()
+	bucketCaps = old
+	if code != 0 || strings.Contains(errb, "of disk") || strings.Contains(errb, "boom") {
+		t.Fatalf("failed live read: %d\n%s", code, errb)
+	}
+
+	_, errb, code = a.init()
+	if code != 0 || !strings.Contains(errb, liveDiskWarning) {
+		t.Fatalf("re-init over raised caps: %d\n%s", code, errb)
+	}
+}
+
+func TestDiskNeed(t *testing.T) {
+	def := store.DefaultLimits()
+	if got := diskNeed(def, nil); got != 109<<20 {
+		t.Errorf("configured: %d", got)
+	}
+	live := map[string]int64{store.DirectoryBucket: 50 << 20, store.LeaseBucket: 1 << 20}
+	if got := diskNeed(def, live); got != 143<<20 {
+		t.Errorf("live: %d", got)
 	}
 }

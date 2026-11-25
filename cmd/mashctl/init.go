@@ -45,16 +45,36 @@ const sysCredsFile = "sys.creds"
 // consumer limit is not checked: it applies per stream, and a stream here has one consumer, so any limit of 1 or more
 // is enough. Streams and disk follow docs/nats-server.md, "Sizing".
 func limitWarnings(lim jwt.JetStreamLimits, l store.Limits) []string {
+	return append(streamWarnings(lim), diskWarnings(lim, diskNeed(l, nil))...)
+}
+
+// diskNeed is the disk one endpoint needs: for each bucket the larger of its live cap (live, by bucket name, may be
+// nil or lack a bucket) and its configured cap, since init never lowers a cap, plus the inbox cap.
+func diskNeed(l store.Limits, live map[string]int64) int64 {
+	need := l.InboxMaxBytes
+	for b, c := range store.InitBucketCaps(l) {
+		need += max(c, live[b])
+	}
+	return need
+}
+
+// bucketCaps reads the live caps of the buckets init makes (a variable so a test can make the read fail).
+var bucketCaps = func(ctx context.Context, adm *madmin.Admin) (map[string]int64, error) { return adm.BucketCaps(ctx) }
+
+func streamWarnings(lim jwt.JetStreamLimits) []string {
 	var warns []string
 	needStreams := store.InitBuckets + 1
-	needDisk := store.InitBucketsMaxBytes(l) + l.InboxMaxBytes
 	if lim.Streams > 0 && lim.Streams < int64(needStreams) {
 		warns = append(warns, fmt.Sprintf("the account allows %d streams; one endpoint needs %d, one more each", lim.Streams, needStreams))
 	}
-	if lim.DiskStorage > 0 && lim.DiskStorage < needDisk {
-		warns = append(warns, fmt.Sprintf("the account has %s of disk; one endpoint needs %s", config.FormatSize(lim.DiskStorage), config.FormatSize(needDisk)))
-	}
 	return warns
+}
+
+func diskWarnings(lim jwt.JetStreamLimits, needDisk int64) []string {
+	if lim.DiskStorage > 0 && lim.DiskStorage < needDisk {
+		return []string{fmt.Sprintf("the account has %s of disk; one endpoint needs %s", config.FormatSize(lim.DiskStorage), config.FormatSize(needDisk))}
+	}
+	return nil
 }
 
 var initSpec = epSpec{
@@ -426,7 +446,7 @@ func doInit(setupPath string, dry, jsonOut, detail bool, env func(string) string
 	if err != nil {
 		return cliframe.Failf("%v (nothing was changed)", err)
 	}
-	warns = append(warns, limitWarnings(lim, cfg.Limits)...)
+	warns = append(warns, streamWarnings(lim)...)
 	if err := checkClusterListed(set, len(sf.servers), setupPath); err != nil {
 		return err
 	}
@@ -442,15 +462,23 @@ func doInit(setupPath string, dry, jsonOut, detail bool, env func(string) string
 		return cliframe.Failf("%v (nothing was changed)", err)
 	}
 	nc.Close()
-	for _, w := range warns {
-		fmt.Fprintf(stderr, "warning: %s\n", w)
+	printWarns := func() {
+		for _, w := range warns {
+			fmt.Fprintf(stderr, "warning: %s\n", w)
+		}
 	}
 
 	adm, actx, closeAdmin, err := ctl.OpenAdmin("mashctl", cfg)
 	if err != nil {
+		printWarns()
 		return failErr(err)
 	}
 	defer closeAdmin()
+	// The disk need counts the live caps of existing buckets (init never lowers one); a failed read leaves the
+	// configured caps, and never fails init.
+	live, _ := bucketCaps(actx, adm)
+	warns = append(warns, diskWarnings(lim, diskNeed(cfg.Limits, live))...)
+	printWarns()
 	missing, err := adm.MissingBuckets(actx)
 	if err != nil {
 		return failErr(err)
