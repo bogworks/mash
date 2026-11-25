@@ -610,6 +610,24 @@ func TestPlanChecks(t *testing.T) {
 	}
 }
 
+func TestPlanUnderCloseReleaseAncestorIsRefused(t *testing.T) {
+	_, err := Generate(patchedFixture(t, "mash.json",
+		`{"name":"alpha","description":"Alpha.",`, `{"name":"alpha","description":"Alpha.",
+    "commands":[{"name":"kid","description":"Kid.","metadata":[{"name":"x-plan","value":"next"}]}],`,
+		`{"name":"x-release","value":"1.0.0"},
+     {"name":"x-mcp","value":{"tool":null,"why":"Not for agents."}}`,
+		`{"name":"x-release","value":"`+closeRelease+`"},
+     {"name":"x-mcp","value":{"tool":null,"why":"Not for agents."}}`))
+	if err == nil {
+		t.Fatal("Generate accepted x-plan under an ancestor at the close release")
+	}
+	for _, want := range []string{"a built entry (it inherits x-release", "must not carry x-plan next"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %v, want it to contain %q", err, want)
+		}
+	}
+}
+
 func TestPlanTextRenders(t *testing.T) {
 	for _, tc := range []struct{ plan, want string }{
 		{"next", "Planned: next"}, {"later", "Planned: later"},

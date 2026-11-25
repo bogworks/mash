@@ -216,7 +216,7 @@ func buildTree(c *cmdSpec, path []string, current, inheritedRelease, inheritedPl
 		}
 		n.release, n.plan, builtSet = "", p, false
 	} else if r != "" {
-		n.release, n.plan, builtSet = r, "", r == current
+		n.release, n.plan, builtSet = r, "", r == current || r == closeRelease
 	}
 	for _, s := range c.Commands {
 		sub, err := buildTree(s, n.path, current, n.release, n.plan, builtSet, false)

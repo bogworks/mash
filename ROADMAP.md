@@ -35,7 +35,7 @@ after Now.
   mesh is a choice you make.
 - Prompting an agent through the SAP protocol, as a first-class action beside
   mail.
-- More than one owner on one server, in a small first form.
+- Sharing one server between owners. Today a deployment has one owner (ADR 0006); a change to that is a decision still to be made.
 - Asking to join, by administrator approval: an endpoint asks to join the mesh
   and an administrator approves it.
 
