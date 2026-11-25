@@ -93,7 +93,7 @@ func main() {
 		os.Exit(2)
 	}
 	releaseRepo = *repo
-	releasesURL = "https://api.github.com/repos/" + *repo + "/releases?per_page=100"
+	releasesURL = "https://api.github.com" + "/repos/" + *repo + "/releases?per_page=100"
 	fmt.Println("release repo: " + *repo)
 	override := strings.Fields(os.Getenv("AT006_TAGS"))
 	rels, err := derive(*skippedFile, override, filepath.Join(*work, "dl"))
