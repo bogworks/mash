@@ -871,7 +871,7 @@ func (e *Endpoint) viaOrigin(ctx context.Context, seq uint64) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("mash: no message #%d in your inbox to relay", seq)
 	}
-	h, trust := sap.VerifyStored(raw.Header.Get(sap.HeaderName), raw.Subject, raw.Data)
+	h, trust := sapsdk.VerifyStored(raw.Header.Values(sap.HeaderName), raw.Subject, raw.Data)
 	if trust == sap.TrustForged || trust == sap.TrustMalformed || trust == sap.TrustAbsent || !validDirectoryKey(h.Name) {
 		return "", fmt.Errorf("mash: message #%d names no sender that can be declared as the origin of a relay", seq)
 	}
