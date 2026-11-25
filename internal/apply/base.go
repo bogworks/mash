@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -217,20 +218,35 @@ func CurrentAccountClaims(ctx context.Context, r Resolver, acct string, trust Tr
 	return b.claims, nil
 }
 
+// ErrServerHasNoAccountJWT is what AccountClaimsCopies wraps when a server that answered holds no JWT for the account.
+var ErrServerHasNoAccountJWT = errors.New("a server holds no account JWT")
+
 // AccountClaimsCopies is every distinct account JWT the servers hold, each verified against trust, newest first, for a
 // reader that must hold every copy to a rule (the doctor's signing key check: an older copy that lacks the key is
 // still one a server may act on). It shares CurrentAccountClaims's completeness and all-servers-answered checks, and
-// refuses a copy that does not verify. A server that holds no JWT adds no copy. An account no server has a JWT for is
-// an error.
+// refuses a copy that does not verify. A server that holds no JWT is not hidden: it is an error wrapping
+// ErrServerHasNoAccountJWT (with how many servers hold none), because that server cannot accept the users a key signs.
 func AccountClaimsCopies(ctx context.Context, r Resolver, acct string, trust Trust, servers int) ([]*jwt.AccountClaims, error) {
 	toks, _, err := completeLookup(ctx, r, acct, servers)
 	if err != nil {
 		return nil, err
 	}
+	empty := 0
+	for _, t := range toks {
+		if t == "" {
+			empty++
+		}
+	}
+	if empty > 0 {
+		if empty == len(toks) {
+			return nil, fmt.Errorf("no server holds a JWT for account %s: %w", acct, ErrServerHasNoAccountJWT)
+		}
+		return nil, fmt.Errorf("%d of %d servers hold no JWT for account %s: %w", empty, len(toks), acct, ErrServerHasNoAccountJWT)
+	}
 	seen := map[string]bool{}
 	var out []*jwt.AccountClaims
 	for _, t := range toks {
-		if t == "" || seen[t] {
+		if seen[t] {
 			continue
 		}
 		seen[t] = true
@@ -240,8 +256,8 @@ func AccountClaimsCopies(ctx context.Context, r Resolver, acct string, trust Tru
 		}
 		out = append(out, claims)
 	}
-	if len(out) == 0 {
-		return nil, fmt.Errorf("no server holds a JWT for account %s", acct)
+	if len(out) == 0 { // no answer at all: nothing shows the key listed
+		return nil, fmt.Errorf("no server answered for account %s: %w", acct, ErrServerHasNoAccountJWT)
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].IssuedAt > out[j].IssuedAt })
 	return out, nil

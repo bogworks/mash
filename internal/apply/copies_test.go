@@ -2,6 +2,7 @@ package apply
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -24,15 +25,15 @@ func TestAccountClaimsCopies(t *testing.T) {
 	if err != nil || len(got) != 2 || got[0].IssuedAt != 3000 || got[1].IssuedAt != 1000 {
 		t.Fatalf("%v %+v", err, got)
 	}
-	// agreement is one copy; a server with no JWT adds none
+	// agreement is one copy; a server with no JWT is an error, not a skipped reply
 	if got, err = run(two, 2, newest, newest); err != nil || len(got) != 1 {
 		t.Fatalf("%v %+v", err, got)
 	}
-	if got, err = run(two, 2, newest, ""); err != nil || len(got) != 1 {
-		t.Fatalf("%v %+v", err, got)
+	if _, err = run(two, 2, newest, ""); !errors.Is(err, ErrServerHasNoAccountJWT) || !strings.Contains(err.Error(), "1 of 2 servers hold no JWT") {
+		t.Fatalf("%v", err)
 	}
 	// no JWT anywhere, a silent server, an incomplete set and a copy that does not verify are errors
-	if _, err = run(two, 2, "", ""); err == nil || !strings.Contains(err.Error(), "no server holds a JWT") {
+	if _, err = run(two, 2, "", ""); !errors.Is(err, ErrServerHasNoAccountJWT) || !strings.Contains(err.Error(), "no server holds a JWT") {
 		t.Fatalf("%v", err)
 	}
 	if _, err = run(two, 2, newest); err == nil || !strings.Contains(err.Error(), "only 1 of 2 servers answered") {

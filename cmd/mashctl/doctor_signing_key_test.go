@@ -1,14 +1,24 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/nats-io/jwt/v2"
+	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 	"github.com/nats-io/nkeys"
+
+	"github.com/bogworks/mash/internal/apply"
+	"github.com/bogworks/mash/internal/config"
+	"github.com/bogworks/mash/internal/ctlkeys"
+	"github.com/bogworks/mash/internal/natsauth"
+	"github.com/bogworks/mash/internal/store"
 )
 
 // doctorKeysRowOf runs `mashctl doctor --json` on a and returns the keys row and the exit code.
@@ -187,5 +197,64 @@ func TestDoctorKeysSigningKeyInTheKeyStoreWithoutSysCreds(t *testing.T) {
 	}
 	if code != 1 || got.State != "fail" || got.Detail != "no system_creds: connected users cannot be audited" {
 		t.Fatalf("%d %+v", code, got)
+	}
+}
+
+// A server that holds no account JWT is a server that lists no signing key: the finding says the key is not listed,
+// not that the account could not be read, and has no hint.
+func TestDoctorKeysSigningKeyAServerHoldsNoAccountJWT(t *testing.T) {
+	e, sk, osk := strictEnv(t)
+	a := initStrict(t, e, sk, osk, true)
+	prev := readAccountCopies
+	readAccountCopies = func(context.Context, config.Config, func(string) string, *ctlkeys.Authority) ([]*jwt.AccountClaims, error) {
+		return nil, fmt.Errorf("1 of 2 servers hold no JWT for account X: %w", apply.ErrServerHasNoAccountJWT)
+	}
+	t.Cleanup(func() { readAccountCopies = prev })
+	c, code := doctorKeysRowOf(t, a)
+	want := "the signing key is not listed in the account"
+	if code != 1 || c.State != "fail" || !strings.HasPrefix(c.Detail, want) || strings.Contains(c.Detail, "could not be read") || c.Fix != nil {
+		t.Fatalf("%d %+v", code, c)
+	}
+}
+
+// The signing key is not listed and the row itself failed with a hint (no issue record: mashctl init): the init hint
+// cannot fix the signing key, so the combined row has no hint.
+func TestDoctorKeysSigningKeyNotListedDropsTheRowsHint(t *testing.T) {
+	e, sk, osk := strictEnv(t)
+	skPub, _ := sk.PublicKey()
+	a := initStrict(t, e, sk, osk, true)
+	fk, _ := nkeys.CreateAccount()
+	fkPub, _ := fk.PublicKey()
+	fkCreds := filepath.Join(a.root, "in", "other.creds")
+	signingKeyCreds(t, e.acctPub, fk, fkCreds)
+	a.env["MASH_ADMIN_CREDS"] = fkCreds
+	ac := e.claims()
+	ac.SigningKeys.Add(fkPub)
+	delete(ac.SigningKeys, skPub)
+	tok, err := ac.Encode(osk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pushAccountJWT(t, e, tok)
+	nc, err := nats.Connect(e.srv.ClientURL(), natsauth.UserCredentials(fkCreds))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer nc.Close()
+	js, err := jetstream.New(nc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := js.DeleteKeyValue(context.Background(), store.IssuedBucket); err != nil {
+		t.Fatal(err)
+	}
+	c, code := doctorKeysRowOf(t, a)
+	want := "the signing key is not listed in the account\nno issue record"
+	if code != 1 || c.State != "fail" || !strings.HasPrefix(c.Detail, want) || c.Fix != nil {
+		t.Fatalf("%d %+v", code, c)
+	}
+	out, errb, _ := a.run("doctor")
+	if strings.Contains(out+errb, "hint:") {
+		t.Fatalf("a hint stays: %s%s", out, errb)
 	}
 }

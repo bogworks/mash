@@ -650,10 +650,8 @@ func doctorKeys(rep *doctorReport, ctx context.Context, adm *admin.Admin, cfg co
 	} else if rest, ok := strings.CutPrefix(c.Detail, "mashctl's users ok; "); ok {
 		detail += "\n" + rest
 	}
+	// the hint is the signing finding's own, or none: the row's hint (say, mashctl init) cannot fix the signing key
 	fix := sig.fix
-	if fix == "" && c.Fix != nil {
-		fix = *c.Fix
-	}
 	switch c.State { // the row is counted again, as a failure
 	case stateFail:
 		rep.Problems--
@@ -690,7 +688,10 @@ func signingKeyFinding(ctx context.Context, cfg config.Config, env func(string) 
 	if cfg.SysCreds == "" { // the account cannot be read without system_creds; the row says so itself
 		return finding{}
 	}
-	copies, err := doctorAccountClaims(ctx, cfg, env, ks)
+	copies, err := readAccountCopies(ctx, cfg, env, ks)
+	if errors.Is(err, apply.ErrServerHasNoAccountJWT) { // that server's account lists no key
+		return say("the signing key is not listed in the account", "")
+	}
 	if err != nil { // the key cannot be shown listed, so the row does not pass
 		return say("the account could not be read: "+oneLine(admin.RewordUnavailable(err.Error())), "")
 	}
@@ -704,6 +705,9 @@ func signingKeyFinding(ctx context.Context, cfg config.Config, env func(string) 
 	}
 	return finding{}
 }
+
+// readAccountCopies is doctorAccountClaims; a test replaces it.
+var readAccountCopies = doctorAccountClaims
 
 // doctorAccountClaims is every distinct verified copy of the account's JWT the servers hold, read through the system
 // account.

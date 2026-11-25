@@ -117,7 +117,7 @@ keys are used.
 
 When `config.json` names a signing key (`signing_key_pub`), the row also fails if the key folder does not hold that key
 (`mashctl init --config <file>` restores it) or the account JWT on a server (every server's copy is checked) does not list it as a plain signing key,
-which the servers refuse every user it signs for. The key store part runs without `system_creds`; the account part needs them. The finding does not name the key.
+which the servers refuse every user it signs for. A server that holds no account JWT counts as not listing the key. The row's hint is the signing key finding's own (`mashctl init --config <file>` when the key store lacks the key); when the key is not listed or the account cannot be read there is none, even if another failure of the row has one. The key store part runs without `system_creds`; the account part needs them. The finding does not name the key.
 
 #### Other users on the account
 
