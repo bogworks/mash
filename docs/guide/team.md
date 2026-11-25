@@ -33,16 +33,18 @@ and come up with a plan.
 
 ## Say what you need
 
-Mail that needs an answer is a `question`, a `blocker` or a `task`. Each wakes
-an idle session about 45 seconds after it arrives. A `result` or an `fyi`
-waits for the receiver's next turn, so a note that ends "please reply" belongs
-in a `question`:
+Mail that needs an answer is a `question`, a `blocker` or a `task`. With a
+channel (above), each wakes an idle session about 45 seconds after it arrives;
+without one, it waits for the next prompt. A `result` or an `fyi` waits for the
+receiver's next turn, so a note that ends "please reply" belongs in a
+`question`:
 
 ```sh
 mash send acme.demo.alice --kind question "Which cases should the tests cover?"
 ```
 
-`--urgent` is for what cannot wait. It wakes the receiver at once.
+`--urgent` is for what cannot wait. With a channel, it wakes the receiver at
+once when the sender is verified.
 
 ## What a session should do with mail
 
