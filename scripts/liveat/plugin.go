@@ -292,7 +292,7 @@ func (a *AT) pluginMail(pl pluginLaunch, name string, h Home, from, to *plugSess
 		a.C.Check("mail "+name+": the send receipt names the message number", false, "no number in the receipt's structured content")
 		return
 	}
-	a.C.Check("mail "+name+": the "+from.Name+" session's MCP send tool succeeds", err == nil && !isErr && out == fmt.Sprintf("Mail sent (number %d).", receipt.Number), redact(out)+errSuffix(err))
+	a.C.Check("mail "+name+": the "+from.Name+" session's MCP send tool succeeds", err == nil && !isErr && out == fmt.Sprintf("Mail sent (number %d)", receipt.Number), redact(out)+errSuffix(err))
 	deadline := time.Now().Add(20 * time.Second)
 	var ctx string
 	var herr error

@@ -477,7 +477,7 @@ MASH_ENDPOINT=acme.demo.bob mash send acme.demo.alice "lunch at noon?"
 MASH_ENDPOINT=acme.demo.alice mash inbox
 ```
 
-Expected: `Mail sent (number 1).`, then `1 message for acme.demo.alice, 1 new,
+Expected: `Mail sent (number 1)`, then `1 message for acme.demo.alice, 1 new,
 0 urgent.` and a one-row table with `lunch at noon?`.
 `MASH_ENDPOINT=acme.demo.alice mash read 1` shows the message in full,
 with `trust: verified`.

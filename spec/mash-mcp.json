@@ -68,7 +68,7 @@
    "text": [
     {
      "case": "Sent",
-     "text": "Mail sent (number 42).",
+     "text": "Mail sent (number 42)",
      "stream": "stdout",
      "exit": 0
     }
@@ -82,7 +82,7 @@
     },
     {
      "case": "No such endpoint",
-     "text": "error: no endpoint has the address acme.demo.alise\nhint: mash who",
+     "text": "error: no endpoint acme.demo.alise\nhint: mash who",
      "stream": "stderr",
      "exit": 1
     },
@@ -223,7 +223,7 @@
    "errors": [
     {
      "case": "No such message",
-     "text": "error: acme.demo.alice has no message 9\nhint: mash inbox",
+     "text": "error: no message 9\nhint: mash inbox",
      "stream": "stderr",
      "exit": 1
     },

@@ -383,7 +383,7 @@ func TestAdminIsAnUnknownCommand(t *testing.T) {
 	for _, args := range [][]string{{"admin"}, {"admin", "list"}, {"admin", "provision", "o.dev.z"}, {"admin", "-h"}} {
 		var out, errb bytes.Buffer
 		code := run(args, envFrom(nil), strings.NewReader(""), &out, &errb)
-		if code != 2 || !strings.Contains(errb.String(), `mash has no command admin`) || out.Len() != 0 {
+		if code != 2 || !strings.Contains(errb.String(), `unknown command "admin"`) || out.Len() != 0 {
 			t.Fatalf("%v: %d out=%q err=%q", args, code, out.String(), errb.String())
 		}
 	}

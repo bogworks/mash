@@ -106,7 +106,7 @@ func retireAddress(addr sap.Address, opts retireOpts, env func(string) string, l
 	if r, ok := findRecord(recs, addr); ok {
 		user = r.User
 	}
-	notFound := cliframe.Failf("%s does not exist", name).WithHint("mashctl endpoint list")
+	notFound := cliframe.Failf("no endpoint %s", name).WithHint("mashctl endpoint list")
 	cleanup := false // the server holds the leftovers of an interrupted removal that this run finishes
 	if user == "" {
 		// No record. A run killed after the record was purged leaves the retirement marker pending, and maybe the lease

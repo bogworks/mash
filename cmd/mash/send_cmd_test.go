@@ -79,11 +79,11 @@ func TestSendCommandBothForms(t *testing.T) {
 	}
 	// a failure is exit 1; --json puts the same on stdout and nothing on stderr
 	out, errb, code = runSplit(t, w, "b", "send", "o.dev.nobody", "x")
-	if code != 1 || out != "" || errb != "error: no endpoint has the address o.dev.nobody\nhint: mash who\n" {
+	if code != 1 || out != "" || errb != "error: no endpoint o.dev.nobody\nhint: mash who\n" {
 		t.Fatalf("no such endpoint: %d %q %q", code, out, errb)
 	}
 	out, errb, code = runSplit(t, w, "b", "send", "o.dev.nobody", "x", "--json")
-	if code != 1 || errb != "" || out != `{"error":"no endpoint has the address o.dev.nobody","hint":"mash who"}`+"\n" {
+	if code != 1 || errb != "" || out != `{"error":"no endpoint o.dev.nobody","hint":"mash who"}`+"\n" {
 		t.Fatalf("no such endpoint --json: %d %q %q", code, out, errb)
 	}
 	if n := inboxCount(t, w, "a"); n != 4 {
@@ -139,7 +139,7 @@ func TestSendRetaggedIsReported(t *testing.T) {
 		t.Fatal(code)
 	}
 	out, errb, code := runSplit(t, w, "a", "send", tTo("b"), "--reply-to", "1", "--kind", "question", "ok")
-	if code != 0 || errb != "" || out != "Mail sent as fyi (number 1): a reply marked question that asks nothing.\n" {
+	if code != 0 || errb != "" || out != "Mail sent as fyi (number 1): a reply marked question that asks nothing\n" {
 		t.Fatalf("retagged: %d %q %q", code, out, errb)
 	}
 	out, _, code = runSplit(t, w, "a", "send", tTo("b"), "--reply-to", "1", "--kind", "question", "which one?", "--json")
@@ -189,7 +189,7 @@ func TestHelpCommandMatchesHelpFlag(t *testing.T) {
 	}
 	var o, e bytes.Buffer
 	if code := run([]string{"help", "nosuch"}, envFrom(nil), strings.NewReader(""), &o, quiet(&e)); code != 2 || o.Len() != 0 ||
-		e.String() != "error: mash has no command nosuch\nhint: mash help\n" {
+		e.String() != "error: unknown command \"nosuch\"\n" {
 		t.Errorf("help nosuch: %d %q %q", code, o.String(), e.String())
 	}
 	// the tool's own help has the table's commands generated from it
@@ -204,7 +204,7 @@ func TestHelpCommandMatchesHelpFlag(t *testing.T) {
 
 // isReceipt says s is a send receipt: lead, then " (number N)", then tail ("." unless given), and an optional newline.
 func isReceipt(s, lead string, tail ...string) bool {
-	t := "\\."
+	t := ""
 	if len(tail) > 0 {
 		t = regexp.QuoteMeta(tail[0])
 	}

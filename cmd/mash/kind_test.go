@@ -59,7 +59,7 @@ func TestSendKindFromTheMCPTool(t *testing.T) {
 	if txt, bad := send(10, `{"address":"o.dev.a","message":"do it","kind":"task"}`); bad || !isReceipt(txt, "Mail sent") {
 		t.Fatalf("task: %v %s", bad, txt)
 	}
-	if txt, bad := send(11, `{"address":"o.dev.a","message":"ok, done","reply_to":1,"kind":"question"}`); bad || !isReceipt(txt, "Mail sent as fyi", ": a reply marked question that asks nothing.") {
+	if txt, bad := send(11, `{"address":"o.dev.a","message":"ok, done","reply_to":1,"kind":"question"}`); bad || !isReceipt(txt, "Mail sent as fyi", ": a reply marked question that asks nothing") {
 		t.Fatalf("tagged: %v %s", bad, txt)
 	}
 	if txt, bad := send(12, `{"address":"o.dev.a","message":"ok?","reply_to":1,"kind":"question"}`); bad || !isReceipt(txt, "Question mail sent") {

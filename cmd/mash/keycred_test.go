@@ -41,7 +41,7 @@ func readTrim(t *testing.T, p string) string {
 func TestKeyCreateWritesTheSeedAndThePublicKey(t *testing.T) {
 	dir := chdirTemp(t)
 	rc, out, errb := kcRun(t, "key", "create", "--out", "bob.seed")
-	if rc != 0 || errb != "" || out != "Created bob.seed and bob.seed.pub.\n" {
+	if rc != 0 || errb != "" || out != "Created bob.seed and bob.seed.pub\n" {
 		t.Fatalf("rc %d, stdout %q, stderr %q", rc, out, errb)
 	}
 	st, err := os.Stat(filepath.Join(dir, "bob.seed"))
@@ -70,7 +70,7 @@ func TestKeyCreateWritesTheSeedAndThePublicKey(t *testing.T) {
 func TestKeyCreateDefaultsToMashSeed(t *testing.T) {
 	chdirTemp(t)
 	rc, out, errb := kcRun(t, "key", "create")
-	if rc != 0 || errb != "" || out != "Created mash.seed and mash.seed.pub.\n" {
+	if rc != 0 || errb != "" || out != "Created mash.seed and mash.seed.pub\n" {
 		t.Fatalf("rc %d, stdout %q, stderr %q", rc, out, errb)
 	}
 	for _, n := range []string{"mash.seed", "mash.seed.pub"} {
@@ -142,7 +142,7 @@ func TestKeyCreateHasOnlyTheSpecifiedOptions(t *testing.T) {
 func TestKeyCreateMakesParentDirectory(t *testing.T) {
 	dir := chdirTemp(t)
 	rc, out, errb := kcRun(t, "key", "create", "--out", "keys/bob.seed")
-	if rc != 0 || errb != "" || out != "Created keys/bob.seed and keys/bob.seed.pub.\n" {
+	if rc != 0 || errb != "" || out != "Created keys/bob.seed and keys/bob.seed.pub\n" {
 		t.Fatalf("rc %d, stdout %q, stderr %q", rc, out, errb)
 	}
 	if st, err := os.Stat(filepath.Join(dir, "keys")); err != nil || st.Mode().Perm() != 0o700 {
@@ -178,7 +178,7 @@ func TestKeyNeedsACommand(t *testing.T) {
 // mash credential is gone: it is an unknown command, with no alias.
 func TestCredentialIsRemoved(t *testing.T) {
 	rc, out, errb := kcRun(t, "credential", "create", "--seed", "a", "--jwt", "b")
-	if rc != 2 || out != "" || errb != "error: mash has no command credential\nhint: mash --help\n" {
+	if rc != 2 || out != "" || errb != "error: unknown command \"credential\"\n" {
 		t.Errorf("rc %d, stdout %q, stderr %q", rc, out, errb)
 	}
 	if strings.Contains(usage, "mash credential") {

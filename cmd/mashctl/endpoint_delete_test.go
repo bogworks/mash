@@ -109,7 +109,7 @@ func TestEndpointDeleteMissingAddressIsNotAskedAbout(t *testing.T) {
 	h := newFleetEnv(t)
 	noTerminal(t)
 	out, errb, code := h.run("endpoint", "delete", "o.g.nope")
-	if code != 1 || out != "" || errb != "error: o.g.nope does not exist\nhint: mashctl endpoint list\n" {
+	if code != 1 || out != "" || errb != "error: no endpoint o.g.nope\nhint: mashctl endpoint list\n" {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
 }

@@ -584,7 +584,7 @@ func (a *AT) joinWithSeed(ha, hb Home, name string) {
 		return
 	}
 	r = a.Mash("join-"+name, hb, a.Conn(), "join", carried)
-	a.C.Check("mash join FILE with no --key installs the creds of a join file that holds its seed and prints Joined as "+who+".", r.Code == 0 && strings.TrimSpace(r.Stdout) == "Joined as "+who+".", exitDetail(r)+": "+snip(r.Stdout))
+	a.C.Check("mash join FILE with no --key installs the creds of a join file that holds its seed and prints Joined as "+who, r.Code == 0 && strings.TrimSpace(r.Stdout) == "Joined as "+who, exitDetail(r)+": "+snip(r.Stdout))
 	creds := credsIn(hb, who)
 	a.checkMode(name+" creds file installed by mash join is mode 0600", creds)
 	a.issuedPermissions(creds, "alice", "dev", name)

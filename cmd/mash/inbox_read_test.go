@@ -96,10 +96,10 @@ func TestInboxAndReadDoorsOnARealEndpoint(t *testing.T) {
 
 	// no such message, in both doors
 	out, code = w.cli(t, "a", "read", "99")
-	if code != 1 || out != "error: o.dev.a has no message 99\nhint: mash inbox\n" {
+	if code != 1 || out != "error: no message 99\nhint: mash inbox\n" {
 		t.Errorf("cli read 99: %d %q", code, out)
 	}
-	if r := s.call(t, 24, "read", `{"number":99}`); r["isError"] != true || resultText(r) != "error: o.dev.a has no message 99\nhint: mash inbox" {
+	if r := s.call(t, 24, "read", `{"number":99}`); r["isError"] != true || resultText(r) != "error: no message 99\nhint: mash inbox" {
 		t.Errorf("tool read 99: %v", r)
 	}
 	// the old names are refused, and the limit is the same in both doors

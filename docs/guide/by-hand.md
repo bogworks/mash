@@ -106,7 +106,7 @@ MASH_ENDPOINT=acme.demo.alice mash read 1
 ```
 
 ```
-Mail sent (number 1).
+Mail sent (number 1)
 1 message for acme.demo.alice, 1 new, 0 urgent.
 
 NUMBER  FROM           WHEN      STATE  URGENT  KIND  MESSAGE

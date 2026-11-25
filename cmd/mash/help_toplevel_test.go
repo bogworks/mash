@@ -131,8 +131,12 @@ func TestTopLevelHelpMatchesSpec(t *testing.T) {
 				t.Errorf("%s: %d columns: %q", c.Case, len([]rune(l)), l)
 			}
 		}
-		if code != c.Exit || out.String() != c.Text+"\n" || errb.Len() != 0 {
-			t.Errorf("%s: exit %d, stdout\n%s\nstderr %q; want exit %d and\n%s", c.Case, code, out.String(), errb.String(), c.Exit, c.Text)
+		got, other := out.String(), errb.String()
+		if c.Stream == "stderr" {
+			got, other = errb.String(), out.String()
+		}
+		if code != c.Exit || got != c.Text+"\n" || other != "" {
+			t.Errorf("%s: exit %d, %s\n%s\nother stream %q; want exit %d and\n%s", c.Case, code, c.Stream, got, other, c.Exit, c.Text)
 		}
 	}
 }

@@ -64,6 +64,15 @@ Join file:            acme.demo.bob.join
 servers acknowledged: 2
 ```
 
+### No such endpoint
+
+Stream: stderr. Exit code: 1.
+
+```text
+error: no endpoint acme.demo.dave
+hint: mashctl endpoint list
+```
+
 ## JSON
 
 With `--json` the result is this shape. The values are an example.

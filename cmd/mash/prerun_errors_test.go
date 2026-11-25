@@ -21,8 +21,6 @@ func TestPreRunErrorsAreFramed(t *testing.T) {
 		hint  string
 		jsonO string // expected stdout with --json
 	}{
-		{"unknown command", nil, []string{"frobnicate"}, 2, "mash has no command frobnicate", "mash --help",
-			`{"error":"mash has no command frobnicate","hint":"mash --help"}`},
 		{"global flag without value", nil, []string{"status", "--endpoint"}, 2, "--endpoint needs a value", "mash --help",
 			`{"error":"--endpoint needs a value","hint":"mash --help"}`},
 		{"plain URL refused", map[string]string{"MASH_ENDPOINT": "o.dev.a", "MASH_SERVER": "nats://x:4222"}, []string{"send", "o.dev.a", "x"}, 2, "", "mash doctor", ""},

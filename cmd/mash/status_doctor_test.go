@@ -693,8 +693,8 @@ func TestJSONPolicyByDestination(t *testing.T) {
 		tty  bool
 		want string
 	}{
-		{"non-terminal", false, `{"error":"mash has no command nope","hint":"mash --help"}` + "\n"},
-		{"terminal", true, "{\n  \"error\": \"mash has no command nope\",\n  \"hint\": \"mash --help\"\n}\n"},
+		{"non-terminal", false, `{"error":"unknown command \"nope\""}` + "\n"},
+		{"terminal", true, "{\n  \"error\": \"unknown command \\\"nope\\\"\"\n}\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cliframe.IsTerminal = func(io.Writer) bool { return tc.tty }

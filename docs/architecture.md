@@ -210,7 +210,7 @@ carry the hand-off to the hook, `mcp` carries tool calls and channel events, and
 
 ![Send data flow: the sender looks up bob in the KV directory, signs the message, publishes to the inbox stream and receives a storage acknowledgement (seq 42 or duplicate).](images/011-send.svg)
 
-*This diagram is drawn for the 0.3.0 tree. It shows the old send output `sent #42`; 0.5.6 prints `Mail sent (number 42).`*
+*This diagram is drawn for the 0.3.0 tree. It shows the old send output `sent #42`; 0.5.6 prints `Mail sent (number 42)`*
 
 A publish has exactly one responder, JetStream, so `sent` means stored ([ADR-0004][0004]). A retry with the same key
 inside the 2-minute duplicate window stores nothing new ([ADR-0031][0031]).

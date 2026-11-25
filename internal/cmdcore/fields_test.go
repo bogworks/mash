@@ -101,14 +101,14 @@ func TestToolErrorIsStructured(t *testing.T) {
 	if err == nil {
 		t.Fatal("no error")
 	}
-	if want := "error: no endpoint has the address a.b.c\nhint: mash who"; err.Error() != want {
+	if want := "error: no endpoint a.b.c\nhint: mash who"; err.Error() != want {
 		t.Errorf("text %q", err.Error())
 	}
 	se, ok := err.(mcp.StructuredError)
 	if !ok {
 		t.Fatalf("%T is not a StructuredError", err)
 	}
-	want := map[string]any{"error": "no endpoint has the address a.b.c", "hint": "mash who"}
+	want := map[string]any{"error": "no endpoint a.b.c", "hint": "mash who"}
 	if !reflect.DeepEqual(se.Structured(), want) {
 		t.Errorf("structured %v", se.Structured())
 	}

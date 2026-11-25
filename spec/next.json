@@ -85,39 +85,6 @@
   "verbatim": true
  },
  {
-  "id": "unknown-command-mash",
-  "where": "mash, a command that does not exist",
-  "case": "mash nope",
-  "text": "error: unknown command \"nope\"",
-  "stream": "stderr",
-  "exit": 2,
-  "issue": "#1046",
-  "note": "One form in both tools: error: unknown command \"nope\" (today mash says \"mash has no command nope\"; mashctl already says this). No hint: a hint is a command that fixes the problem (ADR 0168), and none fixes a misspelt command.",
-  "verbatim": true
- },
- {
-  "id": "not-found-mashctl",
-  "where": "mashctl endpoint show, suspend, resume, set, unset, inbox, permissions, delete: an address with no record",
-  "case": "mashctl endpoint show acme.demo.dave",
-  "text": "error: no endpoint acme.demo.dave\nhint: mashctl endpoint list",
-  "stream": "stderr",
-  "exit": 1,
-  "issue": "#1046",
-  "note": "The not-found form of both tools, \"no endpoint <address>\". Unchanged for mashctl (it already says this); written out so that the other tools' wording is held to it. Exit 1.",
-  "verbatim": true
- },
- {
-  "id": "not-found-reissue",
-  "where": "mashctl endpoint reissue: an address with no record",
-  "case": "mashctl endpoint reissue acme.demo.dave",
-  "text": "error: no endpoint acme.demo.dave\nhint: mashctl endpoint list",
-  "stream": "stderr",
-  "exit": 1,
-  "issue": "#1046",
-  "note": "Today this reads \"acme.demo.dave does not exist\"; one not-found form instead. The hint is the one for every not-found: list shows what exists. Exit 1.",
-  "verbatim": true
- },
- {
   "id": "help-mash-top-usage-footer",
   "where": "mash --help (Usage line and footer)",
   "case": "mash --help",

@@ -51,7 +51,7 @@ The structured content of a successful result. The values are an example.
 The call returns this text.
 
 ```text
-Mail sent (number 42).
+Mail sent (number 42)
 ```
 
 ## Errors
@@ -70,7 +70,7 @@ hint: mash send --help
 The call returns this text with `isError` set.
 
 ```text
-error: no endpoint has the address acme.demo.alise
+error: no endpoint acme.demo.alise
 hint: mash who
 ```
 

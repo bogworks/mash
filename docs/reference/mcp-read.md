@@ -54,7 +54,7 @@ urgent:   yes
 The call returns this text with `isError` set.
 
 ```text
-error: acme.demo.alice has no message 9
+error: no message 9
 hint: mash inbox
 ```
 

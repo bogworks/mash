@@ -121,7 +121,7 @@ func TestRetireNoRecordRevokesNothing(t *testing.T) {
 	h := newFleetEnv(t)
 	s := stubRevoke(t)
 	out, errb, code := h.run("endpoint", "delete", "o.g.a", "--yes")
-	if code != 1 || len(s.calls) != 0 || out != "" || !strings.Contains(errb, "o.g.a does not exist") {
+	if code != 1 || len(s.calls) != 0 || out != "" || !strings.Contains(errb, "no endpoint o.g.a") {
 		t.Fatalf("%d %v %q %q", code, s.calls, out, errb)
 	}
 }
