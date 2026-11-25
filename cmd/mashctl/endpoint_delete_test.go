@@ -51,7 +51,7 @@ func TestEndpointDeleteAsksThenDeletes(t *testing.T) {
 	h.putMessages(a, 1)
 	terminal(t, "o.g.q\n")
 	out, errb, code := h.run("endpoint", "delete", "o.g.q")
-	want := "This deletes o.g.q and the 1 message in its inbox. It cannot be undone.\nType the address to confirm: Deleted endpoint o.g.q\n"
+	want := "This deletes o.g.q and the 1 message in its inbox.\nMail that arrives before it is gone is lost too. It cannot be undone.\nType the address to confirm: Deleted endpoint o.g.q\n"
 	if code != 0 || out != want || errb != "" {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
@@ -153,9 +153,9 @@ func TestEndpointDeleteMessageCountWords(t *testing.T) {
 		n    int
 		want string
 	}{
-		{0, "This deletes o.g.q and its empty inbox. It cannot be undone.\n"},
-		{1, "This deletes o.g.q and the 1 message in its inbox. It cannot be undone.\n"},
-		{3, "This deletes o.g.q and the 3 messages in its inbox. It cannot be undone.\n"},
+		{0, "This deletes o.g.q and its empty inbox.\nMail that arrives before it is gone is lost too. It cannot be undone.\n"},
+		{1, "This deletes o.g.q and the 1 message in its inbox.\nMail that arrives before it is gone is lost too. It cannot be undone.\n"},
+		{3, "This deletes o.g.q and the 3 messages in its inbox.\nMail that arrives before it is gone is lost too. It cannot be undone.\n"},
 	} {
 		t.Run(fmt.Sprint(c.n), func(t *testing.T) {
 			h := newFleetEnv(t)
