@@ -119,6 +119,39 @@ error: acme.dev.bob: this endpoint was deleted; its address cannot be used again
 hint: mash doctor
 ```
 
+### --json
+
+Stream: stdout. Exit code: 0.
+
+```text
+{
+  "endpoints": [
+    {
+      "address": "acme.demo.alice",
+      "online": true,
+      "role": "reviewer",
+      "host": "myserver",
+      "description": "reviews pull requests",
+      "capability": [
+        "review"
+      ],
+      "labels": {
+        "team": "blue"
+      }
+    },
+    {
+      "address": "acme.demo.bob",
+      "online": false,
+      "role": null,
+      "host": null,
+      "description": null,
+      "capability": [],
+      "labels": {}
+    }
+  ]
+}
+```
+
 ## JSON
 
 With `--json` the result is this shape. The values are an example.

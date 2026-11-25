@@ -950,6 +950,14 @@
         "text": "error: acme.dev.bob: this endpoint was deleted; its address cannot be used again\nhint: mash doctor",
         "stream": "stderr",
         "exit": 1
+       },
+       {
+        "case": "--json",
+        "text": "{\n  \"endpoints\": [\n    {\n      \"address\": \"acme.demo.alice\",\n      \"online\": true,\n      \"role\": \"reviewer\",\n      \"host\": \"myserver\",\n      \"description\": \"reviews pull requests\",\n      \"capability\": [\n        \"review\"\n      ],\n      \"labels\": {\n        \"team\": \"blue\"\n      }\n    },\n    {\n      \"address\": \"acme.demo.bob\",\n      \"online\": false,\n      \"role\": null,\n      \"host\": null,\n      \"description\": null,\n      \"capability\": [],\n      \"labels\": {}\n    }\n  ]\n}",
+        "stream": "stdout",
+        "exit": 0,
+        "note": "--json is shown as it prints at a terminal (indented); piped it is one compact line (rule \"--json prints one object\"). The key stays capability, as today: ADR 0049 says who JSON fields are added, never renamed or removed (the one exception to plural list keys). Unset fields stay null. The same in the MCP tool's structured result, which is the same object.",
+        "verbatim": true
        }
       ]
      },
@@ -1016,20 +1024,6 @@
      {
       "name": "x-notes",
       "value": "A prefix follows the address the way a domain name does: acme is everything under acme, acme.demo is everything under acme.demo, and acme.demo.bob is that one endpoint, never acme.demo.bobby. There is no other pattern matching: capitals are refused, acme.demo.bob.* is refused, and an empty prefix means none. The filters by role, capability and label stay, as --role, --capability and --label, in the command and the tool: an agent uses them to find a peer by what it does. Only the free-text match and the alternative output modes are gone. The JSON and the MCP tool's structured result carry role, host, description, capability and labels for every endpoint. An address is always owner.group.name, with dots. who says whether an endpoint is online, not whether mail is reaching its session: that is known only to the session itself, and is in its own status ('session'). A per-endpoint delivery claim visible to peers would be new data that mash 0.5.5 never had; it is left for a later release."
-     },
-     {
-      "name": "x-output-next",
-      "value": [
-       {
-        "case": "--json",
-        "text": "{\n  \"endpoints\": [\n    {\n      \"address\": \"acme.demo.alice\",\n      \"online\": true,\n      \"role\": \"reviewer\",\n      \"host\": \"myserver\",\n      \"description\": \"reviews pull requests\",\n      \"capability\": [\n        \"review\"\n      ],\n      \"labels\": {\n        \"team\": \"blue\"\n      }\n    },\n    {\n      \"address\": \"acme.demo.bob\",\n      \"online\": false,\n      \"role\": null,\n      \"host\": null,\n      \"description\": null,\n      \"capability\": [],\n      \"labels\": {}\n    }\n  ]\n}",
-        "stream": "stdout",
-        "exit": 0,
-        "issue": "#1042",
-        "note": "--json is shown as it prints at a terminal (indented); piped it is one compact line (rule \"--json prints one object\"). The key stays capability, as today: ADR 0049 says who JSON fields are added, never renamed or removed (the one exception to plural list keys). Unset fields stay null. The same in the MCP tool's structured result, which is the same object.",
-        "verbatim": true
-       }
-      ]
      }
     ]
    },
@@ -1619,6 +1613,14 @@
         "text": "mash v0.0.0-dev (unknown)",
         "stream": "stdout",
         "exit": 0
+       },
+       {
+        "case": "--json, no plugin",
+        "text": "{\n  \"version\": \"0.5.9\",\n  \"commit\": \"3f9a41c2e0b7d5a1c4e08b2d77f3a95e1b6c4098\",\n  \"plugin\": null\n}",
+        "stream": "stdout",
+        "exit": 0,
+        "note": "--json is shown as it prints at a terminal (indented); piped it is one compact line (rule \"--json prints one object\"). When there is no plugin the value is null. The key is always present.",
+        "verbatim": true
        }
       ]
      },
@@ -1644,20 +1646,6 @@
      {
       "name": "x-notes",
       "value": "The short commit in brackets, seven characters, tells two builds of the same version apart. --json carries the whole commit, so a tool that pins a version can compare it exactly."
-     },
-     {
-      "name": "x-output-next",
-      "value": [
-       {
-        "case": "--json, no plugin",
-        "text": "{\n  \"version\": \"0.5.9\",\n  \"commit\": \"3f9a41c2e0b7d5a1c4e08b2d77f3a95e1b6c4098\",\n  \"plugin\": null\n}",
-        "stream": "stdout",
-        "exit": 0,
-        "issue": "#1042",
-        "note": "--json is shown as it prints at a terminal (indented); piped it is one compact line (rule \"--json prints one object\"). When there is no plugin the value is null (today \"plugin\": \"\"). The key is always present.",
-        "verbatim": true
-       }
-      ]
      }
     ]
    },

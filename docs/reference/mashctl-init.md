@@ -97,6 +97,36 @@ Stream: stderr. Exit code: 0.
 (no warning line; the result line is as in "A signing key is set")
 ```
 
+### A signing key is set, with --json
+
+Stream: stdout. Exit code: 0.
+
+```text
+{
+  "servers": [
+    "tls://localhost:4222"
+  ],
+  "owner": "acme",
+  "changed": true,
+  "signing_key_pub": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+}
+```
+
+### No signing key is set, with --json
+
+Stream: stdout. Exit code: 0.
+
+```text
+{
+  "servers": [
+    "tls://localhost:4222"
+  ],
+  "owner": "acme",
+  "changed": true,
+  "signing_key_pub": null
+}
+```
+
 ## JSON
 
 With `--json` the result is this shape. The values are an example.

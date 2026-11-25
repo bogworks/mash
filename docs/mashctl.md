@@ -246,11 +246,11 @@ public key: UDXU4RCSV3GJRXWQ4PNDKYEL7ZBSMSGGTJYNDQGHFM4QWHBRD3ZTQ4LX
 
 `role`, `host`, `description`, `capability` and `note` lines appear when the record has them. The labels are padded to the longest label in the block plus one space, so with a `description` the values start one column further right. It exits 1 when the endpoint does not exist. Both change nothing.
 
-`--json` prints, for `list`, `{"endpoints": [{"address", "owner", "group", "name", "online", "suspended"}]}`, and for `show`, `address`, `online`, `suspended`, `created` (RFC 3339), `waiting`, `labels`, `public_key` and the optional fields above.
+`--json` prints, for `list`, `{"endpoints": [{"address", "owner", "group", "name", "online", "suspended"}]}`, and for `show`, `address`, `online`, `suspended`, `created` (RFC 3339), `waiting`, `role`, `host`, `description` and `note` (each `null` when unset, never `""` and never left out), `capabilities` (a list, `[]` when none), `labels` and `public_key`.
 
 ## mashctl version
 
-`mashctl version` prints `mashctl vVERSION (COMMIT)`, where COMMIT is the first seven characters of the commit the binary was built from (`unknown` when the build has none). `--json` prints `{"version": "VERSION", "commit": "COMMIT"}` with the whole commit, all 40 characters (`unknown` when the build has none).
+`mashctl version` prints `mashctl vVERSION (COMMIT)`, where COMMIT is the first seven characters of the commit the binary was built from (`unknown` when the build has none). `--json` prints `{"version": "VERSION", "commit": "COMMIT", "plugin": null}` (the same three keys as `mash version --json`; `mashctl` has no plugin) with the whole commit, all 40 characters (`unknown` when the build has none).
 
 ## mash key create and mash join
 

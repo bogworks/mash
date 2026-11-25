@@ -48,6 +48,18 @@ Stream: stdout. Exit code: 0.
 mashctl v0.0.0-dev (unknown)
 ```
 
+### --json
+
+Stream: stdout. Exit code: 0.
+
+```text
+{
+  "version": "0.5.9",
+  "commit": "3f9a41c2e0b7d5a1c4e08b2d77f3a95e1b6c4098",
+  "plugin": null
+}
+```
+
 ## JSON
 
 With `--json` the result is this shape. The values are an example.
