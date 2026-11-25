@@ -792,7 +792,7 @@ func TestMergify_exceptionPathsNeedTheLabelToQueue(t *testing.T) {
 // The shipped assets (install.sh, the mash-* scripts) are product, not CI, and stay out.
 func TestMergify_exceptionRegexCoversTheScriptsWorkflowsRun(t *testing.T) {
 	re := exceptionGroup(t, loadMergify(t), "default")
-	files, err := filepath.Glob("../../.github/workflows/*.yml")
+	files, err := filepath.Glob(filepath.Join(repoRoot(t), ".github", "workflows", "*.yml"))
 	if err != nil || len(files) == 0 {
 		t.Fatalf("no workflows found: %v", err)
 	}
