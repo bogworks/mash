@@ -888,6 +888,11 @@ func latencyStep(ctx context.Context, o Options, b *binaries) error {
 	if oerr != nil {
 		return oerr
 	}
+	if b.hasPrev && b.prev == "" && b.prevErr != nil {
+		// The gate could not get its baseline: that says nothing about the candidate, so it is operational (exit 4),
+		// not a latency refusal (#1505). The plugin step names the same download failure.
+		return op(fmt.Errorf("fresh-session mail: no baseline, the previous release %s could not be downloaded: %w", b.prevTag, b.prevErr))
+	}
 	var pp *latencies
 	switch {
 	case comparePrev:

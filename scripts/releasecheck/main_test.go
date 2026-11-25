@@ -1081,8 +1081,8 @@ func TestCheck_pluginRunsAgainstTheCandidateToo(t *testing.T) {
 }
 
 // Without the seam the binary comes from gh release download; a gh that cannot is the gate failing, not a refusal.
-// That is the plugin step's verdict. The whole check refuses as well since the latency step has no baseline to compare
-// with and says so as a finding (#1387): the missing baseline is a consequence, and the cause is still named.
+// That is the plugin step's verdict, and the latency step, which has no baseline because of it, is operational too
+// (#1505): the whole check exits 4 and names the failed download, never a latency refusal (3).
 func TestCheck_aFailedDownloadOfThePreviousReleaseIsFour(t *testing.T) {
 	f := newFixture(t)
 	gitT(t, f.repo, "tag", "v0.0.9", f.x)
@@ -1093,8 +1093,11 @@ func TestCheck_aFailedDownloadOfThePreviousReleaseIsFour(t *testing.T) {
 		t.Fatalf("the plugin step: want an operational error for the failed download, got %v", err)
 	}
 	err = f.check()
-	if err == nil || !strings.Contains(err.Error(), "no assets match") {
-		t.Fatalf("check: want a failure naming the failed download, got %v (exit %d)", err, exitCode(err))
+	if err == nil || !strings.Contains(err.Error(), "no assets match") || exitCode(err) != 4 {
+		t.Fatalf("check: want exit 4 naming the failed download, got %v (exit %d)", err, exitCode(err))
+	}
+	if strings.Contains(err.Error(), "no previous release to compare with") {
+		t.Fatalf("check: the missing baseline is a latency refusal, want operational only: %v", err)
 	}
 	log, _ := os.ReadFile(filepath.Join(filepath.Dir(f.o.GH), "gh.log"))
 	if want := "release download v0.0.9 "; !strings.Contains(string(log), want) || !strings.Contains(string(log), "-p mash-") {

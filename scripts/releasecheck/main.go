@@ -1133,6 +1133,7 @@ func pluginCompat(ctx context.Context, o Options, x string, b *binaries) error {
 	}
 	got, err := dl(ctx, prev, dlDir)
 	if err != nil {
+		b.prevErr = err
 		return op(err)
 	}
 	bin, err := stageMash(work, "prev-bin", got)
@@ -1217,7 +1218,8 @@ type binaries struct {
 	cand    string // the candidate's binary; empty until built
 	prev    string // the previous release's binary; empty when there is none or it was not fetched
 	prevTag string
-	hasPrev bool // a previous release exists, whether or not its binary was fetched
+	hasPrev bool  // a previous release exists, whether or not its binary was fetched
+	prevErr error // why its binary was not fetched, when the download failed: the latency step has no baseline because of it (#1505)
 	mcpArgs []string
 	mcpEnv  map[string]string
 	mcpRoot string // the candidate's plugin directory when its MCP command is the launcher; empty otherwise
