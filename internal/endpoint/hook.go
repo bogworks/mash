@@ -64,6 +64,12 @@ var (
 // SetSpool hands delivery to s once a hook has run in this session (after this call). Call it before Run, and only
 // once this serve holds the lease: owner is its owner record (host.Adapter.OwnerToken), which then owns the spool.
 func (e *Endpoint) SetSpool(s spool.Spool, owner string) error {
+	return e.SetSpoolContext(context.Background(), s, owner)
+}
+
+// SetSpoolContext is SetSpool that gives up when ctx ends: serve passes its own, so a connection that is reconnecting
+// cannot hold up the exit after stdin closes.
+func (e *Endpoint) SetSpoolContext(ctx context.Context, s spool.Spool, owner string) error {
 	if err := s.Init(); err != nil {
 		return err
 	}
@@ -76,7 +82,7 @@ func (e *Endpoint) SetSpool(s spool.Spool, owner string) error {
 	defer unlock()
 	// Tombstones are keyed by stream sequence, which restarts when the stream is recreated: bind the spool to this
 	// stream's identity so an old stream's tombstone never acks new mail (codex H1 on #21, round 2).
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	// Asked for here, never taken from a read made earlier (e.inbox may hand back one a one-shot client prefetched):
 	// a stream recreated since, while this session waited for the lease, would bind the spool to the old identity,
