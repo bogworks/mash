@@ -127,3 +127,21 @@ func TestPromptFailureKeepsConfigExitCode(t *testing.T) {
 		}
 	}
 }
+
+// The usage error comes out of run too, ahead of a configuration error: exit 2, not the configuration's exit 1.
+func TestPromptUsageBeatsAConfigurationError(t *testing.T) {
+	env := func(k string) string {
+		if k == "MASH_CALL_TIMEOUT" {
+			return "zz" // a configuration error: run reports it as exit 1 before any command runs
+		}
+		return ""
+	}
+	for _, args := range [][]string{{"prompt"}, {"prompt", "o.dev.zed"}} {
+		var stdout, stderr bytes.Buffer
+		code := run(args, env, strings.NewReader(""), &stdout, &stderr)
+		want := "error: mash prompt needs <to> and the message text\nhint: mash prompt --help\n"
+		if code != 2 || stderr.String() != want || stdout.Len() != 0 {
+			t.Errorf("%v: exit %d, stderr %q, stdout %q", args, code, stderr.String(), stdout.String())
+		}
+	}
+}
