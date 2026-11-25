@@ -93,47 +93,75 @@ func evaluate(runs []CheckRun, x string) (ciState, error) {
 	return ciPassed, nil
 }
 
-// CheckCIWalk is CheckCI for a candidate that may be docs-only. If x's required checks passed, it is CheckCI. If they
+// CheckCIWalkCited is CheckCI for a candidate that may be docs-only, and names the runs that decided. If x's required checks passed, it is CheckCI. If they
 // were skipped or never ran, x must change only documentation (IsDocsPath), and so must every commit back along main's
 // first parent until one whose required checks ran and succeeded; that commit decides. A docs-only commit therefore
 // can neither break the gate nor stand in for tests: the code it carries is the tested ancestor's code. A code commit
 // without passing checks, a failed or cancelled run, a spoofed run, or no tested ancestor within MaxDocsWalk is refused.
 // chain lists x first, then its first parents, newest first; runsFor reads one commit's check runs.
-func CheckCIWalk(x string, chain []Commit, runsFor func(sha string) ([]CheckRun, error)) error {
+func CheckCIWalkCited(x string, chain []Commit, runsFor func(sha string) ([]CheckRun, error)) (cited []CheckRun, at string, above int, err error) {
 	if len(chain) == 0 || chain[0].SHA != x {
-		return errors.New("the first-parent chain does not start at the candidate")
+		return nil, "", 0, errors.New("the first-parent chain does not start at the candidate")
 	}
 	for i, c := range chain {
 		if i >= MaxDocsWalk {
-			return fmt.Errorf("CI: no commit with passing required checks within %d commits of the candidate", MaxDocsWalk)
+			return nil, "", 0, fmt.Errorf("CI: no commit with passing required checks within %d commits of the candidate", MaxDocsWalk)
 		}
 		runs, err := runsFor(c.SHA)
 		if err != nil {
-			return err
+			return nil, "", 0, err
 		}
 		state, eerr := evaluate(runs, c.SHA)
 		if eerr != nil {
 			if i == 0 {
-				return eerr
+				return nil, "", 0, eerr
 			}
-			return fmt.Errorf("commit %s on the way back: %w", short(c.SHA), eerr)
+			return nil, "", 0, fmt.Errorf("commit %s on the way back: %w", short(c.SHA), eerr)
 		}
 		if state == ciPassed {
-			return nil // tested, and every commit above it was docs-only
+			return CitedRuns(runs, c.SHA), c.SHA, i, nil // tested, and every commit above it was docs-only
 		}
 		if len(c.Paths) == 0 { // scripts/ci-changes: an empty path list is code
-			return fmt.Errorf("commit %s has no passing checks and no changed paths to judge as docs-only", short(c.SHA))
+			return nil, "", 0, fmt.Errorf("commit %s has no passing checks and no changed paths to judge as docs-only", short(c.SHA))
 		}
 		for _, p := range c.Paths {
 			if !IsDocsPath(p) {
 				if i == 0 {
-					return fmt.Errorf("CI check runs did not run on the candidate and it is not docs-only (%s)", p)
+					return nil, "", 0, fmt.Errorf("CI check runs did not run on the candidate and it is not docs-only (%s)", p)
 				}
-				return fmt.Errorf("commit %s on the way back has no passing checks and is not docs-only (%s)", short(c.SHA), p)
+				return nil, "", 0, fmt.Errorf("commit %s on the way back has no passing checks and is not docs-only (%s)", short(c.SHA), p)
 			}
 		}
 	}
-	return fmt.Errorf("CI: no commit with passing required checks in the %d commits given", len(chain))
+	return nil, "", 0, fmt.Errorf("CI: no commit with passing required checks in the %d commits given", len(chain))
+}
+
+// CheckCIWalk is CheckCIWalkCited without the citation.
+func CheckCIWalk(x string, chain []Commit, runsFor func(sha string) ([]CheckRun, error)) error {
+	_, _, _, err := CheckCIWalkCited(x, chain, runsFor)
+	return err
+}
+
+// CitedRuns is the run the gate accepts for each required check on commit x: the highest-id completed, successful,
+// not-skipped run of the CI app for x. Checks with no such run are omitted. A release record cites these runs.
+func CitedRuns(runs []CheckRun, x string) []CheckRun {
+	var out []CheckRun
+	for _, name := range RequiredChecks {
+		var best *CheckRun
+		for i := range runs {
+			r := &runs[i]
+			if r.Name != name || r.HeadSHA != x || r.App.Slug != CIApp || r.Status != "completed" || r.Conclusion != "success" {
+				continue
+			}
+			if best == nil || r.ID > best.ID {
+				best = r
+			}
+		}
+		if best != nil {
+			out = append(out, *best)
+		}
+	}
+	return out
 }
 
 func short(sha string) string {

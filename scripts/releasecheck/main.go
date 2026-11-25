@@ -334,6 +334,21 @@ func (r *report) step(name string, err error) bool {
 	return true
 }
 
+// cite prints the check run accepted for each required check, under the CI step. These lines are neither steps nor problems.
+func (r *report) cite(runs []release.CheckRun, at, x string, above int) {
+	for _, c := range runs {
+		line := fmt.Sprintf("      %s: check run %d", c.Name, c.ID)
+		if c.HTMLURL != "" {
+			line += " " + c.HTMLURL
+		}
+		line += " on " + at[:min(12, len(at))]
+		if at != x {
+			line += fmt.Sprintf(" (tested ancestor of the docs-only candidate, %d docs-only commit(s) above it)", above)
+		}
+		fmt.Fprintln(r.out, line)
+	}
+}
+
 // ok is whether every step so far passed.
 func (r *report) ok() bool { return len(r.problems) == 0 }
 
@@ -379,15 +394,19 @@ func check(ctx context.Context, o Options) error {
 		r.step("CI check runs", op(err))
 	} else if release.CheckCI(runs, x) == nil {
 		r.step("CI check runs succeeded", nil)
+		r.cite(release.CitedRuns(runs, x), x, x, 0)
 	} else if chain, cerr := firstParentChain(o, x, release.MaxDocsWalk); cerr != nil {
 		r.step("CI check runs succeeded", release.CheckCI(runs, x))
 	} else {
-		r.step("CI check runs succeeded", release.CheckCIWalk(x, chain, func(sha string) ([]release.CheckRun, error) {
+		cited, at, above, werr := release.CheckCIWalkCited(x, chain, func(sha string) ([]release.CheckRun, error) {
 			if sha == x {
 				return runs, nil
 			}
 			return checkRuns(o, sha)
-		}))
+		})
+		if r.step("CI check runs succeeded", werr) {
+			r.cite(cited, at, x, above)
+		}
 	}
 
 	// No earlier release was left a draft or unreleased.

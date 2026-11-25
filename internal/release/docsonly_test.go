@@ -192,3 +192,64 @@ func TestCheckCIWalk_chainMustStartAtTheCandidate(t *testing.T) {
 		t.Fatal("a chain that does not start at the candidate must be refused")
 	}
 }
+
+func TestCitedRuns(t *testing.T) {
+	x := fp("a")
+	n0, n1 := RequiredChecks[0], RequiredChecks[1]
+	mk := func(id int64, name, status, concl, app string) CheckRun {
+		r := CheckRun{ID: id, HeadSHA: x, Name: name, Status: status, Conclusion: concl}
+		r.App.Slug = app
+		return r
+	}
+	cases := []struct {
+		name string
+		runs []CheckRun
+		want map[string]int64
+	}{
+		{"latest tested wins over a later skipped", []CheckRun{mk(5, n0, "completed", "success", CIApp), mk(9, n0, "completed", "skipped", CIApp)}, map[string]int64{n0: 5}},
+		{"queue success then a later push skipped cites the success", []CheckRun{mk(3, n0, "completed", "success", CIApp), mk(4, n1, "completed", "success", CIApp), mk(8, n0, "completed", "skipped", CIApp), mk(9, n1, "completed", "skipped", CIApp)}, map[string]int64{n0: 3, n1: 4}},
+		{"the highest id among successes", []CheckRun{mk(2, n0, "completed", "success", CIApp), mk(7, n0, "completed", "success", CIApp)}, map[string]int64{n0: 7}},
+		{"another app is never cited", []CheckRun{mk(2, n0, "completed", "success", "someone-else")}, map[string]int64{}},
+		{"a failed run is not cited", []CheckRun{mk(2, n0, "completed", "failure", CIApp)}, map[string]int64{}},
+		{"an unfinished run is not cited", []CheckRun{mk(2, n0, "in_progress", "", CIApp)}, map[string]int64{}},
+		{"a run for another commit is not cited", []CheckRun{func() CheckRun { r := mk(2, n0, "completed", "success", CIApp); r.HeadSHA = fp("b"); return r }()}, map[string]int64{}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := CitedRuns(c.runs, x)
+			if len(got) != len(c.want) {
+				t.Fatalf("got %d cited runs %+v, want %v", len(got), got, c.want)
+			}
+			for _, r := range got {
+				if c.want[r.Name] != r.ID {
+					t.Errorf("cited %s run %d, want %d", r.Name, r.ID, c.want[r.Name])
+				}
+			}
+		})
+	}
+	got := CitedRuns(append(runsFor(x, allOK()), skippedAt(x, 10)...), x)
+	if len(got) != len(RequiredChecks) || got[0].Name != RequiredChecks[0] {
+		t.Errorf("citations are not in RequiredChecks order: %+v", got)
+	}
+}
+
+func TestCheckCIWalkCited(t *testing.T) {
+	x, p1, p2 := fp("a"), fp("b"), fp("c")
+	docs, code := []string{"README.md"}, []string{"internal/x/y.go"}
+	byS := map[string][]CheckRun{x: runsFor(x, allSkipped()), p1: nil, p2: runsFor(p2, allOK())}
+	chain := []Commit{{x, docs}, {p1, docs}, {p2, code}}
+	cited, at, above, err := CheckCIWalkCited(x, chain, func(sha string) ([]CheckRun, error) { return byS[sha], nil })
+	if err != nil || at != p2 || above != 2 || len(cited) != len(RequiredChecks) {
+		t.Fatalf("got cited=%v at=%s above=%d err=%v, want the ancestor %s with 2 above", cited, at, above, err, p2)
+	}
+	for _, c := range cited {
+		if c.HeadSHA != p2 {
+			t.Errorf("cited a run of %s, want %s", c.HeadSHA, p2)
+		}
+	}
+	byS[x] = runsFor(x, allOK())
+	cited, at, above, err = CheckCIWalkCited(x, chain[:1], func(sha string) ([]CheckRun, error) { return byS[sha], nil })
+	if err != nil || at != x || above != 0 || len(cited) != len(RequiredChecks) {
+		t.Fatalf("direct: got cited=%v at=%s above=%d err=%v", cited, at, above, err)
+	}
+}
