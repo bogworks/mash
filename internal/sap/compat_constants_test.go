@@ -30,15 +30,32 @@ func TestCompatTrustConstantsMatchSpoolGolden(t *testing.T) {
 				if !ok || gd.Tok != token.CONST {
 					continue
 				}
-				// Only a spec that states both the type and a string value counts; every Trust constant does.
+				// A Trust constant is written as `Name Trust = "v"`, as `Name = Trust("v")`, or as a bare name that repeats the
+				// previous spec of its group (the type and the value both carry over). Each form is collected.
+				var lastType ast.Expr
+				var lastValues []ast.Expr
 				for _, sp := range gd.Specs {
 					vs := sp.(*ast.ValueSpec)
-					id, ok := vs.Type.(*ast.Ident)
-					if !ok || id.Name != "Trust" {
-						continue
+					typ, values := vs.Type, vs.Values
+					if typ == nil && len(values) == 0 { // an implicit repetition of the previous spec
+						typ, values = lastType, lastValues
+					} else {
+						lastType, lastValues = typ, values
 					}
-					for _, v := range vs.Values {
-						if lit, ok := v.(*ast.BasicLit); ok && lit.Kind == token.STRING {
+					isTrust := func(e ast.Expr) bool { id, ok := e.(*ast.Ident); return ok && id.Name == "Trust" }
+					for _, v := range values {
+						var lit *ast.BasicLit
+						switch x := v.(type) {
+						case *ast.BasicLit:
+							if isTrust(typ) {
+								lit = x
+							}
+						case *ast.CallExpr: // Trust("new")
+							if len(x.Args) == 1 && isTrust(x.Fun) {
+								lit, _ = x.Args[0].(*ast.BasicLit)
+							}
+						}
+						if lit != nil && lit.Kind == token.STRING {
 							s, err := strconv.Unquote(lit.Value)
 							if err != nil {
 								t.Fatal(err)
