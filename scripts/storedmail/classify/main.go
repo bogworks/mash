@@ -205,7 +205,13 @@ func (k *kit) sendAll(r *result, a, b string) error {
 				return
 			}
 			r.refused++
-			fmt.Fprintf(os.Stderr, "note: %s send %v refused: %v\n", r.tag, args, err)
+			if !lacksFlag(err) { // any other failure of a supported send is a broken send path: the run fails
+				if basicErr == nil {
+					basicErr = fmt.Errorf("send %v failed: %w", args, err)
+				}
+				return
+			}
+			fmt.Fprintf(os.Stderr, "note: %s send %v: this release lacks the flag: %v\n", r.tag, args, err)
 		}
 	}
 	send(true, a, "", to(b), "hello bob")
@@ -219,6 +225,13 @@ func (k *kit) sendAll(r *result, a, b string) error {
 	send(false, b, "", to(a), "unicode é世界", "--kind", "fyi")
 	send(false, a, "", to(b), "relayed", "--relay", "1")
 	return basicErr
+}
+
+// lacksFlag is true when a send failed because this release does not know a flag (the only reason a case is skipped).
+func lacksFlag(err error) bool {
+	m := strings.ToLower(err.Error())
+	return strings.Contains(m, "unknown flag") || strings.Contains(m, "unknown option") ||
+		strings.Contains(m, "flag provided but not defined") || strings.Contains(m, "unrecognized")
 }
 
 // check reads every message of one inbox stream and classifies it, with its header and without.
