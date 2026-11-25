@@ -390,10 +390,7 @@ pins file is unpinned and uses `mash` from PATH.
 source tree whose HEAD is not X, that holds any untracked or ignored file, or that contains the output, and runs
 `go mod download` + `go mod verify` first, so the module cache is what `go.sum` names.
 
-The build may also set `-X github.com/bogworks/mash/internal/cliframe.ReleaseBase=<base>`: the release base the 0.5.5
-migration hint is written from (default `https://github.com/bogworks/mash/releases/latest/download`; a fork sets it to
-its own release base). The plugin launcher's own install hint uses `REPO_URL` in `plugin/scripts/mash`, a shell setting;
-the two are the same project default.
+The plugin launcher's own install hint uses `REPO_URL` in `plugin/scripts/mash`, a shell setting.
 
 ## Build provenance
 
@@ -420,7 +417,7 @@ artifact and the draft job attaches it. No reusable workflow of another reposito
 ([ADR 0079](decisions/0079-ci-and-release-jobs-run-on-self-hosted-runners-only.md)). mash meets SLSA v1.0 Build L2, not L3: the
 attestation is made by a step inside mash's own workflow, with the signer identity of `release.yml`. The `attest` job holds
 `id-token: write`, `attestations: write` and `contents: read`, and no other job but `attest-sbom` holds the signing
-permissions. The release assets from 0.3.2 are the four binaries, the four `.cdx.json` files (from the release that adds `mashctl`: eight and eight, ADR 0148; from the release that adds the two scripts, also `install.sh` and `mash-local-nats-setup.sh`, [ADR 0150](decisions/0150-releases-carry-install-and-local-nats-setup-scripts-as-attested-assets.md); from the release that adds the migration script, also `mash-migrate-0.5.5.sh`, [ADR 0152](decisions/0152-the-release-carries-a-one-time-0-5-5-migration-script.md)), `mash.intoto.jsonl`,
+permissions. The release assets from 0.3.2 are the four binaries, the four `.cdx.json` files (from the release that adds `mashctl`: eight and eight, ADR 0148; from the release that adds the two scripts, also `install.sh` and `mash-local-nats-setup.sh`, [ADR 0150](decisions/0150-releases-carry-install-and-local-nats-setup-scripts-as-attested-assets.md); from the release that adds the migration script, also `mash-migrate-0.5.5.sh` (releases 0.5.8 and 0.5.9 only; 0.5.10 and later do not carry it), [ADR 0152](decisions/0152-the-release-carries-a-one-time-0-5-5-migration-script.md), removed again by [ADR 0180](decisions/0180-the-0-5-5-migration-script-and-the-refusal-of-a-0-5-5-configuration-folder-are-removed-in-0-5-10.md)), `mash.intoto.jsonl`,
 `SHA256SUMS` and `SHA256SUMS.sig`. The reasoning, and what is not yet true, is in
 [decision 0051](decisions/0051-releases-carry-an-sbom-per-binary-and-slsa-provenance.md) (whose isolated generator ADR 0079 replaces
 with the in-job attestation).

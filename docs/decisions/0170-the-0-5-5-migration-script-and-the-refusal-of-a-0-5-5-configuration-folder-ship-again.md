@@ -1,10 +1,11 @@
 ---
-status: accepted
+status: superseded by ADR-0180
 date: 2026-11-24
 decision-makers: Randy Bias (mash maintainer)
 ---
 
 # The 0.5.5 migration script and the refusal of a 0.5.5 configuration folder ship again
+Superseded by [0180](0180-the-0-5-5-migration-script-and-the-refusal-of-a-0-5-5-configuration-folder-are-removed-in-0-5-10.md).
 
 ## Context and Problem Statement
 

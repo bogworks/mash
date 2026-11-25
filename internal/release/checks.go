@@ -5,8 +5,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -124,22 +126,64 @@ func Binaries() []Binary {
 	return out
 }
 
-// ProvenanceName is the provenance asset (the Sigstore bundle) covering the eight binaries, the three scripts and SHA256SUMS.
+// ProvenanceName is the provenance asset (the Sigstore bundle) covering the eight binaries, the two scripts and SHA256SUMS.
 const ProvenanceName = "mash.intoto.jsonl"
 
-// ScriptNames are the three scripts a release carries beside the binaries (ADR 0150), named exactly as the repository's
-// scripts/ files are, in the order SHA256SUMS lists them (after the binaries, before the SBOMs). They are the repository's
-// own files at the release commit, copied unchanged, and are subjects of the provenance attestation like the binaries.
-// They have no SBOM.
-func ScriptNames() []string {
-	return []string{"install.sh", "mash-local-nats-setup.sh", "mash-migrate-0.5.5.sh"}
+// MigrationScriptName is the one-time 0.5.5 configuration migration script that releases up to and including
+// MigrationScriptLastVersion carried as a third script (ADR 0152). From 0.5.10 on it is not a release asset (ADR 0180),
+// and scripts/ no longer holds it; the published releases that carry it are still re-verified, so they are still held to it.
+// Every version up to and including 0.5.9 is held to the third script, also those before 0.5.5, which shipped no scripts
+// at all: the check does not tell them apart.
+const MigrationScriptName = "mash-migrate-0.5.5.sh"
+
+// MigrationScriptLastVersion is the last release that carries MigrationScriptName.
+const MigrationScriptLastVersion = "0.5.9"
+
+var versionRE = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
+
+// versionKey parses N.N.N strictly (no leading zeros, unlike tagKey).
+func versionKey(v string) ([3]int, bool) {
+	var k [3]int
+	m := versionRE.FindStringSubmatch(v)
+	if m == nil {
+		return k, false
+	}
+	for i := range k {
+		n, err := strconv.Atoi(m[i+1])
+		if err != nil {
+			return k, false
+		}
+		k[i] = n
+	}
+	return k, true
 }
 
-// CIAssetNames are the assets release.yml makes that the gate cannot rebuild: the three scripts, each binary's SBOM in
+// carriesMigrationScript reports whether the release of version (N.N.N, no leading v) carries MigrationScriptName: it
+// parses and is at or below MigrationScriptLastVersion. An empty or unparsable version does not.
+func carriesMigrationScript(version string) bool {
+	a, ok := versionKey(version)
+	last, _ := versionKey(MigrationScriptLastVersion)
+	return ok && !less(last, a)
+}
+
+// ScriptNamesFor are the scripts the release of version (N.N.N) carries beside the binaries (ADR 0150), named exactly as
+// the repository's scripts/ files are, in the order SHA256SUMS lists them (after the binaries, before the SBOMs). They
+// are the repository's own files at the release commit, copied unchanged, and are subjects of the provenance attestation
+// like the binaries. They have no SBOM. From 0.5.10 (and for an empty or unparsable version) they are install.sh and
+// mash-local-nats-setup.sh; releases up to and including 0.5.9 carry MigrationScriptName as a third.
+func ScriptNamesFor(version string) []string {
+	n := []string{"install.sh", "mash-local-nats-setup.sh"}
+	if carriesMigrationScript(version) {
+		n = append(n, MigrationScriptName)
+	}
+	return n
+}
+
+// CIAssetNames are the assets release.yml makes that the gate cannot rebuild: the two scripts, each binary's SBOM in
 // Binaries order, then the SLSA provenance. They are attached by name and listed in SHA256SUMS; the gate verifies their
 // contents (the scripts are compared with the repository's, `release-check`; the rest by their attestations).
-func CIAssetNames() []string {
-	n := ScriptNames()
+func CIAssetNames(version string) []string {
+	n := ScriptNamesFor(version)
 	for _, b := range Binaries() {
 		n = append(n, b.SBOMName())
 	}
@@ -148,8 +192,8 @@ func CIAssetNames() []string {
 
 // SumsCINames are the CIAssetNames that SHA256SUMS lists: all of them, or, for a keyless release, all but the
 // provenance bundle.
-func SumsCINames(keyless bool) []string {
-	n := CIAssetNames()
+func SumsCINames(version string, keyless bool) []string {
+	n := CIAssetNames(version)
 	if keyless {
 		n = n[:len(n)-1] // the provenance is last
 	}
@@ -169,16 +213,16 @@ const SumsSigName = "SHA256SUMS.sig"
 const SumsNamespace = "mash-release"
 
 // ExpectedSums is the exact SHA256SUMS content for the given per-binary hashes (hex SHA-256 of each binary) and the
-// hex SHA-256 of each CIAssetNames file (ci, by name): the binaries, the three scripts, the
+// hex SHA-256 of each CIAssetNames file (ci, by name): the binaries, the two scripts, the
 // SBOMs and the provenance, in that order, as release.yml's draft job lists them. A name missing from ci is left out.
 // A keyless release (at or above the cutover) lists the same names except the provenance bundle: it cannot list itself,
 // as release.yml makes the sums before the job that attests.
-func ExpectedSums(hashes map[Binary]string, ci map[string]string, keyless bool) string {
+func ExpectedSums(version string, hashes map[Binary]string, ci map[string]string, keyless bool) string {
 	var b strings.Builder
 	for _, bin := range Binaries() {
 		fmt.Fprintf(&b, "%s  %s\n", hashes[bin], bin.AssetName())
 	}
-	for _, n := range SumsCINames(keyless) {
+	for _, n := range SumsCINames(version, keyless) {
 		if h, ok := ci[n]; ok {
 			fmt.Fprintf(&b, "%s  %s\n", h, n)
 		}
@@ -192,18 +236,18 @@ func sha(b []byte) string {
 }
 
 // CheckAssets judges a draft release's assets (name -> GitHub's "sha256:<hex>" digest) against our own fresh builds
-// of the candidate: exactly the eight binaries (mash and mashctl for each target), the three scripts, their eight SBOMs, the SLSA provenance and
+// of the candidate: exactly the eight binaries (mash and mashctl for each target), the two scripts, their eight SBOMs, the SLSA provenance and
 // SHA256SUMS, nothing else; each binary's digest is the hash of our build for that target; the SBOMs and the provenance must be attached (their contents are verified separately, as
 // they cannot be rebuilt); and SHA256SUMS is exactly the file those hashes and the attached digests produce. It names
 // every problem. For a keyless release (at or above the cutover) SHA256SUMS omits the provenance bundle (which stays
 // required to be attached), and a SHA256SUMS.sig is not allowed. An asset whose digest GitHub did not give (empty or
 // absent) is reported as "digest not available" by name, still a refusal, and the empty value is never compared.
-func CheckAssets(have map[string]string, hashes map[Binary]string, keyless bool) error {
+func CheckAssets(version string, have map[string]string, hashes map[Binary]string, keyless bool) error {
 	var problems []string
 	add := func(f string, a ...any) { problems = append(problems, fmt.Sprintf(f, a...)) }
 	want := map[string]string{}
 	ci := map[string]string{}
-	for _, n := range CIAssetNames() {
+	for _, n := range CIAssetNames(version) {
 		got, ok := have[n]
 		hex, found := strings.CutPrefix(got, "sha256:")
 		switch {
@@ -218,7 +262,7 @@ func CheckAssets(have map[string]string, hashes map[Binary]string, keyless bool)
 			want[n] = got
 		}
 	}
-	want[SumsName] = "sha256:" + sha([]byte(ExpectedSums(hashes, ci, keyless)))
+	want[SumsName] = "sha256:" + sha([]byte(ExpectedSums(version, hashes, ci, keyless)))
 	for _, t := range Binaries() {
 		h, ok := hashes[t]
 		if !ok || len(h) != 64 {
@@ -252,12 +296,12 @@ func CheckAssets(have map[string]string, hashes map[Binary]string, keyless bool)
 	return joined(problems)
 }
 
-// CheckScripts holds the two release scripts to the repository: each of ScriptNames must be attached with exactly the
+// CheckScripts holds the release scripts to the repository: each of ScriptNamesFor(version) must be attached with exactly the
 // digest of the bytes the repository holds at the release commit (content, by name; read with `git show <commit>:scripts/<name>`).
 // A script that differs, or that is missing from either side, is named.
-func CheckScripts(have map[string]string, content map[string][]byte) error {
+func CheckScripts(version string, have map[string]string, content map[string][]byte) error {
 	var problems []string
-	for _, n := range ScriptNames() {
+	for _, n := range ScriptNamesFor(version) {
 		b, ok := content[n]
 		if !ok {
 			problems = append(problems, fmt.Sprintf("no copy of scripts/%s at the release commit to compare %s with", n, n))
