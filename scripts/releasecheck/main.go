@@ -6,7 +6,7 @@
 //	release-check [--receipts <dir>] <X> <version>   as the first form; --receipts holds the upgrade-proof receipts to the candidate (REQ-019), required from 0.6.0
 //	release-check --compat <older> <newer> the published binary of each version reads the mail the other writes (REQ-014)
 //	release-check --policy-tests           run the policy tests of REQ-020 alone (scripts/releasecheck/policytests.txt)
-//	release-check publish [--wait <d>] [--not-latest] <version> <X>     the whole path, resumable: gate, signed tag, draft, --assets gate, publish, verify
+//	release-check publish [--wait <d>] [--not-latest] [--receipts <dir>] <version> <X>     the whole path, resumable: gate, signed tag, draft, --assets gate, publish, verify
 //
 // It verifies the candidate is on main of the release repository; CI's check runs on X succeeded; X builds, from
 // fresh clones in different directories, to identical bytes whose `version` line is exactly "mash v<version> (<first 7 characters of X>)".
@@ -105,8 +105,18 @@ func parseArgs(args []string) (o Options, assets bool, err error) {
 		for i := 0; i < len(rest); i++ {
 			a := rest[i]
 			switch {
-			case a == "--assets" || a == "--consumer" || a == "publish" || a == "--receipts" || strings.HasPrefix(a, "--receipts="):
+			case a == "--assets" || a == "--consumer" || a == "publish":
 				return o, false, errors.New("publish does not combine with other modes")
+			case a == "--receipts":
+				if i+1 >= len(rest) || rest[i+1] == "" || strings.HasPrefix(rest[i+1], "--") {
+					return o, false, errors.New("--receipts needs a directory")
+				}
+				i++
+				o.Receipts = rest[i]
+			case strings.HasPrefix(a, "--receipts="):
+				if o.Receipts = strings.TrimPrefix(a, "--receipts="); o.Receipts == "" {
+					return o, false, errors.New("--receipts needs a directory")
+				}
 			case a == "--wait" || strings.HasPrefix(a, "--wait="):
 				v := strings.TrimPrefix(a, "--wait=")
 				if a == "--wait" {
@@ -130,7 +140,7 @@ func parseArgs(args []string) (o Options, assets bool, err error) {
 			}
 		}
 		if len(pos) != 2 {
-			return o, false, errors.New("usage: release-check publish [--wait <duration>] [--not-latest] <version> <X>")
+			return o, false, errors.New("usage: release-check publish [--wait <duration>] [--not-latest] [--receipts <dir>] <version> <X>")
 		}
 		return withArgs(o, pos[1], pos[0]), false, nil
 	}
@@ -257,25 +267,7 @@ func (o *Options) defaults() error {
 	if o.Repo == "" {
 		o.Repo = "."
 	}
-	if o.GH == "" {
-		o.GH = os.Getenv("RELEASE_CHECK_GH")
-	}
-	if o.GH == "" {
-		o.GH = "gh"
-	}
-	if o.GHRepo == "" {
-		o.GHRepo = os.Getenv("RELEASE_CHECK_REPO")
-	}
-	if o.GHRepo == "" {
-		if u, err := git(o.Repo, "remote", "get-url", "origin"); err == nil {
-			if r, ok := parseGitHubRepo(u); ok {
-				o.GHRepo = r
-			}
-		}
-	}
-	if o.GHRepo == "" {
-		o.GHRepo = "bogworks/mash"
-	}
+	o.resolveGH()
 	if o.Signers == "" {
 		o.Signers = filepath.Join(o.Repo, "docs", "allowed_signers")
 	}
@@ -295,6 +287,30 @@ func (o *Options) defaults() error {
 		return errors.New("a commit and a version are required")
 	}
 	return nil
+}
+
+// resolveGH fills the gh command and the release repository: GH is $RELEASE_CHECK_GH, else gh; GHRepo is
+// $RELEASE_CHECK_REPO, else origin of Repo when it is on github.com, else bogworks/mash. --compat shares it.
+func (o *Options) resolveGH() {
+	if o.GH == "" {
+		o.GH = os.Getenv("RELEASE_CHECK_GH")
+	}
+	if o.GH == "" {
+		o.GH = "gh"
+	}
+	if o.GHRepo == "" {
+		o.GHRepo = os.Getenv("RELEASE_CHECK_REPO")
+	}
+	if o.GHRepo == "" {
+		if u, err := git(o.Repo, "remote", "get-url", "origin"); err == nil {
+			if r, ok := parseGitHubRepo(u); ok {
+				o.GHRepo = r
+			}
+		}
+	}
+	if o.GHRepo == "" {
+		o.GHRepo = "bogworks/mash"
+	}
 }
 
 // parseGitHubRepo extracts owner/name from a github.com remote URL: https://github.com/o/n(.git),

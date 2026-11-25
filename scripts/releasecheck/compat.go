@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -24,8 +25,11 @@ import (
 	"github.com/bogworks/mash/internal/testenv"
 )
 
-// release-check --compat <older> <newer> (REQ-014, AT-012, TO-13) runs the published mash binary of each version for
-// this host against a fixed corpus of mail written by the other. Its exit codes are a named exception (see main.go).
+// release-check --compat [--candidate <mash>] [--evidence <file>] <older> <newer> (REQ-014, AT-012, TO-13) runs the
+// published mash binary of each version for this host against a fixed corpus of mail written by the other. Every
+// downloaded binary is checked against the SHA256SUMS of its release before it runs. --candidate runs the given binary
+// as the newer side (an unpublished switch-on candidate); --evidence writes what was run and the result as JSON. Its
+// exit codes are a named exception (see main.go).
 
 // compatMsg is one message of the corpus. Number is its place in the list, from 1; Body is the text without the
 // marker the run adds to track the message.
@@ -74,20 +78,22 @@ type compatBin struct {
 
 // compatObs is what happened to one corpus message.
 type compatObs struct {
-	Number  int
-	Sent    bool   // the writing binary reported it stored
-	Seq     int    // its stream sequence, 0 when not visible
-	Copies  int    // how many times the reading binary delivered it
-	Refused string // the class the reading binary gave when it refused the message; empty when it did not
+	Number   int
+	Sent     bool   // the writing binary reported it stored
+	Seq      int    // its stream sequence, 0 when not visible
+	Copies   int    // how many times the message is in the reading binary's stored inbox
+	Notified int    // how many channel notifications serve (the delivery to the session) carried it
+	Refused  string // the class the reading binary gave when it refused the message; empty when it did not
 }
 
 // CompatOptions configure `release-check --compat`. Every external seam is a field a test replaces.
 type CompatOptions struct {
 	GH       string // the gh command; default $RELEASE_CHECK_GH, else gh
-	GHRepo   string // default $RELEASE_CHECK_REPO, else bogworks/mash
+	GHRepo   string // default as the main gate: $RELEASE_CHECK_REPO, else origin of the checkout on github.com, else bogworks/mash
 	Out      io.Writer
 	ErrOut   io.Writer
 	Download func(ctx context.Context, tag, dir string) (string, error)                                   // test seam: the published binary of tag for this host, in dir; default gh release download
+	Sums     func(ctx context.Context, tag string) ([]byte, error)                                        // test seam: the SHA256SUMS asset of the published release tag; default gh release download
 	Drive    func(ctx context.Context, writer, reader compatBin, corpus []compatMsg) ([]compatObs, error) // test seam: writer writes the corpus and reader reads it; default a throwaway NATS server and the real binaries
 	Panic    bool                                                                                         // test seam: panic inside the run
 }
@@ -117,30 +123,139 @@ func compatMain(args []string, o CompatOptions) (code int) {
 			code = 1
 		}
 	}()
-	refused, err := compatRun(context.Background(), args, o)
+	ev := &compatEvidence{Platform: compatPlatform{GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}, CorpusSHA256: compatCorpusDigest()}
+	refused, err := compatRun(context.Background(), args, o, ev)
 	var u compatUsage
 	var d compatUndecided
 	switch {
 	case errors.As(err, &u):
 		fmt.Fprintf(o.ErrOut, "error: %s\n", u.msg)
-		return 2
+		return 2 // a usage error ran nothing: no evidence is written
 	case errors.As(err, &d):
 		fmt.Fprintf(o.ErrOut, "compat: could not decide: %s\n", d.msg)
-		return 4
+		ev.Result, code = "could not decide", 4
 	case err != nil:
 		fmt.Fprintf(o.ErrOut, "error: %v\n", err)
-		return 1
+		ev.Result, code = "error", 1
 	case refused:
-		return 3
+		ev.Result, code = "refused", 3
+	default:
+		ev.Result, code = "passed", 0
 	}
-	return 0
+	if ev.path != "" {
+		ev.ExitStatus = code
+		b, _ := json.MarshalIndent(ev, "", "  ")
+		if werr := os.WriteFile(ev.path, append(b, '\n'), 0o644); werr != nil {
+			fmt.Fprintf(o.ErrOut, "error: writing the evidence: %v\n", werr)
+			if code == 0 {
+				code = 1
+			}
+		}
+	}
+	return code
 }
 
-func compatRun(ctx context.Context, args []string, o CompatOptions) (refused bool, err error) {
-	if len(args) != 2 {
+// compatPlatform is the host a run was made on.
+type compatPlatform struct {
+	GOOS   string `json:"goos"`
+	GOARCH string `json:"goarch"`
+}
+
+// compatEvidence is what --evidence writes: the binaries that were run (by digest), the corpus and the outcome.
+type compatEvidence struct {
+	Older        string         `json:"older"`
+	Newer        string         `json:"newer"`
+	OlderSHA256  string         `json:"older_mash_sha256"`
+	NewerSHA256  string         `json:"newer_mash_sha256"`
+	CorpusSHA256 string         `json:"corpus_sha256"`
+	Platform     compatPlatform `json:"platform"`
+	Result       string         `json:"result"` // passed, refused, could not decide or error
+	ExitStatus   int            `json:"exit_status"`
+	path         string
+}
+
+// parseCompatArgs reads the two versions and the flags, which may stand anywhere: --candidate <path> and --evidence <file>
+// (each also as --flag=value).
+func parseCompatArgs(args []string) (pos []string, candidate, evidence string, err error) {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		var dst *string
+		var name string
+		switch {
+		case a == "--candidate" || strings.HasPrefix(a, "--candidate="):
+			dst, name = &candidate, "--candidate"
+		case a == "--evidence" || strings.HasPrefix(a, "--evidence="):
+			dst, name = &evidence, "--evidence"
+		default:
+			pos = append(pos, a)
+			continue
+		}
+		if a == name {
+			if i+1 >= len(args) || args[i+1] == "" {
+				return nil, "", "", compatUsage{name + " needs a path"}
+			}
+			i++
+			*dst = args[i]
+		} else if *dst = strings.TrimPrefix(a, name+"="); *dst == "" {
+			return nil, "", "", compatUsage{name + " needs a path"}
+		}
+	}
+	return pos, candidate, evidence, nil
+}
+
+// fileSHA256 is the sha256 (hex) of a file.
+func fileSHA256(p string) (string, error) {
+	f, err := os.Open(p)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// verifyDownloaded holds a downloaded binary to the digest the release's SHA256SUMS lists for the same asset. A missing
+// SHA256SUMS, a missing line or a different digest is an error: the binary must not run.
+func verifyDownloaded(ctx context.Context, sums func(context.Context, string) ([]byte, error), tag, path string) error {
+	b, err := sums(ctx, tag)
+	if err != nil {
+		return err
+	}
+	asset := "mash-" + runtime.GOOS + "-" + runtime.GOARCH
+	want := ""
+	for _, line := range strings.Split(string(b), "\n") {
+		if m := sumsLine.FindStringSubmatch(line); m != nil && m[2] == asset {
+			if want != "" {
+				return fmt.Errorf("SHA256SUMS lists %s more than once", asset)
+			}
+			want = m[1]
+		}
+	}
+	if want == "" {
+		return fmt.Errorf("SHA256SUMS of %s lists no %s", tag, asset)
+	}
+	got, err := fileSHA256(path)
+	if err != nil {
+		return err
+	}
+	if got != want {
+		return fmt.Errorf("%s is sha256:%s, SHA256SUMS lists sha256:%s", asset, got, want)
+	}
+	return nil
+}
+
+func compatRun(ctx context.Context, args []string, o CompatOptions, ev *compatEvidence) (refused bool, err error) {
+	pos, candidate, evidence, err := parseCompatArgs(args)
+	if err != nil {
+		return false, err
+	}
+	if len(pos) != 2 {
 		return false, compatUsage{"--compat takes two versions: the older, then the newer"}
 	}
-	older, newer := args[0], args[1]
+	older, newer := pos[0], pos[1]
 	for _, v := range []string{older, newer} {
 		if !versionRE.MatchString(v) {
 			return false, compatUsage{fmt.Sprintf("--compat takes two versions: %q is not N.N.N", v)}
@@ -149,25 +264,24 @@ func compatRun(ctx context.Context, args []string, o CompatOptions) (refused boo
 	if release.TagBelow("v"+newer, older) || newer == older {
 		return false, compatUsage{fmt.Sprintf("--compat takes the older version first: %s is not below %s", older, newer)}
 	}
+	if candidate != "" {
+		if st, serr := os.Stat(candidate); serr != nil || !st.Mode().IsRegular() {
+			return false, compatUsage{fmt.Sprintf("--candidate %s is not a file", candidate)}
+		}
+	}
+	ev.path, ev.Older, ev.Newer = evidence, older, newer
 	if o.Panic {
 		panic("forced by the test")
 	}
+	gho := Options{Repo: ".", GH: o.GH, GHRepo: o.GHRepo}
+	gho.resolveGH()
 	dl := o.Download
 	if dl == nil {
-		gho := Options{GH: o.GH, GHRepo: o.GHRepo}
-		if gho.GH == "" {
-			gho.GH = os.Getenv("RELEASE_CHECK_GH")
-		}
-		if gho.GH == "" {
-			gho.GH = "gh"
-		}
-		if gho.GHRepo == "" {
-			gho.GHRepo = os.Getenv("RELEASE_CHECK_REPO")
-		}
-		if gho.GHRepo == "" {
-			gho.GHRepo = "bogworks/mash"
-		}
 		dl = func(_ context.Context, tag, dir string) (string, error) { return downloadPrevious(gho, tag, dir) }
+	}
+	sums := o.Sums
+	if sums == nil {
+		sums = func(_ context.Context, tag string) ([]byte, error) { return downloadAsset(gho, tag, release.SumsName) }
 	}
 	work, err := os.MkdirTemp("", "release-check-compat-")
 	if err != nil {
@@ -176,6 +290,10 @@ func compatRun(ctx context.Context, args []string, o CompatOptions) (refused boo
 	defer os.RemoveAll(work)
 	var bins [2]compatBin
 	for i, v := range []string{newer, older} { // the newer first: it is the one a release candidate is about
+		if i == 0 && candidate != "" {
+			bins[i] = compatBin{Version: v, Path: candidate} // the caller's own build: nothing published to check it against
+			continue
+		}
 		dir := filepath.Join(work, "dl-"+v)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return false, err
@@ -184,9 +302,20 @@ func compatRun(ctx context.Context, args []string, o CompatOptions) (refused boo
 		if derr != nil {
 			return false, compatUndecided{v + " could not be downloaded"}
 		}
+		// Never run an unverified binary.
+		if verr := verifyDownloaded(ctx, sums, "v"+v, p); verr != nil {
+			return false, compatUndecided{v + " failed its checksum"}
+		}
 		bins[i] = compatBin{Version: v, Path: p}
 	}
 	nb, ob := bins[0], bins[1]
+	var herr error
+	if ev.NewerSHA256, herr = fileSHA256(nb.Path); herr != nil {
+		return false, herr
+	}
+	if ev.OlderSHA256, herr = fileSHA256(ob.Path); herr != nil {
+		return false, herr
+	}
 	drive := o.Drive
 	if drive == nil {
 		drive = driveCompat
@@ -209,7 +338,12 @@ func compatRun(ctx context.Context, args []string, o CompatOptions) (refused boo
 }
 
 // judgeCompat finds the first message of the corpus that was not delivered exactly once, and why: n is 0 when every
-// message was. A message with no observation was never sent.
+// message was. Two observations of the reading binary decide it, and each yields its own reason:
+//   - the writer's report that it stored the message (a message that was not stored, or has no observation: "not delivered");
+//   - the refusal class the reader gave it ("refused: <class>");
+//   - the reader's stored inbox, which must hold the message once: none is "missing", more is "delivered twice";
+//   - the channel notifications serve sent the session (the delivery path itself), which must carry the message once: a
+//     message that is stored but that serve never delivered is "not delivered", one it delivered more than once "delivered twice".
 func judgeCompat(corpus []compatMsg, obs []compatObs) (n int, reason string) {
 	by := map[int]compatObs{}
 	for _, ob := range obs {
@@ -224,11 +358,45 @@ func judgeCompat(corpus []compatMsg, obs []compatObs) (n int, reason string) {
 			return m.Number, "refused: " + ob.Refused
 		case ob.Copies == 0:
 			return m.Number, "missing"
-		case ob.Copies > 1:
+		case ob.Copies > 1 || ob.Notified > 1:
 			return m.Number, "delivered twice"
+		case ob.Notified == 0:
+			return m.Number, "not delivered"
 		}
 	}
 	return 0, ""
+}
+
+// compatSettle is how long the run keeps counting channel notifications after every message was announced, so a
+// redelivery (a nak is redelivered after 500 ms) is seen.
+const compatSettle = 2 * time.Second
+
+// seqsOf is the message numbers a channel notification delivered to endpoint to, from its meta ("to" and "seqs": a
+// comma-separated list). A notice of serve's own carries neither and yields none.
+func seqsOf(meta, to string) []string {
+	var m map[string]any
+	if json.Unmarshal([]byte(meta), &m) != nil {
+		return nil
+	}
+	seqs, _ := m["seqs"].(string)
+	if got, _ := m["to"].(string); got != to || seqs == "" {
+		return nil
+	}
+	return strings.Split(seqs, ",")
+}
+
+// collectSeqs adds the numbers of every channel notification that arrived since the last call to counts.
+func (p *serveProc) collectSeqs(to string, counts map[string]int) {
+	for {
+		select {
+		case e := <-p.anyEv:
+			for _, q := range seqsOf(e.Meta, to) {
+				counts[strings.TrimSpace(q)]++
+			}
+		default:
+			return
+		}
+	}
 }
 
 var (
@@ -237,8 +405,9 @@ var (
 )
 
 // driveCompat is the real drive: one embedded NATS server in mash's account setup, the writer's binary sending the
-// corpus to the reader, the reader's binary running serve (which verifies and delivers) and then listing and reading
-// its inbox. Each message is tracked by a marker in its body (sender, nonce) and the stream sequence the send reported.
+// corpus to the reader, the reader's binary running serve as an MCP client does (latency.go's startServe, which verifies
+// and delivers) and then listing and reading its inbox. Delivery is observed twice: the channel notifications serve sends
+// the session, counted per message number, and the stored inbox. Each message is tracked by a marker in its body (sender, nonce) and the stream sequence the send reported.
 func driveCompat(ctx context.Context, writer, reader compatBin, corpus []compatMsg) ([]compatObs, error) {
 	dir, err := os.MkdirTemp("", "release-check-compat-lab-")
 	if err != nil {
@@ -350,6 +519,35 @@ func driveCompat(ctx context.Context, writer, reader compatBin, corpus []compatM
 		case <-time.After(time.Second):
 		case <-ctx.Done():
 			return nil, ctx.Err()
+		}
+	}
+	// The delivery itself: every channel notification serve sent the session carries the numbers of the messages it
+	// delivered. Wait until each stored message was announced, then a settle period for a redelivery, and count.
+	notified := map[string]int{}
+	allNotified := func() bool {
+		p.collectSeqs("reader", notified)
+		for _, o := range obs {
+			if o.Sent && o.Seq != 0 && notified[strconv.Itoa(o.Seq)] == 0 {
+				return false
+			}
+		}
+		return true
+	}
+	for nd := time.Now().Add(onlineTimeout); !allNotified() && time.Now().Before(nd) && ctx.Err() == nil; {
+		time.Sleep(200 * time.Millisecond)
+	}
+	select {
+	case <-time.After(compatSettle):
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	p.collectSeqs("reader", notified)
+	for i := range obs {
+		// A send that did not report its number cannot be matched to a notification: the stored inbox is then the only observation.
+		if obs[i].Seq != 0 {
+			obs[i].Notified = notified[strconv.Itoa(obs[i].Seq)]
+		} else {
+			obs[i].Notified = obs[i].Copies
 		}
 	}
 	for i := range obs {

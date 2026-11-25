@@ -275,8 +275,9 @@ func TestReceiptsGate_flags(t *testing.T) {
 		{"--receipts", "--consumer", "abc", "0.5.10"},
 		{"--assets", "0.5.10", "abc", "--receipts", "/r"},
 		{"--assets", "--receipts=/r", "0.5.10", "abc"},
-		{"publish", "--receipts", "/r", "0.5.10", "abc"},
-		{"publish", "0.5.10", "abc", "--receipts=/r"},
+		{"publish", "0.5.10", "abc", "--receipts"},
+		{"publish", "--receipts=", "0.5.10", "abc"},
+		{"publish", "--receipts", "--not-latest", "0.5.10", "abc"},
 	} {
 		if got := mainRun(args, &out); got != 2 {
 			t.Errorf("%v: exit %d, want 2", args, got)
@@ -345,5 +346,37 @@ func TestReceiptsGate_realExpected(t *testing.T) {
 	}
 	if exp2.UpgradePage != "" {
 		t.Fatalf("upgrade page %q at a commit without it", exp2.UpgradePage)
+	}
+}
+
+// B1: publish takes --receipts (both spellings, anywhere after publish) and its pre-tag gate is held to it.
+func TestReceiptsGate_publishTakesReceipts(t *testing.T) {
+	for _, args := range [][]string{
+		{"publish", "--receipts", "/r", "0.6.0", "abc"},
+		{"publish", "0.6.0", "--receipts=/r", "abc", "--not-latest"},
+	} {
+		o, _, err := parseArgs(args)
+		if err != nil || !o.Publish || o.Receipts != "/r" || o.Version != "0.6.0" || o.X != "abc" {
+			t.Errorf("%v: %+v %v", args, o, err)
+		}
+	}
+	if o, _, err := parseArgs([]string{"publish", "0.6.0", "abc"}); err != nil || o.Receipts != "" {
+		t.Errorf("no flag: %+v %v", o, err)
+	}
+}
+
+// The pre-tag gate publish runs is check with the options publish was given: at the switch-on release it refuses
+// without the receipts, and with a --receipts directory it reads them instead of reporting none given.
+func TestReceiptsGate_publishPreTagGetsTheReceipts(t *testing.T) {
+	f := newFixture(t)
+	f.o.Version = release.SwitchOnVersion
+	err := realWorld{ctx: context.Background(), o: f.o}.PreTag()
+	if err == nil || !strings.Contains(err.Error(), receiptsNoneGiven) {
+		t.Fatalf("without --receipts: %v", err)
+	}
+	f.o.Receipts = filepath.Join(t.TempDir(), "absent")
+	err = realWorld{ctx: context.Background(), o: f.o}.PreTag()
+	if err == nil || strings.Contains(err.Error(), receiptsNoneGiven) || !strings.Contains(err.Error(), "receipts") {
+		t.Fatalf("with --receipts: %v", err)
 	}
 }
