@@ -173,7 +173,29 @@ func (e *Endpoint) Instance() string {
 }
 
 func (e *Endpoint) promptMetadata() map[string]string {
-	return map[string]string{"max_payload": "1MB", "attachments_ok": "false", "min_sender_trust": "signed"}
+	return map[string]string{"max_payload": PromptMaxPayload(), "attachments_ok": "false", "min_sender_trust": "signed"}
+}
+
+// PromptMaxPayload is the max_payload the prompt endpoint advertises, in the SAP grammar (a count and B, KB, MB or
+// GB, base 1024; SAP section 2.1): exactly MaxPromptBytes, the text cap the endpoint enforces. SAP counts the whole
+// request on the wire against max_payload, the Agent-Sender header included (SAP section 5.4), so a request within
+// it carries at most MaxPromptBytes of text and is never refused for size. A caller that obeys the advertisement
+// gets a little less text room than the endpoint accepts (the headers count), which is the safe direction.
+func PromptMaxPayload() string {
+	return formatMaxPayload(MaxPromptBytes)
+}
+
+// formatMaxPayload writes n bytes as SAP's \d+(B|KB|MB|GB) with the largest unit that divides n evenly.
+func formatMaxPayload(n int) string {
+	for _, u := range []struct {
+		name string
+		size int
+	}{{"GB", 1 << 30}, {"MB", 1 << 20}, {"KB", 1 << 10}} {
+		if n >= u.size && n%u.size == 0 {
+			return fmt.Sprintf("%d%s", n/u.size, u.name)
+		}
+	}
+	return fmt.Sprintf("%dB", n)
 }
 
 // heartbeat builds the SAP §8.3 payload (also the status reply).
@@ -486,15 +508,10 @@ func promptSend(ctx context.Context, nc *nats.Conn, id sap.Identity, name, subje
 		return err
 	}
 	defer sub.Unsubscribe()
-	payload := []byte(text)
-	h, err := id.Sign(subject, payload, name, time.Now(), "")
+	m, err := promptMsg(id, name, subject, inbox, text)
 	if err != nil {
 		return err
 	}
-	m := nats.NewMsg(subject)
-	m.Reply = inbox
-	m.Data = payload
-	m.Header.Set(sap.HeaderName, h.Encode())
 	if err := nc.PublishMsg(m); err != nil {
 		return err
 	}
@@ -532,6 +549,20 @@ func promptSend(ctx context.Context, nc *nats.Conn, id sap.Identity, name, subje
 			return err
 		}
 	}
+}
+
+// promptMsg is the signed request a prompt sends: the text as the payload and the Agent-Sender header.
+func promptMsg(id sap.Identity, name, subject, inbox, text string) (*nats.Msg, error) {
+	payload := []byte(text)
+	h, err := id.Sign(subject, payload, name, time.Now(), "")
+	if err != nil {
+		return nil, err
+	}
+	m := nats.NewMsg(subject)
+	m.Reply = inbox
+	m.Data = payload
+	m.Header.Set(sap.HeaderName, h.Encode())
+	return m, nil
 }
 
 // secretInbox is a reply subject under the connection's inbox prefix with 128 random bits. nc.NewInbox ends in a NUID,

@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -68,7 +70,7 @@ func TestRegistrationMetadata(t *testing.T) {
 	}
 	p, s := eps["prompt"], eps["status"]
 	if p.Subject != taddr("a").Subjects().Prompt || p.QueueGroup != "agents" || p.Metadata["min_sender_trust"] != "signed" ||
-		p.Metadata["max_payload"] != "1MB" || p.Metadata["attachments_ok"] != "false" {
+		p.Metadata["max_payload"] != PromptMaxPayload() || p.Metadata["attachments_ok"] != "false" {
 		t.Fatalf("prompt endpoint %+v", p)
 	}
 	if s.Subject != taddr("a").Subjects().Status || s.QueueGroup != "agents" {
@@ -406,5 +408,106 @@ func TestPromptLimit(t *testing.T) {
 	svc.mu.Unlock()
 	if open != 0 {
 		t.Fatalf("%d request ids are open after refused prompts", open)
+	}
+}
+
+// parseMaxPayload reads SAP's max_payload grammar: a count and B, KB, MB or GB, base 1024.
+func parseMaxPayload(t *testing.T, s string) int {
+	t.Helper()
+	m := regexp.MustCompile(`^(\d+)(B|KB|MB|GB)$`).FindStringSubmatch(s)
+	if m == nil {
+		t.Fatalf("max_payload %q is not SAP's \\d+(B|KB|MB|GB)", s)
+	}
+	n, _ := strconv.Atoi(m[1])
+	return n * map[string]int{"B": 1, "KB": 1 << 10, "MB": 1 << 20, "GB": 1 << 30}[m[2]]
+}
+
+// The advertised max_payload and the enforced prompt limit are one number: a caller that trusts the advertisement
+// is never refused for a prompt within it, and a prompt over MaxPromptBytes is still refused.
+func TestPromptAdvertisedMaxPayloadMatchesTheLimit(t *testing.T) {
+	f := newFixture(t, "a", "b")
+	a := f.serve(t, "a", func(ep *Endpoint, p PromptEvent) { _ = ep.Reply(p.RequestID, "ok", true) })
+	b := f.client(t, "b")
+
+	nc := f.e.ConnAs(t, f.creds["b"], tkey("b"))
+	m, err := nc.Request("$SRV.INFO.agents", nil, 15*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var info micro.Info
+	if err := json.Unmarshal(m.Data, &info); err != nil {
+		t.Fatal(err)
+	}
+	var advertised string
+	for _, e := range info.Endpoints {
+		if e.Name == "prompt" {
+			advertised = e.Metadata["max_payload"]
+		}
+	}
+	got := parseMaxPayload(t, advertised)
+	if advertised != "32KB" || got != MaxPromptBytes {
+		t.Fatalf("advertised max_payload %q is %d bytes, want exactly MaxPromptBytes %d (\"32KB\")", advertised, got, MaxPromptBytes)
+	}
+	if parseMaxPayload(t, a.promptMetadata()["max_payload"]) != got {
+		t.Fatalf("registered and built metadata differ")
+	}
+
+	// send publishes a signed request built as mash prompt builds it and returns the request and every reply.
+	send := func(textLen int) (*nats.Msg, []string) {
+		t.Helper()
+		req, err := promptMsg(b.Identity(), tkey("b"), taddr("a").Subjects().Prompt, secretInbox(b.Conn()), strings.Repeat("x", textLen))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(req.Header.Get(sap.HeaderName)) == 0 {
+			t.Fatal("the request is not signed")
+		}
+		sub, err := b.Conn().SubscribeSync(req.Reply)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer sub.Unsubscribe()
+		if err := b.Conn().PublishMsg(req); err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for {
+			r, err := sub.NextMsg(5 * time.Second)
+			if err != nil {
+				t.Fatalf("after %q: %v", out, err)
+			}
+			if code := r.Header.Get("Nats-Service-Error-Code"); code != "" {
+				out = append(out, "ERR "+code)
+				continue
+			}
+			if len(r.Data) == 0 && len(r.Header) == 0 {
+				return req, append(out, "END")
+			}
+			out = append(out, string(r.Data))
+		}
+	}
+
+	// No refused request fits: the smallest refused one (MaxPromptBytes+1 of text) is over the advertised size on
+	// the wire (Msg.Size counts the subject, the reply and the headers as well as the payload).
+	req, r := send(MaxPromptBytes + 1)
+	if strings.Join(r, "|") != "ERR 413|END" {
+		t.Fatalf("MaxPromptBytes+1: %q", r)
+	}
+	if size := req.Size(); size <= got {
+		t.Fatalf("a refused prompt is %d bytes on the wire, within the advertised %d", size, got)
+	}
+
+	// A request sized to exactly the advertised limit on the wire (text shrunk to fit) is accepted.
+	base, _ := promptMsg(b.Identity(), tkey("b"), taddr("a").Subjects().Prompt, secretInbox(b.Conn()), "")
+	n := got - base.Size()
+	if n <= 0 || n > MaxPromptBytes {
+		t.Fatalf("headers take %d bytes of the %d advertised", base.Size(), got)
+	}
+	req, r = send(n)
+	if size := req.Size(); size != got {
+		t.Fatalf("sized request is %d bytes on the wire, want exactly %d", size, got)
+	}
+	if j := strings.Join(r, "|"); strings.Contains(j, "ERR") || !strings.Contains(j, `"type":"response"`) {
+		t.Fatalf("a request of exactly the advertised size was refused or garbled: %q", r)
 	}
 }

@@ -1,0 +1,1 @@
+**The prompt endpoint now advertises the size it accepts, 32 KiB (`32KB`), not 1 MB.** SAP callers that trust the advertised `max_payload` are no longer refused with a 413 for a prompt between 32 KiB and 1 MB.

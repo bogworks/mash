@@ -68,7 +68,7 @@ mash registers these keys on the `agents` service:
 | `id_sig` | A signature over the user key, account, agent, owner and prompt subject, which readers use to check that the record is the endpoint's own. |
 | `mail_subject` | The endpoint's mail subject. |
 
-The `prompt` endpoint adds its own metadata: `max_payload`, `attachments_ok` and `min_sender_trust`.
+The `prompt` endpoint adds its own metadata: `max_payload`, `attachments_ok` and `min_sender_trust`. Its `max_payload` is `32KB` (32768 bytes), the most text the endpoint accepts. SAP counts the whole request on the wire, so a request within it never has more text than that.
 
 ## The reply-inbox prefix
 
