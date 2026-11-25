@@ -12,57 +12,48 @@ All notable user-facing changes to mash are recorded here. The format follows [K
 
 ### Upgrading
 
-**This step is one-way.** If you find a problem after upgrading to 0.5.9, the next release fixes it; you do not go back to 0.5.8.
+**This step is one-way:** a problem found after upgrading is fixed by the next release; you do not go back to 0.5.8.
 
-On each machine that has endpoints, then on the administrator's machine, in this order:
+On each machine with endpoints, then on the administrator's machine, in this order:
 
-1. **Look before you change anything.** Run `mash version`, `mash doctor` and, on the administrator's machine, `mashctl doctor`. A good result is `mash version` naming your current release, and each doctor ending with no problem and exit code 0. If you set a `signing_key`, also check that both `signing.nk` and `signing.pub` are in its folder.
-2. **Install `mash` and `mashctl` 0.5.9 from the same release**, with the install steps in the README. Your endpoints, keys and mail stay where they are.
-3. **Update both plugins,** `mash` and `mash-setup`. At a shell: `claude plugin update mash@mash` and `claude plugin update mash-setup@mash`. In a session: the plugin menu, Installed, the plugin, Update now. You do not refresh the marketplace first. The `mash-setup` plugin carries its skills, so updating it brings them to 0.5.9.
-4. **Restart each Claude Code session.** A running session keeps its old hooks and its old mail process until you restart it; it keeps working as it did, and picks up 0.5.9 only when restarted.
-5. **If you set up a local NATS server with the 0.5.8 script,** you do not have to change it. The running server is left alone, and the files that script wrote, `mash-setup.yaml` and `mash-setup.json`, work with the 0.5.9 script's `--start`, `--stop` and `--remove`. Fetch the 0.5.9 script from this release only when you next want one of those.
-6. **Look again.** Run `mash version`, `mash doctor` and `mashctl doctor`. `mash version` names 0.5.9, and each doctor ends with no problem and exit code 0. If you set a `signing_key`, confirm again that `signing.nk` and `signing.pub` are both present. If they are not, 0.5.9 stops `mashctl endpoint create` and `mashctl endpoint reissue` with an `error:` line that names the missing file and a `hint:` line; it no longer signs with the account's own key instead. If you set `signing_key` on 0.5.7, run `mashctl init --config <file>` once more.
+1. **Check first:** `mash version`, `mash doctor` and, as administrator, `mashctl doctor`. Good is your current release and each doctor ending with no problem and exit code 0. If you set a `signing_key`, confirm `signing.nk` and `signing.pub` are both in its folder.
+2. **Install `mash` and `mashctl` 0.5.9** from the same release, with the README's install steps. Endpoints, keys and mail stay where they are.
+3. **Update both plugins,** `mash` and `mash-setup`: at a shell `claude plugin update mash@mash` and `claude plugin update mash-setup@mash`, or in a session the plugin menu, Installed, the plugin, Update now. No marketplace refresh first. `mash-setup` carries its skills, so this brings them to 0.5.9.
+4. **Restart each Claude Code session.** A running session keeps its old hooks and mail process until you restart it.
+5. **A local NATS server set up with the 0.5.8 script** needs nothing: the running server is left alone, and `mash-setup.yaml` and `mash-setup.json` work with the 0.5.9 script's `--start`, `--stop` and `--remove`. Fetch the 0.5.9 script only when you next want one of those.
+6. **Check again** as in step 1; `mash version` now names 0.5.9. With a `signing_key`, if a signing file is missing, 0.5.9 refuses to create or reissue an endpoint, with an `error:` line naming the file, rather than sign with the account's own key. If you set `signing_key` on 0.5.7, run `mashctl init --config <file>` once more.
 
-While machines are at mixed versions, 0.5.8 and 0.5.9 machines send and read each other's mail on one server, in both directions. A machine you leave behind keeps working.
+Machines at mixed versions send and read each other's mail on one server, both ways; a machine left behind keeps working.
 
-### If a script reads a doctor's exit code
-
-`mash doctor` and `mashctl doctor` now exit 1 when they find a problem, and 0 otherwise. A Claude Code older than 2.1.312 is such a problem for `mash doctor`; a newer one warns, and one that cannot be found is skipped. `mashctl status` with no server configured now prints `error: no server is configured` and exits 1. `mashctl init --json` now includes the signing key's public key as `signing_key_pub`; 0.5.8 had no signing field there.
+**If a script reads exit codes:** `mash doctor` and `mashctl doctor` now exit 1 when they find a problem, and 0 otherwise; a Claude Code older than 2.1.312 is one, a newer one warns. `mashctl status` with no server configured prints `error: no server is configured` and exits 1. `mashctl init --json` now includes `signing_key_pub`; 0.5.8 had no signing field there.
 
 ### Added
 
-- **`mash doctor` checks your Claude Code version.** A new `claude` row, after `config`, runs `claude --version` and compares it with the versions mash is tested with: 2.1.312 is the minimum, and the tested series is 2.1. A Claude Code above the 2.1 series (2.2 or later) gets a warning, one that cannot be found is skipped, and one older than the minimum is a problem, so `mash doctor` now exits 1 on it. Scripts that run `mash doctor` will see exit 1 for an old Claude Code where it exited 0 before.
+- **`mash doctor` checks your Claude Code version.** A `claude` row fails below 2.1.312 and warns above the 2.1 series; no `claude` command is skipped. ([#1130](https://github.com/bogworks/mash/issues/1130))
 
 ### Changed
 
-- **`mashctl endpoint delete` run without a terminal no longer suggests `--yes`.** It now says it needs a terminal to type the address. `--help` still documents `--yes` ([#1161](https://github.com/bogworks/mash/issues/1161)).
-- **`mashctl endpoint delete` names the address and the cause when a later step fails.** When the endpoint's key was cancelled but a later step failed, the error is now one line naming the address and the cause in plain words, with the command to run again ([#1081](https://github.com/bogworks/mash/issues/1081)).
-- **`mashctl init` no longer prints the signing key by default.** When you set `signing_key`, the result is the one line `Initialized mash on <server> for owner <owner>`. `--detail` adds a second line, `Signing key: <public key>`, and `--json` has the public key as `signing_key_pub`.
-- **`mashctl init` warns when the account lists signing keys and the setup file has no `signing_key` ([#1255](https://github.com/bogworks/mash/issues/1255)).** The operator may then require one, and `init` does not read the operator. The warning is one line on stderr, `warning: no signing_key in <setup file>; this server may require one`; the exit code stays 0 and the setup goes on. It is not printed when `signing_key` is set or a signing key is already stored.
-- **`mash join` says what is wrong when a join file's user JWT was made for another address.** It used to answer only "not a join file this mash can read". It now says `<file> names <address> but is for <other address>` (or `has no name but names <address>`), with the `mashctl endpoint reissue` command that makes a right file, under a new name, as the hint.
-- **Deleting an endpoint no longer keeps its key.** `mashctl endpoint delete` still leaves a `.deleted` marker beside where the creds file was, so mash knows the endpoint was deleted, but the marker now holds the endpoint's JWT and no key ([#1064](https://github.com/bogworks/mash/issues/1064)). The creds file itself is removed.
-- **A lost or wrong signing key now stops with a short message and the command that fixes it.** When the key folder has lost `signing.nk` or `signing.pub`, or holds a key that does not match, mashctl prints `error:` and `hint:` lines that name the folder and the next step (`mashctl init --config <file>` to put the key back, `mashctl doctor` to check what is wrong). The long public keys the old text printed are gone from the message.
-- **`mashctl init --json` now includes the signing key's public key as `signing_key_pub`**, the name `config.json` already uses. 0.5.8's JSON had no signing field. In the setup file, `signing_key` still means only the seed file.
-- **`mashctl status` with no server configured now says so** (`error: no server is configured`, with the hint `mashctl init --config <file>`) and exits 1, where it printed nothing and exited 0. `mashctl doctor` reads the same: `no server is configured` ([#1097](https://github.com/bogworks/mash/issues/1097)).
+- **`mashctl init` no longer prints the signing key by default.** `--detail` adds a `Signing key:` line; `--json` has `signing_key_pub`. ([#1260](https://github.com/bogworks/mash/issues/1260))
+- **A lost or wrong signing key stops with a short `error:` and the command that fixes it.** No endpoint is made with the account's own key instead. ([#1246](https://github.com/bogworks/mash/issues/1246))
+- **`mashctl status` with no server configured says so and exits 1,** where it printed nothing and exited 0. ([#1097](https://github.com/bogworks/mash/issues/1097))
+- **`mashctl init` warns when the account lists signing keys and the setup file has no `signing_key`.** ([#1255](https://github.com/bogworks/mash/issues/1255))
+- **`mashctl endpoint delete` names the address and the cause when a later step fails,** and no longer suggests `--yes` without a terminal. ([#1081](https://github.com/bogworks/mash/issues/1081))
+- **Deleting an endpoint no longer keeps its key:** the `.deleted` marker holds the JWT only. ([#1064](https://github.com/bogworks/mash/issues/1064))
+- **`mash join` says what is wrong when a join file was made for another address.** ([#1303](https://github.com/bogworks/mash/issues/1303))
 
 ### Fixed
 
-- **A bad owner is no longer printed in the error when `mashctl` cannot connect as the administrator.** The error said the value is not shown and then showed it. It now leaves the value out, as the other messages of that kind do.
-- **`mash inbox` no longer calls its counts exact when a message read out of order may still be counted as urgent.** `--detail` now says so ("exact: no (mail read out of order may still be counted as urgent)").
-- **`mashctl init` warns at the account limits mash really needs.** It assumed one endpoint needs 3 streams and 36 MiB, so it stayed quiet on accounts too small for mash. It now warns below 6 streams or about 109 MiB of disk (the 5 buckets and one inbox), following the caps in `config.json`, as in the Sizing section of docs/nats-server.md ([#1156](https://github.com/bogworks/mash/issues/1156)).
-- **`mashctl init` now refuses an owner longer than 32 characters up front.** It used to accept up to 48 in the setup file and then fail when it opened the admin connection, which allows 32. The error now says "up to 32 characters" and names the setup file.
-- **`mashctl init` no longer prints an unknown key from the setup file.** A secret put by mistake where a key belongs used to be echoed in the error. The error now says how many keys are not setup keys, does not show them, and lists the setup keys.
-- **The installer now checks that the release was built from the commit its tag points to.** With gh 2.102.0 or newer, `install.sh` reads that commit and pins the attestation check to it, so a release attested from another commit is refused. If it cannot read the commit, it installs nothing.
-- **`mash join` now says what is wrong when a folder has a server but no endpoint and the join file brings a certificate authority.** It printed the "different ca" line, though the folder has no certificate authority to differ from. It now says "this folder has a server but no endpoint" and hints at joining into another folder, and changes nothing.
-- **`mash join` no longer sets a private certificate authority in a folder that was already set up.** A join file that brings a ca is now refused, with the same "different ca" line, where the folder already names servers and has no ca. If a join fails after installing the creds file, undoing it now leaves a creds file you replaced in the meantime and says so.
-- **The mash tools now say when an endpoint was deleted.** When `mashctl endpoint delete` removed the endpoint on this machine, the tools in Claude Code failed with a different message from the `mash` command. They now say what `mash send` says: the endpoint was deleted and its address cannot be used again.
-- **A bad argument keeps its own error after the endpoint is deleted in the session.** A `send` with an invalid `id` said the endpoint was deleted; it now reports the bad id. Only calls that fail to reach the server say deleted ([#1396](https://github.com/bogworks/mash/issues/1396)).
-- **`mash serve` now says an endpoint was deleted when a tool call fails after the delete.** Deleting the endpoint with `mashctl endpoint delete` while a session was running made `send` time out and `inbox` and `read` fail with "context deadline exceeded". They now say the endpoint was deleted and that its address cannot be used again, as the shell does ([#1396](https://github.com/bogworks/mash/issues/1396)). `who` still answers during the session.
-- **A `mash` session that was killed inside a container no longer blocks the next session for that agent.** In a container whose first process never cleans up finished processes, the killed session lingered as a dead process, and the next session saw the name as still taken and waited. A process that has exited is now gone as a holder ([#1437](https://github.com/bogworks/mash/issues/1437)).
+- **`mashctl init` warns at the account limits mash needs** (6 streams, about 109 MiB), and refuses an owner over 32 characters up front. ([#1156](https://github.com/bogworks/mash/issues/1156))
+- **`mashctl init` and `mashctl` no longer print a bad owner or an unknown setup key** in their errors. ([#1065](https://github.com/bogworks/mash/issues/1065))
+- **`mash inbox` no longer calls its counts exact** when urgent mail was read out of order. ([#1399](https://github.com/bogworks/mash/issues/1399))
+- **The installer checks that the release was built from the commit its tag points to.** ([#1352](https://github.com/bogworks/mash/issues/1352))
+- **`mash join` is refused for a folder already set up when the file brings a private CA,** and says so plainly. ([#1062](https://github.com/bogworks/mash/issues/1062))
+- **The mash tools in Claude Code say when an endpoint was deleted,** and a bad argument keeps its own error. ([#1396](https://github.com/bogworks/mash/issues/1396))
+- **A `mash` session killed inside a container no longer blocks the next session for that agent.** ([#1437](https://github.com/bogworks/mash/issues/1437))
 
 ### Security
 
-- **Dependency security upgrades.** Bump `github.com/klauspost/compress` to v1.20.2 (GO-2026-6865) and `golang.org/x/crypto` to v0.59.0 (GO-2026-5932). Related `golang.org/x/sys` and `golang.org/x/term` move with the crypto module requirement. mash does not call the vulnerable symbols; the bumps clear the module advisories reported by `govulncheck`.
+- **Dependency security upgrades:** `compress` v1.20.2 and `x/crypto` v0.59.0 (GO-2026-6865, GO-2026-5932). mash was not exposed. ([#1401](https://github.com/bogworks/mash/pull/1401))
 
 Known issues: 4 known issues, listed in the [release notes](https://github.com/bogworks/mash/blob/v0.5.9/docs/release-notes/0.5.9.md#known-issues)
 Links: [Release notes](https://github.com/bogworks/mash/blob/v0.5.9/docs/release-notes/0.5.9.md), [full changes](https://github.com/bogworks/mash/compare/v0.5.8...v0.5.9), [verify your download](https://github.com/bogworks/mash/blob/v0.5.9/docs/install.md#verify-what-you-download)
