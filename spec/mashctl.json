@@ -1218,7 +1218,7 @@
           "exit": 0,
           "issue": "#1040",
           "replaces": "With --wide",
-          "note": "Every row prints its owner and group (no blank repeated cells), so a line can be grepped or cut on its own, and an ADDRESS column is added, as mash who has. In --wide the NAME column gives way to ADDRESS (the name is the last part of the address): with both, a row with a suspended endpoint and a label is wider than 80 columns, and --wide may pass 80 but this specification's texts may not.",
+          "note": "Every row prints its owner and group (no blank repeated cells), so a line can be grepped or cut on its own, and an ADDRESS column is added, as mash who has. In --wide the NAME column gives way to ADDRESS (the name is the last part of the address). NAME and ADDRESS together make 83 columns, so --wide drops NAME for ADDRESS and is not a superset of the default list. This is a known choice, for the lead to confirm.",
           "verbatim": true
          },
          {
@@ -1318,7 +1318,7 @@
         "value": [
          {
           "case": "An endpoint",
-          "text": "address:      acme.demo.bob\nstate:        offline\ncreated:      2026-11-19 09:40 UTC\nwaiting:      1 message\nrole:         writer\ndescription:  Bob reviews\nlabels:       team=blue\npublic key:   UDXU4RCSV3GJRXWQ4PNDKYEL7ZBSMSGGTJYNDQGHFM4QWHBRD3ZTQ4LX",
+          "text": "address:     acme.demo.bob\nstate:       offline\ncreated:     2026-11-19 09:40 UTC\nwaiting:     1 message\nrole:        writer\ndescription: Bob reviews\nlabels:      team=blue\npublic key:  UDXU4RCSV3GJRXWQ4PNDKYEL7ZBSMSGGTJYNDQGHFM4QWHBRD3ZTQ4LX",
           "stream": "stdout",
           "exit": 0,
           "issue": "#1050",
@@ -2144,7 +2144,7 @@
       "value": [
        {
         "case": "--json",
-        "text": "{\n  \"version\": \"0.5.6\",\n  \"commit\": \"3f9a41c2e0b7d5a1c4e08b2d77f3a95e1b6c4098\",\n  \"plugin\": null\n}",
+        "text": "{\n  \"version\": \"0.5.9\",\n  \"commit\": \"3f9a41c2e0b7d5a1c4e08b2d77f3a95e1b6c4098\",\n  \"plugin\": null\n}",
         "stream": "stdout",
         "exit": 0,
         "issue": "#1042",

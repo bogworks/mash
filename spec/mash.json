@@ -684,7 +684,7 @@
         "exit": 0,
         "issue": "#1045",
         "replaces": "A long message, or one of several lines",
-        "note": "FROM is always the sender's full address, never the short name: two senders in different groups or owners cannot print alike (mash read and --json already give the full address). Only the FROM column changes; the rest of the case is as today. The message is cut one character later to fit 80 columns.",
+        "note": "FROM is always the sender's full address, never the short name: two senders in different groups or owners cannot print alike (mash read and --json already give the full address). Only the FROM column changes; the rest of the case is as today. The message is cut earlier than today (at \"all f…\", not \"all four runn…\") because FROM is wider, to fit 80 columns.",
         "verbatim": true
        },
        {
@@ -1614,7 +1614,7 @@
       "value": [
        {
         "case": "--json, no plugin",
-        "text": "{\n  \"version\": \"0.5.6\",\n  \"commit\": \"3f9a41c2e0b7d5a1c4e08b2d77f3a95e1b6c4098\",\n  \"plugin\": null\n}",
+        "text": "{\n  \"version\": \"0.5.9\",\n  \"commit\": \"3f9a41c2e0b7d5a1c4e08b2d77f3a95e1b6c4098\",\n  \"plugin\": null\n}",
         "stream": "stdout",
         "exit": 0,
         "issue": "#1042",
