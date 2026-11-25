@@ -61,10 +61,7 @@ die() {
 # variables, PATH only), so the user's own configuration cannot make it refuse to report.
 version_of() {
     local out
-    if [ -z "$VHOME" ]; then
-        VHOME="$WORKDIR/home"
-        mkdir -p -- "$VHOME" || return 0
-    fi
+    mkdir -p -- "$VHOME" || return 0 # VHOME is set in main: an assignment here would die with the command substitution
     out=$(env -i HOME="$VHOME" PATH="$PATH" XDG_CONFIG_HOME="$VHOME/config" \
         XDG_STATE_HOME="$VHOME/state" XDG_DATA_HOME="$VHOME/data" "$1" version 2>/dev/null) || return 0
     printf '%s\n' "$out" | awk 'NR == 1 { sub(/^v/, "", $2); print $2 }'
@@ -220,6 +217,7 @@ main() {
     # A private place to download to, removed on exit.
     WORKDIR=$(mktemp -d "${TMPDIR:-/tmp}/mash-install.XXXXXX") || die "could not make a temporary folder"
     chmod 0700 "$WORKDIR"
+    VHOME="$WORKDIR/home"
     trap cleanup EXIT
 
     sumsname=SHA256SUMS
