@@ -220,11 +220,14 @@ func TestErrorsResetTheLabel(t *testing.T) {
 	}
 }
 
-const okRuns = `{"check_runs":[{"name":"label-reset","status":"completed","conclusion":"success","started_at":"2026-11-16T06:00:00Z","app":{"slug":"github-actions"}}]}`
+const okRuns = `{"check_runs":[{"name":"label-reset","status":"completed","conclusion":"success","started_at":"2026-11-16T06:00:00Z","app":{"slug":"github-actions"},"pull_requests":[{"number":7}]}]}`
 
 func TestChainBrokenResets(t *testing.T) {
 	run := func(app, status, conclusion, started string) string {
-		return `{"name":"label-reset","status":"` + status + `","conclusion":"` + conclusion + `","started_at":"` + started + `","app":{"slug":"` + app + `"}}`
+		return `{"name":"label-reset","status":"` + status + `","conclusion":"` + conclusion + `","started_at":"` + started + `","app":{"slug":"` + app + `"},"pull_requests":[{"number":7}]}`
+	}
+	runPRs := func(prs string) string {
+		return `{"name":"label-reset","status":"completed","conclusion":"success","started_at":"2026-11-16T06:00:00Z","app":{"slug":"github-actions"},"pull_requests":` + prs + `}`
 	}
 	cases := map[string]struct {
 		json string
@@ -242,10 +245,15 @@ func TestChainBrokenResets(t *testing.T) {
 		"newest failed, older success":               {`{"check_runs":[` + run("github-actions", "completed", "success", "2026-11-16T06:00:00Z") + `,` + run("github-actions", "completed", "failure", "2026-11-16T06:05:00Z") + `]}`, false},
 		"newest success, older failure":              {`{"check_runs":[` + run("github-actions", "completed", "failure", "2026-11-16T06:00:00Z") + `,` + run("github-actions", "completed", "success", "2026-11-16T06:05:00Z") + `]}`, true},
 		"not json":                                   {`oops`, false},
-		"another check only":                         {`{"check_runs":[{"name":"adr-lint","status":"completed","conclusion":"success","started_at":"x","app":{"slug":"github-actions"}}]}`, false},
+		"another check only":                         {`{"check_runs":[{"name":"adr-lint","status":"completed","conclusion":"success","started_at":"x","app":{"slug":"github-actions"},"pull_requests":[{"number":7}]}]}`, false},
+		"a run listing only another PR":              {`{"check_runs":[` + runPRs(`[{"number":8}]`) + `]}`, false},
+		"a run listing both PRs":                     {`{"check_runs":[` + runPRs(`[{"number":8},{"number":7}]`) + `]}`, true},
+		"a run with an empty pull_requests list":     {`{"check_runs":[` + runPRs(`[]`) + `]}`, false},
+		"a run without pull_requests":                {`{"check_runs":[{"name":"label-reset","status":"completed","conclusion":"success","started_at":"2026-11-16T06:00:00Z","app":{"slug":"github-actions"}}]}`, false},
+		"another PR's newer run is ignored":          {`{"check_runs":[` + run("github-actions", "completed", "success", "2026-11-16T06:00:00Z") + `,` + runPRs(`[{"number":8}]`) + `]}`, true},
 	}
 	for name, c := range cases {
-		if ok, _ := chainOK([]byte(c.json)); ok != c.ok {
+		if ok, _ := chainOK([]byte(c.json), 7); ok != c.ok {
 			t.Errorf("%s: chainOK = %v, want %v", name, ok, c.ok)
 		}
 	}
@@ -277,18 +285,18 @@ func TestBrokenChainThenPureRebaseResets(t *testing.T) {
 		}
 		return p
 	}
-	failed := write("failed.json", `{"check_runs":[{"name":"label-reset","status":"completed","conclusion":"failure","started_at":"2026-11-16T06:00:00Z","app":{"slug":"github-actions"}}]}`)
+	failed := write("failed.json", `{"check_runs":[{"name":"label-reset","status":"completed","conclusion":"failure","started_at":"2026-11-16T06:00:00Z","app":{"slug":"github-actions"},"pull_requests":[{"number":7}]}]}`)
 	good := write("good.json", okRuns)
 	var out, errw bytes.Buffer
-	if code := runKeepLabel([]string{"--base", newBase, "--before", h2, "--after", h3, "--repo", r.dir, "--before-checks", failed}, &out, &errw, realGitIO); code != 1 || !strings.Contains(out.String(), "chain is broken") {
+	if code := runKeepLabel([]string{"--base", newBase, "--before", h2, "--after", h3, "--repo", r.dir, "--pr", "7", "--before-checks", failed}, &out, &errw, realGitIO); code != 1 || !strings.Contains(out.String(), "chain is broken") {
 		t.Fatalf("a failed label-reset on the old head must reset: code %d %q", code, out.String())
 	}
 	out.Reset()
-	if code := runKeepLabel([]string{"--base", newBase, "--before", h2, "--after", h3, "--repo", r.dir, "--before-checks", good}, &out, &errw, realGitIO); code != 0 || out.String() != "keep\n" {
+	if code := runKeepLabel([]string{"--base", newBase, "--before", h2, "--after", h3, "--repo", r.dir, "--pr", "7", "--before-checks", good}, &out, &errw, realGitIO); code != 0 || out.String() != "keep\n" {
 		t.Fatalf("an unbroken chain and a pure rebase keep: code %d %q", code, out.String())
 	}
 	out.Reset()
-	if code := runKeepLabel([]string{"--base", newBase, "--before", h2, "--after", h3, "--repo", r.dir}, &out, &errw, realGitIO); code != 1 {
+	if code := runKeepLabel([]string{"--base", newBase, "--before", h2, "--after", h3, "--repo", r.dir, "--pr", "7"}, &out, &errw, realGitIO); code != 1 {
 		t.Fatalf("no check runs given must reset: code %d", code)
 	}
 }
@@ -342,9 +350,19 @@ func TestKeepLabelCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out, errw bytes.Buffer
-	code := runKeepLabel([]string{"--base", base, "--before", before, "--after", after, "--repo", r.dir, "--before-checks", good}, &out, &errw, realGitIO)
+	code := runKeepLabel([]string{"--base", base, "--before", before, "--after", after, "--repo", r.dir, "--pr", "7", "--before-checks", good}, &out, &errw, realGitIO)
 	if code != 1 || !strings.HasPrefix(out.String(), "reset: ") {
 		t.Fatalf("code %d out %q", code, out.String())
+	}
+	for _, pr := range []string{"", "0", "-3", "x"} {
+		args := []string{"--base", base, "--before", before, "--after", after, "--repo", r.dir, "--before-checks", good}
+		if pr != "" {
+			args = append(args, "--pr", pr)
+		}
+		out.Reset()
+		if code := runKeepLabel(args, &out, &errw, realGitIO); code != 2 {
+			t.Fatalf("--pr %q must be a usage error (exit 2), got %d", pr, code)
+		}
 	}
 	if code := runKeepLabel([]string{"--bogus"}, &out, &errw, realGitIO); code != 2 {
 		t.Fatalf("a usage error must exit 2, got %d", code)
@@ -358,11 +376,11 @@ func TestChainOKOnARealPayload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ok, why := chainOK(b); !ok {
+	if ok, why := chainOK(b, 7); !ok {
 		t.Fatalf("a real successful label-reset run must keep the chain: %s", why)
 	}
 	failed := strings.Replace(string(b), `"conclusion":"success"`, `"conclusion":"failure"`, 1)
-	if ok, _ := chainOK([]byte(failed)); ok {
+	if ok, _ := chainOK([]byte(failed), 7); ok {
 		t.Fatal("the same payload with a failed run must break the chain")
 	}
 }

@@ -1,1 +1,1 @@
-{"check_runs":[{"app":{"slug":"github-actions"},"conclusion":"success","head_sha":"0000000000000000000000000000000000000000","name":"label-reset","started_at":"2026-11-16T06:31:40Z","status":"completed"}]}
+{"check_runs":[{"app":{"slug":"github-actions"},"conclusion":"success","head_sha":"0000000000000000000000000000000000000000","name":"label-reset","pull_requests":[{"number":7}],"started_at":"2026-11-16T06:31:40Z","status":"completed"}]}

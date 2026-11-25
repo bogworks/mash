@@ -90,13 +90,14 @@ jobs:
         id: keep
         if: ${{ github.event.action == 'synchronize' && steps.fetch-keep.outputs.fetched == 'yes' }}
         env:
+          PR: ${{ github.event.pull_request.number }}
           BASE: ${{ github.event.pull_request.base.sha }}
           BEFORE: ${{ github.event.before }}
           AFTER: ${{ github.event.pull_request.head.sha }}
         run: |
           set -uo pipefail
           keep=no
-          if verdict=$("$RUNNER_TEMP/adrlint" keep-label --base "$BASE" --before "$BEFORE" --after "$AFTER" --before-checks "$RUNNER_TEMP/before-checks.json" --repo trusted 2>> "$RUNNER_TEMP/keep.err"); then
+          if verdict=$("$RUNNER_TEMP/adrlint" keep-label --base "$BASE" --before "$BEFORE" --after "$AFTER" --pr "$PR" --before-checks "$RUNNER_TEMP/before-checks.json" --repo trusted 2>> "$RUNNER_TEMP/keep.err"); then
             keep=yes
           fi
           echo "keep-label: $verdict"

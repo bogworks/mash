@@ -334,7 +334,7 @@ func TestRuleA_bothWorkflowsRunTheSameKeepLabelVerdict(t *testing.T) {
 					t.Errorf("step %s must run only on a push (%s): %q", id, onlyPush, st.If)
 				}
 			}
-			for _, want := range []string{"keep-label", "--base \"$BASE\"", "--before \"$BEFORE\"", "--after \"$AFTER\"", "--before-checks", "--repo trusted", c.checker} {
+			for _, want := range []string{"keep-label", "--base \"$BASE\"", "--before \"$BEFORE\"", "--after \"$AFTER\"", "--pr \"$PR\"", "--before-checks", "--repo trusted", c.checker} {
 				if !strings.Contains(keep.Run, want) {
 					t.Errorf("the keep step lacks %q:\n%s", want, keep.Run)
 				}
@@ -346,6 +346,9 @@ func TestRuleA_bothWorkflowsRunTheSameKeepLabelVerdict(t *testing.T) {
 				if keep.Env[env] != want || fetch.Env[env] != want {
 					t.Errorf("%s must come from %s in the fetch and keep steps, got %q and %q", env, want, fetch.Env[env], keep.Env[env])
 				}
+			}
+			if want := "${{ github.event.pull_request.number }}"; keep.Env["PR"] != want {
+				t.Errorf("PR must come from %s in the keep step, got %q", want, keep.Env["PR"])
 			}
 			// The token is in the fetch step only: the verdict step runs the checker on a pull request's objects without it.
 			if fetch.Env["GH_TOKEN"] == "" {

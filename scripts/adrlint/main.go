@@ -3,7 +3,7 @@
 //	adrlint docs [--root r] [--base <git ref>] [dir]   lint every NNNN-title.md in dir (default docs/decisions)
 //	adrlint pr --files <path> [--root r] [--dir dir]   check a pull request's "Decision:" line
 //	adrlint index [--write|--check] [--root r] [--dir dir]   print, write or verify docs/decisions/INDEX.md
-//	adrlint keep-label --base B --before X --after Y --before-checks FILE [--repo dir]   may a push keep decision-confirmed
+//	adrlint keep-label --base B --before X --after Y --pr N --before-checks FILE [--repo dir]   may a push keep decision-confirmed
 //
 // --root (default ".") is the tree being judged: dir resolves under it and, with --base, git runs as "git -C root". The
 // workflow runs a checker built from the base branch with --root pointing at the pull request's checkout, so a pull

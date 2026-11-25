@@ -25,7 +25,8 @@ import (
 //  3. for every changed path, protected or not, its blob is identical in the old and the new head.
 //
 // The decision is local to one push, so it also needs the chain to be unbroken: the label-reset check run on the OLD head
-// must have concluded success (chainOK). Without that, a push whose label-reset failed or was missed would leave a label
+// must have concluded success (chainOK), and that run must belong to THIS pull request (two pull requests can share a head
+// commit, and the check-runs endpoint is keyed by commit). Without that, a push whose label-reset failed or was missed would leave a label
 // that a later pure rebase then keeps, and the label from an earlier head would cover a change nobody reviewed.
 //
 // 1 alone is not enough: patch-id ignores line numbers, so the same edit applied to a different repeated block of a file
@@ -190,16 +191,21 @@ type checkRuns struct {
 		Status     string `json:"status"`
 		Conclusion string `json:"conclusion"`
 		StartedAt  string `json:"started_at"`
-		App        struct {
+		// PullRequests lists the pull requests a run is attached to; a run is evidence only for those.
+		PullRequests []struct {
+			Number int `json:"number"`
+		} `json:"pull_requests"`
+		App struct {
 			Slug string `json:"slug"`
 		} `json:"app"`
 	} `json:"check_runs"`
 }
 
 // chainOK says whether label-reset judged the old head: its newest check run named label-reset, from the GitHub Actions app,
-// is completed with conclusion success. Skipped runs are ignored; missing, failed, cancelled, in progress, or from another
-// app, or no run but skipped ones: a broken chain.
-func chainOK(data []byte) (bool, string) {
+// is completed with conclusion success. Only runs whose pull_requests list holds pr count: a run attached to other pull
+// requests alone (a commit can be the head of several) is ignored as if absent. Skipped runs are ignored; missing, failed,
+// cancelled, in progress, or from another app, or no run but skipped or foreign ones: a broken chain.
+func chainOK(data []byte, pr int) (bool, string) {
 	var cr checkRuns
 	if err := json.Unmarshal(data, &cr); err != nil {
 		return false, "the check runs of the old head are unreadable"
@@ -207,6 +213,15 @@ func chainOK(data []byte) (bool, string) {
 	newest := -1
 	for i, r := range cr.CheckRuns {
 		if r.Name != "label-reset" || r.App.Slug != "github-actions" {
+			continue
+		}
+		mine := false
+		for _, p := range r.PullRequests {
+			if p.Number == pr {
+				mine = true
+			}
+		}
+		if !mine {
 			continue
 		}
 		// A skipped run made no judgement: a skipped label-reset run (its job `if` was false) can be newer than the push's real
@@ -245,8 +260,9 @@ func clean(s string) string {
 	return out
 }
 
-// runKeepLabel is `adrlint keep-label --base B --before X --after Y --before-checks FILE [--repo dir]`: prints "keep" and
-// exits 0, or prints "reset: <reason>" and exits 1. FILE holds the check runs of the old head (chainOK). A usage problem
+// runKeepLabel is `adrlint keep-label --base B --before X --after Y --pr N --before-checks FILE [--repo dir]`: prints "keep" and
+// exits 0, or prints "reset: <reason>" and exits 1. FILE holds the check runs of the old head (chainOK), and N is the pull request
+// number the run must belong to (required, positive). A usage problem
 // exits 2, which callers treat as reset too.
 func runKeepLabel(args []string, out, errw io.Writer, git func(dir string) gitIO) int {
 	fs := flag.NewFlagSet("keep-label", flag.ContinueOnError)
@@ -255,8 +271,13 @@ func runKeepLabel(args []string, out, errw io.Writer, git func(dir string) gitIO
 	before := fs.String("before", "", "the head before the push (full sha)")
 	after := fs.String("after", "", "the head after the push (full sha)")
 	repo := fs.String("repo", "", "the git directory that holds all three commits")
+	pr := fs.Int("pr", 0, "the pull request number (required): only its label-reset runs count in the chain")
 	checks := fs.String("before-checks", "", "a file with `gh api repos/R/commits/<before>/check-runs` output")
 	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *pr <= 0 {
+		fmt.Fprintln(errw, "keep-label: --pr N is required and must be positive")
 		return 2
 	}
 	reset := func(why string) int {
@@ -270,7 +291,7 @@ func runKeepLabel(args []string, out, errw io.Writer, git func(dir string) gitIO
 	if err != nil {
 		return reset("the check runs of the old head cannot be read")
 	}
-	if ok, why := chainOK(data); !ok {
+	if ok, why := chainOK(data, *pr); !ok {
 		return reset(why)
 	}
 	keep, why := keepLabel(git(*repo), *base, *before, *after)
