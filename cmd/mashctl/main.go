@@ -67,6 +67,9 @@ func runVerbs(args []string, env func(string) string, lookup config.Lookup, stdo
 		fmt.Fprintln(stderr, msg)
 		return 2
 	}
+	if args[0] == "--version" { // `mashctl --version` is `mashctl version`
+		args = append([]string{"version"}, args[1:]...)
+	}
 	// The global options are taken out of the arguments wherever they stand; a flag shadows its environment variable.
 	spec := cliframe.Spec{Tool: "mashctl", CredsEnv: "MASH_ADMIN_CREDS", CredsKey: "admin_creds"}
 	global, rest0, gerr := cliframe.ExtractOwning(spec, args, map[string][]string{"endpoint": {"--json"}, "doctor": {"--json"}, "version": {"--json"}, "init": {"--json"}, "status": {"--json"}, "limits": {"--json"}}) // these parse their own

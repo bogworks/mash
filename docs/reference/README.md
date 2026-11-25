@@ -23,7 +23,8 @@ from the spec.
     this endpoint, and whether it is online.
   - [`mash doctor`](mash-doctor.md): Check everything mail depends on for this
     endpoint, and say how to fix what is wrong. Changes nothing.
-  - [`mash version`](mash-version.md): Print the version.
+  - [`mash version`](mash-version.md): Print the version. It can also be run
+    as --version.
   - [`mash join`](mash-join.md): Install an endpoint's credentials on this
     machine from a join file.
   - [`mash key`](mash-key.md): Make your own key pair, for when the seed must
@@ -72,7 +73,8 @@ from the spec.
     - [`mashctl endpoint permissions`](mashctl-endpoint-permissions.md): Print
       the NATS permissions an endpoint's user needs, for someone who runs
       their own NATS.
-  - [`mashctl version`](mashctl-version.md): Print the version.
+  - [`mashctl version`](mashctl-version.md): Print the version. It can also be
+    run as --version.
 
 ## MCP tools
 

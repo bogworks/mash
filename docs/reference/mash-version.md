@@ -2,7 +2,7 @@ Generated from spec/*.json by go run ./scripts/refgen. Do not edit.
 
 # mash version
 
-Print the version.
+Print the version. It can also be run as --version.
 
 Release: 0.5.9. Group: Everyday.
 
@@ -18,6 +18,7 @@ The global options of `mash` also apply: see [mash](mash.md#global-options).
 
 ```text
 mash version
+mash --version
 ```
 
 ## Exit codes

@@ -38,7 +38,7 @@ These options work with every `mash` command.
 | [`mash who`](mash-who.md) | List the endpoints you can see, and which are online. |
 | [`mash status`](mash-status.md) | Say in one line whether mail works for this endpoint, and whether it is online. |
 | [`mash doctor`](mash-doctor.md) | Check everything mail depends on for this endpoint, and say how to fix what is wrong. Changes nothing. |
-| [`mash version`](mash-version.md) | Print the version. |
+| [`mash version`](mash-version.md) | Print the version. It can also be run as --version. |
 
 ### Setup
 

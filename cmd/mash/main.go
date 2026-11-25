@@ -238,6 +238,9 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 	if len(args) == 0 {
 		return cliframe.Report(stdout, stderr, cliframe.Usagef("mash needs a command").WithHint("mash --help"), global.JSON)
 	}
+	if args[0] == "--version" { // `mash --version` is `mash version`
+		args = append([]string{"version"}, args[1:]...)
+	}
 	env, lookup = global.Shadow(cliframe.Spec{Tool: "mash", CredsEnv: "MASH_CREDS", CredsKey: "creds"}, env, lookup)
 	home := config.HomeDir(env)
 	// A folder mash 0.5.5 left is named for what it is, before any command (help included) runs.

@@ -234,7 +234,7 @@ func TestRecipientMayBeDottedOrFlat(t *testing.T) {
 	}
 	for _, bad := range []string{"b", f.e.Owner + ".team", f.e.Owner + ".team.b.c", f.e.Owner + ".team_b", "O.team.b", "team.b"} {
 		_, err := a.Send(context.Background(), bad, "hi", 0)
-		if err == nil || !strings.Contains(err.Error(), "is not an endpoint address") || !strings.Contains(err.Error(), "owner.group.instance") {
+		if err == nil || !strings.Contains(err.Error(), "is not an endpoint address") || !strings.Contains(err.Error(), "owner.group.name") {
 			t.Fatalf("send to %q: %v", bad, err)
 		}
 	}
@@ -317,7 +317,7 @@ func TestPromptRoundTrip(t *testing.T) {
 		t.Fatalf("the dotted form names the same endpoint: %q %v", s2, err)
 	}
 	for _, bad := range []string{"a", f.e.Owner + ".team"} {
-		if _, err := DiscoverRecipient(ctx, b.Conn(), bad); err == nil || !strings.Contains(err.Error(), "owner.group.instance") {
+		if _, err := DiscoverRecipient(ctx, b.Conn(), bad); err == nil || !strings.Contains(err.Error(), "owner.group.name") {
 			t.Fatalf("%q: %v", bad, err)
 		}
 	}

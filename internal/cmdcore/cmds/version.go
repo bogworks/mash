@@ -38,11 +38,12 @@ func (r VersionResult) Text(cmdcore.Opts) string {
 
 // Version is the version command.
 var Version = cmdcore.Command[VersionParams, VersionResult]{
-	Name:        "version",
-	Group:       "Everyday",
-	Summary:     "Print the version.",
-	Description: "Print the version.",
-	Examples:    []string{"mash version"},
+	Name:           "version",
+	Group:          "Everyday",
+	Summary:        "Print the version. It can also be run as --version.",
+	Description:    "Print the version. It can also be run as --version.",
+	Examples:       []string{"mash version", "mash --version"},
+	MCPDescription: "Print the version.",
 	Run: func(_ context.Context, env *cmdcore.Env, _ VersionParams) (VersionResult, error) {
 		if env == nil {
 			return VersionResult{}, cliframe.Failf("internal: mash version has no environment to run in")

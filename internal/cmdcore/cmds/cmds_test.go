@@ -569,7 +569,7 @@ func TestSendHelp(t *testing.T) {
 	// the version help has no Arguments or Options section
 	o.Reset()
 	cmdcore.CLIWith(cmds.Version, envOf(&fakeSvc{}, true, nil), fr)([]string{"--help"}, nil, &o, &e, cliframe.Global{})
-	if strings.Contains(o.String(), "Arguments:") || strings.Contains(o.String(), "\nOptions:") || !strings.HasPrefix(o.String(), "Print the version.\n\nUsage:\n  mash version\n\nExamples:\n  mash version\n\nGlobal options:\n") {
+	if strings.Contains(o.String(), "Arguments:") || strings.Contains(o.String(), "\nOptions:") || !strings.HasPrefix(o.String(), "Print the version. It can also be run as --version.\n\nUsage:\n  mash version\n\nExamples:\n  mash version\n  mash --version\n\nGlobal options:\n") {
 		t.Errorf("version help:\n%s", o.String())
 	}
 }
