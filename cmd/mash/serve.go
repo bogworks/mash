@@ -271,7 +271,7 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 	// restarted session meeting a broker blip) is retried the same way; any other failure is terminal.
 	// Recorded before the first attempt: a resumed copy's hook can run while it is still in progress (ADR 0043).
 	// Removed on every exit, and at once when the first attempt binds (the bind also removes it).
-	clearWaiter, noteHeld := noteWaiting(cfg)
+	clearWaiter, noteHeld := noteWaiting(ctx, cfg)
 	defer clearWaiter()
 	startPPID := getppid()
 	openCtx, openCancel := context.WithTimeout(ctx, openBound(cfg))
@@ -786,7 +786,7 @@ func pingClient(ctx context.Context, srv *mcp.Server, ep *endpoint.Endpoint) {
 // removes the record, and the function that records who holds the lease (the spool's lease-wait state, which a hook of
 // this session turns into a notice, ADR 0092); the removal removes that state too. A spool that cannot be written costs
 // only these.
-func noteWaiting(cfg config.Config) (clear func(), noteHeld func(*endpoint.LeaseHeldError)) {
+func noteWaiting(ctx context.Context, cfg config.Config) (clear func(), noteHeld func(*endpoint.LeaseHeldError)) {
 	dir, err := endpoint.SpoolDir(cfg)
 	if err != nil {
 		return func() {}, func(*endpoint.LeaseHeldError) {}
@@ -797,7 +797,7 @@ func noteWaiting(cfg config.Config) (clear func(), noteHeld func(*endpoint.Lease
 	if s.Init() != nil {
 		return func() {}, func(*endpoint.LeaseHeldError) {}
 	}
-	if unlock, err := s.Lock(); err == nil {
+	if unlock, err := s.LockContext(ctx); err == nil {
 		_ = s.NoteWaiter(spool.WaiterRecord{PID: ppid, Session: session})
 		unlock()
 	}
@@ -807,19 +807,25 @@ func noteWaiting(cfg config.Config) (clear func(), noteHeld func(*endpoint.Lease
 	_, _ = rand.Read(rb[:])
 	instance := hex.EncodeToString(rb[:])
 	return func() {
-			if unlock, err := s.Lock(); err == nil {
+			// Runs as serve exits: a fresh short bound, so a stalled hook holding the lock cannot keep serve from exiting.
+			cctx, cancel := context.WithTimeout(context.Background(), cleanupLockWait)
+			defer cancel()
+			if unlock, err := s.LockContext(cctx); err == nil {
 				_ = s.ClearWaiter(ppid)
 				_ = s.ClearWaitState(os.Getpid(), instance)
 				unlock()
 			}
 		}, func(h *endpoint.LeaseHeldError) {
-			if unlock, err := s.Lock(); err == nil {
+			if unlock, err := s.LockContext(ctx); err == nil {
 				_ = s.NoteWaitState(spool.WaitState{HolderPID: h.PID, HolderHost: h.Host, HolderSince: h.Since,
 					ServePID: os.Getpid(), Instance: instance, ParentPID: ppid, Session: session, Updated: time.Now().UTC()})
 				unlock()
 			}
 		}
 }
+
+// cleanupLockWait is the longest serve's exit cleanup waits for the spool lock.
+var cleanupLockWait = time.Second
 
 // leaseRollupWarned makes the lease bucket warning appear at most once per process.
 var leaseRollupWarned sync.Once

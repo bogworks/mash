@@ -143,6 +143,7 @@ func hold(batch []pending) {
 
 // held is what the spool holds unacked, by (stream, sequence).
 type held struct {
+	ctx        context.Context // what the spool lock waits follow: ends with serve (nil: never, as in a test)
 	msgs       map[spool.Ref]pending
 	at         map[spool.Ref]time.Time // when each was spooled
 	bytes      int
@@ -819,7 +820,7 @@ func (e *Endpoint) healHeld(h *held) {
 	if len(bad) == 0 {
 		return
 	}
-	unlock, err := e.spool.Lock()
+	unlock, err := e.spool.LockContext(h.lockCtx())
 	if err != nil {
 		e.log.Printf("spool: %v", err)
 		return

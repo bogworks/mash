@@ -114,6 +114,7 @@ type Endpoint struct {
 	// flood of mail from one unknown signer costs one directory read per poll interval (reloadSender). Guarded by mu.
 	failedLookups map[string]time.Time
 	leaseGone     atomic.Bool
+	runCtx        atomic.Pointer[context.Context] // the Run in progress, see serveCtx
 	// loseOwn marks the own lease lost, as the watch or a failed refresh does (set by keepLease).
 	loseOwn func(error)
 	// live is the cache of the ack-time lease check (lease_fence.go).
@@ -846,6 +847,7 @@ func (e *Endpoint) Run(ctx context.Context, deliver Deliverer) error {
 	defer e.relay.stop()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	e.runCtx.Store(&ctx)
 	// The poller is joined before Run returns, and its interval read here: a poller outliving Run raced a test that
 	// changes DirectoryPoll after it (TestDirectoryLiveUpdate under -race).
 	polled := make(chan struct{})
