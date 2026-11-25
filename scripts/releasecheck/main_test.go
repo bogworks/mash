@@ -1105,6 +1105,21 @@ func TestCheck_aFailedDownloadOfThePreviousReleaseIsFour(t *testing.T) {
 	}
 }
 
+// A failed download of the previous release does not hide what the candidate itself got wrong: with a candidate finding
+// the gate still refuses (exit 3) and names it (#1505, codex M1).
+func TestCheck_aFailedDownloadStillRefusesOnACandidateFinding(t *testing.T) {
+	f := newFixture(t)
+	gitT(t, f.repo, "tag", "v0.0.9", f.x)
+	gitT(t, f.repo, "push", "-q", "origin", "v0.0.9")
+	f.setLatency(func(string) latencies {
+		return latencies{Fresh: 100 * time.Millisecond, FreshOK: true, Findings: []string{"fyi mail to a hooked session woke it"}}
+	})
+	err := f.check()
+	if err == nil || exitCode(err) != 3 || !strings.Contains(err.Error(), "fyi mail to a hooked session woke it") {
+		t.Fatalf("want a refusal (exit 3) naming the candidate finding, got %v (exit %d)", err, exitCode(err))
+	}
+}
+
 // A previous release whose hook failed is only visible in the hook log (the wrapper exits 0): that must be a refusal,
 // except `unknown command "hook"` from a release that predates `mash hook`.
 func TestCheck_previousReleaseHookLog(t *testing.T) {

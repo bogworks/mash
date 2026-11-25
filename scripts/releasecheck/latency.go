@@ -888,9 +888,10 @@ func latencyStep(ctx context.Context, o Options, b *binaries) error {
 	if oerr != nil {
 		return oerr
 	}
-	if b.hasPrev && b.prev == "" && b.prevErr != nil {
+	if b.hasPrev && b.prev == "" && b.prevErr != nil && len(cand.Findings) == 0 {
 		// The gate could not get its baseline: that says nothing about the candidate, so it is operational (exit 4),
-		// not a latency refusal (#1505). The plugin step names the same download failure.
+		// not a latency refusal (#1505). The plugin step names the same download failure. A candidate finding already
+		// measured is evidence to refuse on, so with one the step falls through to the refusal (exit 3), never hides it.
 		return op(fmt.Errorf("fresh-session mail: no baseline, the previous release %s could not be downloaded: %w", b.prevTag, b.prevErr))
 	}
 	var pp *latencies
