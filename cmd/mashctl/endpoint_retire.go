@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -280,7 +281,11 @@ func stageName(src string) string {
 	return fmt.Sprintf("%s.deleting.%d.%d.%x", src, os.Getpid(), stageSeq.Add(1), r)
 }
 
-// leftovers lists the staging files of src, src+".deleting.*", left by interrupted or running attempts, sorted.
+// stagedSuffix matches what follows src+".deleting." in a name stageName makes: pid, counter, 12 hex digits.
+var stagedSuffix = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9a-f]{12}$`)
+
+// leftovers lists the staging files of src, the names stageName makes, left by interrupted or running attempts,
+// sorted. Any other file with the src+".deleting." prefix is not ours and is left alone.
 // A directory that cannot be listed is an error, not "none": a staged creds file may be in it. A missing one has none.
 func leftovers(src string) ([]string, error) {
 	ents, err := os.ReadDir(filepath.Dir(src))
@@ -290,7 +295,7 @@ func leftovers(src string) ([]string, error) {
 	pre := filepath.Base(src) + ".deleting."
 	var out []string
 	for _, e := range ents {
-		if strings.HasPrefix(e.Name(), pre) {
+		if strings.HasPrefix(e.Name(), pre) && stagedSuffix.MatchString(strings.TrimPrefix(e.Name(), pre)) {
 			out = append(out, filepath.Join(filepath.Dir(src), e.Name()))
 		}
 	}
@@ -304,7 +309,7 @@ func leftovers(src string) ([]string, error) {
 // It first takes ownership of src with an atomic rename to a name unique to this attempt,
 // src+".deleting.<pid>.<n>.<random>", which no other attempt uses, so a rename never overwrites a file. It reads,
 // stats and removes only that file, never src again, so a creds file put at src meanwhile is neither read nor
-// removed. Staging files left by an interrupted run (src+".deleting.*", regular files only) are each claimed by a
+// removed. Staging files left by an interrupted run (the names stageName makes, regular files only) are each claimed by a
 // rename to a fresh unique name, which only one attempt can win, and archived first, each to its own marker; if src
 // is then missing, the last of those markers' path is returned, otherwise src is archived too and its marker's path
 // is returned. If every name is taken, or the marker cannot be made durable, the half marker is deleted and src is

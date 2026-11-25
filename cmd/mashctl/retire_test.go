@@ -520,7 +520,7 @@ func TestArchiveNoReplaceArchivesALeftoverDeleting(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "n.creds")
 	dest := src + ".deleted"
-	own := src + ".deleting.12345.1.abc"
+	own := src + ".deleting.12345.1.abcdef012345"
 	os.WriteFile(own, []byte(markerCreds("eyJleft")), 0o600)
 	got, err := archiveNoReplace(src, dest)
 	if err != nil || got != dest {
@@ -553,13 +553,35 @@ func TestArchiveNoReplaceArchivesALeftoverDeleting(t *testing.T) {
 	}
 }
 
+func TestArchiveNoReplaceLeavesAnUnrelatedDeletingFileAlone(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "n.creds")
+	dest := src + ".deleted"
+	other := src + ".deleting.bak"
+	os.WriteFile(src, []byte(markerCreds("eyJsrc")), 0o600)
+	os.WriteFile(other, []byte("distinctive backup contents"), 0o600)
+	got, err := archiveNoReplace(src, dest)
+	if err != nil || got != dest {
+		t.Fatalf("%q %v", got, err)
+	}
+	if b, _ := os.ReadFile(got); !strings.Contains(string(b), "eyJsrc") {
+		t.Errorf("marker not made from src: %q", b)
+	}
+	if b, err := os.ReadFile(other); err != nil || string(b) != "distinctive backup contents" {
+		t.Errorf("unrelated file touched: %q %v", b, err)
+	}
+	if _, err := os.Lstat(src); !os.IsNotExist(err) {
+		t.Error("src remains")
+	}
+}
+
 func TestArchiveNoReplaceUnlistableDirectoryFailsAndKeepsStagedFile(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root can list any directory")
 	}
 	dir := t.TempDir()
 	src := filepath.Join(dir, "n.creds")
-	staged := src + ".deleting.1.1.aa"
+	staged := src + ".deleting.1.1.abcdef012345"
 	os.WriteFile(staged, []byte(markerCreds("eyJstaged")), 0o600)
 	t.Cleanup(func() { os.Chmod(dir, 0o700) })
 	if err := os.Chmod(dir, 0o300); err != nil {
@@ -670,7 +692,7 @@ func TestRetireRetryFinishesACrashedDelete(t *testing.T) {
 	if _, errb, code := h.run("endpoint", "delete", "o.g.c", "--yes"); code != 0 {
 		t.Fatalf("first delete: %q", errb)
 	}
-	stage := creds + ".deleting.99.1.abc"
+	stage := creds + ".deleting.99.1.abcdef012345"
 	if err := os.Rename(aside, stage); err != nil {
 		t.Fatal(err)
 	}
