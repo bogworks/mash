@@ -234,7 +234,11 @@ func TestPromptFromAVerifiedSenderOutsideTheDirectory403(t *testing.T) {
 	}
 	// The Prompt client path shows the same refusal.
 	var out bytes.Buffer
-	err := Prompt(context.Background(), nc, id, tkey("x"), subj, "again", &out)
+	_, sid, ierr := readIdentities(creds)
+	if ierr != nil {
+		t.Fatal(ierr)
+	}
+	err := Prompt(context.Background(), nc, sid, tkey("x"), subj, "again", &out)
 	if err == nil || !strings.Contains(err.Error(), "403") || out.Len() != 0 {
 		t.Fatalf("Prompt: err %v, out %q", err, out.String())
 	}
