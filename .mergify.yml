@@ -88,6 +88,7 @@ queue_rules:
       - check-success = @github-actions/pr-check
       - check-success = @github-actions/adr-lint
       - check-success = @github-actions/label-reset # on this head, so a label left by an earlier push cannot let an exception path in
+      - check-success = medium-dispositions # every codex medium answered in Review-Dispositions; docs-only and no-review heads report success
     merge_conditions:
       - check-success = @github-actions/pr-check
     batch_size:
@@ -122,6 +123,7 @@ queue_rules:
       - check-success = @github-actions/pr-check
       - check-success = @github-actions/adr-lint
       - check-success = @github-actions/label-reset
+      - check-success = medium-dispositions
     # To merge (evaluated on the queue branch's run of the exact combination): pr-check again, since a batch's
     # combined code can break what each pull request passed alone. It needs test (both OSes) and reproducible.
     merge_conditions:
