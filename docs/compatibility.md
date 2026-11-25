@@ -24,7 +24,7 @@ The mixed 0.5.8 and 0.5.9 runs below were made on 2026-11-25 in throwaway Linux 
 | Linux, amd64 | The automated tests on the release commit. The mixed-version runs of 2026-11-25 were on a Go 1.27 container image. The nightly run on the candidate (commit `3fd115b1`, job `test (linux, eph)`, run 45567864348, 2026-11-25) passed. | Not stated. | Any current Linux distribution. |
 | Linux, arm64 | The release binary is built and checked for a reproducible build. Tests are not run on it. Untested. | Not stated. | Works as on amd64. |
 | macOS, amd64 (Intel) | The release binary is built and checked for a reproducible build. Tests are not run on it. Untested. | Not stated. | Works as on arm64. |
-| macOS, arm64 (Apple silicon) | The automated tests on the release commit. **PENDING:** the macOS upgrade runs. | Not stated. | Other current macOS releases. |
+| macOS, arm64 (Apple silicon) | The automated tests on the release commit. On 2026-11-25, on macOS 15.7.7 arm64 in a throwaway tart VM, from the from-source candidate (`3fd115b1`): installing 0.5.9 by rename over 0.5.8 (release files checked against their checksums) exited 0 and the running server was left alone; six numbered messages were each delivered exactly once; `mash doctor` and `mashctl doctor` exited 0 before and after; and the 0.5.9 setup script's `--start` and `--stop` worked on 0.5.8 setup files. Not run on macOS: a live Claude Code session, the plugin update (no `claude` on the VM; the Linux run covers it), the 0.5.9 installer and `--remove`. | Not stated. | Other current macOS releases. |
 | Windows | Untested. | Not supported. | Does not work natively. WSL 2 with the Linux binary is expected to work. |
 
 Notes:
@@ -35,7 +35,7 @@ Notes:
 
 ## Upgrading from 0.5.8
 
-The upgrade is one-way; see the release notes. On 2026-11-25 a Linux container run, from a 0.5.8 install and a server set up by the 0.5.8 script, ran these steps and they passed: `mashctl init --config <file>` once more (it adds `signing_key_pub` to `config.json` and changes nothing else), the doctor exit codes, `mashctl status` with no server, and `mashctl init --json`. Mail kept flowing, in both directions, when a session was not restarted after the programs were replaced, and with the 0.5.8 plugin and the 0.5.9 program, and the other way round. In a real Claude Code 2.1.330 on a Linux VM (2026-11-25, from-source candidate, no marketplace refresh), `claude plugin update mash@mash` and `claude plugin update mash-setup@mash` took both plugins from 0.5.8 to 0.5.9 (exit 0, "Restart to apply changes"). After the restart a new session received mail, the doctor tool showed no problems, and a reply reached a 0.5.8 peer. **PENDING:** macOS.
+The upgrade is one-way; see the release notes. On 2026-11-25 a Linux container run, from a 0.5.8 install and a server set up by the 0.5.8 script, ran these steps and they passed: `mashctl init --config <file>` once more (it adds `signing_key_pub` to `config.json` and changes nothing else), the doctor exit codes, `mashctl status` with no server, and `mashctl init --json`. Mail kept flowing, in both directions, when a session was not restarted after the programs were replaced, and with the 0.5.8 plugin and the 0.5.9 program, and the other way round. In a real Claude Code 2.1.330 on a Linux VM (2026-11-25, from-source candidate, no marketplace refresh), `claude plugin update mash@mash` and `claude plugin update mash-setup@mash` took both plugins from 0.5.8 to 0.5.9 (exit 0, "Restart to apply changes"). After the restart a new session received mail, the doctor tool showed no problems, and a reply reached a 0.5.8 peer. The macOS run is in the Platforms table.
 
 ## Run on the published 0.5.9 release
 
@@ -50,7 +50,7 @@ The release scripts, `install.sh` and `mash-local-nats-setup.sh`, are supported 
 | Ubuntu 24.04 | Untested on 0.5.9. |
 | Ubuntu 22.04 | Untested on 0.5.9. |
 | Debian | **PENDING**: the 2026-11-25 runs used a Go 1.27 container image; its Debian release was not recorded. |
-| macOS, arm64 | **PENDING**. |
+| macOS, arm64 | The 0.5.9 setup script's `--start` and `--stop` worked on 0.5.8 setup files (macOS 15.7.7, tart VM, 2026-11-25). The 0.5.9 installer and `--remove` were not run. |
 | Every other platform | Not supported by the scripts. Use the [setup skill](../mash-setup/skills/setup/SKILL.md): your agent works it out. May work; not tested or supported. |
 
 ## How to report a combination that fails
