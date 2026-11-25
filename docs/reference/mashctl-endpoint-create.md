@@ -53,6 +53,7 @@ Stream: stdout. Exit code: 0.
 
 ```text
 Created endpoint acme.demo.bob
+Credentials: <config dir>/acme.demo.bob.creds
 ```
 
 ### Created, with a join file

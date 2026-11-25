@@ -12,7 +12,7 @@ package main
 // server's own; of the two servers of the status case with several, tls://a.example:4222 is the test server and
 // tls://b.example:4222 is an address nothing listens on, as the case says it did not answer), and the version and
 // commit. Two shapes vary by nature and match as patterns: a date and time
-// (2026-11-19 09:40) and a public key.
+// (2026-11-19 09:40) and a public key. The folder placeholder <config dir> of the create case is the world's real folder.
 //
 // How the specification's stream is read (rules.json, "Where a hint is printed"): at a shell every `hint:` line goes to
 // stderr, whatever stream the rest uses. So the text of a case is split into its hint lines and the rest; the rest is
@@ -401,7 +401,8 @@ func init() {
 	})
 
 	reg("endpoint create Created, credentials installed on this machine", func(t *testing.T) confOutRun {
-		return confOutRun{ran: newConfWorld(t, true).run("endpoint", "create", "acme.demo.bob")}
+		w := newConfWorld(t, true)
+		return confOutRun{ran: w.run("endpoint", "create", "acme.demo.bob"), subs: []string{"<config dir>", w.a.env["MASH_CONFIG_DIR"]}}
 	})
 	reg("endpoint create Created, with a join file", func(t *testing.T) confOutRun {
 		w := newConfWorld(t, true)

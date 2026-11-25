@@ -187,7 +187,7 @@ func TestEndpointCreateDefaultInstalls(t *testing.T) {
 	h := newFleetEnv(t)
 	a := ad("same")
 	so, se, code := h.run("endpoint", "create", a.String())
-	if code != 0 || so != "Created endpoint "+a.String()+"\n" {
+	if code != 0 || so != "Created endpoint "+a.String()+"\nCredentials: "+h.creds(a)+"\n" {
 		t.Fatalf("code %d %q %q", code, so, se)
 	}
 	p := h.creds(a)
@@ -239,7 +239,7 @@ func TestEndpointCreateDefaultInstalls(t *testing.T) {
 	}
 	// --verbose
 	so, _, code = h.run("endpoint", "create", ad("same3").String(), "--detail")
-	if code != 0 || so != "Created endpoint "+ad("same3").String()+"\n" { // --detail adds nothing to create
+	if code != 0 || so != "Created endpoint "+ad("same3").String()+"\nCredentials: "+h.creds(ad("same3"))+"\n" { // --detail adds nothing to create
 		t.Errorf("verbose %d %q", code, so)
 	}
 }
@@ -614,5 +614,29 @@ func TestEndpointCreateGolden(t *testing.T) {
 	}
 	if b.String() != string(want) {
 		t.Fatalf("differs from %s (run with -update-endpoint-create after checking the diff)\n got: %s\nwant: %s", golden, b.String(), want)
+	}
+}
+
+// The Credentials line is the file create wrote: --config-dir changes it, and a join file case has no such line.
+func TestEndpointCreateCredentialsLine(t *testing.T) {
+	h := newFleetEnv(t)
+	other := filepath.Join(t.TempDir(), "elsewhere")
+	if err := os.MkdirAll(other, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	a := ad("cl1")
+	so, se, code := h.run("endpoint", "create", a.String(), "--config-dir", other)
+	want := other + string(filepath.Separator) + a.String() + ".creds"
+	if code != 0 || so != "Created endpoint "+a.String()+"\nCredentials: "+want+"\n" {
+		t.Fatalf("config-dir: %d %q %q", code, so, se)
+	}
+	if _, err := os.Stat(want); err != nil {
+		t.Errorf("the printed path is not a file: %v", err)
+	}
+	b := ad("cl2")
+	jf := filepath.Join(t.TempDir(), "b.join")
+	so, se, code = h.run("endpoint", "create", b.String(), "--out", jf)
+	if code != 0 || so != "Created endpoint "+b.String()+"\nJoin file: "+jf+"\n" {
+		t.Fatalf("join: %d %q %q", code, so, se)
 	}
 }

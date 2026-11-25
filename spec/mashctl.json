@@ -835,7 +835,7 @@
         "value": [
          {
           "case": "Created, credentials installed on this machine",
-          "text": "Created endpoint acme.demo.bob",
+          "text": "Created endpoint acme.demo.bob\nCredentials: <config dir>/acme.demo.bob.creds",
           "stream": "stdout",
           "exit": 0
          },
@@ -894,20 +894,6 @@
        {
         "name": "x-notes",
         "value": "With no option, the endpoint can be used on this machine at once: what a solo developer wants. --out is for another machine. --public-key is for when the seed must never leave that machine. When mashctl has no certificate authority file configured, the join file's \"ca\" is null, and mash then trusts the server only through the machine's own trusted certificate authorities, as a browser would."
-       },
-       {
-        "name": "x-output-next",
-        "value": [
-         {
-          "case": "Created, credentials installed on this machine",
-          "text": "Created endpoint acme.demo.bob\nCredentials: <config dir>/acme.demo.bob.creds",
-          "stream": "stdout",
-          "exit": 0,
-          "issue": "#1044",
-          "replaces": "Created, credentials installed on this machine",
-          "note": "The line says where the file it wrote is, as gh and aws do; --json already has it as \"creds\". <config dir> stands for the folder the program is using (the default, or the one --config-dir names); the program prints the real path, so the example is not verbatim. The case with a join file is unchanged (its Join file line is the location it wrote); mash who's text is unchanged."
-         }
-        ]
        }
       ]
      },
