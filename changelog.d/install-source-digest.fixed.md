@@ -1,1 +1,0 @@
-**The installer now checks that the release was built from the commit its tag points to.** With gh 2.102.0 or newer, `install.sh` reads that commit and pins the attestation check to it, so a release attested from another commit is refused. If it cannot read the commit, it installs nothing.

@@ -1,1 +1,0 @@
-**A serve that was killed no longer blocks the next one where nothing reaps it.** In a container whose first process does not reap its children, a killed serve stays a zombie, and the next serve of the endpoint saw it as still holding the name and waited. A process that has exited is now gone as a holder ([#1437](https://github.com/bogworks/mash/issues/1437)).

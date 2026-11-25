@@ -1,1 +1,0 @@
-**`mash join` no longer sets a private certificate authority in a folder that was already set up.** A join file that brings a ca is now refused, with the same "different ca" line, where the folder already names servers and has no ca. If a join fails after installing the creds file, undoing it now leaves a creds file you replaced in the meantime and says so.
