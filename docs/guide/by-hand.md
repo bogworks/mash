@@ -122,7 +122,8 @@ urgent:   no
 ```
 
 `mash read` shows who signed the message. `trust: verified` means Bob's own
-key did. Mail that is not verified is refused.
+key did. Mail that is not verified is dropped and counted (`mash doctor` shows
+the count); the sender is not told.
 
 ## 6. Two Claude Code sessions
 
