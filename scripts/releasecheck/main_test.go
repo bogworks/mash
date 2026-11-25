@@ -551,6 +551,32 @@ func TestAssets_everyWrongAssetSetIsRefused(t *testing.T) {
 	}
 }
 
+// GitHub can return an empty digest for a draft asset. The gate still refuses (exit 3), but says the digest was not
+// available, by asset name, and does not compare the empty value (#1377).
+func TestAssets_anEmptyDigestIsReportedAsNotAvailable(t *testing.T) {
+	f := newFixture(t)
+	setAssets(t, f, func(m map[string]string) { m["mash-linux-arm64"] = "" })
+	err := checkAssets(context.Background(), f.o)
+	if err == nil {
+		t.Fatal("an asset with no digest passed")
+	}
+	if got := exitCode(err); got != 3 {
+		t.Errorf("exit %d, want 3: %v", got, err)
+	}
+	var named []string
+	for _, ln := range strings.Split(err.Error(), "\n") {
+		if strings.Contains(ln, "mash-linux-arm64") && !strings.Contains(ln, "mashctl-") {
+			named = append(named, ln)
+		}
+	}
+	if len(named) != 1 || !strings.Contains(named[0], "asset mash-linux-arm64: digest not available") {
+		t.Errorf("want one line naming the asset with its digest not available, got %q in:\n%v", named, err)
+	}
+	if strings.Contains(err.Error(), `has digest ""`) {
+		t.Errorf("the empty digest was compared:\n%v", err)
+	}
+}
+
 func tagAt(t *testing.T, f *fixture, annotated bool) {
 	t.Helper()
 	write(t, f.repo, "later.txt", "later")
