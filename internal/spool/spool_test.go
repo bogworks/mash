@@ -1,6 +1,8 @@
 package spool
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -534,5 +536,43 @@ func TestListedMarkLifecycle(t *testing.T) {
 	}
 	if err := s.Acked(Ref{Seq: 3}); err != nil || s.IsListed(Ref{Seq: 3}) {
 		t.Fatalf("Acked kept the listed mark: %v", err)
+	}
+}
+
+func TestLockContextGivesUpWithContextAndAcquiresAfterRelease(t *testing.T) {
+	s := Spool{Dir: filepath.Join(t.TempDir(), "spool")}
+	if err := s.Init(); err != nil {
+		t.Fatal(err)
+	}
+	holder, err := s.Lock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	if _, err := s.LockContext(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("LockContext while held = %v, want deadline exceeded", err)
+	}
+	if d := time.Since(start); d > 2*time.Second {
+		t.Fatalf("LockContext took %v to give up", d)
+	}
+	done := make(chan func(), 1)
+	go func() {
+		unlock, err := s.LockContext(context.Background())
+		if err != nil {
+			t.Error(err)
+			done <- func() {}
+			return
+		}
+		done <- unlock
+	}()
+	time.Sleep(50 * time.Millisecond)
+	holder()
+	select {
+	case unlock := <-done:
+		unlock()
+	case <-time.After(5 * time.Second):
+		t.Fatal("LockContext did not acquire after the holder unlocked")
 	}
 }

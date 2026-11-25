@@ -75,7 +75,7 @@ func (e *Endpoint) SetSpoolContext(ctx context.Context, s spool.Spool, owner str
 	}
 	// Hooks are excluded while the spool changes hands: one that passed its owner check before this rebind must not
 	// drain the new session's mail (codex H1 on #21, round 7).
-	unlock, err := s.Lock()
+	unlock, err := s.LockContext(ctx)
 	if err != nil {
 		return err
 	}
