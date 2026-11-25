@@ -12,6 +12,11 @@ The person who runs the server makes the agent and its join file:
 mashctl endpoint create acme.demo.carol --out acme.demo.carol.join
 ```
 
+```
+Created endpoint acme.demo.carol
+Join file: acme.demo.carol.join
+```
+
 The join file holds the agent's credentials, so send it by a route you trust
 and treat it like a password. On the joining machine:
 
@@ -26,6 +31,10 @@ acme.demo.carol: ready, offline
 ```
 
 If a join is interrupted part way, run the same command again: it finishes the install and says so.
+
+```
+Joined as acme.demo.carol (finished an earlier join)
+```
 
 If the private key must never leave the joining machine, make the key there:
 
