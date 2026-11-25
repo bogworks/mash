@@ -274,11 +274,21 @@
        },
        {
         "case": "A signing key is set, with --json",
-        "text": "{\n  \"server\": [\n    \"tls://localhost:4222\"\n  ],\n  \"owner\": \"acme\",\n  \"changed\": true,\n  \"signing_key_pub\": \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"\n}",
+        "text": "{\n  \"servers\": [\n    \"tls://localhost:4222\"\n  ],\n  \"owner\": \"acme\",\n  \"changed\": true,\n  \"signing_key_pub\": \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"\n}",
         "stream": "stdout",
         "exit": 0,
-        "issue": "#1260 / #1299",
-        "note": "signing_key_pub is the signing key's public key, never the seed; it is left out when no signing key is set."
+        "issue": "#1042",
+        "note": "--json is shown as it prints at a terminal (indented); piped it is one compact line (rule \"--json prints one object\"). The list of servers is named \"servers\" (plural, today \"server\"), as in the setup file and mashctl status --json. signing_key_pub is the signing key's public key, never the seed.",
+        "verbatim": true
+       },
+       {
+        "case": "No signing key is set, with --json",
+        "text": "{\n  \"servers\": [\n    \"tls://localhost:4222\"\n  ],\n  \"owner\": \"acme\",\n  \"changed\": true,\n  \"signing_key_pub\": null\n}",
+        "stream": "stdout",
+        "exit": 0,
+        "issue": "#1042",
+        "note": "--json is shown as it prints at a terminal (indented). signing_key_pub is always present: null when no signing key is set (today it is left out), so a script reads one shape.",
+        "verbatim": true
        },
        {
         "case": "The owner is too long",
@@ -1081,21 +1091,6 @@
        {
         "name": "x-notes",
         "value": "Order. The endpoint's key is cancelled on every server first; only when every server confirms is anything removed, so a failure there leaves the endpoint whole. If this machine holds the endpoint's creds file, it is set aside as <address>.creds.deleted, a marker that keeps the endpoint's name and its JWT only, no key, so mash no longer counts it as installed; the path is predictable and nothing prints it. Nothing else on any machine is touched. If a step after the cancellation fails, the error is one line naming the address and the cause in plain words, with the command to run again; the key is already cancelled, so its credentials no longer work, and running the command again is safe."
-       },
-       {
-        "name": "x-output-next",
-        "value": [
-         {
-          "case": "No terminal and no --yes",
-          "text": "error: mashctl endpoint delete needs a terminal to type the address\nhint: mashctl endpoint delete acme.demo.bob --yes",
-          "stream": "stderr",
-          "exit": 2,
-          "issue": "#1049",
-          "replaces": "No terminal and no --yes",
-          "note": "ADR 0168: a hint is the command that fixes the problem. The error line is unchanged; the hint is the command with --yes, with the address as typed. This departs from the earlier note (#1161) that the error does not mention --yes so an agent does not skip the confirmation: the hint now names it. reissue and suspend stay without a confirmation (only a destructive command asks).",
-          "verbatim": true
-         }
-        ]
        }
       ]
      },
