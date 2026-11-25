@@ -30,13 +30,17 @@ func Permissions(a sap.Address) *jwt.Permissions {
 	if a.Validate() != nil {
 		return nil
 	}
-	s := a.Subjects()
+	s, err := a.Subjects()
+	if err != nil {
+		return nil
+	}
+	hb := s.HB
 	peer := a.Owner + ".*.*"
 	var pub []string
 	for _, verb := range []string{"mail", "prompt", "status"} {
 		pub = append(pub, "agents."+verb+"."+peer)
 	}
-	pub = append(pub, fixedPub(a)...)
+	pub = append(pub, fixedPub(a, hb)...)
 	sub := []string{
 		a.InboxPrefix() + ".>",
 		s.Prompt,
@@ -53,13 +57,13 @@ func Permissions(a sap.Address) *jwt.Permissions {
 // fixedPub is the part of the publish allow list that names only the endpoint itself: its heartbeat, replies, the
 // service API, and the JetStream and KV subjects of its own inbox, the directory and its lease. The stream is
 // inbox-<flat>, the consumer is the shared consumer name, and the lease key is <flat>.
-func fixedPub(a sap.Address) []string {
+func fixedPub(a sap.Address, hb string) []string {
 	flat := a.Flat()
 	inbox := a.InboxStream()
 	dir := "KV_" + store.DirectoryBucket
 	lease := "KV_" + store.LeaseBucket
 	return []string{
-		a.Subjects().HB,
+		hb,
 		"_INBOX." + a.Owner + ".>", // replies (SAP prompt chunks, $SRV answers) go to inboxes of its own owner only
 		"$SRV.>",
 		"$JS.API.INFO",

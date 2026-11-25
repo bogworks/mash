@@ -19,7 +19,7 @@ func rawMark(t *testing.T, f *fixture, from, to, body string, mutate func(id sap
 	t.Helper()
 	nc := f.e.ConnAs(t, f.creds[from], tkey(from))
 	id := identity(t, f.creds[from])
-	subj := taddr(to).Subjects().Mail
+	subj := taddr(to).MailSubject()
 	h, err := id.Sign(subj, []byte(body), tkey(from), time.Now(), "")
 	if err != nil {
 		t.Fatal(err)
@@ -229,7 +229,7 @@ func TestMarksChangeNeitherTrustKindNorWake(t *testing.T) {
 // The origin syntax in sap is the endpoint's flat key, the same rule as a directory key.
 func TestViaOriginSyntaxMatchesDirectoryKey(t *testing.T) {
 	id := identity(t, newFixture(t, "a").creds["a"])
-	h, err := id.Sign(taddr("a").Subjects().Mail, []byte("x"), tkey("a"), time.Now(), "")
+	h, err := id.Sign(taddr("a").MailSubject(), []byte("x"), tkey("a"), time.Now(), "")
 	if err != nil {
 		t.Fatal(err)
 	}

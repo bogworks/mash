@@ -1206,7 +1206,7 @@ func (s *at4) mail() {
 	}
 	defer nc.Close()
 	to, _ := sap.ParseAddress("alice.dev.review")
-	subject := to.Subjects().Mail
+	subject := to.MailSubject()
 	senderKey := sap.KeyOf("alice.dev.design")
 	rnd := strconv.FormatInt(time.Now().UnixNano()%1_000_000_000, 36)
 	publish := func(kind string) at4Sent {

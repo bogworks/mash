@@ -46,7 +46,7 @@ func serveCfg(t *testing.T, cfg config.Config) (*Endpoint, *events, func()) {
 // publishUnverified stores one message of each unverified label in a's inbox and returns their labels in order.
 func (f *fixture) publishUnverified(t *testing.T, to string) []sap.Trust {
 	t.Helper()
-	subj := taddr(to).Subjects().Mail
+	subj := taddr(to).MailSubject()
 	nc := f.e.ConnAs(t, f.creds["b"], tkey("b"))
 	id := identity(t, f.creds["b"])
 	publishRaw(t, nc, subj, "", "absent body")
@@ -190,7 +190,7 @@ func TestAcceptUnverifiedDeliversLabelled(t *testing.T) {
 func TestForgedMailIsNotCountedAsRefused(t *testing.T) {
 	f := newFixture(t, "a", "b")
 	cfg := f.cfgState("a", t.TempDir(), false)
-	subj := taddr("a").Subjects().Mail
+	subj := taddr("a").MailSubject()
 	id := identity(t, f.creds["b"])
 	h, _ := id.Sign(subj, []byte("forged body"), tkey("b"), time.Now(), "")
 	h.Sig = strings.Repeat("A", len(h.Sig))

@@ -19,7 +19,7 @@ import (
 // unknownSignerMsg stores one unknown-signer message in to's inbox.
 func (f *fixture) unknownSignerMsg(t *testing.T, to string) {
 	t.Helper()
-	subj := taddr(to).Subjects().Mail
+	subj := taddr(to).MailSubject()
 	xcreds, _ := f.e.Mint(t, taddr("x"))
 	xh, _ := identity(t, xcreds).Sign(subj, []byte("unknown body"), tkey("x"), time.Now(), "")
 	publishRaw(t, f.e.ConnAs(t, xcreds, tkey("x")), subj, xh.Encode(), "unknown body")

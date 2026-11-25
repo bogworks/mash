@@ -461,7 +461,11 @@ func DiscoverRecipient(ctx context.Context, nc *nats.Conn, arg string) (string, 
 // Discover finds the prompt subject of the endpoint at a from $SRV.INFO.agents (SAP §4.3). It matches the prompt
 // subject alone, so an endpoint hosted by any SAP SDK is found by its T3.T4.T5; metadata is not read for routing.
 func Discover(ctx context.Context, nc *nats.Conn, a sap.Address) (string, error) {
-	return discoverSubject(ctx, nc, a.Subjects().Prompt, a.Flat())
+	s, err := a.Subjects()
+	if err != nil {
+		return "", err
+	}
+	return discoverSubject(ctx, nc, s.Prompt, a.Flat())
 }
 
 func discoverSubject(ctx context.Context, nc *nats.Conn, want, name string) (string, error) {

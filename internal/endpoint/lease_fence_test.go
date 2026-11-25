@@ -385,7 +385,7 @@ func TestPromptDuringTakeoverGraceNotDelivered(t *testing.T) {
 	var out bytes.Buffer
 	short, c2 := context.WithTimeout(ctx, 2*time.Second)
 	defer c2()
-	if err := Prompt(short, snd.Conn(), snd.Identity(), tkey("snd"), taddr("a").Subjects().Prompt, "early", &out); err == nil {
+	if err := Prompt(short, snd.Conn(), snd.Identity(), tkey("snd"), mustSubj(taddr("a")).Prompt, "early", &out); err == nil {
 		t.Fatal("a prompt inside the grace was answered")
 	}
 	select {
@@ -395,7 +395,7 @@ func TestPromptDuringTakeoverGraceNotDelivered(t *testing.T) {
 	}
 	<-started
 	out.Reset()
-	if err := Prompt(ctx, snd.Conn(), snd.Identity(), tkey("snd"), taddr("a").Subjects().Prompt, "late", &out); err != nil {
+	if err := Prompt(ctx, snd.Conn(), snd.Identity(), tkey("snd"), mustSubj(taddr("a")).Prompt, "late", &out); err != nil {
 		t.Fatal(err)
 	}
 	if p := <-got; p.Text != "late" {

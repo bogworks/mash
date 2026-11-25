@@ -336,7 +336,7 @@ func TestNameRulePrompt(t *testing.T) {
 	_, err = a.DiscoverRecipient(ctx, tdot("gone"))
 	wantRefusal(t, err, "no-gone", "prompt: the recipient")
 	subj, err := a.DiscoverRecipient(ctx, tdot("b"))
-	if err != nil || subj != taddr("b").Subjects().Prompt {
+	if err != nil || subj != mustSubj(taddr("b")).Prompt {
 		t.Fatalf("an allowed recipient: %q %v", subj, err)
 	}
 	a.cfg.NameRule = ruleOf(t, "instance:a")

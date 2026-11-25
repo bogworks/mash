@@ -83,7 +83,7 @@ func TestEndpointListWide(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := 0; i < 2; i++ {
-		if _, err := js.Publish(context.Background(), addr3("acme", "demo", "bob").Subjects().Mail, []byte("hello")); err != nil {
+		if _, err := js.Publish(context.Background(), addr3("acme", "demo", "bob").MailSubject(), []byte("hello")); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -181,7 +181,7 @@ func TestEndpointShowWaiting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := js.Publish(context.Background(), a.Subjects().Mail, []byte("hello")); err != nil {
+	if _, err := js.Publish(context.Background(), a.MailSubject(), []byte("hello")); err != nil {
 		t.Fatal(err)
 	}
 	out, _, code := h.run("endpoint", "show", "acme.demo.bob")

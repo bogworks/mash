@@ -35,7 +35,7 @@ func (f *fixture) fillInbox(t *testing.T, name string, n int) {
 	}
 	body := []byte(strings.Repeat("x", 500))
 	for i := 0; i < n; i++ {
-		if _, err := js.Publish(ctx, taddr(name).Subjects().Mail, body); err != nil {
+		if _, err := js.Publish(ctx, taddr(name).MailSubject(), body); err != nil {
 			t.Fatal(err)
 		}
 	}

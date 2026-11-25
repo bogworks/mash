@@ -13,7 +13,10 @@ func TestGoldenAddressIdentifiers(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		s := a.Subjects()
+		s, err := a.Subjects()
+		if err != nil {
+			t.Fatal(err)
+		}
 		if s.Prompt != c.prompt || s.Mail != c.mail || a.Flat() != c.flat || a.InboxStream() != c.stream || a.InboxPrefix() != c.prefix {
 			t.Errorf("%v: %+v %q %q %q", a, s, a.Flat(), a.InboxStream(), a.InboxPrefix())
 		}
