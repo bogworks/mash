@@ -170,3 +170,53 @@ func TestStatusRowsKeepTheConfiguredOrder(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadSetupRefusesEverySeedPrefix(t *testing.T) {
+	const body = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUV"
+	keys := []string{"ca", "admin_creds", "system_creds", "operator_key", "account_key", "signing_key"}
+	for _, pre := range []string{"SO", "SA", "SU", "SN", "SC", "SP", "SX"} {
+		seed := pre + body
+		if len(seed) != 56 {
+			t.Fatalf("seed length %d", len(seed))
+		}
+		for _, k := range keys {
+			vals := map[string]string{"owner": "alice", "ca": "/ca.pem", "admin_creds": "/a.creds", "system_creds": "/s.creds", "operator_key": "/o.nk", "account_key": "/k.nk", "signing_key": "/g.nk"}
+			vals[k] = seed
+			doc := "servers:\n  - tls://a:4222\n"
+			for key, v := range vals {
+				doc += key + ": \"" + v + "\"\n"
+			}
+			p := filepath.Join(t.TempDir(), "setup.yaml")
+			if err := os.WriteFile(p, []byte(doc), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := loadSetup(p, "/home/x")
+			if err == nil || !strings.Contains(err.Error(), k+" holds a key, not a path") {
+				t.Fatalf("%s %s: %v", pre, k, err)
+			}
+			if strings.Contains(err.Error(), seed) || strings.Contains(err.Error(), body[:20]) {
+				t.Fatalf("%s %s: the value was echoed: %v", pre, k, err)
+			}
+		}
+		doc := "servers:\n  - \"" + seed + "\"\nca: /c\nowner: alice\nadmin_creds: /a\nsystem_creds: /s\noperator_key: /o\naccount_key: /k\n"
+		p := filepath.Join(t.TempDir(), "setup.yaml")
+		if err := os.WriteFile(p, []byte(doc), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, err := loadSetup(p, "/home/x")
+		if err == nil || !strings.Contains(err.Error(), "servers holds a key") || strings.Contains(err.Error(), body[:20]) {
+			t.Fatalf("%s servers: %v", pre, err)
+		}
+	}
+}
+
+func TestLoadSetupAcceptsShortSOName(t *testing.T) {
+	doc := "servers:\n  - tls://a:4222\nowner: alice\nca: SOMEFILE\nadmin_creds: SOMEFILE\nsystem_creds: SOMEFILE\noperator_key: SOMEFILE\naccount_key: SOMEFILE\nsigning_key: SOMEFILE\n"
+	p := filepath.Join(t.TempDir(), "setup.yaml")
+	if err := os.WriteFile(p, []byte(doc), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadSetup(p, "/home/x"); err != nil {
+		t.Fatal(err)
+	}
+}
