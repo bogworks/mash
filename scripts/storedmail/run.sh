@@ -23,11 +23,15 @@ for t in "${tags[@]}"; do
 	curl -fsSL -o "$bins/$t/mash-linux-amd64" "https://github.com/$repo/releases/download/$t/mash-linux-amd64"
 	got=$(sha256 "$bins/$t/mash-linux-amd64" | cut -d' ' -f1)
 	want=$(gh release view "$t" --repo "$repo" --json assets --jq '.assets[]|select(.name=="mash-linux-amd64")|.digest' 2>/dev/null || true)
-	if [ -n "$want" ] && [ "$want" != "sha256:$got" ]; then
+	if [ -z "$want" ]; then # no digest, no integrity check: refuse rather than run an unchecked binary
+		echo "no release digest for $t mash-linux-amd64; refusing to use it unchecked" >&2
+		exit 1
+	fi
+	if [ "$want" != "sha256:$got" ]; then
 		echo "sha256 mismatch for $t: got $got, release says $want" >&2
 		exit 1
 	fi
-	if [ -n "$want" ]; then echo "$t sha256 $got (matches the release digest)"; else echo "$t sha256 $got (no release digest shown)"; fi
+	echo "$t sha256 $got (matches the release digest)"
 done
 
 docker run --rm --name "$name" -e MASH_STOREDMAIL_IN_CONTAINER=1 -v "$root":/src:ro -v "$bins":/bins:ro golang:1.27 sh -c '
