@@ -116,6 +116,314 @@
   "issue": "#1046",
   "note": "Today this reads \"acme.demo.dave does not exist\"; one not-found form instead. The hint is the one for every not-found: list shows what exists. Exit 1.",
   "verbatim": true
+ },
+ {
+  "id": "help-mash-top-usage-footer",
+  "where": "mash --help (Usage line and footer)",
+  "case": "mash --help",
+  "text": "Trusted mail between agents. Speaks as one endpoint.\n\nUsage: mash <command> [options]\n\nSAP is the Synadia Agent Protocol, NATS is the message server mash\ntalks to, and creds are the file that signs an endpoint in to it.\n\nEveryday:\n  mash send <address> [<message>] [options]    Send a message to an endpoint.\n  mash inbox [options]                         List the messages this endpoint\n                                               has received.\n  mash read <number>                           Show one message in full.\n  mash who [<prefix>] [options]                List the endpoints you can see,\n                                               and which are online.\n  mash status                                  Say in one line whether mail\n                                               works for this endpoint, and\n                                               whether it is online.\n  mash doctor [options]                        Check everything mail depends on\n                                               for this endpoint, and say how to\n                                               fix what is wrong. Changes\n                                               nothing.\n  mash version                                 Print the version. It can also be\n                                               run as --version.\n\nSetup:\n  mash join <file> [options]                   Install an endpoint's credentials\n                                               on this machine from a join file.\n  mash key create [options]                    Make your own key pair, for when\n                                               the seed must never leave this\n                                               machine.\n\nIntegration:\n  mash serve [options]                         Run as an MCP server for an agent\n                                               host. Started by the host, not by\n                                               hand.\n  mash hook                                    Print mail waiting for this\n                                               session, in the form the agent\n                                               host expects. Run by the host\n                                               after each tool call and with\n                                               each prompt.\n\nRaw SAP:\n  mash prompt <address> <text>                 Ask an endpoint a live question\n                                               and wait for its answer. Not\n                                               stored: if the recipient is not\n                                               there, it fails.\n\nGlobal options:\n  --endpoint <address>  Which endpoint to act as, as owner.group.name. Not\n                        needed for the everyday and setup commands when only one\n                        is installed here. mash serve and mash hook always need\n                        it said: a session becomes an endpoint only because\n                        someone chose that.\n  --creds <path>        The creds file to sign in with. Default: <config\n                        folder>/<address>.creds.\n  --server <url>        The server address. May be given more than once.\n  --ca <path>           The certificate authority's certificate, when the server\n                        uses its own.\n  --config-dir <path>   The configuration folder. Default: ~/.config/mash.\n  --detail              Print the fuller answer: after the usual line, more as\n                        'label: value' lines; with --json, the fuller object.\n  --json                Print the result as JSON: the same object the matching\n                        MCP tool returns.\n  --no-color            Never use color. Color is used only on a terminal, and\n                        NO_COLOR is honored.\n  -h, --help            Show help for the command.\n\nAn endpoint is addressed owner.group.name: MASH_ENDPOINT (or config.json\n\"endpoint\", or --endpoint). With none set, the one endpoint whose creds file\n(owner.group.name.creds, mode 0600) is in the config directory is used; with\nseveral, name one.\nA global option may stand anywhere in the command. A flag beats its environment\nvariable, which beats config.json.\nConfiguration: config.json {\"servers\",\"endpoint\",\"ca\"} in $MASH_CONFIG_DIR\n(default ~/.config/mash, or $XDG_CONFIG_HOME/mash), overridden by MASH_SERVER\n(commas between several), MASH_ENDPOINT, MASH_CA, MASH_CREDS, MASH_ADMIN_CREDS,\nMASH_HOST (see docs/install.md).\nState (spool, hook.log): $MASH_STATE_DIR (default $XDG_STATE_HOME/mash, else\n~/.local/state/mash).\nSlow link: \"open_timeout\" (default 20s) and \"call_timeout\" (default 15s), or\nMASH_OPEN_TIMEOUT and MASH_CALL_TIMEOUT.\nAlso tunable: lease_retry, transient_budget, transient_max, cli_timeout,\nadmin_timeout (MASH_LEASE_RETRY, MASH_TRANSIENT_BUDGET, MASH_TRANSIENT_MAX,\nMASH_CLI_TIMEOUT, MASH_ADMIN_TIMEOUT).\n\nRun mash <command> --help for a command's options.",
+  "stream": "stdout",
+  "exit": 0,
+  "issue": "#1100",
+  "note": "Layout change only, per the rule \"--help has one layout\". (1) A Usage: line after the description, in the same one-line form mashctl --help uses: Usage: mash <command> [options]. Today there is none. (2) One footer as the last line, after the configuration text and a blank line: Run mash <command> --help for a command's options. mashctl --help ends with the same sentence naming mashctl (mashctl endpoint --help already ends Run mashctl endpoint <command> --help for a command's options.). A docs URL does not fit the footer in 80 columns, so it is not in it. Built on the planned text of help-mash-top (its one-sentence glossary); item help-mash-top-glossary adds the longer glossary on top of this. Today: no Usage line, no footer.",
+  "verbatim": true
+ },
+ {
+  "id": "help-mashctl-top-usage-footer",
+  "where": "mashctl --help (Usage:, <address>, footer)",
+  "case": "mashctl --help",
+  "text": "Usage: mashctl <verb> [args]\n\nSAP is the Synadia Agent Protocol, NATS is the message server mash\ntalks to, and creds are the file that signs an endpoint in to it.\n\n  mashctl init --config path [--dry-run] [--json]\n      set mash up on a NATS server you already have, from a setup file; safe to\n      run again\n  mashctl status [--json]\n      one line per server: whether it works, how many endpoints it has, how many\n      are online\n  mashctl limits show [--json]\n      print the limits in force\n  mashctl doctor [--strict] [--json]\n      check the server, mash's storage on it and every endpoint's records, and\n      say how to fix what is wrong; changes nothing\n  mashctl limits apply [prefix] [--dry-run] [--json]\n      raise existing inboxes to the configured limits (never lowers); prefix is\n      an owner, owner.group or one address\n  mashctl endpoint list [prefix] [--wide] [--json]\n      the endpoints in the directory\n  mashctl endpoint show <address> [--json]\n      one endpoint: its state, labels and public key\n  mashctl endpoint create <address> [--out PATH] [--public-key PATH] [--dry-run]\n          [--json]\n      make an endpoint and its credentials, for example acme.demo.bob\n  mashctl endpoint reissue <address> [--out PATH] [--public-key PATH]\n          [--dry-run] [--json]\n      give an endpoint new credentials and cancel the old ones\n  mashctl endpoint delete <address> [--yes] [--dry-run] [--json]\n      revoke the endpoint's user key, remove its record and inbox, burn the\n      address, rename its creds file\n  mashctl endpoint set <address> key=value... [--dry-run] [--json]\n      set role, description, host, capability or label.NAME\n  mashctl endpoint unset <address> key... [--dry-run] [--json]\n      remove those values\n  mashctl endpoint suspend <address> [--json]\n      refuse new mail to an endpoint; its stored mail and credentials stay\n  mashctl endpoint resume <address> [--json]\n      take new mail again, undoing suspend\n  mashctl endpoint inbox <address> [--after number] [--limit n] [--json]\n      what is in an endpoint's inbox, without any message text\n  mashctl endpoint permissions <address> [--json]\n      the NATS permissions an endpoint's user needs\n  mashctl version [--json]\n      print the version and the commit\n\nGlobal options (before or after the verb):\n  --server <url>       The server address. May be given more than once.\n  --creds <path>       The administrator's creds file.\n  --ca <path>          The certificate authority's certificate, when the\n                       server uses its own.\n  --config-dir <path>  The configuration folder. Default: ~/.config/mash.\n  --detail             Print the fuller answer: after the usual line, more as\n                       'label: value' lines; with --json, the fuller object.\n  --json               Print the result as JSON.\n  --no-color           Never use color.\n  -h, --help           Show help for the command.\n\nRun mashctl <command> --help for a command's options.",
+  "stream": "stdout",
+  "exit": 0,
+  "issue": "#1100",
+  "note": "help-mashctl-top's planned text with three changes and nothing else. (1) usage: becomes Usage: (capital U, as mash). (2) ADDRESS becomes <address> in every verb line, as mash writes it; the create and reissue synopses are the 80-column wrap with the longer word (create still fits on one line, reissue wraps the same way). (3) One footer as the last line after a blank line: Run mashctl <command> --help for a command's options. Today: usage: mashctl <verb> [args], ADDRESS, no footer. Other placeholders (prefix, path, number, n) are not changed here.",
+  "verbatim": true
+ },
+ {
+  "id": "help-mashctl-endpoint-usage",
+  "where": "mashctl endpoint --help (Usage:)",
+  "case": "mashctl endpoint --help",
+  "text": "Usage: mashctl endpoint <command> [args]\ncommands:\n  list [prefix] [--wide]      list the endpoints\n  show <address>              show one endpoint\n  create <address> ...        make an endpoint and its credentials\n  reissue <address> ...       give an endpoint new credentials\n  delete <address> ...        remove an endpoint\n  set <address> key=value...  set role, description, host, capability, labels\n  unset <address> key...      remove those values\n  suspend <address>           refuse new mail to an endpoint\n  resume <address>            take new mail again, undoing suspend\n  inbox <address>             list what is in an inbox, without the text\n  permissions <address>       print the NATS permissions an endpoint needs\nRun mashctl endpoint <command> --help for a command's options.",
+  "stream": "stdout",
+  "exit": 0,
+  "issue": "#1100",
+  "note": "help-mashctl-endpoint's planned text with one change and nothing else: usage: becomes Usage: (capital U, as mash and every other help). The usage line is mashctl endpoint <command> [args], which has no address in it, so no ADDRESS becomes <address> here; the command lines already write <address>. The last line, Run mashctl endpoint <command> --help for a command's options., is the footer the other help items use, and stays.",
+  "verbatim": true
+ },
+ {
+  "id": "help-mashctl-endpoint-show",
+  "where": "mashctl endpoint show --help",
+  "case": "mashctl endpoint show --help",
+  "text": "Usage: mashctl endpoint show <address> [--json]\n  address  the endpoint, as owner.group.name\n  --json   print the endpoint as JSON\nExample:\n  mashctl endpoint show acme.demo.bob",
+  "stream": "stdout",
+  "exit": 0,
+  "issue": "#1100",
+  "note": "Only usage: becomes Usage: (the same as mash). show already writes <address> in its own help; ADDRESS survives only in mashctl --help's verb lines (item help-mashctl-top-usage-footer), in the --wide text of endpoint list --help (show ADDRESS in place of NAME, which becomes show the address in place of NAME) and in one hint, mashctl endpoint unset ADDRESS key (cmd/mashctl/endpoint_meta.go:74), which becomes mashctl endpoint unset <address> key. The ADDRESS column header of endpoint list --wide stays: it is a column name. The rest of this help is not laid out to the rule (no description line, Examples: or Arguments:); that comes with the generated help in the build PR. Same Usage: change in mashctl endpoint --help and every mashctl command's help.",
+  "verbatim": true
+ },
+ {
+  "id": "help-mash-top-glossary",
+  "where": "mash --help (glossary and the two descriptions that name seed and MCP)",
+  "case": "mash --help",
+  "text": "Trusted mail between agents. Speaks as one endpoint.\n\nUsage: mash <command> [options]\n\nAn endpoint is one agent's mailbox, addressed owner.group.name; the owner, the\nfirst part, is the account that holds it. SAP is the Synadia Agent Protocol,\nNATS is the message server mash talks to, creds are the file that signs an\nendpoint in to it, and a trust label ([verified] and the others) says whether a\nmessage's sender is proven.\n\nEveryday:\n  mash send <address> [<message>] [options]    Send a message to an endpoint.\n  mash inbox [options]                         List the messages this endpoint\n                                               has received.\n  mash read <number>                           Show one message in full.\n  mash who [<prefix>] [options]                List the endpoints you can see,\n                                               and which are online.\n  mash status                                  Say in one line whether mail\n                                               works for this endpoint, and\n                                               whether it is online.\n  mash doctor [options]                        Check everything mail depends on\n                                               for this endpoint, and say how to\n                                               fix what is wrong. Changes\n                                               nothing.\n  mash version                                 Print the version. It can also be\n                                               run as --version.\n\nSetup:\n  mash join <file> [options]                   Install an endpoint's credentials\n                                               on this machine from a join file.\n  mash key create [options]                    Make a key pair: a secret seed\n                                               and its public key. For when the\n                                               seed must never leave this\n                                               machine.\n\nIntegration:\n  mash serve [options]                         Run as an MCP server, which is\n                                               how an agent host such as Claude\n                                               Code calls mash's tools. Started\n                                               by the host, not by hand.\n  mash hook                                    Print mail waiting for this\n                                               session, in the form the agent\n                                               host expects. Run by the host\n                                               after each tool call and with\n                                               each prompt.\n\nRaw SAP:\n  mash prompt <address> <text>                 Ask an endpoint a live question\n                                               and wait for its answer. Not\n                                               stored: if the recipient is not\n                                               there, it fails.\n\nGlobal options:\n  --endpoint <address>  Which endpoint to act as, as owner.group.name. Not\n                        needed for the everyday and setup commands when only one\n                        is installed here. mash serve and mash hook always need\n                        it said: a session becomes an endpoint only because\n                        someone chose that.\n  --creds <path>        The creds file to sign in with. Default: <config\n                        folder>/<address>.creds.\n  --server <url>        The server address. May be given more than once.\n  --ca <path>           The certificate authority's certificate, when the server\n                        uses its own.\n  --config-dir <path>   The configuration folder. Default: ~/.config/mash.\n  --detail              Print the fuller answer: after the usual line, more as\n                        'label: value' lines; with --json, the fuller object.\n  --json                Print the result as JSON: the same object the matching\n                        MCP tool returns.\n  --no-color            Never use color. Color is used only on a terminal, and\n                        NO_COLOR is honored.\n  -h, --help            Show help for the command.\n\nAn endpoint is addressed owner.group.name: MASH_ENDPOINT (or config.json\n\"endpoint\", or --endpoint). With none set, the one endpoint whose creds file\n(owner.group.name.creds, mode 0600) is in the config directory is used; with\nseveral, name one.\nA global option may stand anywhere in the command. A flag beats its environment\nvariable, which beats config.json.\nConfiguration: config.json {\"servers\",\"endpoint\",\"ca\"} in $MASH_CONFIG_DIR\n(default ~/.config/mash, or $XDG_CONFIG_HOME/mash), overridden by MASH_SERVER\n(commas between several), MASH_ENDPOINT, MASH_CA, MASH_CREDS, MASH_ADMIN_CREDS,\nMASH_HOST (see docs/install.md).\nState (spool, hook.log): $MASH_STATE_DIR (default $XDG_STATE_HOME/mash, else\n~/.local/state/mash).\nSlow link: \"open_timeout\" (default 20s) and \"call_timeout\" (default 15s), or\nMASH_OPEN_TIMEOUT and MASH_CALL_TIMEOUT.\nAlso tunable: lease_retry, transient_budget, transient_max, cli_timeout,\nadmin_timeout (MASH_LEASE_RETRY, MASH_TRANSIENT_BUDGET, MASH_TRANSIENT_MAX,\nMASH_CLI_TIMEOUT, MASH_ADMIN_TIMEOUT).\n\nRun mash <command> --help for a command's options.",
+  "stream": "stdout",
+  "exit": 0,
+  "issue": "#1100",
+  "note": "help-mash-top-usage-footer with the glossary sentence extended. Today (planned in help-mash-top): SAP, NATS and creds only. New: also what an endpoint is, what its owner is, and what a trust label is: An endpoint is one agent's mailbox, addressed owner.group.name; the owner, the first part, is the account that holds it. (The owner is described in docs/guide/by-hand.md as the first part of every address and in install.md as the fence a credential reaches.) Seed and MCP are not in the glossary; they are explained where they appear, in the one description of mash key create and of mash serve, which the rule says is used wherever the command is listed, so the two top-level lines change with them (items help-mash-key-create and help-mash-serve).",
+  "verbatim": true
+ },
+ {
+  "id": "help-mashctl-top-glossary",
+  "where": "mashctl --help (glossary)",
+  "case": "mashctl --help",
+  "text": "Usage: mashctl <verb> [args]\n\nAn endpoint is one agent's mailbox, addressed owner.group.name; the owner, the\nfirst part, is the account that holds it. SAP is the Synadia Agent Protocol,\nNATS is the message server mash talks to, creds are the file that signs an\nendpoint in to it, and a trust label ([verified] and the others) says whether a\nmessage's sender is proven.\n\n  mashctl init --config path [--dry-run] [--json]\n      set mash up on a NATS server you already have, from a setup file; safe to\n      run again\n  mashctl status [--json]\n      one line per server: whether it works, how many endpoints it has, how many\n      are online\n  mashctl limits show [--json]\n      print the limits in force\n  mashctl doctor [--strict] [--json]\n      check the server, mash's storage on it and every endpoint's records, and\n      say how to fix what is wrong; changes nothing\n  mashctl limits apply [prefix] [--dry-run] [--json]\n      raise existing inboxes to the configured limits (never lowers); prefix is\n      an owner, owner.group or one address\n  mashctl endpoint list [prefix] [--wide] [--json]\n      the endpoints in the directory\n  mashctl endpoint show <address> [--json]\n      one endpoint: its state, labels and public key\n  mashctl endpoint create <address> [--out PATH] [--public-key PATH] [--dry-run]\n          [--json]\n      make an endpoint and its credentials, for example acme.demo.bob\n  mashctl endpoint reissue <address> [--out PATH] [--public-key PATH]\n          [--dry-run] [--json]\n      give an endpoint new credentials and cancel the old ones\n  mashctl endpoint delete <address> [--yes] [--dry-run] [--json]\n      revoke the endpoint's user key, remove its record and inbox, burn the\n      address, rename its creds file\n  mashctl endpoint set <address> key=value... [--dry-run] [--json]\n      set role, description, host, capability or label.NAME\n  mashctl endpoint unset <address> key... [--dry-run] [--json]\n      remove those values\n  mashctl endpoint suspend <address> [--json]\n      refuse new mail to an endpoint; its stored mail and credentials stay\n  mashctl endpoint resume <address> [--json]\n      take new mail again, undoing suspend\n  mashctl endpoint inbox <address> [--after number] [--limit n] [--json]\n      what is in an endpoint's inbox, without any message text\n  mashctl endpoint permissions <address> [--json]\n      the NATS permissions an endpoint's user needs\n  mashctl version [--json]\n      print the version and the commit\n\nGlobal options (before or after the verb):\n  --server <url>       The server address. May be given more than once.\n  --creds <path>       The administrator's creds file.\n  --ca <path>          The certificate authority's certificate, when the\n                       server uses its own.\n  --config-dir <path>  The configuration folder. Default: ~/.config/mash.\n  --detail             Print the fuller answer: after the usual line, more as\n                       'label: value' lines; with --json, the fuller object.\n  --json               Print the result as JSON.\n  --no-color           Never use color.\n  -h, --help           Show help for the command.\n\nRun mashctl <command> --help for a command's options.",
+  "stream": "stdout",
+  "exit": 0,
+  "issue": "#1100",
+  "note": "help-mashctl-top-usage-footer with the same glossary sentence as mash --help (the rule says the sentence is one, in the top-level help of both tools). \"mash talks to\" is as in mash's text: mashctl's own server is the same NATS server.",
+  "verbatim": true
+ },
+ {
+  "id": "help-mash-send",
+  "where": "mash send --help",
+  "case": "mash send --help",
+  "text": "Send a message to an endpoint.\n\nUsage:\n  mash send <address> [<message>] [options]\n\nExamples:\n  mash send acme.demo.alice \"lunch at noon?\"\n  mash send acme.demo.alice --urgent --kind question \"ready?\"\n  mash send acme.demo.alice --reply-to 2 \"yes\"\n  git log -1 | mash send acme.demo.alice --kind fyi --file -\n\nArguments:\n  address  Who to send to, as owner.group.name.\n  message  The text. Leave it out to read the text from --file or from standard\n           input.\n\nOptions:\n  --kind <kind>         What sort of message this is. blocker, question and task\n                        wake an idle recipient that has mash's wake channel on;\n                        otherwise, and for result and fyi, the message arrives\n                        with its next turn. Default: task. One exception: a\n                        reply (--reply-to) marked question whose text has no\n                        question mark and is at most 280 characters asks\n                        nothing, so it is sent as fyi and the output says so.\n  --urgent              Deliver at once, into a running turn where the agent\n                        host allows it.\n  --reply-to <number>   The number of the message in your inbox that this\n                        answers. Signed, so the recipient can trust the link.\n  --relay <number>      The number of a message in your inbox that this passes\n                        on. Signed, so the recipient can trust the link.\n  --id <key>            A key of your own. A second send with the same key to\n                        the same address within two minutes stores nothing new,\n                        so a retry cannot deliver twice.\n  --file <path>         Read the message text from a file. Use - for standard\n                        input; if nothing arrives there within 15 minutes the\n                        command gives up.\n  --endpoint <address>  Which endpoint to act as, as owner.group.name. Not\n                        needed when only one is installed here.\n  --creds <path>        The creds file to sign in with. Default: <config\n                        folder>/<address>.creds.\n  --server <url>        The server address. May be given more than once.\n  --ca <path>           The certificate authority's certificate, when the server\n                        uses its own.\n  --config-dir <path>   The configuration folder. Default: ~/.config/mash.\n  --detail              Print the fuller answer: after the usual line, more as\n                        'label: value' lines; with --json, the fuller object.\n  --json                Print the result as JSON: the same object the matching\n                        MCP tool returns.\n  --no-color            Never use color. Color is used only on a terminal, and\n                        NO_COLOR is honored.\n  -h, --help            Show help for the command.",
+  "stream": "stdout",
+  "exit": 0,
+  "issue": "#1100",
+  "note": "No Global options: block: per-command help lists the options that apply to it, among its own. send reads the connection (--endpoint, --creds, --server, --ca, --config-dir), prints a fuller answer with --detail and a JSON object with --json, and honours --no-color, so all of them are listed; send's own options are today's, unchanged, with the labels re-padded to the longest. The --endpoint text drops the sentence about serve and hook, which are not this command. Today the help ends with the Global options block, the same text as mash --help, nine entries. Which options apply was read from cmd/mash/main.go: the connection options feed config.Load; the verbs without a --json form are prompt, serve and hook.",
+  "verbatim": true
+ },
+ {
+  "id": "help-mash-hook",
+  "where": "mash hook --help",
+  "case": "mash hook --help",
+  "text": "Print mail waiting for this session, in the form the agent host expects. Run by\nthe host after each tool call and with each prompt.\n\nUsage:\n  mash hook\n\nOptions:\n  --endpoint <address>  Which endpoint to act as, as owner.group.name. Always\n                        needed: a session becomes an endpoint only because\n                        someone chose that.\n  --creds <path>        The creds file to sign in with. Default: <config\n                        folder>/<address>.creds.\n  --server <url>        The server address. May be given more than once.\n  --ca <path>           The certificate authority's certificate, when the server\n                        uses its own.\n  --config-dir <path>   The configuration folder. Default: ~/.config/mash.\n  -h, --help            Show help for the command.",
+  "stream": "stdout",
+  "exit": 0,
+  "issue": "#1100",
+  "note": "Two changes. (1) The Examples: entry goes: its one line, mash hook, only repeats the usage line. (2) The Global options: block goes; Options: lists what applies. hook loads the endpoint by name only (config.LoadNamedOnly), so --endpoint is listed, and it says it is always needed; --creds, --server, --ca and --config-dir feed the connection. --json is refused for hook (mash hook has no --json form) and --detail changes nothing it prints, so neither is listed; hook prints context for the host, not a terminal line, so --no-color is not either. Today: the same description, an Examples: entry and the full nine-entry Global options block.",
+  "verbatim": true
+ },
+ {
+  "id": "help-mash-serve",
+  "where": "mash serve --help",
+  "case": "mash serve --help",
+  "text": "Run as an MCP server, which is how an agent host such as Claude Code calls\nmash's tools. Started by the host, not by hand.\n\nUsage:\n  mash serve [options]\n\nOptions:\n  --wake-count <n>       Wake the session when more than this many messages are\n                         waiting. Default 15; 0 turns it off.\n  --wake-age <duration>  Wake the session when the oldest waiting message is\n                         older than this. Default 1h; 0 turns it off.\n  --accept-unverified    Deliver mail that is not verified, with its trust\n                         label. Default: off; such mail is refused.\n  --endpoint <address>   Which endpoint to act as, as owner.group.name. Always\n                         needed: a session becomes an endpoint only because\n                         someone chose that.\n  --creds <path>         The creds file to sign in with. Default: <config\n                         folder>/<address>.creds.\n  --server <url>         The server address. May be given more than once.\n  --ca <path>            The certificate authority's certificate, when the\n                         server uses its own.\n  --config-dir <path>    The configuration folder. Default: ~/.config/mash.\n  -h, --help             Show help for the command.",
+  "stream": "stdout",
+  "exit": 0,
+  "issue": "#1100",
+  "note": "Three changes. (1) The description says what MCP is, in the word's first place in the help: Run as an MCP server, which is how an agent host such as Claude Code calls mash's tools. Started by the host, not by hand. Today: Run as an MCP server for an agent host. Started by the host, not by hand. The same text is mash serve's line in mash --help (help-mash-top-glossary). (2) The Examples: entry goes (it only repeated the usage line). (3) No Global options: block; --endpoint (always needed, LoadNamedOnly), --creds, --server, --ca and --config-dir are listed under Options: with serve's own three, which are unchanged. No --json (refused), --detail (nothing to detail) or --no-color (serve runs behind an agent host, not a terminal).",
+  "verbatim": true
+ },
+ {
+  "id": "help-mash-prompt",
+  "where": "mash prompt --help",
+  "case": "mash prompt --help",
+  "text": "Ask an endpoint a live question and wait for its answer. Not stored: if the\nrecipient is not there, it fails.\n\nUsage:\n  mash prompt <address> <text>\n\nArguments:\n  address  Who to ask.\n  text     The question.\n\nOptions:\n  --endpoint <address>  Which endpoint to act as, as owner.group.name. Not\n                        needed when only one is installed here.\n  --creds <path>        The creds file to sign in with. Default: <config\n                        folder>/<address>.creds.\n  --server <url>        The server address. May be given more than once.\n  --ca <path>           The certificate authority's certificate, when the server\n                        uses its own.\n  --config-dir <path>   The configuration folder. Default: ~/.config/mash.\n  -h, --help            Show help for the command.",
+  "stream": "stdout",
+  "exit": 0,
+  "issue": "#1100",
+  "note": "Same two changes as hook: the Examples: entry goes (mash prompt acme.demo.alice \"are you there?\" only restates the usage line with values) and the Global options: block becomes the options that apply. prompt has no --json form (refused), so --json is not listed; the connection options and --endpoint are. --detail is left out: prompt prints the answer and nothing fuller (not verified against a live answer here). Today: the full nine-entry block and the Examples: line.",
+  "verbatim": true
+ },
+ {
+  "id": "help-mash-key-create",
+  "where": "mash key create --help",
+  "case": "mash key create --help",
+  "text": "Make a key pair: a secret seed and its public key. For when the seed must never\nleave this machine.\n\nUsage:\n  mash key create [options]\n\nExamples:\n  mash key create --out bob.seed\n\nOptions:\n  --out <path>  Where to write the seed. The public key goes beside it with .pub\n                added. Default: mash.seed in the current folder.\n  --json        Print the result as JSON.\n  -h, --help    Show help for the command.",
+  "stream": "stdout",
+  "exit": 0,
+  "issue": "#1100",
+  "note": "Three changes. (1) The description says what a seed is where the word first appears: Make a key pair: a secret seed and its public key. For when the seed must never leave this machine. Today the command has two descriptions, Make a seed and its public key. here and Make your own key pair, for when the seed must never leave this machine. in mash --help; the rule says one, so this is the one, used in both. (2) The Examples: entry stays: mash key create --out bob.seed names an option, so it adds something. (3) No Global options: block. key create reads no configuration (it needs no endpoint, server or creds), so no connection option applies; --json does (it prints {\"seed\",\"public_key\"}, run here) and is listed. --detail is accepted and prints nothing more, so it is not listed.",
+  "verbatim": true
+ },
+ {
+  "id": "doctor-refused-ok",
+  "where": "mash doctor, the refused row when nothing was refused",
+  "case": "mash doctor (in a session, all well)",
+  "text": "config    ok\nclaude    ok    2.1.320\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   ok\ndelivery  ok\nrefused   ok    no message was refused for lacking its sender's signature\n\nNo problems.",
+  "stream": "stdout",
+  "exit": 0,
+  "issue": "#1100",
+  "note": "Only the refused row's detail changes, when its state is ok. Today: refused   ok    no unverified mail was refused (cmd/mash/health.go, refusedCheck, case 0). It says what the row is: no message was turned away because its sender could not be proven. It does not say every message received was signed: with --accept-unverified (mash serve) unverified mail is delivered and not refused, so a count of 0 would not prove that. The same string replaces the old one in every doctor case that shows an ok refused row (fourteen in spec/mash.json). The warn forms (1 unverified message was refused, N unverified messages were refused) are not changed here; to match, they would read 1 message was refused for lacking its sender's signature.",
+  "verbatim": true
+ },
+ {
+  "id": "doctor-delivery-skip-shell",
+  "where": "mash doctor at a shell, the delivery row",
+  "case": "mash doctor (at a shell)",
+  "text": "config    ok\nclaude    ok    2.1.320\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   ok\ndelivery  skip  checked only inside a Claude Code session\nrefused   ok    no message was refused for lacking its sender's signature\n\nNo problems.",
+  "stream": "stdout",
+  "exit": 0,
+  "issue": "#1100",
+  "note": "At a shell the delivery row is skipped because a shell has no session to deliver to (health.go, the !h.session case). Today: delivery  skip  needs a session. Every other skip row reads needs the <earlier row>, a row of this same table; this one waits on something that is not a row, so it says what the check is: checked only inside a Claude Code session, which tells a newcomer that skip is expected at a shell and not a fault. The rest of the output is the refused row's new text (item doctor-refused-ok); the skip is not a problem, so the last line stays No problems.",
+  "verbatim": true
+ },
+ {
+  "id": "create-next-step",
+  "where": "mashctl endpoint create (credentials installed here)",
+  "case": "mashctl endpoint create acme.demo.bob",
+  "text": "Created endpoint acme.demo.bob\nCredentials: <config dir>/acme.demo.bob.creds\nNext: MASH_ENDPOINT=acme.demo.bob claude",
+  "stream": "stdout",
+  "exit": 0,
+  "issue": "#1100",
+  "note": "One line is added: the next step, a command to run as printed. Today: the first two lines. With no --out the creds are installed on this machine, so the endpoint can run here at once (docs/operations.md, Adding an endpoint). What a person does with a new endpoint is start a session as it: docs/guide/by-hand.md step 6 (MASH_ENDPOINT=acme.demo.bob claude), docs/install.md section 5 (Launch a session) and the setup skill's last steps (it writes a one-word launcher with the same MASH_ENDPOINT export). The setup skill also checks MASH_ENDPOINT=acme.demo.bob mash status first (it expects ready, offline); that is a check, not a use, so it is not the line. The line is not printed for --out (the join file is for another machine, where mash join <file> is the step; a case for it can follow) or for --dry-run. The one-line rule \"An action prints one line\" allows the file location; this is a second addition and is for the lead to rule on.",
+  "verbatim": true
+ },
+ {
+  "id": "send-sent-inbox",
+  "where": "mash send, success",
+  "case": "mash send acme.demo.alice \"lunch at noon?\"",
+  "text": "Mail sent (number 42 in acme.demo.alice's inbox)",
+  "stream": "stdout",
+  "exit": 0,
+  "issue": "#1100",
+  "note": "The number is the message's number in the recipient's inbox (the send spec's own note says so), and the sender cannot get it anywhere else; the line now says whose inbox. No full stop, as the rule \"An action prints one line\" (and planned case Sent, #1046). Today: Mail sent (number 42). (planned in #1046: Mail sent (number 42)). The urgent and kind forms follow the same pattern: Urgent question mail sent (number 43 in acme.demo.alice's inbox).",
+  "verbatim": true
+ },
+ {
+  "id": "send-sent-inbox-detail",
+  "where": "mash send --detail, success",
+  "case": "mash send acme.demo.alice \"lunch at noon?\" --detail",
+  "text": "Mail sent (number 42 in acme.demo.alice's inbox)\nto:     acme.demo.alice\nkind:   task\nurgent: no",
+  "stream": "stdout",
+  "exit": 0,
+  "issue": "#1100",
+  "note": "Only the first line changes, as in send-sent-inbox; the label lines are today's. The to: line now repeats the address in the first line; if that is unwanted, drop to: (the lead's call). Today: Mail sent (number 42)\\nto:     acme.demo.alice\\nkind:   task\\nurgent: no.",
+  "verbatim": true
+ },
+ {
+  "id": "hint-no-endpoint-mash",
+  "where": "mash status, doctor and every command that needs an endpoint: none installed",
+  "case": "mash status (no endpoint installed)",
+  "text": "error: no endpoint is installed here",
+  "stream": "stderr",
+  "exit": 2,
+  "issue": "#1100",
+  "note": "The hint goes. Today: error: no endpoint is installed here, then hint: mash join <file>. ADR 0168 wants a command that fixes it. mash join <file> does, but only for a person who already holds a join file, and the person this error meets is usually one who does not: the file is made elsewhere, by whoever runs the server, with mashctl endpoint create <address> --out <file> (docs/operations.md, Adding an endpoint; install.md). On the machine that runs mashctl the first step is a different command, mashctl endpoint create <address>, which installs the creds without any join file (same section). Two roles, two first steps, and neither can be run from here as printed, so no single command fixes it and there is no hint. If a placeholder is allowed in a hint (ADR 0168 accepted mashctl init --config <file> for the signing refusals), keep today's hint; the choice is the lead's. The other mash join <file> hints (a creds file missing, deleted, refused) are not changed: there an endpoint was installed and a join file replaces it.",
+  "verbatim": true
+ },
+ {
+  "id": "hint-no-server-mashctl-doctor",
+  "where": "mashctl doctor, no server configured",
+  "case": "mashctl doctor (no server is configured)",
+  "text": "config     FAIL  no server is configured\nserver     skip  needs the config\nsign-in    skip  needs the server\nstorage    skip  needs sign-in\nendpoints  skip  needs the storage\nkeys       skip  needs sign-in\n\n1 problem.",
+  "stream": "stdout",
+  "exit": 1,
+  "issue": "#1100",
+  "note": "The hint goes. Today: the same rows and 1 problem., then hint: mashctl init --config <file> on stderr. The setup file does not exist yet for a person who has not made one, and what makes it depends: mash-local-nats-setup.sh writes mash-setup.yaml for a server on this machine and prints the init command with the real path (mash-setup/skills/setup/SKILL.md, step 3; docs/guide/by-hand.md step 3); with a server you already run the person writes the file by hand (docs/operations.md, Setting mash up); and docs/mashctl.md's error table names a third fix for this very row, a server given with --server or MASH_SERVER. Three first steps, none a single command to print, so no hint. mashctl init --config <file> is the command once the file exists; if a placeholder hint is allowed (as for the signing refusals), keep today's.",
+  "verbatim": true
+ },
+ {
+  "id": "inbox-sent-messages",
+  "where": "mash inbox (Messages)",
+  "case": "mash inbox",
+  "text": "2 messages for acme.demo.alice, 2 new, 1 urgent.\n\nNUMBER  FROM           SENT     STATE  URGENT  KIND      MESSAGE\n1       acme.demo.bob  10s ago  new    no      task      lunch at noon?\n2       acme.demo.bob  8s ago   new    yes     question  ready?",
+  "stream": "stdout",
+  "exit": 0,
+  "issue": "#1100",
+  "note": "The WHEN column is named SENT, the label mash read already uses (sent:). FROM is already the first name read shows (from:). SENT is as long as WHEN, so no column moves; the rows are unchanged. Today: the header reads WHEN. Case copied from the inbox case \"Messages\" in spec/mash.json.",
+  "verbatim": true
+ },
+ {
+  "id": "inbox-sent-a-long-message-or-one-of-several-lines",
+  "where": "mash inbox (A long message, or one of several lines)",
+  "case": "mash inbox",
+  "text": "NUMBER  FROM           SENT    STATE  URGENT  KIND    MESSAGE\n3       acme.demo.bob  1m ago  new    no      result  The build passed on all …",
+  "stream": "stdout",
+  "exit": 0,
+  "issue": "#1100",
+  "note": "The WHEN column is named SENT, the label mash read already uses (sent:). FROM is already the first name read shows (from:). SENT is as long as WHEN, so no column moves; the rows are unchanged. Today: the header reads WHEN. Case copied from the inbox case \"A long message, or one of several lines\" in spec/mash.json.",
+  "verbatim": true
+ },
+ {
+  "id": "inbox-sent-the-oldest-has-waited-longer-than-the-wake-age",
+  "where": "mash inbox (The oldest has waited longer than the wake age)",
+  "case": "mash inbox",
+  "text": "3 messages for acme.demo.alice, 3 new, 0 urgent.\nThe oldest has waited 1h 12m.\n\nNUMBER  FROM           SENT  STATE  URGENT  KIND  MESSAGE\n...",
+  "stream": "stdout",
+  "exit": 0,
+  "issue": "#1100",
+  "note": "The WHEN column is named SENT, the label mash read already uses (sent:). FROM is already the first name read shows (from:). SENT is as long as WHEN, so no column moves; the rows are unchanged. Today: the header reads WHEN. Case copied from the inbox case \"The oldest has waited longer than the wake age\" in spec/mash.json.",
+  "verbatim": true
+ },
+ {
+  "id": "inbox-sent-more-waiting-than-the-wake-count",
+  "where": "mash inbox (More waiting than the wake count)",
+  "case": "mash inbox",
+  "text": "17 messages for acme.demo.alice, 17 new, 0 urgent.\nMore than 15 are waiting.\n\nNUMBER  FROM  SENT  STATE  URGENT  KIND  MESSAGE\n...",
+  "stream": "stdout",
+  "exit": 0,
+  "issue": "#1100",
+  "note": "The WHEN column is named SENT, the label mash read already uses (sent:). FROM is already the first name read shows (from:). SENT is as long as WHEN, so no column moves; the rows are unchanged. Today: the header reads WHEN. Case copied from the inbox case \"More waiting than the wake count\" in spec/mash.json.",
+  "verbatim": true
+ },
+ {
+  "id": "inbox-sent-a-sender-outside-your-group",
+  "where": "mash inbox (A sender outside your group)",
+  "case": "mash inbox",
+  "text": "NUMBER  FROM            SENT    STATE  URGENT  KIND  MESSAGE\n3       acme.ops.carol  2m ago  new    no      fyi   deploy finished",
+  "stream": "stdout",
+  "exit": 0,
+  "issue": "#1100",
+  "note": "The WHEN column is named SENT, the label mash read already uses (sent:). FROM is already the first name read shows (from:). SENT is as long as WHEN, so no column moves; the rows are unchanged. Today: the header reads WHEN. Case copied from the inbox case \"A sender outside your group\" in spec/mash.json.",
+  "verbatim": true
+ },
+ {
+  "id": "inbox-sent-counts-include-mail-read-out-of-order-with-detail",
+  "where": "mash inbox (Counts include mail read out of order, with --detail)",
+  "case": "mash inbox",
+  "text": "About 2 messages for acme.demo.alice, about 1 new, about 1 urgent.\nexact: no (mail read out of order may still be counted as urgent)\n\nNUMBER  FROM           SENT     STATE  URGENT  KIND      MESSAGE\n1       acme.demo.bob  10s ago  new    no      task      lunch at noon?\n2       acme.demo.bob  8s ago   new    yes     question  ready?",
+  "stream": "stdout",
+  "exit": 0,
+  "issue": "#1100",
+  "note": "The WHEN column is named SENT, the label mash read already uses (sent:). FROM is already the first name read shows (from:). SENT is as long as WHEN, so no column moves; the rows are unchanged. Today: the header reads WHEN. Case copied from the inbox case \"Counts include mail read out of order, with --detail\" in spec/mash.json.",
+  "verbatim": true
+ },
+ {
+  "id": "inbox-sent-counts-without-serve-running",
+  "where": "mash inbox (Counts without serve running)",
+  "case": "mash inbox",
+  "text": "About 2 messages for acme.demo.alice, about 2 new, about 1 urgent.\n\nNUMBER  FROM           SENT     STATE  URGENT  KIND      MESSAGE\n1       acme.demo.bob  10s ago  new    no      task      lunch at noon?\n2       acme.demo.bob  8s ago   new    yes     question  ready?",
+  "stream": "stdout",
+  "exit": 0,
+  "issue": "#1100",
+  "note": "The WHEN column is named SENT, the label mash read already uses (sent:). FROM is already the first name read shows (from:). SENT is as long as WHEN, so no column moves; the rows are unchanged. Today: the header reads WHEN. Case copied from the inbox case \"Counts without serve running\" in spec/mash.json.",
+  "verbatim": true
+ },
+ {
+  "id": "inbox-sent-counts-without-serve-running-with-detail",
+  "where": "mash inbox (Counts without serve running, with --detail)",
+  "case": "mash inbox",
+  "text": "About 2 messages for acme.demo.alice, about 2 new, about 1 urgent.\nexact: no (mash serve is not running, so unverified mail is counted)\n\nNUMBER  FROM           SENT     STATE  URGENT  KIND      MESSAGE\n1       acme.demo.bob  10s ago  new    no      task      lunch at noon?\n2       acme.demo.bob  8s ago   new    yes     question  ready?",
+  "stream": "stdout",
+  "exit": 0,
+  "issue": "#1100",
+  "note": "The WHEN column is named SENT, the label mash read already uses (sent:). FROM is already the first name read shows (from:). SENT is as long as WHEN, so no column moves; the rows are unchanged. Today: the header reads WHEN. Case copied from the inbox case \"Counts without serve running, with --detail\" in spec/mash.json.",
+  "verbatim": true
+ },
+ {
+  "id": "inbox-sent-counts-are-capped-with-detail",
+  "where": "mash inbox (Counts are capped, with --detail)",
+  "case": "mash inbox",
+  "text": "About 1000 messages for acme.demo.alice, about 90 new, about 4 urgent.\nexact: no (only the oldest 1000 messages were checked)\n\nNUMBER  FROM           SENT     STATE  URGENT  KIND      MESSAGE\n1       acme.demo.bob  10s ago  new    no      task      lunch at noon?\n2       acme.demo.bob  8s ago   new    yes     question  ready?",
+  "stream": "stdout",
+  "exit": 0,
+  "issue": "#1100",
+  "note": "The WHEN column is named SENT, the label mash read already uses (sent:). FROM is already the first name read shows (from:). SENT is as long as WHEN, so no column moves; the rows are unchanged. Today: the header reads WHEN. Case copied from the inbox case \"Counts are capped, with --detail\" in spec/mash.json.",
+  "verbatim": true
+ },
+ {
+  "id": "inbox-sent-counts-are-capped-and-serve-is-not-running-with-detail",
+  "where": "mash inbox (Counts are capped and serve is not running, with --detail)",
+  "case": "mash inbox",
+  "text": "About 1000 messages for acme.demo.alice, about 90 new, about 4 urgent.\nexact: no (only the oldest 1000 messages were checked)\nexact: no (mash serve is not running, so unverified mail is counted)\n\nNUMBER  FROM           SENT     STATE  URGENT  KIND      MESSAGE\n1       acme.demo.bob  10s ago  new    no      task      lunch at noon?\n2       acme.demo.bob  8s ago   new    yes     question  ready?",
+  "stream": "stdout",
+  "exit": 0,
+  "issue": "#1100",
+  "note": "The WHEN column is named SENT, the label mash read already uses (sent:). FROM is already the first name read shows (from:). SENT is as long as WHEN, so no column moves; the rows are unchanged. Today: the header reads WHEN. Case copied from the inbox case \"Counts are capped and serve is not running, with --detail\" in spec/mash.json.",
+  "verbatim": true
  }
  ],
  "rules_next": [
@@ -135,7 +443,7 @@
  },
  {
   "rule": "An action prints one line",
-  "detail": "Past tense, naming the thing, with a capital first letter and no full stop, in both tools: 'Created endpoint acme.demo.bob', 'Deleted endpoint acme.demo.bob', 'Mail sent (number 42)'. It does not print what another command already shows; it does print an identifier the person can get nowhere else, and the location of a file it wrote ('Credentials: <path>').",
+  "detail": "Past tense, naming the thing, with a capital first letter and no full stop, in both tools: 'Created endpoint acme.demo.bob', 'Deleted endpoint acme.demo.bob', \"Mail sent (number 42 in acme.demo.alice's inbox)\". It does not print what another command already shows; it does print an identifier the person can get nowhere else, and the location of a file it wrote ('Credentials: <path>').",
   "replaces": "An action prints one line"
  },
  {
@@ -156,6 +464,11 @@
   "rule": "--help has one layout, generated from this specification",
   "detail": "For a command, in this order: the one-line description; 'Usage:' and the synopsis; 'Examples:'; 'Arguments:'; 'Options:'; 'Global options:'. Nothing else, 80 columns. For the tool itself: its one-line description, then one sentence that says what SAP, NATS and creds are (here and in no other help), then, for mash, one heading per group in the specification's order ('Everyday:', 'Setup:', 'Integration:', 'Raw SAP:') with each command and its one-line description indented beneath; mashctl's top-level help stays one flat list of its verbs in 0.5.10 (grouping it is not part of this item); then 'Global options:' in both tools, followed only by the configuration text that help already carries. A command is described once, in the specification, and that one description is used wherever the command is listed. Help is never written by hand beside the specification.",
   "replaces": "--help has one layout, generated from this specification"
+ },
+ {
+  "rule": "One exit rule, the same in both tools",
+  "detail": "0 it worked, 1 it failed, 2 the command line was wrong and nothing was attempted. This holds for every command of mash and mashctl. A command that needs another code is named here as an exception; none is left implicit. There is one exception today: mash hook exits 0 whatever happens, so that a bad configuration or a failed check never fails the session that runs it. No command exits with a code above 2. status and doctor are not exceptions: they exit 1 when they found a problem (a warning alone is 0, or 1 with --strict), as a failure does. A command that did part of its work exits 1, says what is left, and is safe to run again.",
+  "replaces": "Three exit codes"
  }
  ]
 }
