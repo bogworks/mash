@@ -70,8 +70,9 @@ func TestFrameSaysDeletedForAFailedCallOnceTheCredsAreSetAside(t *testing.T) {
 	}
 }
 
-// revokedExitBound is how long serve may take to exit after stdin closes on a revoked connection.
-const revokedExitBound = 2 * time.Second
+// revokedExitBound is how long serve may take to exit after stdin closes on a revoked connection. The lease release
+// on a disconnected connection is bounded at 1 s, so the bound is 5 s to hold under load; the unfixed exit took 10.4 s.
+const revokedExitBound = 5 * time.Second
 
 // The real thing: mash serve over MCP stdio against a real NATS server. The endpoint is deleted as mashctl does it
 // (the user key revoked at the server, the creds file renamed to .deleted); inbox, read and send then answer with the
@@ -142,8 +143,8 @@ func TestServeToolsSayDeletedAfterTheEndpointIsDeletedDuringTheSession(t *testin
 	if r["isError"] != true || !strings.Contains(txt, "send id") || strings.Contains(txt, cmdcore.ReasonEndpointDeleted) {
 		t.Errorf("send with an auth-worded bad id: isError=%v %q, want its own error", r["isError"], txt)
 	}
-	// The revoked connection is reconnecting, which must not hold up the exit: serve skips the lease it cannot
-	// release (it expires) and exits promptly.
+	// The revoked connection is reconnecting, which must not hold up the exit: serve gives the lease release
+	// at most a second, then exits.
 	s.in.Close()
 	select {
 	case code := <-s.done:

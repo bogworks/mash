@@ -817,10 +817,14 @@ func (e *Endpoint) Close() {
 		e.leaseCancel()
 		<-e.leaseDone
 	}
-	// A connection that is down, reconnecting or revoked cannot carry the delete: the lease is left to expire rather
-	// than hold up the exit for the whole of releaseTimeout.
-	if e.leaseKV != nil && e.nc.IsConnected() {
-		ctx, cancel := context.WithTimeout(context.Background(), releaseTimeout)
+	// Always attempt the release (ADR 0013), so a brief disconnect that reconnects still frees the name. A connection
+	// that cannot come back costs at most disconnectedReleaseTimeout, then the lease expires.
+	if e.leaseKV != nil {
+		limit := releaseTimeout
+		if !e.nc.IsConnected() {
+			limit = disconnectedReleaseTimeout
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), limit)
 		if err := e.releaseLease(ctx); err != nil {
 			e.log.Printf("lease release: %v; the next session waits up to %s for it to expire", err, store.LeaseTTL)
 		}
@@ -831,6 +835,9 @@ func (e *Endpoint) Close() {
 
 // releaseTimeout bounds Close's lease release, retries included.
 var releaseTimeout = 3 * time.Second
+
+// disconnectedReleaseTimeout bounds the release when the connection is down, reconnecting or revoked.
+var disconnectedReleaseTimeout = time.Second
 
 // releaseLease deletes this session's lease, so the next session can take the name at once instead of waiting out
 // the TTL (G270). The last known revision may be stale (a refresh landed but its reply was lost): on a revision
