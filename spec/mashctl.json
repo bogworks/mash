@@ -1571,7 +1571,7 @@
      },
      {
       "name": "resume",
-      "description": "Undo suspend.",
+      "description": "Take new mail again, undoing suspend.",
       "arguments": [
        {
         "name": "address",
@@ -2006,6 +2006,20 @@
        "tool": null,
        "why": "Administration. There are no MCP tools for mashctl."
       }
+     },
+     {
+      "name": "x-output",
+      "value": [
+       {
+        "case": "mashctl endpoint --help",
+        "text": "usage: mashctl endpoint <command> [args]\ncommands:\n  list [prefix] [--wide]      list the endpoints\n  show <address>              show one endpoint\n  create <address> ...        make an endpoint and its credentials\n  reissue <address> ...       give an endpoint new credentials\n  delete <address> ...        remove an endpoint\n  set <address> key=value...  set role, description, host, capability, labels\n  unset <address> key...      remove those values\n  suspend <address>           refuse new mail to an endpoint\n  resume <address>            take new mail again, undoing suspend\n  inbox <address>             list what is in an inbox, without the text\n  permissions <address>       print the NATS permissions an endpoint needs\nRun mashctl endpoint <command> --help for a command's options.",
+        "stream": "stdout",
+        "exit": 0,
+        "issue": "#1048",
+        "note": "Only the resume line changes: the one description of resume, the same as in mashctl --help. The specification's own description of resume (\"Undo suspend.\") changes to it, so mashctl endpoint resume --help says the same (today \"take new mail again\" here and \"undo suspend\" in mashctl --help).",
+        "verbatim": true
+       }
+      ]
      }
     ]
    },
@@ -2176,6 +2190,20 @@
      {
       "what": "add, reissue, retire (messages only)",
       "why": "Left over from 0.5.5's renames; nobody uses 0.5.5."
+     }
+    ]
+   },
+   {
+    "name": "x-output",
+    "value": [
+     {
+      "case": "mashctl --help",
+      "text": "usage: mashctl <verb> [args]\n\nSAP is the Synadia Agent Protocol, NATS is the message server mash\ntalks to, and creds are the file that signs an endpoint in to it.\n\n  mashctl init --config path [--dry-run] [--json]\n      set mash up on a NATS server you already have, from a setup file; safe to\n      run again\n  mashctl status [--json]\n      one line per server: whether it works, how many endpoints it has, how many\n      are online\n  mashctl limits show [--json]\n      print the limits in force\n  mashctl doctor [--strict] [--json]\n      check the server, mash's storage on it and every endpoint's records, and\n      say how to fix what is wrong; changes nothing\n  mashctl limits apply [prefix] [--dry-run] [--json]\n      raise existing inboxes to the configured limits (never lowers); prefix is\n      an owner, owner.group or one address\n  mashctl endpoint list [prefix] [--wide] [--json]\n      the endpoints in the directory\n  mashctl endpoint show ADDRESS [--json]\n      one endpoint: its state, labels and public key\n  mashctl endpoint create ADDRESS [--out PATH] [--public-key PATH] [--dry-run]\n          [--json]\n      make an endpoint and its credentials, for example acme.demo.bob\n  mashctl endpoint reissue ADDRESS [--out PATH] [--public-key PATH] [--dry-run]\n          [--json]\n      give an endpoint new credentials and cancel the old ones\n  mashctl endpoint delete ADDRESS [--yes] [--dry-run] [--json]\n      revoke the endpoint's user key, remove its record and inbox, burn the\n      address, rename its creds file\n  mashctl endpoint set ADDRESS key=value... [--dry-run] [--json]\n      set role, description, host, capability or label.NAME\n  mashctl endpoint unset ADDRESS key... [--dry-run] [--json]\n      remove those values\n  mashctl endpoint suspend ADDRESS [--json]\n      refuse new mail to an endpoint; its stored mail and credentials stay\n  mashctl endpoint resume ADDRESS [--json]\n      take new mail again, undoing suspend\n  mashctl endpoint inbox ADDRESS [--after number] [--limit n] [--json]\n      what is in an endpoint's inbox, without any message text\n  mashctl endpoint permissions ADDRESS [--json]\n      the NATS permissions an endpoint's user needs\n  mashctl version [--json]\n      print the version and the commit\n\nGlobal options (before or after the verb):\n  --server <url>       The server address. May be given more than once.\n  --creds <path>       The administrator's creds file.\n  --ca <path>          The certificate authority's certificate, when the server\n                       uses its own.\n  --config-dir <path>  The configuration folder. Default: ~/.config/mash.\n  --detail             Print the fuller answer: after the usual line, more as\n                       'label: value' lines; with --json, the fuller object.\n  --json               Print the result as JSON.\n  --no-color           Never use color.\n  -h, --help           Show help for the command.",
+      "stream": "stdout",
+      "exit": 0,
+      "issue": "#1048 / #1100",
+      "note": "Four changes and nothing else. (1) The same one-sentence explanation of SAP, NATS and creds as mash --help. (2) A Global options block (the options the specification lists for mashctl, said to work before or after the verb). (3) --json is listed for every verb that has it: endpoint list, show, set, unset, suspend, resume, inbox and permissions, as it is for the other verbs. (4) resume has the one description it has in endpoint --help. Today the block and the eight --json flags are missing and resume reads \"undo suspend\" here and \"take new mail again\" in endpoint --help.",
+      "verbatim": true
      }
     ]
    }

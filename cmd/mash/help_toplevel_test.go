@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"github.com/bogworks/mash/internal/cmdcore"
 	"strings"
 	"testing"
@@ -11,6 +12,9 @@ import (
 // one-line description, in no more than 80 columns. The commands on the command table are generated from it.
 func TestTopLevelHelpGolden(t *testing.T) {
 	const want = `Trusted mail between agents. Speaks as one endpoint.
+
+SAP is the Synadia Agent Protocol, NATS is the message server mash
+talks to, and creds are the file that signs an endpoint in to it.
 
 Everyday:
   mash send <address> [<message>] [options]    Send a message to an endpoint.
@@ -102,6 +106,33 @@ func TestHelpLayoutAgreesWithTable(t *testing.T) {
 	for n := range handCommands {
 		if _, ok := r.Lookup(n); ok {
 			t.Errorf("%s is on the table and still has a hand-written line", n)
+		}
+	}
+}
+
+// The x-output cases of the tool itself, mash, run word for word: the top of its help, 80 columns.
+func TestTopLevelHelpMatchesSpec(t *testing.T) {
+	var cases []specCase
+	for _, m := range loadConfSpec(t).Root.Metadata {
+		if m.Name == "x-output" {
+			if err := json.Unmarshal(m.Value, &cases); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if len(cases) == 0 {
+		t.Fatal("spec/mash.json has no x-output for mash itself")
+	}
+	for _, c := range cases {
+		var out, errb bytes.Buffer
+		code := run(strings.Fields(c.Case)[1:], func(string) string { return "" }, strings.NewReader(""), &out, &errb)
+		for _, l := range strings.Split(out.String(), "\n") {
+			if len([]rune(l)) > 80 {
+				t.Errorf("%s: %d columns: %q", c.Case, len([]rune(l)), l)
+			}
+		}
+		if code != c.Exit || out.String() != c.Text+"\n" || errb.Len() != 0 {
+			t.Errorf("%s: exit %d, stdout\n%s\nstderr %q; want exit %d and\n%s", c.Case, code, out.String(), errb.String(), c.Exit, c.Text)
 		}
 	}
 }

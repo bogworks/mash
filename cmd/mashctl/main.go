@@ -12,10 +12,23 @@ import (
 	"strings"
 
 	"github.com/bogworks/mash/internal/cliframe"
+	"github.com/bogworks/mash/internal/cmdcore"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/ctl"
 	"github.com/bogworks/mash/internal/natsauth"
 )
+
+// helpFrame is the global options `mashctl --help` lists. The descriptions are the specification's.
+var helpFrame = cmdcore.Frame{Tool: "mashctl", Globals: []cmdcore.HelpOption{
+	{Flag: "--server", Value: "url", Desc: "The server address. May be given more than once."},
+	{Flag: "--creds", Value: "path", Desc: "The administrator's creds file."},
+	{Flag: "--ca", Value: "path", Desc: "The certificate authority's certificate, when the server uses its own."},
+	{Flag: "--config-dir", Value: "path", Desc: "The configuration folder. Default: ~/.config/mash."},
+	{Flag: cliframe.DetailFlag, Desc: "Print the fuller answer: after the usual line, more as 'label: value' lines; with --json, the fuller object."},
+	{Flag: "--json", Desc: "Print the result as JSON."},
+	{Flag: "--no-color", Desc: "Never use color."},
+	{Flag: "--help", Short: "-h", Desc: "Show help for the command."},
+}}
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Getenv, os.LookupEnv, os.Stdout, os.Stderr))
@@ -90,7 +103,7 @@ func runVerbs(args []string, env func(string) string, lookup config.Lookup, stdo
 	case "version":
 		return runVersion(args[1:], stdout, stderr)
 	case "help", "-h", "--help":
-		fmt.Fprint(stdout, ctl.Usage("mashctl"))
+		fmt.Fprint(stdout, ctl.TopHelp("mashctl", cmdcore.Glossary, cmdcore.GlobalOptionsUnder(helpFrame, "Global options (before or after the verb):")))
 		return 0
 	}
 	if args[0] == "doctor" && helpRequested(args[0], args[1:]) { // its usage is its own text

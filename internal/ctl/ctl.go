@@ -31,9 +31,18 @@ const usageWidth = 80
 
 // Usage is the full verb listing for prog. Each command takes a line, wrapped with a hanging indent when it is long,
 // and its description follows indented under it, wrapped; no line passes eighty columns.
-func Usage(prog string) string {
+func Usage(prog string) string { return usage(prog, "", "") }
+
+// TopHelp is the help of the tool itself, `mashctl --help`: Usage with intro (the sentence that says what SAP, NATS
+// and creds are) after the usage line and tail (the global options) after the verbs. Either may be empty.
+func TopHelp(prog, intro, tail string) string { return usage(prog, intro, tail) }
+
+func usage(prog, intro, tail string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "usage: %s <verb> [args]\n\n", prog)
+	if intro != "" {
+		b.WriteString(intro + "\n\n")
+	}
 	line := func(left, right string) {
 		for _, l := range wrapUsageLeft("  "+prog+" "+left, "          ") {
 			b.WriteString(l + "\n")
@@ -52,6 +61,9 @@ func Usage(prog string) string {
 	if prog == "mashctl" {
 		endpointLines(line)
 		line("version [--json]", "print the version and the commit")
+	}
+	if tail != "" {
+		b.WriteString("\n" + tail + "\n")
 	}
 	return b.String()
 }
@@ -104,17 +116,17 @@ func wrapTokens(toks []string, first, indent string) []string {
 }
 
 func endpointLines(line func(left, right string)) {
-	line("endpoint list [prefix] [--wide]", "the endpoints in the directory")
-	line("endpoint show ADDRESS", "one endpoint: its state, labels and public key")
+	line("endpoint list [prefix] [--wide] [--json]", "the endpoints in the directory")
+	line("endpoint show ADDRESS [--json]", "one endpoint: its state, labels and public key")
 	line("endpoint create ADDRESS [--out PATH] [--public-key PATH] [--dry-run] [--json]", "make an endpoint and its credentials, for example acme.demo.bob")
 	line("endpoint reissue ADDRESS [--out PATH] [--public-key PATH] [--dry-run] [--json]", "give an endpoint new credentials and cancel the old ones")
 	line("endpoint delete ADDRESS [--yes] [--dry-run] [--json]", "revoke the endpoint's user key, remove its record and inbox, burn the address, rename its creds file")
-	line("endpoint set ADDRESS key=value... [--dry-run]", "set role, description, host, capability or label.NAME")
-	line("endpoint unset ADDRESS key... [--dry-run]", "remove those values")
-	line("endpoint suspend ADDRESS", "refuse new mail to an endpoint; its stored mail and credentials stay")
-	line("endpoint resume ADDRESS", "undo suspend")
-	line("endpoint inbox ADDRESS [--after number] [--limit n]", "what is in an endpoint's inbox, without any message text")
-	line("endpoint permissions ADDRESS", "the NATS permissions an endpoint's user needs")
+	line("endpoint set ADDRESS key=value... [--dry-run] [--json]", "set role, description, host, capability or label.NAME")
+	line("endpoint unset ADDRESS key... [--dry-run] [--json]", "remove those values")
+	line("endpoint suspend ADDRESS [--json]", "refuse new mail to an endpoint; its stored mail and credentials stay")
+	line("endpoint resume ADDRESS [--json]", "take new mail again, undoing suspend")
+	line("endpoint inbox ADDRESS [--after number] [--limit n] [--json]", "what is in an endpoint's inbox, without any message text")
+	line("endpoint permissions ADDRESS [--json]", "the NATS permissions an endpoint's user needs")
 }
 
 // OpenAdmin connects to the server with the admin credentials and returns the admin handle, a context carrying the

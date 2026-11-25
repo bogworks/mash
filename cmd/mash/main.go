@@ -104,7 +104,7 @@ var handCommands = map[string][2]string{
 // the table that the layout does not name is listed last under its own group.
 func usageFor(r *cmdcore.Registry) string {
 	var b strings.Builder
-	b.WriteString(helpIntro + "\n")
+	b.WriteString(helpIntro + "\n\n" + cmdcore.Glossary + "\n")
 	for _, g := range helpGroups {
 		b.WriteString("\n" + g + ":\n")
 		names := helpLayout[g]

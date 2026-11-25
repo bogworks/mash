@@ -272,6 +272,7 @@ func init() {
 	urlSub := func(w *confWorld) []string { return []string{"tls://localhost:4222", w.url} }
 	dead := "nats://127.0.0.1:1"
 
+	reg("endpoint mashctl endpoint --help", func(t *testing.T) confOutRun { return confOutRun{ran: confRun(t, "endpoint", "--help")} })
 	reg("endpoint inbox Messages", func(t *testing.T) confOutRun { return confInboxMessagesRun(t) })
 	reg("init Set up", func(t *testing.T) confOutRun {
 		w := newConfWorld(t, false)
@@ -715,4 +716,19 @@ func confOutputs(t *testing.T, tracked []specCommand) {
 			}
 		}
 	})
+}
+
+// The x-output cases of the tool itself, mashctl, run word for word: the top of its help.
+func TestTopLevelHelpMatchesSpec(t *testing.T) {
+	root := loadConfSpec(t)
+	cases := root.outputs()
+	if len(cases) == 0 {
+		t.Fatal("spec/mashctl.json has no x-output for mashctl itself")
+	}
+	for _, oc := range cases {
+		t.Run(oc.Case, func(t *testing.T) {
+			args := strings.Fields(oc.Case)[1:]
+			confFail(t, "output "+oc.Case, confOutputProblems("", oc, confOutRun{ran: confRun(t, args...)}))
+		})
+	}
 }

@@ -46,7 +46,7 @@ commands:
   set <address> key=value...  set role, description, host, capability, labels
   unset <address> key...      remove those values
   suspend <address>           refuse new mail to an endpoint
-  resume <address>            take new mail again
+  resume <address>            take new mail again, undoing suspend
   inbox <address>             list what is in an inbox, without the text
   permissions <address>       print the NATS permissions an endpoint needs
 Run mashctl endpoint <command> --help for a command's options.
