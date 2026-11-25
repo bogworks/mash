@@ -191,10 +191,16 @@ func TestStatusSessionRefusedAndSuspectedAtShellAndTool(t *testing.T) {
 			t.Fatal(err)
 		}
 		const refused = `{"holds_endpoint":true,"hooks":"refused","storage":"ok"}`
-		if got, _ := shellSession(t, w); got != refused {
+		// Wait on the state itself, not on the refusal being seen by the first look: under load the shell and the serve
+		// take their view of the spool a moment after the file is written.
+		var got string
+		eventually(t, 30*time.Second, "shell sees refused", func() bool { got, _ = shellSession(t, w); return got == refused })
+		if got != refused {
 			t.Errorf("shell: %s", got)
 		}
-		if got := toolSession(t, s, 60); got != refused {
+		id := 160 // each poll is a new tool call, so a new request id
+		eventually(t, 30*time.Second, "tool says refused", func() bool { id++; got = toolSession(t, s, id); return got == refused })
+		if got != refused {
 			t.Errorf("tool: %s", got)
 		}
 	})
