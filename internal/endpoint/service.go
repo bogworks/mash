@@ -575,7 +575,7 @@ func promptSend(ctx context.Context, nc *nats.Conn, id sapsdk.Identity, name, su
 }
 
 // promptMsg is the signed request a prompt sends: the text as the payload and the Agent-Sender header.
-func promptMsg(id sap.Identity, name, subject, inbox, text string) (*nats.Msg, error) {
+func promptMsg(id sapsdk.Identity, name, subject, inbox, text string) (*nats.Msg, error) {
 	payload := []byte(text)
 	h, err := id.Sign(subject, payload, name, time.Now(), "")
 	if err != nil {
