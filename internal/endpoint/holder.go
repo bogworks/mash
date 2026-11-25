@@ -30,3 +30,7 @@ func holderGoneOS(pid, start string) bool {
 	cur, err := procStart(n)
 	return err == nil && cur != start
 }
+
+// PIDGone reports whether the process pid no longer exists, by the same conservative check a lease's holder gets
+// (holderGone): ESRCH or a zombie is gone, anything uncertain is live.
+func PIDGone(pid int) bool { return holderGone(strconv.Itoa(pid), "") }
