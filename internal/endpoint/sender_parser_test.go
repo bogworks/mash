@@ -17,7 +17,7 @@ import (
 // it, and never declare the first value's name as the origin of a relay.
 func TestViaOriginRefusesTwoSenderHeaders(t *testing.T) {
 	f := newFixture(t, "a", "b")
-	subj := taddr("a").Subjects().Mail
+	subj := taddr("a").MailSubject()
 	nc := f.e.ConnAs(t, f.creds["b"], tkey("b"))
 	id := identity(t, f.creds["b"])
 	h, err := id.Sign(subj, []byte("two"), tkey("b"), time.Now(), "")
@@ -56,7 +56,7 @@ func TestViaOriginRefusesTwoSenderHeaders(t *testing.T) {
 // that loads only the records it needs must still load that sender's record, so the mail is not refused as unknown-signer.
 func TestLoadSendersReadsSenderOfV10Header(t *testing.T) {
 	f := newFixture(t, "a", "b")
-	subj := taddr("a").Subjects().Mail
+	subj := taddr("a").MailSubject()
 	nc := f.e.ConnAs(t, f.creds["b"], tkey("b"))
 	id := identity(t, f.creds["b"])
 	h, err := id.Sign(subj, []byte("v one point oh"), tkey("b"), time.Now(), "")

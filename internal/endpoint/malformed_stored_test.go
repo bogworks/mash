@@ -167,7 +167,7 @@ func malformedConsumerState(t *testing.T, f *fixture, name string) (floor uint64
 // returns each case's stream sequence, the sequence of the unsigned one and of the ordinary one.
 func publishMalformedSet(t *testing.T, f *fixture) (seqs map[string]uint64, cases []malformedCase, absent, ok uint64) {
 	t.Helper()
-	subj := taddr("a").Subjects().Mail
+	subj := taddr("a").MailSubject()
 	nc := f.e.ConnAs(t, f.creds["b"], tkey("b"))
 	id := identity(t, f.creds["b"])
 	cases = malformedHeaders(id.Account, id.User, subj)
