@@ -49,10 +49,9 @@ mashctl endpoint list acme.demo
 Stream: stdout. Exit code: 0.
 
 ```text
-OWNER  GROUP  NAME   STATE
-acme   demo   alice  online
-              bob    offline
-       ops    carol  suspended
+OWNER  GROUP  NAME   ADDRESS          STATE
+acme   demo   alice  acme.demo.alice  online
+acme   demo   bob    acme.demo.bob    offline
 ```
 
 ### With --wide
@@ -60,10 +59,9 @@ acme   demo   alice  online
 Stream: stdout. Exit code: 0.
 
 ```text
-OWNER  GROUP  NAME   STATE      CREATED           WAITING  LABELS
-acme   demo   alice  online     2026-11-19 09:40  0        team=blue
-              bob    offline    2026-11-19 09:41  1        -
-       ops    carol  suspended  2026-11-18 16:02  0        -
+OWNER  GROUP  ADDRESS          STATE    CREATED           WAITING  LABELS
+acme   demo   acme.demo.alice  online   2026-11-19 09:40  0        team=blue
+acme   demo   acme.demo.bob    offline  2026-11-19 09:41  1        -
 ```
 
 ### None
@@ -98,7 +96,9 @@ None. Administration. There are no MCP tools for mashctl.
 
 ## Notes
 
-A repeated owner or group is left blank, so the eye finds where one ends.
+Every row prints its owner and group, so a line can be grepped or cut on its
+own. With --wide, ADDRESS takes the place of NAME (the address carries the
+name).
 
 ## What it replaces
 

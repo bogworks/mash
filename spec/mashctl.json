@@ -1145,13 +1145,13 @@
         "value": [
          {
           "case": "Endpoints",
-          "text": "OWNER  GROUP  NAME   STATE\nacme   demo   alice  online\n              bob    offline\n       ops    carol  suspended",
+          "text": "OWNER  GROUP  NAME   ADDRESS          STATE\nacme   demo   alice  acme.demo.alice  online\nacme   demo   bob    acme.demo.bob    offline",
           "stream": "stdout",
           "exit": 0
          },
          {
           "case": "With --wide",
-          "text": "OWNER  GROUP  NAME   STATE      CREATED           WAITING  LABELS\nacme   demo   alice  online     2026-11-19 09:40  0        team=blue\n              bob    offline    2026-11-19 09:41  1        -\n       ops    carol  suspended  2026-11-18 16:02  0        -",
+          "text": "OWNER  GROUP  ADDRESS          STATE    CREATED           WAITING  LABELS\nacme   demo   acme.demo.alice  online   2026-11-19 09:40  0        team=blue\nacme   demo   acme.demo.bob    offline  2026-11-19 09:41  1        -",
           "stream": "stdout",
           "exit": 0
          },
@@ -1190,31 +1190,11 @@
        },
        {
         "name": "x-notes",
-        "value": "A repeated owner or group is left blank, so the eye finds where one ends."
+        "value": "Every row prints its owner and group, so a line can be grepped or cut on its own. With --wide, ADDRESS takes the place of NAME (the address carries the name)."
        },
        {
         "name": "x-output-next",
         "value": [
-         {
-          "case": "Endpoints",
-          "text": "OWNER  GROUP  NAME   ADDRESS          STATE\nacme   demo   alice  acme.demo.alice  online\nacme   demo   bob    acme.demo.bob    offline",
-          "stream": "stdout",
-          "exit": 0,
-          "issue": "#1040",
-          "replaces": "Endpoints",
-          "note": "Every row prints its owner and group (no blank repeated cells), so a line can be grepped or cut on its own, and an ADDRESS column is added, as mash who has. ADDRESS follows NAME and STATE stays last. The rule \"A list is a plain table\" loses \"A repeated leading value may be left blank\".",
-          "verbatim": true
-         },
-         {
-          "case": "With --wide",
-          "text": "OWNER  GROUP  ADDRESS          STATE    CREATED           WAITING  LABELS\nacme   demo   acme.demo.alice  online   2026-11-19 09:40  0        team=blue\nacme   demo   acme.demo.bob    offline  2026-11-19 09:41  1        -",
-          "stream": "stdout",
-          "exit": 0,
-          "issue": "#1040",
-          "replaces": "With --wide",
-          "note": "Every row prints its owner and group (no blank repeated cells), so a line can be grepped or cut on its own, and an ADDRESS column is added, as mash who has. In --wide the NAME column gives way to ADDRESS (the name is the last part of the address). NAME and ADDRESS together make 83 columns, so --wide drops NAME for ADDRESS and is not a superset of the default list. This is a known choice, for the lead to confirm.",
-          "verbatim": true
-         },
          {
           "case": "--json",
           "text": "{\n  \"endpoints\": [\n    {\n      \"address\": \"acme.demo.alice\",\n      \"owner\": \"acme\",\n      \"group\": \"demo\",\n      \"name\": \"alice\",\n      \"online\": true,\n      \"suspended\": false\n    },\n    {\n      \"address\": \"acme.demo.bob\",\n      \"owner\": \"acme\",\n      \"group\": \"demo\",\n      \"name\": \"bob\",\n      \"online\": false,\n      \"suspended\": false\n    }\n  ]\n}",

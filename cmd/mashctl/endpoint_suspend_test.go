@@ -66,7 +66,7 @@ func TestEndpointSuspendResume(t *testing.T) {
 		t.Fatalf("suspend again: %d %q", code, out)
 	}
 	list, _, _ := h.run("endpoint", "list")
-	if list != "OWNER  GROUP  NAME  STATE\no      g      c     suspended\n" {
+	if list != "OWNER  GROUP  NAME  ADDRESS  STATE\no      g      c     o.g.c    suspended\n" {
 		t.Errorf("list: %q", list)
 	}
 	if out, errb, code := h.run("endpoint", "resume", "o.g.c"); code != 0 || out != "Resumed endpoint o.g.c\n" || errb != "" {

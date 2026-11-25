@@ -33,7 +33,7 @@ func TestEndpointListSkipsBadRecordWithWarning(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("endpoint list exit %d: %q %q", code, out, errb)
 	}
-	if out != "OWNER  GROUP  NAME  STATE\no      g      c     offline\n" {
+	if out != "OWNER  GROUP  NAME  ADDRESS  STATE\no      g      c     o.g.c    offline\n" {
 		t.Fatalf("stdout %q", out)
 	}
 	if !strings.Contains(errb, "warning: skipping directory record junk_key") {

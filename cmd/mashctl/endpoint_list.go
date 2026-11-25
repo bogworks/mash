@@ -15,7 +15,7 @@ import (
 
 const endpointListUsage = `usage: mashctl endpoint list [prefix] [--wide] [--json]
   prefix   only endpoints under this owner (acme) or owner.group (acme.demo)
-  --wide   add the columns CREATED, WAITING and LABELS
+  --wide   show ADDRESS in place of NAME, and add CREATED, WAITING and LABELS
   --json   print the endpoints as JSON
 Example:
   mashctl endpoint list acme.demo
@@ -112,22 +112,18 @@ func runEndpointList(args []string, g cliframe.Global, env func(string) string, 
 			return nil
 		}
 		tw := tabwriter.NewWriter(stdout, 0, 4, 2, ' ', 0)
-		head := "OWNER\tGROUP\tNAME\tSTATE"
+		// Every row prints every cell, so a line stands alone; --wide shows the address in place of NAME.
+		head := "OWNER\tGROUP\tNAME\tADDRESS\tSTATE"
 		if wide {
-			head += "\tCREATED\tWAITING\tLABELS"
+			head = "OWNER\tGROUP\tADDRESS\tSTATE\tCREATED\tWAITING\tLABELS"
 		}
 		fmt.Fprintln(tw, head)
-		var prev sap.Address
-		for i, r := range rows {
-			owner, group := config.Clean(r.addr.Owner), config.Clean(r.addr.Group)
-			if i > 0 && r.addr.Owner == prev.Owner {
-				owner = ""
-				if r.addr.Group == prev.Group {
-					group = ""
-				}
+		for _, r := range rows {
+			owner, group, addr := config.Clean(r.addr.Owner), config.Clean(r.addr.Group), config.Clean(r.addr.String())
+			line := fmt.Sprintf("%s\t%s\t%s\t%s\t%s", owner, group, config.Clean(r.addr.Instance), addr, r.state)
+			if wide {
+				line = fmt.Sprintf("%s\t%s\t%s\t%s", owner, group, addr, r.state)
 			}
-			prev = r.addr
-			line := fmt.Sprintf("%s\t%s\t%s\t%s", owner, group, config.Clean(r.addr.Instance), r.state)
 			if wide {
 				created := "-"
 				if r.created != "" {
