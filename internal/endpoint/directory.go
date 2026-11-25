@@ -51,8 +51,9 @@ func (e *Endpoint) pollDirectory(ctx context.Context, every time.Duration) {
 	}
 }
 
-// applyPresence records the agents a $SRV.INFO answer vouches for as seen now, when the answer is from this owner,
-// its id_sig verifies and its key is the directory's key for that name.
+// applyPresence records the agents a $SRV.INFO answer vouches for as seen now, when its id_sig verifies and its key
+// is the directory's key for the address in the prompt subject. The address comes from the subject alone; metadata
+// owner is not a filter (an SDK host registers under another token) and never names the address.
 func (e *Endpoint) applyPresence(m *nats.Msg) (counted int) {
 	var info struct {
 		Metadata  map[string]string `json:"metadata"`
@@ -61,7 +62,7 @@ func (e *Endpoint) applyPresence(m *nats.Msg) (counted int) {
 			Subject string `json:"subject"`
 		} `json:"endpoints"`
 	}
-	if json.Unmarshal(m.Data, &info) != nil || info.Metadata["owner"] != e.cfg.Owner {
+	if json.Unmarshal(m.Data, &info) != nil {
 		return 0
 	}
 	md := info.Metadata

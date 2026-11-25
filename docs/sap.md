@@ -48,8 +48,14 @@ Consequence for discovery:
 - A wildcard on the first slot, such as `agents.mail.claude-code.>`, finds no mash endpoint.
 - Discovery by the SAP service name does. mash registers the service name `agents`, so `$SRV.INFO.agents` lists mash endpoints.
 - The service metadata carries `owner`, `group` and `instance` (the name), so a caller reads who each endpoint is from the reply.
+- mash finds an endpoint by its prompt subject alone, `T3.T4.T5` as the subject carries them. It does not filter on the metadata `owner`, so an endpoint hosted by another SAP SDK (`harness.owner.session`) is found by that address when its three tokens pass mash's token rule (lower-case letters, digits and single dashes, at most 32 characters, starting with a letter). A session id outside that rule, such as a 36-character UUID or one with capitals, is not found. Metadata never names the address; `who` verifies the registration's `id_sig` and key, read from the metadata.
+- The T3.T4.T5 space is shared; NATS subscribe permissions, not discovery, decide who answers a prompt.
 
 This is a documented change in what one slot means. The subject keeps its shape and its five tokens. SAP's protocol and the SAP Go SDK are not changed.
+
+### Security
+
+A credential in the same account can answer the info request and make X look reachable for prompt when it is not; it cannot receive X's prompts and cannot make X show as verified in `mash who`.
 
 ## Service metadata
 

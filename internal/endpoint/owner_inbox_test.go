@@ -229,3 +229,71 @@ func TestSameOwnerRepliesStillWork(t *testing.T) {
 		}
 	}
 }
+
+// answerInfo answers every $SRV.INFO.agents request on c with a registration carrying metadata and prompt subject.
+func answerInfo(t *testing.T, c *Endpoint, md map[string]string, subject string) {
+	t.Helper()
+	body, _ := json.Marshal(map[string]any{
+		"name": "agents", "type": "io.nats.micro.v1.info_response", "metadata": md,
+		"endpoints": []map[string]string{{"name": "prompt", "subject": subject}},
+	})
+	sub, err := c.Conn().Subscribe("$SRV.INFO.agents", func(m *nats.Msg) { _ = m.Respond(body) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sub.Unsubscribe() })
+	if err := c.Conn().Flush(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Discovery matches the prompt subject only: a registration with another metadata owner is found when its subject is
+// the wanted one, and one whose metadata claims the wanted address is refused when its subject is not.
+func TestDiscoverMatchesSubjectNotMetadata(t *testing.T) {
+	want := taddr("ghost").Subjects().Prompt
+	for _, c := range []struct {
+		desc, subject string
+		md            map[string]string
+		found         bool
+	}{
+		{"other metadata owner, wanted subject", want, map[string]string{"owner": "someone-else"}, true},
+		{"no metadata, wanted subject", want, nil, true},
+		{"metadata claims the address, other subject", taddr("other").Subjects().Prompt, map[string]string{"owner": "acme", "instance": "ghost"}, false},
+		{"metadata owner is ours, other subject", taddr("other").Subjects().Prompt, map[string]string{"owner": taddr("ghost").Owner}, false},
+	} {
+		f := newFixture(t, "a", "b")
+		answerInfo(t, f.client(t, "a"), c.md, c.subject)
+		subj, err := Discover(context.Background(), f.client(t, "b").Conn(), taddr("ghost"))
+		if c.found && (err != nil || subj != want) {
+			t.Errorf("%s: got (%q, %v)", c.desc, subj, err)
+		}
+		if !c.found && err == nil {
+			t.Errorf("%s: discovered %q", c.desc, subj)
+		}
+	}
+}
+
+// Discovery accepts a subject only when it is exactly the wanted prompt subject: a wildcard, an extra token or
+// another verb on the same T3.T4.T5 is not an answer for the address.
+func TestDiscoverRefusesMalformedSubjects(t *testing.T) {
+	want := taddr("ghost").Subjects().Prompt
+	tail := strings.TrimPrefix(want, "agents.prompt.")
+	for _, c := range []struct{ desc, subject string }{
+		{"wildcard token", "agents.prompt.*.o.s"},
+		{"full wildcard", "agents.prompt.>"},
+		{"extra token", want + ".x"},
+		{"status verb", "agents.status." + tail},
+		{"mail verb", "agents.mail." + tail},
+	} {
+		f := newFixture(t, "a", "b")
+		answerInfo(t, f.client(t, "a"), map[string]string{"owner": taddr("ghost").Owner}, c.subject)
+		subj, err := Discover(context.Background(), f.client(t, "b").Conn(), taddr("ghost"))
+		if err == nil {
+			t.Errorf("%s: discovered %q", c.desc, subj)
+			continue
+		}
+		if !strings.Contains(err.Error(), "not online") {
+			t.Errorf("%s: error %q is not the not-online error", c.desc, err)
+		}
+	}
+}
