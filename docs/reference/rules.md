@@ -45,7 +45,10 @@ The rules every mash command and tool follows.
 8. --json prints one object. Always an object, never a bare array: a list is
    {"endpoints": [...]}. It is the same object the matching MCP tool returns
    as its structured result. Field names are the glossary's words. Both are
-   produced by one implementation.
+   produced by one implementation. One policy in both tools: it is indented
+   when standard output is a terminal and one compact line when standard
+   output is a pipe or a file, as gh and aws do. An error object follows the
+   same policy. The specification shows the indented form.
 
 9. A wrong command line gets one error line in a fixed form, and one hint. A
    missing argument: 'error: mash send needs &lt;address&gt;'. A bad value:

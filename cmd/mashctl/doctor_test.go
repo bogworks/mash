@@ -55,6 +55,7 @@ func cleanText(e *applyEnv, s string) string {
 
 // All well: every check on its line, then "No problems."; and the same in JSON.
 func TestDoctorAllWell(t *testing.T) {
+	atTerminal(t) // expects the terminal form of --json (#1043)
 	e := newXYEnv(t)
 	out, errb, code := e.run("doctor")
 	want := "config     ok\nserver     ok    tls://localhost:4222\nsign-in    ok\nstorage    ok\nendpoints  ok    2 records, 2 inboxes\nkeys       ok    every connected user was issued by mashctl\n\nNo problems.\n"

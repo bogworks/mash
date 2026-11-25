@@ -2,12 +2,14 @@ package main
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
 
+	"github.com/bogworks/mash/internal/cliframe"
 	"github.com/bogworks/mash/internal/config"
 )
 
@@ -15,6 +17,15 @@ import (
 func TestMain(m *testing.M) {
 	syscall.Umask(0o022) // the folder check refuses a group-writable folder; a 002 umask would make every test folder one
 	os.Exit(m.Run())
+}
+
+// atTerminal makes the tool print --json as it does at a terminal (indented) for the rest of the test. The tests capture
+// output in a buffer, which is not a terminal, so without it they see the compact form of a pipe or a file (#1043).
+func atTerminal(t *testing.T) {
+	t.Helper()
+	old := cliframe.IsTerminal
+	cliframe.IsTerminal = func(io.Writer) bool { return true }
+	t.Cleanup(func() { cliframe.IsTerminal = old })
 }
 
 // loadCfg is config.Load over a config dir holding the config.json body (none when ""), with env on top.

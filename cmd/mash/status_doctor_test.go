@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bogworks/mash/internal/cliframe"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/endpoint"
 	"github.com/bogworks/mash/internal/spool"
@@ -678,5 +680,28 @@ func TestStatusAndDoctorHintsAreOnStderr(t *testing.T) {
 		if j.code != 1 || strings.Contains(j.out, "\nhint:") || strings.HasPrefix(j.out, "hint:") || strings.Contains(j.errs, "hint") && !strings.HasPrefix(j.errs, "hint: ") {
 			t.Errorf("%s --json: %+v", cmd, j)
 		}
+	}
+}
+
+// TestJSONPolicyByDestination: --json is one compact line when stdout is a pipe or a file and indented at a terminal
+// (the rule "--json prints one object", #1043). A usage error needs no server; its object follows the same policy.
+func TestJSONPolicyByDestination(t *testing.T) {
+	old := cliframe.IsTerminal
+	t.Cleanup(func() { cliframe.IsTerminal = old })
+	for _, tc := range []struct {
+		name string
+		tty  bool
+		want string
+	}{
+		{"non-terminal", false, `{"error":"mash has no command nope","hint":"mash --help"}` + "\n"},
+		{"terminal", true, "{\n  \"error\": \"mash has no command nope\",\n  \"hint\": \"mash --help\"\n}\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cliframe.IsTerminal = func(io.Writer) bool { return tc.tty }
+			r := runMash(map[string]string{}, "nope", "--json")
+			if r.code != 2 || r.out != tc.want || r.errs != "" {
+				t.Errorf("code %d, stdout %q (want %q), stderr %q", r.code, r.out, tc.want, r.errs)
+			}
+		})
 	}
 }

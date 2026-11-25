@@ -149,6 +149,7 @@ func TestEndpointDeleteDryRunAsksNothingAndChangesNothing(t *testing.T) {
 }
 
 func TestEndpointDeleteMessageCountWords(t *testing.T) {
+	atTerminal(t) // expects the terminal form of --json (#1043)
 	for _, c := range []struct {
 		n    int
 		want string

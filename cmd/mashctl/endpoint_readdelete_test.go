@@ -3,11 +3,14 @@ package main
 import (
 	"encoding/json"
 	"flag"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/bogworks/mash/internal/cliframe"
 )
 
 var updateEndpointGolden = flag.Bool("update-endpoint", false, "rewrite the cmd/mashctl/testdata/endpoint_*.golden.json files")
@@ -39,6 +42,7 @@ func checkGolden(t *testing.T, name, got string) {
 }
 
 func TestEndpointDeleteRemovesRecordRenamesCredsRevokesKey(t *testing.T) {
+	atTerminal(t) // expects the terminal form of --json (#1043)
 	h := newFleetEnv(t)
 	h.seed(ad("c"))
 	_, user := h.credsClaims(ad("c"))
@@ -221,6 +225,7 @@ func TestEndpointShowFoundAndNotFound(t *testing.T) {
 }
 
 func TestEndpointGoldens(t *testing.T) {
+	atTerminal(t) // expects the terminal form of --json (#1043)
 	h := newFleetEnv(t)
 	h.seed(ad("a"))
 	h.seed(ad("b"))
@@ -249,6 +254,7 @@ func TestEndpointGoldens(t *testing.T) {
 	}
 	checkGolden(t, "endpoint_delete.golden.json", h.scrub(out))
 
+	cliframe.IsTerminal = func(io.Writer) bool { return false } // the error object's golden is the compact form of a pipe
 	out, errb, code = h.run("endpoint", "delete", "o.g.a", "--yes", "--json")
 	if code != 1 || errb != "" {
 		t.Fatalf("delete again: %d %q %q", code, out, errb)

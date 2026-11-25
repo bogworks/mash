@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 
@@ -127,11 +126,9 @@ func permissionsJSON(p *jwt.Permissions) permsJSON {
 // runEndpointPermissions is `mashctl endpoint permissions`: the permission set as JSON on stdout, nothing else.
 func runEndpointPermissions(args []string, g cliframe.Global, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
 	return runEp(endpointPermissionsSpec, g, args, env, lookup, stdout, stderr, func(rt *epRuntime) error {
-		b, err := json.MarshalIndent(permissionsJSON(admin.Permissions(rt.in.addr)), "", "  ")
-		if err != nil {
+		if err := cliframe.WriteJSON(rt.stdout, permissionsJSON(admin.Permissions(rt.in.addr))); err != nil {
 			return failErr(err)
 		}
-		fmt.Fprintln(rt.stdout, string(b))
 		return nil
 	})
 }

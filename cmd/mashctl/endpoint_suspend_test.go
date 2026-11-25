@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"regexp"
@@ -85,6 +86,7 @@ func TestEndpointSuspendResume(t *testing.T) {
 }
 
 func TestEndpointStateOnline(t *testing.T) {
+	atTerminal(t) // expects the terminal form of --json (#1043)
 	h := newFleetEnv(t)
 	h.seed(ad("c"))
 	h.holdLease("c")
@@ -155,6 +157,7 @@ func TestEndpointSuspendRefusals(t *testing.T) {
 }
 
 func TestEndpointPermissions(t *testing.T) {
+	atTerminal(t) // expects the terminal form of --json (#1043)
 	h := newFleetEnv(t)
 	// no server and no config: it reads nothing
 	h.env = map[string]string{"HOME": t.TempDir()}
@@ -163,8 +166,13 @@ func TestEndpointPermissions(t *testing.T) {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
 	a, _ := sap.NewAddress("acme", "demo", "bob")
-	want, _ := json.MarshalIndent(permissionsJSON(admin.Permissions(a)), "", "  ")
-	if out != string(want)+"\n" {
+	var wb bytes.Buffer
+	enc := json.NewEncoder(&wb) // < > & stay readable, as in every --json object
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	_ = enc.Encode(permissionsJSON(admin.Permissions(a)))
+	want := wb.Bytes()
+	if out != string(want) {
 		t.Fatalf("permissions: %q, want %q", out, want)
 	}
 	var p map[string]map[string][]string
@@ -198,6 +206,7 @@ func TestEndpointPermissions(t *testing.T) {
 }
 
 func TestVersionOutput(t *testing.T) {
+	atTerminal(t) // expects the terminal form of --json (#1043)
 	h := newFleetEnv(t)
 	h.env = map[string]string{}
 	commit = "3f9a41c8d2e07b6a5c4d3e2f1a0b9c8d7e6f5a4b"

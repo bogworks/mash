@@ -153,11 +153,6 @@
  ],
  "rules_next": [
  {
-  "rule": "--json prints one object",
-  "detail": "Always an object, never a bare array: a list is {\"endpoints\": [...]}. It is the same object the matching MCP tool returns as its structured result. Field names are the glossary's words. Both are produced by one implementation. One policy in both tools: it is indented when standard output is a terminal and one compact line when standard output is a pipe or a file, as gh and aws do. An error object follows the same policy. The specification shows the indented form.",
-  "replaces": "--json prints one object"
- },
- {
   "rule": "In --json, one name for one fact",
   "detail": "A yes-or-no fact has one name in every command of both tools: online is a boolean wherever it appears (mash who, mash status, mashctl endpoint list and show, mashctl status), never ready, ok or state for the same fact; an endpoint's suspended state is its own boolean, suspended. ready stays the name of \"mail works for this endpoint\" and \"the server works\" (mash status and mashctl status, which was ok). A count is named as a count: endpoint_count, online_count, wake_count. An unset field is null: never \"\" and never left out, so a command's keys are the same on every run. An empty list is [] and an empty map is {}. A list's key is plural: capabilities, not capability, everywhere except mash who --json, whose capability ADR 0049 keeps (who JSON fields are added, never renamed or removed); that is the one named exception. A doctor row's state (ok, warn, fail, skip) is a different fact and keeps its name."
  },

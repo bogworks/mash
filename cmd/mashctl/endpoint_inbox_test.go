@@ -77,6 +77,7 @@ func TestInboxUsageAndOldVerb(t *testing.T) {
 
 // TestEndpointInboxJSONGolden pins the bytes of the JSON with a fixed inspection.
 func TestEndpointInboxJSONGolden(t *testing.T) {
+	atTerminal(t) // expects the terminal form of --json (#1043)
 	in := &admin.InboxInspection{
 		Stream:   admin.InspectedStream{Name: "inbox-acme_team1_alpha", FirstSeq: 1, LastSeq: 4, Messages: 4, Bytes: 812},
 		Consumer: &admin.InspectedConsumer{Name: "deliver", AckFloor: admin.Cursor{Stream: 1, Consumer: 1}, Delivered: admin.Cursor{Stream: 3, Consumer: 3}, NumPending: 1, NumRedelivered: 0, NumAckPending: 2},

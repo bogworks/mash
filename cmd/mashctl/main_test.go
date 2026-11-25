@@ -3,11 +3,13 @@ package main
 import (
 	"bytes"
 	"context"
+	"io"
 	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/bogworks/mash/internal/admin"
+	"github.com/bogworks/mash/internal/cliframe"
 	"github.com/bogworks/mash/internal/testenv"
 )
 
@@ -146,5 +148,29 @@ func TestMashctlGlobalOptionsBeforeVerb(t *testing.T) {
 	}
 	if out, errb, code := ctlRun(t, e, "--version"); code != 0 || errb != "" || !strings.HasPrefix(out, "mashctl v") {
 		t.Errorf("--version: %d %q %q", code, out, errb)
+	}
+}
+
+// TestVersionJSONPolicyByDestination: `mashctl version --json` is one compact line when stdout is a pipe or a file and
+// indented at a terminal (the rule "--json prints one object", #1043).
+func TestVersionJSONPolicyByDestination(t *testing.T) {
+	old := cliframe.IsTerminal
+	t.Cleanup(func() { cliframe.IsTerminal = old })
+	for _, tc := range []struct {
+		name string
+		tty  bool
+		re   string
+	}{
+		{"non-terminal", false, `^\{"version":"[^"\n]+","commit":"[^"\n]+"\}\n$`},
+		{"terminal", true, `^\{\n  "version": "[^"\n]+",\n  "commit": "[^"\n]+"\n\}\n$`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cliframe.IsTerminal = func(io.Writer) bool { return tc.tty }
+			var out, errb bytes.Buffer
+			code := runEnv([]string{"version", "--json"}, func(string) string { return "" }, &out, &errb)
+			if code != 0 || errb.Len() != 0 || !regexp.MustCompile(tc.re).MatchString(out.String()) {
+				t.Errorf("code %d, stdout %q, stderr %q", code, out.String(), errb.String())
+			}
+		})
 	}
 }

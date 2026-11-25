@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -41,10 +40,9 @@ var endpointDeleteSpec = epSpec{
 	check: checkAddress,
 }
 
-// writeJSON prints v as indented JSON and a newline.
+// writeJSON prints v as JSON and a newline: indented at a terminal, one compact line otherwise.
 func writeJSON(w io.Writer, v any) {
-	b, _ := json.MarshalIndent(v, "", "  ")
-	fmt.Fprintf(w, "%s\n", b)
+	_ = cliframe.WriteJSON(w, v)
 }
 
 // inboxWords is how a message count is said: "the 3 messages in its inbox", "its empty inbox".
