@@ -112,11 +112,19 @@ func (e *Endpoint) SetSpoolContext(ctx context.Context, s spool.Spool, owner str
 	if err := s.Own(owner); err != nil {
 		return err
 	}
+	if e.onSpoolBound != nil {
+		e.onSpoolBound() // under the lock this bind holds
+	}
 	e.spool, e.since = &s, time.Now()
 	e.wakeStart = backlogClock()
 	e.hl.bind(s, e.since)
 	return nil
 }
+
+// OnSpoolBound sets fn to run inside SetSpoolContext while it holds the spool lock, once the spool is bound to this
+// session: serve uses it to remove its lease-wait state at the moment it owns the spool (ADR 0092). Call it before
+// SetSpoolContext.
+func (e *Endpoint) OnSpoolBound(fn func()) { e.onSpoolBound = fn }
 
 // SpoolFromStart counts the session as hooked from the start: with a spool set, mail is spooled from the first message,
 // as if a hook had already run, and nothing is acked unless a hook drained it. Call it only once SetSpool has succeeded

@@ -142,6 +142,8 @@ type Endpoint struct {
 	// session switches delivery to the spool.
 	spool *spool.Spool
 	since time.Time
+	// onSpoolBound runs inside SetSpoolContext, under the spool lock, once the spool is bound to this session.
+	onSpoolBound func()
 	// fromStart: the session counts as hooked from the start (SpoolFromStart).
 	fromStart bool
 	// noChannel: the host takes no channel delivery, so mail is held, never channel-delivered (NoChannel).
