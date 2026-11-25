@@ -13,8 +13,8 @@ repo=${MASH_RELEASE_REPO:-bogworks/mash}
 if command -v sha256sum >/dev/null 2>&1; then sha256() { sha256sum "$1"; }; else sha256() { shasum -a 256 "$1"; }; fi
 bins=$(mktemp -d)
 name=mash-storedmail-$$-$RANDOM
-# No rm on the host: the download dir is moved to ~/archive (herd rule), the container is removed by name.
-archive="${MASH_STOREDMAIL_ARCHIVE:-${HOME:?}/archive}" # herd rule: nothing is removed on the host; set MASH_STOREDMAIL_ARCHIVE to move the downloads elsewhere
+# No rm on the host: the download dir is moved to ~/archive (no-delete rule), the container is removed by name.
+archive="${MASH_STOREDMAIL_ARCHIVE:-${HOME:?}/archive}" # no-delete rule: nothing is removed on the host; set MASH_STOREDMAIL_ARCHIVE to move the downloads elsewhere
 trap 'mkdir -p -- "${archive:?}" && mv -- "${bins:?}" "${archive:?}/${name:?}-bins"; docker rm -f "$name" >/dev/null 2>&1 || true' EXIT
 echo "download dir: $bins"
 
