@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -423,25 +424,24 @@ func TestScanStopsOnLeaseLoss(t *testing.T) {
 	_, cases, _, _ := publishMalformedSet(t, f)
 	last := lastInboxSeq(t, f, "a")
 
-	steps := 0
+	var steps atomic.Int32
 	_, ev, _, stop, runErr := serveLogged(t, cfg, func(e *Endpoint) {
 		e.scanStep = func(uint64) error {
-			steps++
-			if steps == 2 {
+			if steps.Add(1) == 2 {
 				e.leaseGone.Store(true)
 			}
 			return nil
 		}
 	})
-	waitFor(t, "the scan to reach its 2nd step", 10*time.Second, func() bool { return steps >= 2 })
+	waitFor(t, "the scan to reach its 2nd step", 10*time.Second, func() bool { return steps.Load() >= 2 })
 	time.Sleep(500 * time.Millisecond) // a scan that did not stop would take more steps and write Done
 	select {
 	case err := <-runErr:
 		t.Fatalf("Run ended: %v (a lost lease stops the scan, it does not fail startup)", err)
 	default:
 	}
-	if steps != 2 {
-		t.Fatalf("the scan took %d steps, want it to stop at the 2nd", steps)
+	if n := steps.Load(); n != 2 {
+		t.Fatalf("the scan took %d steps, want it to stop at the 2nd", n)
 	}
 	if l := l0(t, cfg); l.Done {
 		t.Fatalf("the list is marked Done after a lost lease: %+v", l)
