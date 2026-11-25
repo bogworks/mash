@@ -9,7 +9,8 @@ What changes in 0.6.0. None of it is in 0.5.9.
 - mash prompt becomes mash sap prompt. And the MCP tool reply moves with it.
 - A mesh holds many owners. mashctl owner create, list and delete arrive. Mail
   between owners becomes a designed case, under policy.
-- Policy. Who may send to whom. mash ships open; narrowing is a choice.
+- Policy. Planned, with no release named. Who may send to whom. mash ships
+  open; narrowing is a choice.
 - Asking to join. An endpoint can ask to join and be approved by an
   administrator or by policy.
 - The MCP revision and how a session is woken. Planned for 0.6.0: a study of

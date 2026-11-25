@@ -1,7 +1,7 @@
-> **Status: not shipped. Planned for 0.6.0.** The policy commands (`mashctl policy`, `mashctl issue serve`, `mashctl requester`,
+> **Status: not shipped. Planned, with no release named.** The policy commands (`mashctl policy`, `mashctl issue serve`, `mashctl requester`,
 > `mash policy show` and `mash policy explain`) are not part of 0.5.6 (nor of any earlier release), and nothing in a release adopts an account.
 > The engine this document describes is internal: its packages and tests stay, and the release gate still runs its
-> tests. No command line for it has shipped; the 0.6.0 plan is in [coming in 0.6.0](reference/coming-in-0-6-0.md). The page was written for 0.5.0, so other commands it names, such as `mashctl issued` and `mashctl audit`, were replaced in 0.5.6 by `mashctl doctor` and `mashctl endpoint show`. The decision is [ADR 0129](decisions/0129-the-policy-commands-are-not-part-of-v0-5-0-and-the-engine-stays-internal-until-it-works-standalone.md). Where this text names a command, read it as
+> tests. No command line for it has shipped; the plan is in the [roadmap](../ROADMAP.md). The page was written for 0.5.0, so other commands it names, such as `mashctl issued` and `mashctl audit`, were replaced in 0.5.6 by `mashctl doctor` and `mashctl endpoint show`. The decision is [ADR 0129](decisions/0129-the-policy-commands-are-not-part-of-v0-5-0-and-the-engine-stays-internal-until-it-works-standalone.md). Where this text names a command, read it as
 > a description of the design, not of a command you can run.
 
 # How mash enforces the messaging policy
@@ -405,7 +405,7 @@ a deny tag, or is signed by a different key, and it never re-signs a key the acc
 
 ### 5.3 Issuing a credential: the issue service and the issue record
 
-> **Not shipped; planned for 0.6.0.** The issue service (`mashctl issue serve`) and the outside-submitter workflow are not in any release. The issue record is: `mashctl` writes it, and in 0.5.6 `mashctl doctor` checks it and `mashctl endpoint show` shows one endpoint's record (0.5.0 had `mashctl issued list|check`). See [ADR 0129](decisions/0129-the-policy-commands-are-not-part-of-v0-5-0-and-the-engine-stays-internal-until-it-works-standalone.md).
+> **Not shipped; planned, with no release named.** The issue service (`mashctl issue serve`) and the outside-submitter workflow are not in any release. The issue record is: `mashctl` writes it, and in 0.5.6 `mashctl doctor` checks it and `mashctl endpoint show` shows one endpoint's record (0.5.0 had `mashctl issued list|check`). See [ADR 0129](decisions/0129-the-policy-commands-are-not-part-of-v0-5-0-and-the-engine-stays-internal-until-it-works-standalone.md).
 
 **The issue record (on `main`).** [ADR 0101](decisions/0101-every-issued-user-jwt-is-recorded-in-a-bucket-only-the-admin-connection-writes.md)
 records every user JWT `mashctl` issues in the KV bucket `mash-issued`, keyed by public key. An entry holds the public
@@ -596,7 +596,7 @@ and the sender is not told, because those are core NATS publishes (section 4). M
 
 ### 6.6 What the policy covers, and running one account both ways
 
-> **Not shipped; planned for 0.6.0.** Adoption (`mashctl policy adopt`), the adoption marker and the refusals on an adopted account are not in any release. Nothing can adopt an account. See [ADR 0129](decisions/0129-the-policy-commands-are-not-part-of-v0-5-0-and-the-engine-stays-internal-until-it-works-standalone.md).
+> **Not shipped; planned, with no release named.** Adoption (`mashctl policy adopt`), the adoption marker and the refusals on an adopted account are not in any release. Nothing can adopt an account. See [ADR 0129](decisions/0129-the-policy-commands-are-not-part-of-v0-5-0-and-the-engine-stays-internal-until-it-works-standalone.md).
 
 The lists cover four verbs: mail, prompt, status and heartbeat. Every verb must be stated for every owner group, and mash
 never infers one verb's switch from another (REQ-002). Other traffic is not under the lists: the reply and plumbing
@@ -635,7 +635,7 @@ or on a mount agent sessions cannot read.
 
 ### 6.8 The static requester registry is for test accounts
 
-> **Not shipped; planned for 0.6.0.** The requester registry and `mashctl requester` are not in any release. See [ADR 0129](decisions/0129-the-policy-commands-are-not-part-of-v0-5-0-and-the-engine-stays-internal-until-it-works-standalone.md).
+> **Not shipped; planned, with no release named.** The requester registry and `mashctl requester` are not in any release. See [ADR 0129](decisions/0129-the-policy-commands-are-not-part-of-v0-5-0-and-the-engine-stays-internal-until-it-works-standalone.md).
 
 How a real requester's key comes to be registered for a host and owner group is **not decided** (contract DEC-002, open
 part). Until it is, mash ships only a static registry, `requesters.json` in the key store directory, managed by `mashctl

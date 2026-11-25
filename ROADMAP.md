@@ -16,11 +16,11 @@ of any syntax.
 
 ## Now
 
-Now is the release being built, 0.5.10.
+Now is the release being built, 0.5.10. It prepares the move to the SAP Go
+SDK inside mash, with no change to anything you do or have set up. It also
+removes the one-time 0.5.5 migration script and the refusal of a 0.5.5
+configuration folder, and fixes what `mash doctor` reports.
 
-- The SDK move. mash's internals change over to the SAP Go SDK. These are
-  internal changes. Nothing you do with mash changes, and nothing you have set
-  up has to change.
 - Seeing and prompting agents mash did not start
   ([#1039](https://github.com/bogworks/mash/issues/1039)). Today mash cannot
   discover endpoints that a SAP SDK host serves. This item makes them show up
@@ -31,6 +31,10 @@ Now is the release being built, 0.5.10.
 Next is planned and may change. These are the items we expect to work on
 after Now.
 
+- The SDK move, planned for 0.6.0. mash's internals change over to the SAP Go
+  SDK. Nothing you do with mash changes, and nothing you have set up has to
+  change. A few malformed sender headers that older mash accepted are refused
+  instead.
 - Policy: you say who may send to whom. mash ships open, and narrowing the
   mesh is a choice you make.
 - Prompting an agent through the SAP protocol, as a first-class action beside
