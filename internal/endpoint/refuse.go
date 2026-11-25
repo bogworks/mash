@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/nats-io/nats.go/jetstream"
@@ -50,6 +51,9 @@ const refusedSeqsPruned = "pruned "
 
 // refusedMu serialises the writers of the count and the sequence list, so concurrent arrivals lose no count.
 var refusedMu sync.Mutex
+
+// refusedFileReads counts the reads of the sequences file (tests check a reader does not parse it per message).
+var refusedFileReads atomic.Int64
 
 // refuses reports whether mail of this trust is refused: accept_unverified is off and the trust is not verified.
 func (e *Endpoint) refuses(t sap.Trust) bool {
@@ -94,12 +98,34 @@ func claimedAddress(h sap.SenderHeader, from string) string {
 // holds whatever accept_unverified is now: mail refused earlier is not delivered afterwards, and a later directory
 // update does not make it verified.
 func (e *Endpoint) refusedSeq(seq uint64, stream string) bool {
+	return e.refusedSnapshot().has(seq, stream)
+}
+
+// refusedSnap is the sequences file as read once: a reader that judges many messages reads the file once and asks the
+// snapshot for each, instead of opening and parsing it per message. A missing or unreadable file, or none to find, is
+// an empty snapshot: nothing is refused.
+type refusedSnap struct {
+	id   string
+	seqs map[uint64]bool
+}
+
+// refusedSnapshot reads the sequences file once.
+func (e *Endpoint) refusedSnapshot() refusedSnap {
 	dir, err := SpoolDir(e.cfg)
 	if err != nil {
-		return false
+		return refusedSnap{}
 	}
 	id, seqs := readRefusedSeqs(filepath.Join(dir, refusedSeqsFile))
-	return id == stream && slices.Contains(seqs, seq)
+	set := make(map[uint64]bool, len(seqs))
+	for _, n := range seqs {
+		set[n] = true
+	}
+	return refusedSnap{id: id, seqs: set}
+}
+
+// has reports whether the snapshot lists seq as refused for the inbox stream with this identity.
+func (s refusedSnap) has(seq uint64, stream string) bool {
+	return s.id == stream && s.seqs[seq]
 }
 
 // streamIdentity is the identity of the inbox stream described by info.
@@ -350,6 +376,7 @@ func readRefusedSeqs(path string) (string, []uint64) {
 // readRefusedFile is readRefusedSeqs with the pruned total of the marker line too (0 when there is none or its number
 // is malformed; the last marker wins).
 func readRefusedFile(path string) (id string, seqs []uint64, pruned int) {
+	refusedFileReads.Add(1)
 	f, err := os.Open(path)
 	if err != nil {
 		return "", nil, 0

@@ -436,6 +436,11 @@ const wakeCooldown = 10 * time.Minute
 // wakeRecount is how long a count of the inbox that found no backlog stands before the wake reads it again.
 const wakeRecount = time.Minute
 
+// wakeNoMax bounds a cached no for an unchanged held set. Mail past the consumer's pending limit stays in the stream
+// and changes neither the held set nor its signature, so a no that never expired could hide a backlog (ADR 0151). An
+// inbox that grows past what serve holds is recounted at least this often: a tenth of the reads once a minute.
+const wakeNoMax = 10 * time.Minute
+
 // backlogClock is the clock of the backlog wake and the age of the mail it judges; tests replace it.
 var backlogClock = time.Now
 
@@ -490,6 +495,17 @@ func (e *Endpoint) wakeBacklog(deliver Deliverer, h *held, hl Hookless) {
 		}
 	}
 	sort.Slice(seqs, func(i, j int) bool { return seqs[i].Less(seqs[j]) })
+	// A no that rests on the inbox count stands while the held set is the one it was given for (same count, same highest
+	// sequence: arrivals raise the highest, acknowledged mail lowers the count) and, when WakeAge is on, until the oldest
+	// waiting message could pass it. Held mail from senders no longer verified keeps the set over the limits while the
+	// count says no, and must not make a full inbox read every wakeRecount.
+	sig := heldSig{n: len(seqs)}
+	if len(seqs) > 0 {
+		sig.top = seqs[len(seqs)-1]
+	}
+	if e.wakeNo.set && e.wakeNo.sig == sig && now.Before(e.wakeNo.until) {
+		return
+	}
 	// held is the held set less the sequences the inbox count leaves out (own stream only), and its oldest arrival.
 	held := func(dropped map[uint64]bool) ([]spool.Ref, time.Time) {
 		kept := make([]spool.Ref, 0, len(seqs))
@@ -532,14 +548,16 @@ func (e *Endpoint) wakeBacklog(deliver Deliverer, h *held, hl Hookless) {
 			counted = true
 			if !overOf(rd.waiting, rd.oldest) {
 				e.wakeNoAt = now
+				e.wakeNo = e.noteNo(sig, rd.waiting, rd.oldest, now)
 				return
 			}
 		}
 	}
 	seqs, oldest = held(dropped)
 	if len(seqs) == 0 {
-		// Every held message is from a dropped sender: nothing to show. Not counted again for wakeRecount.
+		// Every held message is from a dropped sender: nothing to show. Not counted again until the held set changes or wakeNoMax passes.
 		e.wakeNoAt = now
+		e.wakeNo = wakeNo{set: true, sig: sig, until: now.Add(wakeNoMax)}
 		return
 	}
 	if !counted {
@@ -577,6 +595,33 @@ func (e *Endpoint) wakeBacklog(deliver Deliverer, h *held, hl Hookless) {
 	// The backlog wake starts the idle backoff like any other wake, so an idle wake does not follow it within seconds.
 	h.wakeAt = now
 	h.wakes++
+}
+
+// heldSig names a held set: how many messages wait in it and the highest sequence among them.
+type heldSig struct {
+	n   int
+	top spool.Ref
+}
+
+// wakeNo is a no the inbox count gave the backlog wake: for the held set sig, until the time (zero: while the set
+// stands, but never past wakeNoMax from the reading).
+type wakeNo struct {
+	set   bool
+	sig   heldSig
+	until time.Time
+}
+
+// noteNo is the no the count (waiting messages, the oldest read) gave for the held set sig. The count part of the answer
+// cannot change without the held set changing; the age part flips when the oldest waiting message passes WakeAge, so
+// the no stands until then and the next tick after it reads again.
+func (e *Endpoint) noteNo(sig heldSig, waiting int, oldest, now time.Time) wakeNo {
+	n := wakeNo{set: true, sig: sig, until: now.Add(wakeNoMax)}
+	if e.cfg.WakeAge > 0 && waiting > 0 && !oldest.IsZero() {
+		if u := oldest.Add(e.cfg.WakeAge); u.Before(n.until) {
+			n.until = u
+		}
+	}
+	return n
 }
 
 // waitingReading is the inbox's count for the backlog wake.
