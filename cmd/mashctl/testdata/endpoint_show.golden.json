@@ -4,6 +4,11 @@
   "suspended": false,
   "created": "<TIME>",
   "waiting": 0,
+  "role": null,
+  "host": null,
+  "description": null,
+  "capabilities": [],
+  "note": null,
   "labels": {},
   "public_key": "<USERKEY>"
 }

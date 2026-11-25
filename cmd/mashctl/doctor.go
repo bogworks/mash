@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -65,8 +66,36 @@ const (
 type doctorCheck struct {
 	Name   string  `json:"name"`
 	State  string  `json:"state"`
-	Detail string  `json:"detail"`
+	Detail string  `json:"-"` // printed as "detail": null when empty (MarshalJSON)
 	Fix    *string `json:"fix"`
+}
+
+// doctorCheckJSON is the wire form of a doctorCheck: the detail is null when empty, so an unset field is never "".
+type doctorCheckJSON struct {
+	Name   string  `json:"name"`
+	State  string  `json:"state"`
+	Detail *string `json:"detail"`
+	Fix    *string `json:"fix"`
+}
+
+func (c doctorCheck) MarshalJSON() ([]byte, error) {
+	w := doctorCheckJSON{Name: c.Name, State: c.State, Fix: c.Fix}
+	if c.Detail != "" {
+		w.Detail = &c.Detail
+	}
+	return json.Marshal(w)
+}
+
+func (c *doctorCheck) UnmarshalJSON(b []byte) error {
+	var w doctorCheckJSON
+	if err := json.Unmarshal(b, &w); err != nil {
+		return err
+	}
+	*c = doctorCheck{Name: w.Name, State: w.State, Fix: w.Fix}
+	if w.Detail != nil {
+		c.Detail = *w.Detail
+	}
+	return nil
 }
 
 // doctorReport is what `mashctl doctor --json` prints.

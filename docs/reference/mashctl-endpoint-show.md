@@ -61,6 +61,29 @@ error: no endpoint acme.demo.dave
 hint: mashctl endpoint list
 ```
 
+### --json
+
+Stream: stdout. Exit code: 0.
+
+```text
+{
+  "address": "acme.demo.bob",
+  "online": false,
+  "suspended": false,
+  "created": "2026-11-19T09:40:00Z",
+  "waiting": 1,
+  "role": "writer",
+  "host": null,
+  "description": "Bob reviews",
+  "capabilities": [],
+  "note": null,
+  "labels": {
+    "team": "blue"
+  },
+  "public_key": "UDXU4RCSV3GJRXWQ4PNDKYEL7ZBSMSGGTJYNDQGHFM4QWHBRD3ZTQ4LX"
+}
+```
+
 ## JSON
 
 With `--json` the result is this shape. The values are an example.
@@ -85,11 +108,12 @@ None. Administration. There are no MCP tools for mashctl.
 
 ## Notes
 
-role, host, description, capability and note each appear only when set.
-'online' here means something holds the endpoint's lease, which lapses 90
-seconds after its holder stops; mash who reads the endpoint's own heartbeat
-over the same 90 seconds. The two answer the same question and can differ for
-up to that long.
+In --json, role, host, description and note are always present (null when
+unset) and the list of capabilities is "capabilities" (empty: []); the text
+form shows each only when set. 'online' here means something holds the
+endpoint's lease, which lapses 90 seconds after its holder stops; mash who
+reads the endpoint's own heartbeat over the same 90 seconds. The two answer
+the same question and can differ for up to that long.
 
 ## What it replaces
 

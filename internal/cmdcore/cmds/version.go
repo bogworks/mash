@@ -18,9 +18,9 @@ type VersionParams struct{}
 
 // VersionResult is the build. Plugin is filled in when run by the plugin.
 type VersionResult struct {
-	Version string `json:"version"`
-	Commit  string `json:"commit"`
-	Plugin  string `json:"plugin"`
+	Version string  `json:"version"`
+	Commit  string  `json:"commit"`
+	Plugin  *string `json:"plugin"` // null when not run by the plugin
 }
 
 // Text is "mash v<version> (<commit>)", the commit shortened to its first seven characters ("+dirty" kept); --json and the
@@ -53,6 +53,10 @@ var Version = cmdcore.Command[VersionParams, VersionResult]{
 			return VersionResult{}, cliframe.Failf("internal: mash version has no build information")
 		}
 		v, c, p := svc.Version()
-		return VersionResult{Version: v, Commit: c, Plugin: p}, nil
+		res := VersionResult{Version: v, Commit: c}
+		if p != "" {
+			res.Plugin = &p
+		}
+		return res, nil
 	},
 }

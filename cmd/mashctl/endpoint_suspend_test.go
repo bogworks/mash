@@ -100,10 +100,10 @@ func TestEndpointStateOnline(t *testing.T) {
 		t.Fatalf("state with a lease: %q", got)
 	}
 	// suspended wins over online, and resume reports the state the endpoint is in
-	if out, _, code := h.run("endpoint", "suspend", "o.g.c", "--json"); code != 0 || out != "{\n  \"address\": \"o.g.c\",\n  \"state\": \"suspended\"\n}\n" {
+	if out, _, code := h.run("endpoint", "suspend", "o.g.c", "--json"); code != 0 || out != "{\n  \"address\": \"o.g.c\",\n  \"online\": true,\n  \"suspended\": true\n}\n" {
 		t.Fatalf("suspend --json: %d %q", code, out)
 	}
-	if out, _, code := h.run("endpoint", "resume", "o.g.c", "--json"); code != 0 || out != "{\n  \"address\": \"o.g.c\",\n  \"state\": \"online\"\n}\n" {
+	if out, _, code := h.run("endpoint", "resume", "o.g.c", "--json"); code != 0 || out != "{\n  \"address\": \"o.g.c\",\n  \"online\": true,\n  \"suspended\": false\n}\n" {
 		t.Fatalf("resume --json: %d %q", code, out)
 	}
 }
