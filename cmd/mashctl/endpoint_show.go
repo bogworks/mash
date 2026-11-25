@@ -56,23 +56,20 @@ func runEndpointShow(args []string, g cliframe.Global, env func(string) string, 
 			return nil
 		}
 		c := config.Clean
-		line := func(label, value string) { fmt.Fprintf(stdout, "%-11s %s\n", label+":", value) }
-		line("address", rt.in.addr.String())
-		line("state", stateWord(st))
+		rows := []cliframe.Row{{Label: "address", Value: rt.in.addr.String()}, {Label: "state", Value: stateWord(st)}}
 		created := "-"
 		if rec.Created != "" {
 			created = utcMinute(rec.Created) + " UTC"
 		}
-		line("created", created)
-		line("waiting", messages(st.Waiting))
+		rows = append(rows, cliframe.Row{Label: "created", Value: created}, cliframe.Row{Label: "waiting", Value: messages(st.Waiting)})
 		for _, f := range []struct{ name, value string }{{"role", rec.Role}, {"host", rec.Host}, {"description", rec.Description},
 			{"capability", strings.Join(rec.Caps, ",")}, {"note", rec.Note}} {
 			if f.value != "" {
-				line(f.name, c(f.value))
+				rows = append(rows, cliframe.Row{Label: f.name, Value: c(f.value)})
 			}
 		}
-		line("labels", labelPairs(rec.Labels))
-		line("public key", c(rec.User))
+		rows = append(rows, cliframe.Row{Label: "labels", Value: labelPairs(rec.Labels)}, cliframe.Row{Label: "public key", Value: c(rec.User)})
+		fmt.Fprintln(stdout, cliframe.Block(rows...))
 		return nil
 	})
 }

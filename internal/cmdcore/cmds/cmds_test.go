@@ -206,12 +206,12 @@ func TestSendText(t *testing.T) {
 		{"retagged", cmds.SendResult{Kind: "fyi", Retagged: true, Number: 44}, false, "Mail sent as fyi (number 44): a reply marked question that asks nothing."},
 		{"retagged urgent", cmds.SendResult{Kind: "fyi", Urgent: true, Retagged: true, Number: 45}, false, "Urgent mail sent as fyi (number 45): a reply marked question that asks nothing."},
 		{"retagged verbose", cmds.SendResult{To: "acme.demo.alice", Number: 9, Kind: "fyi", Retagged: true}, true,
-			"Mail sent as fyi (number 9): a reply marked question that asks nothing.\nto:      acme.demo.alice\nkind:    fyi\nurgent:  no"},
+			"Mail sent as fyi (number 9): a reply marked question that asks nothing.\nto:     acme.demo.alice\nkind:   fyi\nurgent: no"},
 		{"duplicate beats retagged", cmds.SendResult{Kind: "fyi", Duplicate: true, Retagged: true}, false, "Mail already sent; nothing new stored."},
 		{"verbose", cmds.SendResult{To: "acme.demo.alice", Number: 42, Kind: "task"}, true,
-			"Mail sent (number 42).\nto:      acme.demo.alice\nkind:    task\nurgent:  no"},
+			"Mail sent (number 42)\nto:     acme.demo.alice\nkind:   task\nurgent: no"},
 		{"verbose urgent", cmds.SendResult{To: "acme.demo.alice", Number: 7, Kind: "fyi", Urgent: true}, true,
-			"Urgent fyi mail sent (number 7).\nto:      acme.demo.alice\nkind:    fyi\nurgent:  yes"},
+			"Urgent fyi mail sent (number 7)\nto:     acme.demo.alice\nkind:   fyi\nurgent: yes"},
 	} {
 		if got := tc.r.Text(cmdcore.Opts{Detail: tc.verbose}); got != tc.want {
 			t.Errorf("%s: %q, want %q", tc.name, got, tc.want)

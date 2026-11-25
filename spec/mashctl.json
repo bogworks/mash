@@ -1264,7 +1264,7 @@
         "value": [
          {
           "case": "An endpoint",
-          "text": "address:    acme.demo.bob\nstate:      offline\ncreated:    2026-11-19 09:40 UTC\nwaiting:    1 message\nlabels:     team=blue\npublic key: UDXU4RCSV3GJRXWQ4PNDKYEL7ZBSMSGGTJYNDQGHFM4QWHBRD3ZTQ4LX",
+          "text": "address:     acme.demo.bob\nstate:       offline\ncreated:     2026-11-19 09:40 UTC\nwaiting:     1 message\nrole:        writer\ndescription: Bob reviews\nlabels:      team=blue\npublic key:  UDXU4RCSV3GJRXWQ4PNDKYEL7ZBSMSGGTJYNDQGHFM4QWHBRD3ZTQ4LX",
           "stream": "stdout",
           "exit": 0
          }
@@ -1301,16 +1301,6 @@
        {
         "name": "x-output-next",
         "value": [
-         {
-          "case": "An endpoint",
-          "text": "address:     acme.demo.bob\nstate:       offline\ncreated:     2026-11-19 09:40 UTC\nwaiting:     1 message\nrole:        writer\ndescription: Bob reviews\nlabels:      team=blue\npublic key:  UDXU4RCSV3GJRXWQ4PNDKYEL7ZBSMSGGTJYNDQGHFM4QWHBRD3ZTQ4LX",
-          "stream": "stdout",
-          "exit": 0,
-          "issue": "#1050",
-          "replaces": "An endpoint",
-          "note": "One label width in a block: the labels are padded to the longest label in the block (here \"description:\") plus one space, and no value overflows the column. Today the labels are padded to 11 and \"description: Bob reviews\" pushes past the column. Role and description are shown because they set the width; a record with neither pads to \"public key:\", as today.",
-          "verbatim": true
-         },
          {
           "case": "--json",
           "text": "{\n  \"address\": \"acme.demo.bob\",\n  \"online\": false,\n  \"suspended\": false,\n  \"created\": \"2026-11-19T09:40:00Z\",\n  \"waiting\": 1,\n  \"role\": \"writer\",\n  \"host\": null,\n  \"description\": \"Bob reviews\",\n  \"capabilities\": [],\n  \"note\": null,\n  \"labels\": {\n    \"team\": \"blue\"\n  },\n  \"public_key\": \"UDXU4RCSV3GJRXWQ4PNDKYEL7ZBSMSGGTJYNDQGHFM4QWHBRD3ZTQ4LX\"\n}",
@@ -1725,7 +1715,7 @@
          },
          {
           "case": "With --detail",
-          "text": "Reissued credentials for acme.demo.bob\nJoin file: acme.demo.bob.join\nservers acknowledged: 2",
+          "text": "Reissued credentials for acme.demo.bob\nJoin file:            acme.demo.bob.join\nservers acknowledged: 2",
           "stream": "stdout",
           "exit": 0
          }
@@ -1748,21 +1738,6 @@
        {
         "name": "x-today",
         "value": "In 0.5.5, reissue already existed. In 0.5.6 it takes the same options as create."
-       },
-       {
-        "name": "x-output-next",
-        "value": [
-         {
-          "case": "With --detail",
-          "text": "Reissued credentials for acme.demo.bob\nJoin file:            acme.demo.bob.join\nservers acknowledged: 2",
-          "stream": "stdout",
-          "exit": 0,
-          "issue": "#1050",
-          "replaces": "With --detail",
-          "note": "The label:value lines after the usual line are one block with one width: padded to the longest label (\"servers acknowledged:\") plus one space. Today \"servers acknowledged: 2\" is unpadded beside \"Join file: ...\". Without --detail the block is one line, as today.",
-          "verbatim": true
-         }
-        ]
        }
       ]
      },

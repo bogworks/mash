@@ -549,7 +549,7 @@ func init() {
 	reg("endpoint show An endpoint", func(t *testing.T) confOutRun {
 		w := newConfWorld(t, true)
 		w.fleet()
-		w.do("endpoint", "set", "acme.demo.bob", "label.team=blue")
+		w.do("endpoint", "set", "acme.demo.bob", "role=writer", "description=Bob reviews", "label.team=blue")
 		return confOutRun{ran: w.run("endpoint", "show", "acme.demo.bob")}
 	})
 	reg("endpoint set Updated", func(t *testing.T) confOutRun {

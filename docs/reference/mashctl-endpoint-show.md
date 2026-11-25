@@ -42,12 +42,14 @@ mashctl endpoint show acme.demo.bob
 Stream: stdout. Exit code: 0.
 
 ```text
-address:    acme.demo.bob
-state:      offline
-created:    2026-11-19 09:40 UTC
-waiting:    1 message
-labels:     team=blue
-public key: UDXU4RCSV3GJRXWQ4PNDKYEL7ZBSMSGGTJYNDQGHFM4QWHBRD3ZTQ4LX
+address:     acme.demo.bob
+state:       offline
+created:     2026-11-19 09:40 UTC
+waiting:     1 message
+role:        writer
+description: Bob reviews
+labels:      team=blue
+public key:  UDXU4RCSV3GJRXWQ4PNDKYEL7ZBSMSGGTJYNDQGHFM4QWHBRD3ZTQ4LX
 ```
 
 ## JSON

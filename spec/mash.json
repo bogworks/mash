@@ -299,7 +299,7 @@
        },
        {
         "case": "With --detail",
-        "text": "Mail sent (number 42).\nto:      acme.demo.alice\nkind:    task\nurgent:  no",
+        "text": "Mail sent (number 42)\nto:     acme.demo.alice\nkind:   task\nurgent: no",
         "stream": "stdout",
         "exit": 0
        },
@@ -407,16 +407,6 @@
         "issue": "#1046",
         "replaces": "Sent, urgent, with a kind",
         "note": "One success-line form in both tools, as today but for one thing: a capital first letter and no full stop (Created endpoint acme.demo.bob, Deleted endpoint acme.demo.bob). Only the full stop goes.",
-        "verbatim": true
-       },
-       {
-        "case": "With --detail",
-        "text": "Mail sent (number 42)\nto:     acme.demo.alice\nkind:   task\nurgent: no",
-        "stream": "stdout",
-        "exit": 0,
-        "issue": "#1046 / #1050",
-        "replaces": "With --detail",
-        "note": "One success-line form in both tools, as today but for one thing: a capital first letter and no full stop (Created endpoint acme.demo.bob, Deleted endpoint acme.demo.bob). The full stop goes. The --detail labels are padded to the longest label (\"urgent:\") plus one space, as every block is (#1050); today they are padded to nine columns.",
         "verbatim": true
        },
        {

@@ -27,7 +27,7 @@ func TestSendCommandBothForms(t *testing.T) {
 		t.Fatalf("--json: %d %q %q", code, out, errb)
 	}
 	out, _, code = runSplit(t, w, "b", "send", tTo("a"), "--kind", "fyi", "--urgent", "second", "--detail")
-	if code != 0 || out != "Urgent fyi mail sent (number 2).\nto:      o.dev.a\nkind:    fyi\nurgent:  yes\n" {
+	if code != 0 || out != "Urgent fyi mail sent (number 2)\nto:     o.dev.a\nkind:   fyi\nurgent: yes\n" {
 		t.Fatalf("-v: %d %q", code, out)
 	}
 	// reply-to and relay go out signed, and a short question reply is tagged fyi (the receipt says the kind sent)

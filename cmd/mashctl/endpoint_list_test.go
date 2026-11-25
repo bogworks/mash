@@ -146,7 +146,7 @@ func TestEndpointShowFields(t *testing.T) {
 		t.Fatal(code)
 	}
 	out, _, _ = h.run("endpoint", "show", "acme.demo.bob")
-	for _, want := range []string{"\nrole:       reviewer\n", "\nhost:       laptop\n", "\ndescription: checks diffs\n", "\ncapability: review\n"} {
+	for _, want := range []string{"\nrole:        reviewer\n", "\nhost:        laptop\n", "\ndescription: checks diffs\n", "\ncapability:  review\n"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("show lacks %q:\n%s", want, out)
 		}

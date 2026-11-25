@@ -107,8 +107,12 @@ func (r SendResult) Text(o cmdcore.Opts) string {
 	if !o.Detail {
 		return s
 	}
+	if !r.Duplicate && !r.Retagged {
+		s = strings.TrimSuffix(s, ".") // #1046, for the --detail form only until the other lines follow
+	}
 	yn := map[bool]string{true: "yes", false: "no"}
-	return s + fmt.Sprintf("\n%-9s%s\n%-9s%s\n%-9s%s", "to:", r.To, "kind:", r.Kind, "urgent:", yn[r.Urgent])
+	return s + "\n" + cliframe.Block(cliframe.Row{Label: "to", Value: r.To}, cliframe.Row{Label: "kind", Value: r.Kind},
+		cliframe.Row{Label: "urgent", Value: yn[r.Urgent]})
 }
 
 // Send is the send command.
