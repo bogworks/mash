@@ -19,6 +19,15 @@ import (
 // workflow outside this repository (its jobs would run on runners this repository does not pick). A local
 // ./.github/workflows/... caller is fine; step-level `uses:` of actions is not covered.
 
+// ADR 0189 (decision 309) is the one exception: the file named exactly scorecard.yml may run its job `analysis` on
+// ubuntu-latest, because the OpenSSF API takes published results only from a GitHub-hosted runner with OIDC. The exception
+// holds only while the file's triggers are schedule and push (no pull request, no manual dispatch) and it has no other job.
+const (
+	scorecardFile   = "scorecard.yml"
+	scorecardJob    = "analysis"
+	scorecardRunsOn = "ubuntu-latest"
+)
+
 // linuxLabels, macosLabels, gateLabels and ephLabels are fmt.Sprint forms of the only allowed runs-on lists. rh-gate is carried only
 // by small dedicated runners with no rh-linux label, for the gate jobs (TestGateJobsUseGateRunners). rh-linux-eph (ADR 0123) is carried
 // only by the ephemeral one-job runners, for the advisory shadow test job (TestEphJobUsesEphemeralRunners).
@@ -66,11 +75,57 @@ func allowedLabels(v any) bool {
 	return s == linuxLabels || s == macosLabels || s == gateLabels || s == ephLabels
 }
 
+// scorecardProblems lists why text is not the ADR 0189 Scorecard workflow; nothing means the exception applies to it.
+func scorecardProblems(text string) []string {
+	var w struct {
+		On   any `yaml:"on"`
+		Jobs map[string]struct {
+			RunsOn any `yaml:"runs-on"`
+		} `yaml:"jobs"`
+	}
+	if err := yaml.Unmarshal([]byte(text), &w); err != nil {
+		return []string{fmt.Sprintf("not valid YAML: %v", err)}
+	}
+	var out []string
+	triggers, ok := w.On.(map[string]any)
+	if !ok {
+		out = append(out, "its on: is not a mapping of triggers")
+	}
+	for k := range triggers {
+		if k != "schedule" && k != "push" {
+			out = append(out, fmt.Sprintf("trigger %q is not allowed (only schedule and push)", k))
+		}
+	}
+	if ok && (triggers["schedule"] == nil || triggers["push"] == nil) {
+		out = append(out, "want both the schedule and push triggers")
+	}
+	if len(w.Jobs) != 1 {
+		out = append(out, fmt.Sprintf("want exactly the one job %s, have %d jobs", scorecardJob, len(w.Jobs)))
+	}
+	if j, has := w.Jobs[scorecardJob]; !has {
+		out = append(out, fmt.Sprintf("has no job %s", scorecardJob))
+	} else if r, _ := j.RunsOn.(string); r != scorecardRunsOn {
+		out = append(out, fmt.Sprintf("job %s runs-on %v is not %s", scorecardJob, j.RunsOn, scorecardRunsOn))
+	}
+	return out
+}
+
 // selfHostedViolations lists what is wrong with one workflow file's text; nothing means it complies.
 func selfHostedViolations(name, text string) []string {
 	var out []string
+	hostedOK := false
+	if name == scorecardFile {
+		problems := scorecardProblems(text)
+		hostedOK = len(problems) == 0
+		for _, p := range problems {
+			out = append(out, fmt.Sprintf("%s: breaks the ADR 0189 exception: %s", name, p))
+		}
+	}
 	for n, line := range strings.Split(text, "\n") {
 		code := stripComment(line)
+		if hostedOK && strings.TrimSpace(code) == "runs-on: "+scorecardRunsOn {
+			continue // the one line ADR 0189 allows; the job-level check below confirms it is job analysis
+		}
 		if m := hostedLabel.FindString(code); m != "" {
 			out = append(out, fmt.Sprintf("%s:%d names a GitHub-hosted label %q outside a comment", name, n+1, strings.TrimLeft(m, " \t\"'[,:")))
 		}
@@ -107,6 +162,9 @@ func selfHostedViolations(name, text string) []string {
 				out = append(out, fmt.Sprintf("%s job %s: runs-on %v is not %s or %s", name, id, r, linuxLabels, macosLabels))
 			}
 		case string:
+			if hostedOK && id == scorecardJob && r == scorecardRunsOn {
+				continue
+			}
 			if strings.Contains(r, "||") {
 				out = append(out, fmt.Sprintf("%s job %s: runs-on %q has a fallback (||)", name, id, r))
 			}
@@ -244,6 +302,53 @@ func TestSelfHostedGuard_catchesEachViolation(t *testing.T) {
 		"an outside reusable with runs-on": {"jobs:\n  a:\n    runs-on: [self-hosted, rh-linux]\n    uses: o/r/.github/workflows/w.yml@v1\n", "outside this repository"},
 	} {
 		v := selfHostedViolations("bad.yml", c.text)
+		if len(v) == 0 || !strings.Contains(strings.Join(v, "\n"), c.want) {
+			t.Errorf("%s: the guard reported %v, want a violation mentioning %q", name, v, c.want)
+		}
+	}
+}
+
+func TestSelfHostedGuard_scorecardException(t *testing.T) {
+	const good = `name: Scorecard
+on:
+  schedule:
+    - cron: '23 4 * * 1'
+  push:
+    branches: [main]
+permissions: read-all
+jobs:
+  analysis:
+    if: github.repository == 'bogworks/mash'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@0123456789012345678901234567890123456789 # v7.0.1
+`
+	if v := selfHostedViolations("scorecard.yml", good); len(v) != 0 {
+		t.Fatalf("the Scorecard workflow was refused: %v", v)
+	}
+	swap := func(old, repl string) string {
+		if !strings.Contains(good, old) {
+			t.Fatalf("test text has no %q", old)
+		}
+		return strings.Replace(good, old, repl, 1)
+	}
+	for name, c := range map[string]struct{ file, text, want string }{
+		"the same text under another file name":  {"other.yml", good, "ubuntu-latest"},
+		"a name that only ends in scorecard.yml": {"my-scorecard.yml", good, "ubuntu-latest"},
+		"a pull_request trigger":                 {"scorecard.yml", swap("  push:", "  pull_request:\n  push:"), "pull_request"},
+		"a pull_request_target trigger":          {"scorecard.yml", swap("  push:", "  pull_request_target:\n  push:"), "pull_request_target"},
+		"a workflow_dispatch trigger":            {"scorecard.yml", swap("  push:", "  workflow_dispatch:\n  push:"), "workflow_dispatch"},
+		"a string trigger":                       {"scorecard.yml", swap("on:\n  schedule:\n    - cron: '23 4 * * 1'\n  push:\n    branches: [main]\n", "on: pull_request\n"), "not a mapping"},
+		"a job name other than analysis":         {"scorecard.yml", swap("  analysis:", "  scan:"), "analysis"},
+		"a second job":                           {"scorecard.yml", good + "  b:\n    runs-on: ubuntu-latest\n", "exactly the one job"},
+		"runs-on macos-14":                       {"scorecard.yml", swap("ubuntu-latest", "macos-14"), "macos-14"},
+		"runs-on ubuntu-22.04":                   {"scorecard.yml", swap("ubuntu-latest", "ubuntu-22.04"), "ubuntu-22.04"},
+		"a fallback":                             {"scorecard.yml", swap("ubuntu-latest", "${{ vars.R || 'ubuntu-latest' }}"), "fallback"},
+		"a self-hosted list":                     {"scorecard.yml", swap("ubuntu-latest", "[self-hosted, rh-linux]"), "is not"},
+		"a hosted label in a step":               {"scorecard.yml", good + "      - run: echo ubuntu-latest\n", "ubuntu-latest"},
+		"a host name":                            {"scorecard.yml", good + "      - run: ssh bf1\n", "bf1"},
+	} {
+		v := selfHostedViolations(c.file, c.text)
 		if len(v) == 0 || !strings.Contains(strings.Join(v, "\n"), c.want) {
 			t.Errorf("%s: the guard reported %v, want a violation mentioning %q", name, v, c.want)
 		}

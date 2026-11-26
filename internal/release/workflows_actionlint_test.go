@@ -60,6 +60,7 @@ func TestActionlintConfig_declaresEveryCustomLabel(t *testing.T) {
 		collectRunsOn(doc, used)
 	}
 	delete(used, "self-hosted")
+	delete(used, scorecardRunsOn) // a GitHub-hosted label actionlint knows by itself (ADR 0189, scorecard.yml only)
 
 	raw, err := os.ReadFile("../../.github/actionlint.yaml")
 	if err != nil {
