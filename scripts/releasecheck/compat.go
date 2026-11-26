@@ -308,6 +308,9 @@ func compatRun(ctx context.Context, args []string, o CompatOptions, ev *compatEv
 		if verr := verifyDownloaded(ctx, sums, "v"+v, p); verr != nil {
 			return false, compatUndecided{v + " failed its checksum"}
 		}
+		if err := os.Chmod(p, 0o755); err != nil { // a release download carries no execute bit
+			return false, err
+		}
 		bins[i] = compatBin{Version: v, Path: p}
 	}
 	nb, ob := bins[0], bins[1]
