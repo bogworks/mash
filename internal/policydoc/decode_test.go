@@ -117,7 +117,7 @@ func TestDecodeRefusals(t *testing.T) {
 		"unknown group verb":  doc(7, 6, func(m map[string]any) { m["groups"].(map[string]any)["c"].(map[string]any)["fax"] = "shared" }),
 		"missing verb":        doc(7, 6, func(m map[string]any) { delete(m["groups"].(map[string]any)["c"].(map[string]any), "heartbeat") }),
 		"bad switch value":    doc(7, 6, func(m map[string]any) { m["groups"].(map[string]any)["c"].(map[string]any)["mail"] = "open" }),
-		"wrong schema":        doc(7, 6, func(m map[string]any) { m["schema"] = "mash.listset/2" }),
+		"wrong schema":        doc(7, 6, func(m map[string]any) { m["schema"] = "mash.listset/1" }),
 		"missing schema":      doc(7, 6, func(m map[string]any) { delete(m, "schema") }),
 		"missing senders":     doc(7, 6, func(m map[string]any) { delete(m, "senders") }),
 		"missing deny":        doc(7, 6, func(m map[string]any) { delete(m["senders"].(map[string]any)["foo.c.core"].(map[string]any), "deny") }),
