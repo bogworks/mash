@@ -1,1 +1,0 @@
-**The disk warning of `mashctl init` counts the buckets as they are.** On a re-init over buckets whose size caps were raised earlier, the warning used the configured caps and could stay quiet on an account that was too small. It now uses the larger of each live cap and the configured one.

@@ -98,7 +98,7 @@ Install the `mash-setup` plugin and use its `setup` skill: it asks the person be
 Two paths, one bus: live traffic (presence, status, live prompts) rides plain NATS and is not stored; mail rides
 JetStream (the NATS feature that stores messages on the server) and is kept up to 30 days. ([details](docs/comparison.md#4-two-paths-live-and-durable))
 
-**Status: v0.5.9, pre-1.0.** One host adapter (Claude Code). Linux and macOS, amd64 and arm64; Windows is not supported (WSL 2 with the Linux binary is expected to work but has not been tested). Interfaces may still change before 1.0. Known limits are listed in [the comparison](docs/comparison.md#9-known-limits).
+**Status: v0.5.10, pre-1.0.** One host adapter (Claude Code). Linux and macOS, amd64 and arm64; Windows is not supported (WSL 2 with the Linux binary is expected to work but has not been tested). Interfaces may still change before 1.0. Known limits are listed in [the comparison](docs/comparison.md#9-known-limits).
 
 ## Get started
 
@@ -170,10 +170,10 @@ More in [docs/install.md](docs/install.md).
 `install.sh` checks each binary against the release's `SHA256SUMS`. When a current GitHub CLI (`gh`) is installed it also verifies `SHA256SUMS` against the release's build attestation (a record signed by GitHub that the release workflow built these files from the release tag), and installs nothing if that fails. Without `gh` it installs on the checksums alone and prints a one-line warning on stderr that it checked checksums only and did not verify. `gh attestation verify` needs a current `gh`; [which version, and where to get it](docs/security/verify-your-download.md#what-you-need). To check by hand before you run anything, download the files and verify the attestation:
 
 ```sh
-BASE=https://github.com/bogworks/mash/releases/download/v0.5.9
+BASE=https://github.com/bogworks/mash/releases/download/v0.5.10
 curl -fsSLO $BASE/install.sh -O $BASE/SHA256SUMS -O $BASE/mash.intoto.jsonl &&
 gh attestation verify SHA256SUMS -R bogworks/mash --bundle mash.intoto.jsonl \
-  --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/v0.5.9
+  --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/v0.5.10
 ```
 
 The rest (checking `install.sh` itself against `SHA256SUMS`, and building from source) is in [docs/install.md](docs/install.md#verify-what-you-download).
@@ -186,7 +186,7 @@ The rest (checking `install.sh` itself against `SHA256SUMS`, and building from s
 
 ## Synadia Cloud
 
-Synadia Cloud is not supported in 0.5.9 ([#876](https://github.com/bogworks/mash/issues/876)); see [docs/synadia.md](docs/synadia.md).
+Synadia Cloud is not supported in 0.5.10 ([#876](https://github.com/bogworks/mash/issues/876)); see [docs/synadia.md](docs/synadia.md).
 
 
 ## Addresses and the Synadia Agent Protocol

@@ -1,1 +1,0 @@
-**`mashctl doctor`'s keys row now fails when the signing key in `config.json` is not in the key folder or not listed in the account.** Before, a lost or unlisted signing key showed only when `mashctl endpoint create` was refused ([#1288](https://github.com/bogworks/mash/issues/1288)).

@@ -1,1 +1,0 @@
-**The team guide says when mail wakes a session.** A `question`, `blocker` or `task` wakes an idle session only with the wake channel, and `--urgent` wakes it at once only for a verified sender, as the README says ([#1593](https://github.com/bogworks/mash/issues/1593), [#1594](https://github.com/bogworks/mash/issues/1594)).

@@ -1,1 +1,0 @@
-**`mashctl init` now refuses a key written where the setup file wants a path, whatever kind of key it is.** It caught only operator, account and user seeds (`SO`, `SA`, `SU`); it now catches every NATS seed prefix, and also checks the `servers` entries. The error names the key and never repeats the value ([#1342](https://github.com/bogworks/mash/issues/1342)).

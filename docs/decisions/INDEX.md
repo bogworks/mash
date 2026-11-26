@@ -163,3 +163,4 @@
 | [0184](0184-who-json-prints-every-field-null-when-unset-and-fields-are-only-added.md) | `who --json` prints every field, null when unset, and fields are only added | accepted | 2026-11-25 |
 | [0185](0185-from-0-6-0-the-pre-tag-gate-requires-the-upgrade-proof-receipts-and-publish-takes-them.md) | From 0.6.0 the pre-tag gate requires the upgrade-proof receipts, and `publish` takes them | accepted | 2026-11-25 |
 | [0186](0186-every-queue-entry-requires-the-medium-dispositions-status-and-docs-only-heads-report-success.md) | Every queue entry requires the `medium-dispositions` status, and docs-only heads report success | accepted | 2026-11-26 |
+| [0187](0187-one-exit-rule-for-mash-and-mashctl-and-the-plain-url-and-encryption-override-refusals-exit-1.md) | One exit rule for mash and mashctl, and the plain-URL and encryption-override refusals exit 1 | accepted | 2026-11-26 |

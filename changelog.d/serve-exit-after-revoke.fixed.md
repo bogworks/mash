@@ -1,1 +1,0 @@
-**`mash serve` now exits promptly when its session ends, even if the endpoint was deleted while the session was running.** It no longer waits on a connection that is being refused, and leaves the lease to expire ([#1477](https://github.com/bogworks/mash/issues/1477)).

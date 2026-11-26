@@ -1,1 +1,0 @@
-**Stopping `mash serve` with a signal just as it starts no longer leaves the endpoint name held for up to 90 seconds.** A start that is cancelled while its first lease write is in flight now gives the lease back ([#638](https://github.com/bogworks/mash/issues/638)).

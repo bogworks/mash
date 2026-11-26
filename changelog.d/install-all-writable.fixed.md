@@ -1,1 +1,0 @@
-**The installer names every writable folder at once.** When more than one folder on the way up from the install folder was writable by its group or others, it named only the nearest, so fixing it and running again met the next. It now prints one refusal that names all of them with one `chmod go-w` command.
