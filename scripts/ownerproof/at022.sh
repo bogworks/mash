@@ -73,7 +73,8 @@ tar -C "$out" -cf - commit.pack -C "$root" "${inputs[@]}" |
 	set -euo pipefail
 	S=${TMPDIR:-/tmp}/at022
 	export HOME=$S/h GOCACHE=$S/h/gocache GOPATH=$S/h/gopath
-	mkdir -p "$HOME" "$S/src" "$S/tree" "$S/out" "$S/work"
+	mkdir -p "$HOME" "$S/src" "$S/tree" "$S/out" "$S/work" "$S/tmp"
+	export TMPDIR=$S/tmp
 	tar -C $S/tree -xf -
 	(cd $S/src && git init -q && git unpack-objects -q < $S/tree/commit.pack && git checkout -q --detach "$COMMIT" \
 		&& test "$(git rev-parse HEAD)" = "$COMMIT" && test -z "$(git status --porcelain --untracked-files=all --ignored=matching)") >&2 \

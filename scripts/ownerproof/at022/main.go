@@ -1181,7 +1181,9 @@ func item2(w *world, it *Item) {
 
 // item3: AT-016's observer cases through the binary. Carol sees alice's discovery request on $SRV.> and floods the
 // guesses at the reply subject for 3 s, with the evil chunk, an empty message and a replay of bob's genuine
-// registration. Alice's command must accept none of it.
+// registration. Alice's command must accept none of it. In the prompt phase carol also floods every reply subject she
+// saw in the discovery phase, so a candidate that reuses one for its prompt sees her chunk accepted. Last, every reply
+// subject she saw must have the inbox layout and none may repeat.
 func item3(w *world, it *Item) {
 	it.NotObservable = append(it.NotObservable,
 		"the caller's list of reply subjects it used (ReplySubjects) is internal; the observer attacks the subjects the server shows it")
@@ -1192,7 +1194,7 @@ func item3(w *world, it *Item) {
 	}
 	// discovery: bob is offline; carol replays his genuine registration on every guess, so a guess that hit alice's
 	// reply subject would make him look online.
-	attacks, stopObs, err := w.observe(genuine)
+	attacks, seen, stopObs, err := w.observe(genuine, nil)
 	if err != nil {
 		it.Error = err.Error()
 		return
@@ -1207,13 +1209,15 @@ func item3(w *world, it *Item) {
 	it.check("discovery: no guessed reply subject was accepted (bob stays offline)", listed && !online, fmt.Sprintf("bob listed=%v online=%v, answers_not_verified %s, stderr %q", listed, online, doc.Count(), NormalStderr(errOut)))
 	it.check("discovery: the observer saw alice's discovery request and attacked", attacks() > 0, fmt.Sprintf("%d attacked request(s)", attacks()))
 
-	// prompt: bob serves and holds the answer 3.5 s; carol floods the guesses during that time.
+	discovery := seen()
+	// prompt: bob serves and holds the answer 3.5 s; carol floods the guesses, and the discovery reply subjects
+	// themselves, during that time.
 	bob, err := w.serve("bob")
 	if err != nil {
 		it.Error = err.Error()
 		return
 	}
-	attacks, stopObs, err = w.observe(nil)
+	attacks, seen, stopObs, err = w.observe(nil, discovery)
 	if err != nil {
 		it.Error = err.Error()
 		return
@@ -1245,27 +1249,38 @@ func item3(w *world, it *Item) {
 	it.check("prompt: the genuine answer arrived and nothing the observer sent was accepted", code == 0 && strings.TrimSpace(out) == "genuine" && !strings.Contains(out, "EVIL"),
 		fmt.Sprintf("exit %d, stdout %q, stderr %q", code, out, NormalStderr(errOut)))
 	it.check("prompt: the observer saw a discovery request and attacked", attacks() > 0, fmt.Sprintf("%d attacked request(s)", attacks()))
+	all := append(append([]string(nil), discovery...), seen()...)
+	rerr := CheckReplySubjects(w.addr["alice"].InboxPrefix(), all)
+	detail := fmt.Sprintf("%d reply subject(s) seen", len(all))
+	if rerr != nil {
+		detail += ": " + rerr.Error()
+	}
+	it.check("reply subjects: every reply subject the observer saw has the inbox layout and none was reused", rerr == nil, detail)
 }
 
 // observe starts carol, who watches $SRV.> and, for each discovery request from alice, floods the guesses of Guesses
-// for up to 3 s with the evil chunk and an empty message, and with a replay of replay when it is not nil. It returns
-// the number of attacked requests and a function that stops it.
-func (w *world) observe(replay []byte) (attacks func() int, stop func(), err error) {
+// for up to 3 s with the evil chunk and an empty message, and with a replay of replay when it is not nil. On each
+// attacked request it floods the subjects in also the same way, which are reply subjects from an earlier phase: the
+// observed subject itself is never attacked, but an earlier one a candidate reuses is. It records every reply
+// subject it sees from alice, in order. It returns the number of attacked requests, the recorded subjects and a
+// function that stops it.
+func (w *world) observe(replay []byte, also []string) (attacks func() int, seen func() []string, stop func(), err error) {
 	c, err := w.connect("carol")
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	spy, err := c.nc.SubscribeSync("$SRV.>")
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if err := c.nc.Flush(); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	quit := make(chan struct{})
 	done := make(chan struct{})
 	var mu sync.Mutex
 	attacked := 0
+	var subjects []string
 	prefix := w.addr["alice"].InboxPrefix() + "."
 	go func() {
 		defer close(done)
@@ -1281,8 +1296,9 @@ func (w *world) observe(replay []byte) (attacks func() int, stop func(), err err
 			}
 			mu.Lock()
 			attacked++
+			subjects = append(subjects, m.Reply)
 			mu.Unlock()
-			guesses := Guesses(m.Reply)
+			guesses := append(Guesses(m.Reply), also...)
 			for end := time.Now().Add(3 * time.Second); time.Now().Before(end); {
 				select {
 				case <-quit:
@@ -1301,6 +1317,7 @@ func (w *world) observe(replay []byte) (attacks func() int, stop func(), err err
 		}
 	}()
 	return func() int { mu.Lock(); defer mu.Unlock(); return attacked },
+		func() []string { mu.Lock(); defer mu.Unlock(); return append([]string(nil), subjects...) },
 		func() { close(quit); <-done; _ = spy.Unsubscribe() }, nil
 }
 

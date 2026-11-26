@@ -148,9 +148,27 @@ func RandomToken() string {
 	return hex.EncodeToString(b[:])
 }
 
+// CheckReplySubjects checks the reply subjects an observer saw from one caller: each must be prefix, a dot and exactly
+// one non-empty token, and none may appear twice. An empty list is not an error here.
+func CheckReplySubjects(prefix string, seen []string) error {
+	got := map[string]bool{}
+	for _, s := range seen {
+		tok, ok := strings.CutPrefix(s, prefix+".")
+		if !ok || tok == "" || strings.Contains(tok, ".") {
+			return fmt.Errorf("reply subject %q is not %s. plus one token", s, prefix)
+		}
+		if got[s] {
+			return fmt.Errorf("reply subject %q was used for more than one request", s)
+		}
+		got[s] = true
+	}
+	return nil
+}
+
 // Guesses lists the subjects a same-owner observer who saw the reply subject seen would try: the NUID successors of
 // the first 22 characters of its last token, simple increments of that token, and random tokens of its form, all
-// under the same prefix. The subject itself is never among them.
+// under the same prefix. The subject itself is never among them; a caller that reuses an earlier subject is caught by
+// flooding the earlier subjects as well (see observe) and by CheckReplySubjects.
 func Guesses(seen string) []string {
 	dot := strings.LastIndex(seen, ".")
 	if dot < 0 {

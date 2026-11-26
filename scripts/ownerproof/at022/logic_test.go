@@ -260,3 +260,24 @@ func TestErrorsIsSafe(t *testing.T) {
 		t.Fatal(len(e.All()))
 	}
 }
+
+func TestCheckReplySubjects(t *testing.T) {
+	const p = "_INBOX.acme.alice"
+	if err := CheckReplySubjects(p, nil); err != nil {
+		t.Errorf("empty list: %v", err)
+	}
+	if err := CheckReplySubjects(p, []string{p + ".aaa", p + ".bbb"}); err != nil {
+		t.Errorf("good: %v", err)
+	}
+	for name, bad := range map[string][]string{
+		"duplicate":    {p + ".aaa", p + ".bbb", p + ".aaa"},
+		"extra token":  {p + ".aaa.bbb"},
+		"empty token":  {p + "."},
+		"no token":     {p},
+		"other prefix": {"_INBOX.acme.bob.aaa"},
+	} {
+		if err := CheckReplySubjects(p, bad); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}
