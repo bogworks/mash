@@ -45,7 +45,7 @@ func TestS5AT022_FixtureAndTodaysFlow(t *testing.T) {
 			t.Fatalf("%s finds %s: %q, %v", p.from, p.to, subj, err)
 		}
 		var out strings.Builder
-		if err := Prompt(s5Ctx(t), c.nc, identity(t, z.creds[from.Flat()]), from.Flat(), subj, "ping", &out); err != nil || out.String() != "pong from "+to.Instance {
+		if err := Prompt(s5Ctx(t), c.nc, sdkIdentity(t, z.creds[from.Flat()]), from.Flat(), subj, "ping", &out); err != nil || out.String() != "pong from "+to.Instance {
 			t.Fatalf("%s prompts %s: %q, %v", p.from, p.to, out.String(), err)
 		}
 		if v := c.violations(); len(v) != 0 {

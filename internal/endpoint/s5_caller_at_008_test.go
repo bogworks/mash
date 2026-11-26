@@ -162,7 +162,7 @@ func (z *s5Fix) todayWire(t *testing.T, in s5Inputs) s5Wire {
 		t.Fatalf("today's driver prompt: %q, %v", got, err)
 	}
 	var out bytes.Buffer
-	if err := Prompt(s5Ctx(t), c.nc, id, z.alice.Flat(), subj, "ping", &out); err != nil || out.String() != "pong" {
+	if err := Prompt(s5Ctx(t), c.nc, sdkIdentity(t, z.creds[z.alice.Flat()]), z.alice.Flat(), subj, "ping", &out); err != nil || out.String() != "pong" {
 		t.Fatalf("today's Prompt: %q, %v", out.String(), err)
 	}
 	d, p := tp.requestsFrom(z.alice)
@@ -310,7 +310,7 @@ func TestS5AT008_Mixed3_OldAskerPromptsNewResponder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := Prompt(s5Ctx(t), c.nc, identity(t, z.creds[z.alice.Flat()]), z.alice.Flat(), subj, "ping", &out); err != nil || out.String() != "one two" {
+	if err := Prompt(s5Ctx(t), c.nc, sdkIdentity(t, z.creds[z.alice.Flat()]), z.alice.Flat(), subj, "ping", &out); err != nil || out.String() != "one two" {
 		t.Fatalf("old asker, new responder: %q, %v (want both chunks)", out.String(), err)
 	}
 	_, p := tp.requestsFrom(z.alice)
@@ -383,14 +383,13 @@ func s5OverLimit(t *testing.T, z *s5Fix, prompt func(text string) (string, error
 func TestS5Today_PromptOver32KiB(t *testing.T) {
 	z := newS5Fix(t)
 	c := z.connect(t, z.alice)
-	id := identity(t, z.creds[z.alice.Flat()])
 	s5OverLimit(t, z, func(text string) (string, error) {
 		subj, err := Discover(s5Ctx(t), c.nc, z.bob)
 		if err != nil {
 			return "", err
 		}
 		var out bytes.Buffer
-		err = Prompt(s5Ctx(t), c.nc, id, z.alice.Flat(), subj, text, &out)
+		err = Prompt(s5Ctx(t), c.nc, sdkIdentity(t, z.creds[z.alice.Flat()]), z.alice.Flat(), subj, text, &out)
 		return out.String(), err
 	})
 }
