@@ -926,40 +926,25 @@
        },
        {
         "case": "--json",
-        "text": "{\n  \"endpoints\": [\n    {\n      \"address\": \"acme.demo.alice\",\n      \"online\": true,\n      \"role\": \"reviewer\",\n      \"host\": \"myserver\",\n      \"description\": \"reviews pull requests\",\n      \"capability\": [\n        \"review\"\n      ],\n      \"labels\": {\n        \"team\": \"blue\"\n      }\n    },\n    {\n      \"address\": \"acme.demo.bob\",\n      \"online\": false,\n      \"role\": null,\n      \"host\": null,\n      \"description\": null,\n      \"capability\": [],\n      \"labels\": {}\n    }\n  ]\n}",
+        "text": "{\n  \"endpoints\": [\n    {\n      \"address\": \"acme.demo.alice\",\n      \"online\": true,\n      \"role\": \"reviewer\",\n      \"host\": \"myserver\",\n      \"description\": \"reviews pull requests\",\n      \"capability\": [\n        \"review\"\n      ],\n      \"labels\": {\n        \"team\": \"blue\"\n      }\n    },\n    {\n      \"address\": \"acme.demo.bob\",\n      \"online\": false,\n      \"role\": null,\n      \"host\": null,\n      \"description\": null,\n      \"capability\": [],\n      \"labels\": {}\n    }\n  ],\n  \"answers_not_verified\": 0\n}",
         "stream": "stdout",
         "exit": 0,
-        "note": "--json is shown as it prints at a terminal (indented); piped it is one compact line (rule \"--json prints one object\"). The key stays capability, as today: ADR 0049 says who JSON fields are added, never renamed or removed (the one exception to plural list keys). Unset fields stay null. The same in the MCP tool's structured result, which is the same object.",
+        "note": "--json is shown as it prints at a terminal (indented); piped it is one compact line (rule \"--json prints one object\"). The key stays capability, as today: ADR 0049 says who JSON fields are added, never renamed or removed (the one exception to plural list keys). Unset fields stay null. answers_not_verified is how many discovery answers could not be verified (TO-12): an integer, always present, 0 when none. The same in the MCP tool's structured result, which is the same object.",
         "verbatim": true
-       }
-      ]
-     },
-     {
-      "name": "x-output-next",
-      "value": [
+       },
        {
-        "case": "An answer that fails verification, the table (TO-12)",
+        "case": "Answers that fail verification, the table (TO-12)",
         "text": "ADDRESS          STATE\nacme.demo.alice  online\nacme.demo.bob    online\nacme.demo.carol  offline",
         "stream": "stdout",
         "exit": 0,
-        "issue": "#1142",
-        "note": "Contract 0.6.0 SDK adoption r8, TO-12 (REQ-016, CHG-12). `who` keeps the header and the one-word cells main prints and shows each endpoint by its valid answers only; an answer that fails is never attributed to the endpoint it names. Carol shows `offline` because she has no valid answer, as on main today. Exit status 0. Promoted with W."
+        "note": "Contract 0.6.0 SDK adoption, TO-12 (REQ-016, CHG-12). `who` keeps the header and the one-word cells main prints and shows each endpoint by its valid answers only; an answer that fails is never attributed to the endpoint it names. Carol shows `offline` because she has no valid answer, as on main today. Exit status 0."
        },
        {
-        "case": "An answer that fails verification, the warning (TO-12)",
+        "case": "Answers that fail verification, the warning (TO-12)",
         "text": "warning: 1 discovery answer could not be verified",
         "stream": "stderr",
         "exit": 0,
-        "issue": "#1142",
-        "note": "Contract 0.6.0 SDK adoption r8, TO-12: said once on standard error when there are any, `2 discovery answers could not be verified` for two. No pointer to a command: nothing shows the answers themselves, and the count is in --json. Promoted with W."
-       },
-       {
-        "case": "An answer that fails verification, --json (TO-12)",
-        "text": " \"answers_not_verified\": 1",
-        "stream": "stdout",
-        "exit": 0,
-        "issue": "#1142",
-        "note": "Contract 0.6.0 SDK adoption r8, TO-12: the one new member, next to the list, in the layout --json prints. An integer, always present, 0 when none. `online` stays a boolean on every entry and no entry gains a state. The MCP `who` tool carries the same. Promoted with W."
+        "note": "TO-12: said once on standard error when there are any (not with --json, whose object carries the count), `2 discovery answers could not be verified` for two. Nothing is printed when none. No pointer to a command: nothing shows the answers themselves, and the count is in --json."
        }
       ]
      },
@@ -980,7 +965,8 @@
           "team": "blue"
          }
         }
-       ]
+       ],
+       "answers_not_verified": 0
       }
      },
      {

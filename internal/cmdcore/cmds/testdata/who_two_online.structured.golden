@@ -1,1 +1,1 @@
-{"endpoints":[{"address":"o.dev.alice","online":true,"role":null,"host":null,"description":null,"capability":[],"labels":{}},{"address":"o.dev.bob","online":true,"role":null,"host":null,"description":null,"capability":[],"labels":{}}]}
+{"endpoints":[{"address":"o.dev.alice","online":true,"role":null,"host":null,"description":null,"capability":[],"labels":{}},{"address":"o.dev.bob","online":true,"role":null,"host":null,"description":null,"capability":[],"labels":{}}],"answers_not_verified":0}

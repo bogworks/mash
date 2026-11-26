@@ -120,8 +120,8 @@ func (f authFailingSvc) Message(context.Context, int) (cmds.ReadView, error) {
 func (f authFailingSvc) Send(context.Context, string, string, cmds.SendOptions) (cmds.SendReceipt, error) {
 	return cmds.SendReceipt{}, f.frame(f.ep, errAuth)
 }
-func (f authFailingSvc) Who(context.Context) ([]cmds.WhoEntry, error) {
-	return nil, f.frame(f.ep, fmt.Errorf("who: asking who is online: %w", errAuth))
+func (f authFailingSvc) Who(context.Context) ([]cmds.WhoEntry, int, error) {
+	return nil, 0, f.frame(f.ep, fmt.Errorf("who: asking who is online: %w", errAuth))
 }
 
 // The four table tools word a refused sign-in as the shell does: the deleted sentence once the creds file was set

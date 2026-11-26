@@ -2,6 +2,7 @@ package cmds
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"sort"
 	"strings"
@@ -24,9 +25,11 @@ type WhoEntry struct {
 	Labels       map[string]string
 }
 
-// Directory is the service Who needs from Env.Svc: every endpoint the caller can see, and whether each is online.
+// Directory is the service Who needs from Env.Svc: every endpoint the caller can see, whether each is online, and how
+// many discovery answers failed verification while the directory was read (TO-12; 0 when none, and always 0 while the
+// verification switch is off).
 type Directory interface {
-	Who(ctx context.Context) ([]WhoEntry, error)
+	Who(ctx context.Context) (entries []WhoEntry, answersNotVerified int, err error)
 }
 
 // WhoParams are the arguments of mash who and of the MCP tool who.
@@ -57,10 +60,25 @@ type WhoEndpoint struct {
 // The three fields below it are what the text says when nothing matched and are not part of it.
 type WhoResult struct {
 	Endpoints []WhoEndpoint `json:"endpoints"`
+	// AnswersNotVerified is how many discovery answers could not be verified; an integer, always present, 0 when none
+	// (TO-12). The entries are shown by their valid answers only.
+	AnswersNotVerified int `json:"answers_not_verified"`
 
 	prefix string
 	only   string // "online", "offline" or ""
 	wide   bool
+}
+
+// Warning is the line the command line prints once on standard error when answers failed verification, and "" when none
+// did (TO-12). It names no command: nothing shows the answers themselves, and the count is in --json.
+func (r WhoResult) Warning() string {
+	switch {
+	case r.AnswersNotVerified <= 0:
+		return ""
+	case r.AnswersNotVerified == 1:
+		return "warning: 1 discovery answer could not be verified"
+	}
+	return fmt.Sprintf("warning: %d discovery answers could not be verified", r.AnswersNotVerified)
 }
 
 // Text is the table: ADDRESS and STATE, and with --wide ROLE, HOST and DESCRIPTION ("-" where nothing is recorded), or
@@ -200,11 +218,11 @@ var Who = cmdcore.Command[WhoParams, WhoResult]{
 		if !ok || svc == nil {
 			return WhoResult{}, cliframe.Failf("internal: mash who has no directory to read")
 		}
-		all, err := svc.Who(ctx)
+		all, notVerified, err := svc.Who(ctx)
 		if err != nil {
 			return WhoResult{}, err
 		}
-		r := WhoResult{Endpoints: []WhoEndpoint{}, prefix: prefix, wide: p.Wide}
+		r := WhoResult{Endpoints: []WhoEndpoint{}, AnswersNotVerified: notVerified, prefix: prefix, wide: p.Wide}
 		switch {
 		case p.Online:
 			r.only = "online"

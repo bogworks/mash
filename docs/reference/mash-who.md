@@ -148,8 +148,28 @@ Stream: stdout. Exit code: 0.
       "capability": [],
       "labels": {}
     }
-  ]
+  ],
+  "answers_not_verified": 0
 }
+```
+
+### Answers that fail verification, the table (TO-12)
+
+Stream: stdout. Exit code: 0.
+
+```text
+ADDRESS          STATE
+acme.demo.alice  online
+acme.demo.bob    online
+acme.demo.carol  offline
+```
+
+### Answers that fail verification, the warning (TO-12)
+
+Stream: stderr. Exit code: 0.
+
+```text
+warning: 1 discovery answer could not be verified
 ```
 
 ## JSON
@@ -172,7 +192,8 @@ With `--json` the result is this shape. The values are an example.
         "team": "blue"
       }
     }
-  ]
+  ],
+  "answers_not_verified": 0
 }
 ```
 

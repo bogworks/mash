@@ -55,7 +55,7 @@ func whoCell(t *testing.T, out, address, col string) string {
 
 type fixedDirectory []cmds.WhoEntry
 
-func (d fixedDirectory) Who(context.Context) ([]cmds.WhoEntry, error) { return d, nil }
+func (d fixedDirectory) Who(context.Context) ([]cmds.WhoEntry, int, error) { return d, 0, nil }
 
 // The text keeps every control character of a recorded role, host and description from reaching the terminal, and
 // leaves Unicode alone.
@@ -207,7 +207,7 @@ func TestWhoCLI(t *testing.T) {
 	if plain, code := w.cli(t, "b", "who", "--json"); code != 0 || plain != out {
 		t.Errorf("--json without --wide differs: %d %q vs %q", code, plain, out)
 	}
-	if out, code := w.cli(t, "b", "who", "o.lab", "--json"); code != 0 || out != `{"endpoints":[]}`+"\n" {
+	if out, code := w.cli(t, "b", "who", "o.lab", "--json"); code != 0 || out != `{"endpoints":[],"answers_not_verified":0}`+"\n" {
 		t.Errorf("empty --json: %d %q", code, out)
 	}
 	if out, code := w.cli(t, "b", "who", "o_dev_b", "--json"); code != 2 || out != `{"error":"o_dev_b is not an owner, an owner.group or an address","hint":"mash who --help"}`+"\n" {
@@ -255,7 +255,8 @@ func TestWhoMCPTool(t *testing.T) {
 	cliJSON, _ := w.cli(t, "a", "who", "--json")
 	raw, _ := json.Marshal(sc)
 	var typed struct {
-		Endpoints []cmds.WhoEndpoint `json:"endpoints"`
+		Endpoints          []cmds.WhoEndpoint `json:"endpoints"`
+		AnswersNotVerified *int               `json:"answers_not_verified"`
 	}
 	if err := json.Unmarshal(raw, &typed); err != nil {
 		t.Fatal(err)
@@ -309,7 +310,8 @@ func TestWhoMCPTool(t *testing.T) {
 		}
 		raw, _ := json.Marshal(sc)
 		var typed struct {
-			Endpoints []cmds.WhoEndpoint `json:"endpoints"`
+			Endpoints          []cmds.WhoEndpoint `json:"endpoints"`
+			AnswersNotVerified *int               `json:"answers_not_verified"`
 		}
 		_ = json.Unmarshal(raw, &typed)
 		if b, _ := json.Marshal(typed); string(b)+"\n" != cli || !reflect.DeepEqual(got, c.want) {

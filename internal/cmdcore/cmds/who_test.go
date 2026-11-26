@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"sort"
 	"strings"
@@ -16,12 +17,16 @@ import (
 )
 
 type fakeDir struct {
-	entries []cmds.WhoEntry
-	err     error
-	calls   int
+	entries     []cmds.WhoEntry
+	notVerified int
+	err         error
+	calls       int
 }
 
-func (f *fakeDir) Who(context.Context) ([]cmds.WhoEntry, error) { f.calls++; return f.entries, f.err }
+func (f *fakeDir) Who(context.Context) ([]cmds.WhoEntry, int, error) {
+	f.calls++
+	return f.entries, f.notVerified, f.err
+}
 
 // directory is the one the specification's examples show, in an order that is not sorted.
 func directory() *fakeDir {
@@ -118,7 +123,7 @@ func TestWhoEmptyTexts(t *testing.T) {
 		}
 	}
 	// --json of an empty result is the object with an empty list
-	if _, out, _ := runWho(&fakeDir{}, cliframe.Global{JSON: true}); out != `{"endpoints":[]}`+"\n" {
+	if _, out, _ := runWho(&fakeDir{}, cliframe.Global{JSON: true}); out != `{"endpoints":[],"answers_not_verified":0}`+"\n" {
 		t.Errorf("empty json: %q", out)
 	}
 }
@@ -290,7 +295,7 @@ func TestWhoDoorsAgree(t *testing.T) {
 func TestWhoJSONCarriesEveryField(t *testing.T) {
 	want := `{"endpoints":[` +
 		`{"address":"acme.demo.alice","online":true,"role":"reviewer","host":"myserver","description":"reviews pull requests","capability":["review"],"labels":{"team":"blue"}},` +
-		`{"address":"acme.demo.bob","online":false,"role":"writer","host":"myserver","description":null,"capability":[],"labels":{}}]}`
+		`{"address":"acme.demo.bob","online":false,"role":"writer","host":"myserver","description":null,"capability":[],"labels":{}}],"answers_not_verified":0}`
 	f := &fakeDir{entries: directory().entries[:2]}
 	reg := cmdcore.NewRegistry(whoEnv(f), cmdcore.Register(cmds.Who))
 	e, _ := reg.Lookup("who")
@@ -386,6 +391,7 @@ func TestWhoMatchesSpec(t *testing.T) {
 		oc := x.(map[string]any)
 		var argv []string
 		dir := both
+		notVerified := 0
 		switch oc["case"] {
 		case "Endpoints":
 			dir = []cmds.WhoEntry{{Address: bob.Address}, {Address: alice.Address, Online: true}}
@@ -411,13 +417,22 @@ func TestWhoMatchesSpec(t *testing.T) {
 				t.Errorf("who output %q: exit %d %q, spec %q", oc["case"], code, b.String(), oc["text"])
 			}
 			continue
+		case "Answers that fail verification, the table (TO-12)":
+			dir = []cmds.WhoEntry{{Address: alice.Address, Online: true}, {Address: bob.Address, Online: true}, {Address: "acme.demo.carol"}}
+			notVerified = 1
+		case "Answers that fail verification, the warning (TO-12)":
+			code, out, errs := runWho(&fakeDir{entries: both, notVerified: 1}, cliframe.Global{})
+			if code != 0 || errs != oc["text"].(string)+"\n" || strings.Contains(out, "warning") {
+				t.Errorf("who output %q: exit %d, stderr %q, spec %q", oc["case"], code, errs, oc["text"])
+			}
+			continue
 		case "A deleted endpoint here":
 			continue // a stderr failure: cmd/mash/deleted_here_test.go (TestEverydayCommandsDeletedHereMatchSpec) compares it
 		default:
 			t.Errorf("unknown spec case %v", oc["case"])
 			continue
 		}
-		code, out, errs := runWho(&fakeDir{entries: dir}, cliframe.Global{}, argv...)
+		code, out, errs := runWho(&fakeDir{entries: dir, notVerified: notVerified}, cliframe.Global{}, argv...)
 		text := out
 		if oc["stream"] == "stderr" {
 			text = errs
@@ -524,5 +539,67 @@ func TestWhoFilters(t *testing.T) {
 		if code, _, errs := runWho(d, cliframe.Global{}, argv...); code != 2 || !strings.Contains(errs, "hint: mash who --help") {
 			t.Errorf("%v: %d %q", argv, code, errs)
 		}
+	}
+}
+
+// Answers that failed verification: the table is unchanged and exit is 0; one warning on stderr says how many, singular
+// or plural, and nothing is printed when there are none (TO-12).
+func TestWhoWarnsOnceHowManyAnswersFailedVerification(t *testing.T) {
+	for _, tc := range []struct {
+		n    int
+		want string
+	}{
+		{0, ""},
+		{1, "warning: 1 discovery answer could not be verified\n"},
+		{2, "warning: 2 discovery answers could not be verified\n"},
+	} {
+		d := directory()
+		d.notVerified = tc.n
+		code, out, errs := runWho(d, cliframe.Global{}, "acme.demo.alice")
+		if code != 0 || errs != tc.want || !strings.HasPrefix(out, "ADDRESS") {
+			t.Errorf("n=%d: exit %d, stderr %q, stdout %q", tc.n, code, errs, out)
+		}
+	}
+}
+
+// --json carries the count as an integer after endpoints, 0 when none, and prints no warning.
+func TestWhoJSONAnswersNotVerified(t *testing.T) {
+	for _, n := range []int{0, 3} {
+		d := directory()
+		d.notVerified = n
+		code, out, errs := runWho(d, cliframe.Global{JSON: true})
+		if code != 0 || errs != "" {
+			t.Fatalf("n=%d: exit %d, stderr %q", n, code, errs)
+		}
+		var o map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(out), &o); err != nil {
+			t.Fatal(err)
+		}
+		if got := string(o["answers_not_verified"]); got != fmt.Sprint(n) {
+			t.Errorf("n=%d: answers_not_verified = %q in %s", n, got, out)
+		}
+		if strings.Index(out, `"answers_not_verified"`) < strings.Index(out, `"endpoints"`) {
+			t.Errorf("answers_not_verified comes before endpoints: %s", out)
+		}
+	}
+}
+
+// The MCP tool's structured result carries the same count, and its text has no warning line.
+func TestWhoMCPAnswersNotVerified(t *testing.T) {
+	d := directory()
+	d.notVerified = 2
+	text, structured, err := cmdcore.MCPTool(cmds.Who, whoEnv(d)).CallStructured(t.Context(), json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal(structured)
+	var o struct {
+		N *int `json:"answers_not_verified"`
+	}
+	if err := json.Unmarshal(b, &o); err != nil || o.N == nil || *o.N != 2 {
+		t.Errorf("structured %s: %v", b, err)
+	}
+	if strings.Contains(text, "warning") {
+		t.Errorf("text has a warning: %q", text)
 	}
 }
