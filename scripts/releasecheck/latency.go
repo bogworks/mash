@@ -588,22 +588,23 @@ func judgeFyiWindow(res waitResult, candidate bool, woke string) (finding, note 
 	return "", ""
 }
 
-// shownKind is the kind the hook showed for the message carrying marker: it decodes the hook's JSON, takes
-// hookSpecificOutput.additionalContext (the raw stdout when it is not JSON), splits that into the per-message blocks
-// render emits (a full message opens with a "--- #N from" line and declares "kind: X"; a digest is one "#N\tfrom ..."
-// line per message ending "\tkind X"; bodies are quoted "> " so they cannot forge either), and reads the kind of the
-// first block that contains the marker. found is false when no block carries the marker, kind "" when that block
-// declares none.
-func shownKind(stdout, marker string) (kind string, found bool) {
-	text := stdout
+// hookText is what the hook showed the session: hookSpecificOutput.additionalContext of its JSON, the raw stdout when it
+// is not JSON.
+func hookText(stdout string) string {
 	var out struct {
 		H struct {
 			Ctx string `json:"additionalContext"`
 		} `json:"hookSpecificOutput"`
 	}
 	if json.Unmarshal([]byte(stdout), &out) == nil {
-		text = out.H.Ctx
+		return out.H.Ctx
 	}
+	return stdout
+}
+
+// hookBlocks splits the text a hook showed into the per-message blocks render emits: a full message opens with a
+// "--- #N from" line, a digest is one "#N\tfrom ..." line per message; bodies are quoted "> " so they cannot forge either.
+func hookBlocks(text string) [][]string {
 	var blocks [][]string
 	for _, l := range strings.Split(text, "\n") {
 		if strings.HasPrefix(l, "--- #") || (strings.HasPrefix(l, "#") && strings.Contains(l, "\tfrom ")) || len(blocks) == 0 {
@@ -611,6 +612,28 @@ func shownKind(stdout, marker string) (kind string, found bool) {
 		}
 		blocks[len(blocks)-1] = append(blocks[len(blocks)-1], l)
 	}
+	return blocks
+}
+
+// shownCount is how many blocks the hook's stdout shows for the message carrying marker.
+func shownCount(stdout, marker string) int {
+	n := 0
+	for _, b := range hookBlocks(hookText(stdout)) {
+		if strings.Contains(strings.Join(b, "\n"), marker) {
+			n++
+		}
+	}
+	return n
+}
+
+// shownKind is the kind the hook showed for the message carrying marker: it decodes the hook's JSON, takes
+// hookSpecificOutput.additionalContext (the raw stdout when it is not JSON), splits that into the per-message blocks
+// render emits (a full message opens with a "--- #N from" line and declares "kind: X"; a digest is one "#N\tfrom ..."
+// line per message ending "\tkind X"; bodies are quoted "> " so they cannot forge either), and reads the kind of the
+// first block that contains the marker. found is false when no block carries the marker, kind "" when that block
+// declares none.
+func shownKind(stdout, marker string) (kind string, found bool) {
+	blocks := hookBlocks(hookText(stdout))
 	for _, b := range blocks {
 		if !strings.Contains(strings.Join(b, "\n"), marker) {
 			continue

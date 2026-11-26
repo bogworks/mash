@@ -1,5 +1,5 @@
 #!/bin/sh
-# The release gate. Usage: scripts/release-check <X> <version>  |  scripts/release-check publish [--wait <d>] <version> <X>
+# The release gate. Usage: scripts/release-check <X> <version>  |  scripts/release-check publish [--wait <d>] [--receipts <dir>] <version> <X>
 #   |  scripts/release-check --assets <version> <X>
 #   |  scripts/release-check --consumer <consumer checkout> <X> <version>   (maintainers only: needs a downstream consumer checkout)
 # The command is built first and run directly, so its exit code (2 usage, 3 refused, 4 could not decide) reaches the caller.
@@ -7,11 +7,42 @@ set -eu
 root="$(cd "$(dirname "$0")/.." && pwd)"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
-# The gate runs from the repository root, so a relative consumer checkout is made absolute first.
+# The gate runs from the repository root, so a path the caller gave relative to their own directory is made absolute
+# first: the consumer checkout, --receipts (also --receipts=), --candidate and --evidence (the file's directory). One
+# that does not exist is left as given, for the gate to report.
+# BEGIN absolute-paths
 if [ "${1:-}" = "--consumer" ] && [ $# -ge 2 ] && co="$(cd "$2" 2>/dev/null && pwd)"; then
   shift 2
   set -- --consumer "$co" "$@"
 fi
+absdir() { [ -n "$1" ] && (cd -- "$1" 2>/dev/null && pwd); }
+abspath() { d="$(absdir "$(dirname -- "$1")")" && printf '%s/%s\n' "${d%/}" "$(basename -- "$1")"; }
+n=$#
+while [ "$n" -gt 0 ]; do
+  a="$1"; shift; n=$((n - 1))
+  case "$a" in
+    --receipts|--candidate|--evidence)
+      set -- "$@" "$a"
+      if [ "$n" -gt 0 ]; then
+        v="$1"; shift; n=$((n - 1))
+        case "$a" in
+          --receipts) w="$(absdir "$v")" || w="$v" ;;
+          *) w="$(abspath "$v")" || w="$v" ;;
+        esac
+        set -- "$@" "$w"
+      fi ;;
+    --receipts=*)
+      v="${a#--receipts=}"
+      w="$(absdir "$v")" || w="$v"
+      set -- "$@" "--receipts=$w" ;;
+    --candidate=*|--evidence=*)
+      f="${a%%=*}"; v="${a#*=}"
+      w="$(abspath "$v")" || w="$v"
+      set -- "$@" "$f=$w" ;;
+    *) set -- "$@" "$a" ;;
+  esac
+done
+# END absolute-paths
 cd "$root"
 # Bootstrap under the pinned Go settings too: an ambient workspace, overlay or experiment must not change the gate.
 # The toolchain is read from the one place it is declared.

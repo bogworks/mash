@@ -3,8 +3,10 @@
 //	release-check <X> <version>            judge candidate X for release v<version>
 //	release-check --assets <version> <X>   after CI drafted the release: is the tag right and are the assets ours?
 //	release-check --consumer <checkout> <X> <version>   as the first form, plus the consumer's check run against X (maintainers only)
+//	release-check [--receipts <dir>] <X> <version>   as the first form; --receipts holds the upgrade-proof receipts to the candidate (REQ-019), required from 0.6.0
+//	release-check --compat <older> <newer> the published binary of each version reads the mail the other writes (REQ-014)
 //	release-check --policy-tests           run the policy tests of REQ-020 alone (scripts/releasecheck/policytests.txt)
-//	release-check publish [--wait <d>] [--not-latest] <version> <X>     the whole path, resumable: gate, signed tag, draft, --assets gate, publish, verify
+//	release-check publish [--wait <d>] [--not-latest] [--receipts <dir>] <version> <X>     the whole path, resumable: gate, signed tag, draft, --assets gate, publish, verify
 //
 // It verifies the candidate is on main of the release repository; CI's check runs on X succeeded; X builds, from
 // fresh clones in different directories, to identical bytes whose `version` line is exactly "mash v<version> (<first 7 characters of X>)".
@@ -17,6 +19,9 @@
 // docs/decisions/INDEX.md differs from what the records at X generate (internal/adrindex), both read from git at X.
 // It refuses to tag while an earlier vN.N.N tag has a release that is a draft or missing, unless docs/skipped-releases.txt
 // at X records it with a reason. It reports every problem, not the first. Exit 0 passed, 3 refused, 4 the gate could not decide, 2 usage.
+// --compat is a deliberate exception: it exits 0 passed, 1 an unexpected error (a panic is recovered and exits 1, never
+// Go's 2), 2 usage, 3 refused (a message the reader did not deliver exactly once), 4 could not decide (a binary
+// could not be downloaded). It prints its results to stdout, and usage and could-not-decide to stderr (compat.go).
 package main
 
 import (
@@ -57,6 +62,9 @@ type Options struct {
 	// Consumer is a consumer checkout: when set, check adds the step that runs the consumer's check against
 	// the candidate (release-check --consumer). Empty: no such step.
 	Consumer string
+	// Receipts is a directory of upgrade-proof receipts (--receipts). From release.SwitchOnVersion the gate requires it;
+	// below, the receipts are checked only when it is given (receipts_gate.go).
+	Receipts string
 	// Publish selects `release-check publish`; Wait is how long it waits for release.yml's draft (default 45m).
 	Publish bool
 	Wait    time.Duration
@@ -76,6 +84,7 @@ type Options struct {
 	policyRun       policyRunner                                                                              // test seam: runs `go test -json` for one policy test; default the real go
 	policyTests     func(ctx context.Context, o Options, x string) error                                      // test seam: the whole policy-tests step; default a fresh clone of X
 	unlinked        func(ctx context.Context, o Options, x string) error                                      // test seam: the whole no-policy-package-linked step; default go list in a fresh clone of X
+	expect          func(ctx context.Context, o Options, x string) (Expected, error)                          // test seam: what a receipt must say, from the gate's own builds of X; default realExpected
 	hostGOOS        string                                                                                    // test seam: the host's GOOS, which decides whether the candidate's host build serves the linux container; default runtime.GOOS
 }
 
@@ -98,6 +107,16 @@ func parseArgs(args []string) (o Options, assets bool, err error) {
 			switch {
 			case a == "--assets" || a == "--consumer" || a == "publish":
 				return o, false, errors.New("publish does not combine with other modes")
+			case a == "--receipts":
+				if i+1 >= len(rest) || rest[i+1] == "" || strings.HasPrefix(rest[i+1], "--") {
+					return o, false, errors.New("--receipts needs a directory")
+				}
+				i++
+				o.Receipts = rest[i]
+			case strings.HasPrefix(a, "--receipts="):
+				if o.Receipts = strings.TrimPrefix(a, "--receipts="); o.Receipts == "" {
+					return o, false, errors.New("--receipts needs a directory")
+				}
 			case a == "--wait" || strings.HasPrefix(a, "--wait="):
 				v := strings.TrimPrefix(a, "--wait=")
 				if a == "--wait" {
@@ -121,9 +140,38 @@ func parseArgs(args []string) (o Options, assets bool, err error) {
 			}
 		}
 		if len(pos) != 2 {
-			return o, false, errors.New("usage: release-check publish [--wait <duration>] [--not-latest] <version> <X>")
+			return o, false, errors.New("usage: release-check publish [--wait <duration>] [--not-latest] [--receipts <dir>] <version> <X>")
 		}
 		return withArgs(o, pos[1], pos[0]), false, nil
+	}
+	if len(args) > 0 && args[0] == "--assets" {
+		for _, a := range args[1:] {
+			if a == "--receipts" || strings.HasPrefix(a, "--receipts=") {
+				return o, false, errors.New("--receipts does not combine with --assets")
+			}
+		}
+	}
+	// --receipts <dir> belongs to the check forms (plain and --consumer) and may stand anywhere after the mode.
+	if len(args) > 0 && args[0] != "--assets" {
+		var rest []string
+		for i := 0; i < len(args); i++ {
+			a := args[i]
+			switch {
+			case a == "--receipts":
+				if i+1 >= len(args) || args[i+1] == "" || strings.HasPrefix(args[i+1], "--") {
+					return o, false, errors.New("--receipts needs a directory")
+				}
+				i++
+				o.Receipts = args[i]
+			case strings.HasPrefix(a, "--receipts="):
+				if o.Receipts = strings.TrimPrefix(a, "--receipts="); o.Receipts == "" {
+					return o, false, errors.New("--receipts needs a directory")
+				}
+			default:
+				rest = append(rest, a)
+			}
+		}
+		args = rest
 	}
 	if len(args) > 0 && (args[0] == "--assets" || args[0] == "--consumer") {
 		for _, a := range args[1:] {
@@ -145,7 +193,7 @@ func parseArgs(args []string) (o Options, assets bool, err error) {
 		o.Consumer = args[1]
 		return withArgs(o, args[2], args[3]), false, nil
 	case len(args) != 2:
-		return o, false, errors.New("usage: release-check <X> <version>")
+		return o, false, errors.New("usage: release-check [--receipts <dir>] <X> <version>")
 	}
 	return withArgs(o, args[0], args[1]), false, nil
 }
@@ -156,6 +204,9 @@ func withArgs(o Options, x, version string) Options {
 }
 
 func mainRun(args []string, out io.Writer) int {
+	if len(args) > 0 && args[0] == "--compat" {
+		return compatMain(args[1:], CompatOptions{Out: out})
+	}
 	if len(args) == 1 && args[0] == "--policy-tests" {
 		err := policyTestsAlone(context.Background(), out)
 		if err != nil {
@@ -216,25 +267,7 @@ func (o *Options) defaults() error {
 	if o.Repo == "" {
 		o.Repo = "."
 	}
-	if o.GH == "" {
-		o.GH = os.Getenv("RELEASE_CHECK_GH")
-	}
-	if o.GH == "" {
-		o.GH = "gh"
-	}
-	if o.GHRepo == "" {
-		o.GHRepo = os.Getenv("RELEASE_CHECK_REPO")
-	}
-	if o.GHRepo == "" {
-		if u, err := git(o.Repo, "remote", "get-url", "origin"); err == nil {
-			if r, ok := parseGitHubRepo(u); ok {
-				o.GHRepo = r
-			}
-		}
-	}
-	if o.GHRepo == "" {
-		o.GHRepo = "bogworks/mash"
-	}
+	o.resolveGH()
 	if o.Signers == "" {
 		o.Signers = filepath.Join(o.Repo, "docs", "allowed_signers")
 	}
@@ -254,6 +287,30 @@ func (o *Options) defaults() error {
 		return errors.New("a commit and a version are required")
 	}
 	return nil
+}
+
+// resolveGH fills the gh command and the release repository: GH is $RELEASE_CHECK_GH, else gh; GHRepo is
+// $RELEASE_CHECK_REPO, else origin of Repo when it is on github.com, else bogworks/mash. --compat shares it.
+func (o *Options) resolveGH() {
+	if o.GH == "" {
+		o.GH = os.Getenv("RELEASE_CHECK_GH")
+	}
+	if o.GH == "" {
+		o.GH = "gh"
+	}
+	if o.GHRepo == "" {
+		o.GHRepo = os.Getenv("RELEASE_CHECK_REPO")
+	}
+	if o.GHRepo == "" {
+		if u, err := git(o.Repo, "remote", "get-url", "origin"); err == nil {
+			if r, ok := parseGitHubRepo(u); ok {
+				o.GHRepo = r
+			}
+		}
+	}
+	if o.GHRepo == "" {
+		o.GHRepo = "bogworks/mash"
+	}
 }
 
 // parseGitHubRepo extracts owner/name from a github.com remote URL: https://github.com/o/n(.git),
@@ -449,6 +506,8 @@ func check(ctx context.Context, o Options) error {
 	if o.Consumer != "" { // opt-in: it takes 30+ minutes,
 		r.step("the consumer's check passes against the candidate", consumerStep(ctx, o, x, bins))
 	}
+	// From 0.6.0 the upgrade proofs are required; below it they are checked when --receipts is given (REQ-019).
+	receiptsStep(ctx, o, x, r)
 	if err := r.result(x); err != nil {
 		return err
 	}

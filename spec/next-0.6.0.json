@@ -52,46 +52,6 @@
    "exit": 1,
    "issue": "#1142",
    "note": "Contract 0.6.0 SDK adoption r8, TO-14: the same words as the command's. The MCP `doctor` tool gives the delivery row of the doctor case. Stays in spec/next.json until W writes the tool entries in spec/mash-mcp.json, and moves there."
-  },
-  {
-   "id": "release-check-compat-passed",
-   "where": "scripts/release-check --compat",
-   "case": "Both directions pass",
-   "text": "compat: 0.5.10 reads mail written by 0.6.0: passed\ncompat: 0.6.0 reads mail written by 0.5.10: passed",
-   "stream": "stdout",
-   "exit": 0,
-   "issue": "#1142",
-   "note": "Contract 0.6.0 SDK adoption r8, TO-13 (stage C; proposed shape). The command is `release-check --compat 0.5.10 0.6.0`. Its exit codes are a named exception to the rule that every mash command exits 0, 1 or 2 (ADR 0147): it keeps the codes docs/release.md gives for the release check, 0 passed, 2 usage, 3 refused, 4 could not decide; exit 1 is an unexpected error, and a Go panic is recovered and exits 1. Stays in spec/next.json until C's change, which deletes it here and puts the same text, byte for byte, in the golden of the `--compat` output in scripts/releasecheck/: it has no x-output home."
-  },
-  {
-   "id": "release-check-compat-failed",
-   "where": "scripts/release-check --compat",
-   "case": "A direction fails",
-   "text": "compat: 0.5.10 reads mail written by 0.6.0: FAILED\n  message 7: refused: time not in UTC",
-   "stream": "stdout",
-   "exit": 3,
-   "issue": "#1142",
-   "note": "Contract 0.6.0 SDK adoption r8, TO-13: the first failing message and one of four reasons: `missing`, `delivered twice`, `not delivered`, or `refused: <class>` (the class from REQ-005). Exit 3. Same home rule as the passing case."
-  },
-  {
-   "id": "release-check-compat-usage",
-   "where": "scripts/release-check --compat",
-   "case": "Not two versions",
-   "text": "error: --compat takes two versions: the older, then the newer",
-   "stream": "stderr",
-   "exit": 2,
-   "issue": "#1142",
-   "note": "Contract 0.6.0 SDK adoption r8, TO-13: the command is `release-check --compat 0.5.10`. Same home rule as the passing case."
-  },
-  {
-   "id": "release-check-compat-undecided",
-   "where": "scripts/release-check --compat",
-   "case": "A run that could not decide",
-   "text": "compat: could not decide: 0.6.0 could not be downloaded",
-   "stream": "stderr",
-   "exit": 4,
-   "issue": "#1142",
-   "note": "Contract 0.6.0 SDK adoption r8, TO-13. Same home rule as the passing case."
   }
  ],
  "rules_next": []
