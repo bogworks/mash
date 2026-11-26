@@ -83,7 +83,7 @@ queue_rules:
       # Exception paths (ADR 0182): a pull request touching one needs the `lead-approved` label (label-reset removes it on every
       # push). EXCEPTION-PATHS regex: one source, written in the docs queue and the default queue; mergify_test.go fails if they differ.
       - or:
-          - -files ~= ^(\.github/|\.mergify\.yml$|scripts/(ci-|gate|release|build-twice|buildrelease|adrlint|changelog|doclint|draft-guard|lead-approve|notes-base|publishcheck|repofiles|review)|internal/release/|spec/|docs/decisions/|contracts/|internal/policy|internal/(requesterreg|issue|reconcile|listset)(/|$))
+          - -files ~= ^(\.github/|\.mergify\.yml$|scripts/(ci-|gate|release|build-twice|buildrelease|adrlint|changelog|doclint|draft-guard|lead-approve|notes-base|publishcheck|repofiles|review)|internal/release/|spec/|docs/decisions/|contracts/|internal/policy|internal/listset(/|$))
           - label = lead-approved
       - check-success = @github-actions/pr-check
       - check-success = @github-actions/adr-lint
@@ -117,7 +117,7 @@ queue_rules:
       # Exception paths (ADR 0182): a pull request touching one needs the `lead-approved` label (label-reset removes it on every
       # push). EXCEPTION-PATHS regex: one source, written in the docs queue and the default queue; mergify_test.go fails if they differ.
       - or:
-          - -files ~= ^(\.github/|\.mergify\.yml$|scripts/(ci-|gate|release|build-twice|buildrelease|adrlint|changelog|doclint|draft-guard|lead-approve|notes-base|publishcheck|repofiles|review)|internal/release/|spec/|docs/decisions/|contracts/|internal/policy|internal/(requesterreg|issue|reconcile|listset)(/|$))
+          - -files ~= ^(\.github/|\.mergify\.yml$|scripts/(ci-|gate|release|build-twice|buildrelease|adrlint|changelog|doclint|draft-guard|lead-approve|notes-base|publishcheck|repofiles|review)|internal/release/|spec/|docs/decisions/|contracts/|internal/policy|internal/listset(/|$))
           - label = lead-approved
       # GitHub lists at most 3000 files of a pull request and Mergify cannot see past that: a pull request that large could hide an
       # exception path, so it too needs the label.

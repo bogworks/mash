@@ -714,7 +714,7 @@ func TestMergify_exceptionPaths(t *testing.T) {
 	for _, p := range []string{".github/workflows/ci.yml", ".mergify.yml", "scripts/ci-changes", "scripts/releasecheck/main.go",
 		"scripts/release-check", "internal/release/checks.go", "spec/mash.json", "docs/decisions/0001-x.md",
 		"contracts/0.5.5-build-plan.md", "internal/policy/x.go", "internal/policyserve/a.go", "internal/policyapply/b.go",
-		"internal/requesterreg/x.go", "internal/issue/request.go", "internal/reconcile/x.go", "internal/listset/check.go",
+		"internal/listset/check.go",
 		"scripts/build-twice", "scripts/adrlint/main.go", "scripts/doclint/main.go", "scripts/changelog/main.go", "scripts/review-pr"} {
 		if !fileRegexMatches(t, re, p) {
 			t.Errorf("%q must be an exception path", p)

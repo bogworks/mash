@@ -28,7 +28,7 @@ type ApplyRequest struct {
 	// BaseGeneration is the generation the document states it is based on; it must equal ListSet.Base and the
 	// generation in force.
 	BaseGeneration uint64
-	// RotationStep is RunInput.RotationStep; the caller copies it from policyintake.Doc.RotationStep.
+	// RotationStep is RunInput.RotationStep.
 	RotationStep bool
 }
 

@@ -22,12 +22,10 @@ func TestLinkedPolicyPackages(t *testing.T) {
 		{"policy itself allowed", m + "internal/policy\n", nil},
 		{"policy subpackage", m + "internal/policy/sub\n", []string{"internal/policy/sub"}},
 		{"policydoc", m + "internal/policydoc\n", []string{"internal/policydoc"}},
-		{"the four named elsewhere", m + "internal/requesterreg\n" + m + "internal/issue\n" + m + "internal/reconcile\n" + m + "internal/listset\n",
-			[]string{"internal/issue", "internal/listset", "internal/reconcile", "internal/requesterreg"}},
-		{"lookalikes", m + "internal/listsetx\n" + m + "internal/xissue\nother.example/internal/issue\nother.example/internal/policyfoo\n", nil},
-		{"duplicates collapse", m + "internal/issue\n" + m + "internal/issue\n" + m + "internal/policydoc\n", []string{"internal/issue", "internal/policydoc"}},
-		{"subpackages of the named four", m + "internal/listset/foo\n" + m + "internal/issue/v2\n" + m + "internal/reconcile/x/y\n" + m + "internal/requesterreg/z\n",
-			[]string{"internal/issue/v2", "internal/listset/foo", "internal/reconcile/x/y", "internal/requesterreg/z"}},
+		{"the one named elsewhere", m + "internal/listset\n", []string{"internal/listset"}},
+		{"lookalikes", m + "internal/listsetx\n" + m + "internal/xlistset\nother.example/internal/listset\nother.example/internal/policyfoo\n", nil},
+		{"duplicates collapse", m + "internal/listset\n" + m + "internal/listset\n" + m + "internal/policydoc\n", []string{"internal/listset", "internal/policydoc"}},
+		{"subpackage of the one named elsewhere", m + "internal/listset/foo\n", []string{"internal/listset/foo"}},
 		{"policy subpackage deep, policyfoo subpackage", m + "internal/policyfoo/x\n", []string{"internal/policyfoo/x"}},
 		{"the size constants do not hide a neighbour", m + "internal/policy\n" + m + "internal/policyview\n", []string{"internal/policyview"}},
 		{"sdk caller and host refused, identity allowed from 0.6.0", sdk + "/identity\n" + sdk + "/caller\n" + sdk + "/host\n",
@@ -98,10 +96,10 @@ func TestDescribeLinked(t *testing.T) {
 	}
 	got := describeLinked([]targetLinks{
 		{"darwin/amd64", []string{"internal/policyapply"}},
-		{"darwin/arm64", []string{"internal/issue", "internal/policyapply"}},
+		{"darwin/arm64", []string{"internal/listset", "internal/policyapply"}},
 		{"linux/amd64", nil},
 	})
-	want := "internal/issue (darwin/arm64), internal/policyapply (darwin/amd64, darwin/arm64)"
+	want := "internal/listset (darwin/arm64), internal/policyapply (darwin/amd64, darwin/arm64)"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}

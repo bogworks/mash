@@ -1,6 +1,5 @@
-// Package policyserve is the production assembly of the list-set intake: the adapters the intake needs (decode,
-// document in force, refusals, held keys, the write guard), the signer over the key store, the server limits read through
-// the system account, and the Applier that builds everything policyapply.Apply needs for one verified document.
+// Package policyserve holds the production pieces of a policy apply: the signer over the key store, the server limits
+// read through the system account, and the inbox and credential provisioning.
 //
 // Two steps of an apply depend on decisions that are not made yet, and they fail closed: a change that adds an address
 // (the inbox and credential of a new receiver) and a change that narrows a sender's tags (the new credential has to

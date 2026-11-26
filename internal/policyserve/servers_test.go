@@ -3,10 +3,6 @@ package policyserve
 import (
 	"strings"
 	"testing"
-
-	"github.com/nats-io/nats.go"
-
-	"github.com/bogworks/mash/internal/policyapply"
 )
 
 func TestResolveURLs(t *testing.T) {
@@ -59,15 +55,5 @@ func TestParseVarzHostWildcard(t *testing.T) {
 func TestReadServersNeedsADeclaredCount(t *testing.T) {
 	if _, err := ReadServers(t.Context(), nil, 0); err == nil || !strings.Contains(err.Error(), "init --config") {
 		t.Errorf("err = %v", err)
-	}
-}
-
-// The applier hands its connection options to the probes and the witnesses.
-func TestApplierTransportsCarryTheOptions(t *testing.T) {
-	opt := func(*nats.Options) error { return nil }
-	a := &Applier{Options: []nats.Option{opt, opt}}
-	p, w := a.transports([]ServerInfo{{Name: "a", URL: "tls://h:1"}}, &policyapply.ProbeMinter{})
-	if len(p.Options) != 2 || len(w.Options) != 2 || p.URLs["a"] != "tls://h:1" {
-		t.Errorf("prober %d, witnesses %d options", len(p.Options), len(w.Options))
 	}
 }
