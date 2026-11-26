@@ -162,3 +162,38 @@ func TestS5PresenceRechecksOwnerAfterVerify(t *testing.T) {
 func TestS5PresenceRechecksAccountAfterVerify(t *testing.T) {
 	rkRechecksField(t, func(r *store.Record) { r.Account = rkAccount + "X" })
 }
+
+// rkPromptRechecks changes bob's record mid-verify (replace builds the new one) and expects prompt discovery not to
+// vouch for the answer, and to count it.
+func rkPromptRechecks(t *testing.T, replace func(k1, k2 sap.Identity) store.Record) {
+	t.Helper()
+	k1, k2 := rkIdentity(t), rkIdentity(t)
+	data, subject := rkAnswer(t, k1)
+	e := rkEndpoint()
+	e.learn(map[string]recordResult{"acme_ops_bob": {rec: rkRecord(k1.User)}})
+	base := s5On()
+	h := &s5Hooks{secretPresence: true, promptDirectory: true,
+		verify: func(reg registration, d *dirView) (string, bool) {
+			name, ok := base.verify(reg, d)
+			e.learn(map[string]recordResult{"acme_ops_bob": {rec: replace(k1, k2)}}) // changed mid-verify
+			return name, ok
+		}}
+	if e.judgeAnswerS5(h, data, subject) {
+		t.Error("an answer verified against a record that changed during verify was vouched for")
+	}
+	if n := e.AnswersNotVerified(); n != 1 {
+		t.Errorf("counted %d, want 1", n)
+	}
+}
+
+func TestS5PromptDiscoveryRechecksTheRecordAfterVerify(t *testing.T) {
+	rkPromptRechecks(t, func(_, k2 sap.Identity) store.Record { return rkRecord(k2.User) })
+}
+
+func TestS5PromptDiscoveryRechecksOwnerAfterVerify(t *testing.T) {
+	rkPromptRechecks(t, func(k1, _ sap.Identity) store.Record {
+		r := rkRecord(k1.User)
+		r.Owner = "mallory"
+		return r
+	})
+}

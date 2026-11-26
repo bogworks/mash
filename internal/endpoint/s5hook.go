@@ -146,7 +146,7 @@ func sameVerifiedFields(a, b store.Record) bool {
 // judgeAnswerS5 reports whether an answer carries a verified registration at the prompt subject want, and counts once
 // an answer whose registration at want fails verification. A registration at any other subject is another endpoint's
 // and not this discovery's business: it is neither verified nor counted (a one-shot client holds only its own record
-// and the target's). An invalid answer never ends the discovery.
+// and the target's). An accepted answer's record is read again under the lock, as in applyPresenceS5. An invalid answer never ends the discovery.
 func (e *Endpoint) judgeAnswerS5(h *s5Hooks, data []byte, want string) (vouched bool) {
 	failed := false
 	for _, reg := range parseAnswer(data) {
@@ -156,7 +156,14 @@ func (e *Endpoint) judgeAnswerS5(h *s5Hooks, data []byte, want string) (vouched 
 		e.mu.RLock()
 		d := e.viewOfLocked(reg)
 		e.mu.RUnlock()
-		if _, ok := h.verify(reg, d); !ok {
+		name, ok := h.verify(reg, d)
+		if ok {
+			e.mu.RLock()
+			cur, has := e.dir[name]
+			ok = has && d.hasRec && sameVerifiedFields(cur, d.rec)
+			e.mu.RUnlock()
+		}
+		if !ok {
 			failed = true
 			continue
 		}
