@@ -108,8 +108,8 @@ func loadMergify(t *testing.T) mergify {
 // publishes can never be satisfied, and the queue times out on every pull request.
 func TestMergify_waitsOnlyForChecksThatExist(t *testing.T) {
 	// A check's name is the job's name: when set, else its key (a matrix job's name is not one a queue condition names).
-	names := map[string]string{}                                              // check name -> the workflow file that runs it
-	for _, f := range []string{"ci.yml", "adr-lint.yml", "label-reset.yml"} { // the checks the queue waits for
+	names := map[string]string{}                                                          // check name -> the workflow file that runs it
+	for _, f := range []string{"ci.yml", "adr-lint.yml", "label-reset.yml", "lint.yml"} { // the checks the queue waits for
 		for key, j := range load(t, f).Jobs {
 			n := j.Name
 			if n == "" {
@@ -151,8 +151,8 @@ func TestMergify_waitsOnlyForChecksThatExist(t *testing.T) {
 			t.Errorf("queue_conditions lack %q", want)
 		}
 	}
-	if strings.Join(q.MergeConditions, "|") != "check-success = "+actionsApp+"pr-check" {
-		t.Errorf("merge_conditions = %v, want @github-actions/pr-check on the queue branch's run", q.MergeConditions)
+	if strings.Join(q.MergeConditions, "|") != "check-success = "+actionsApp+"pr-check|check-success = "+actionsApp+"lint" {
+		t.Errorf("merge_conditions = %v, want @github-actions/pr-check and @github-actions/lint on the queue branch's run", q.MergeConditions)
 	}
 	if q.MergeMethod != "fast-forward" || m.MergeQueue.Mode != "serial" || m.MergeQueue.MaxParallelChecks != 1 {
 		t.Errorf("main must only move to a tested commit: merge_method %q, mode %q, max_parallel_checks %d",
@@ -173,6 +173,13 @@ func TestMergify_entryNeedsNoApproval(t *testing.T) {
 	if len(ors) != 2 || len(ors[0]) != 2 || ors[0][1] != "label = lead-approved" || !strings.HasPrefix(ors[0][0], "-files ~= ") ||
 		len(ors[1]) != 2 || ors[1][0] != "#files < 3000" || ors[1][1] != "label = lead-approved" {
 		t.Errorf("queue_conditions or groups = %v, want the exception-path group and the #files < 3000 group (ADR 0182)", ors)
+	}
+	hasLint := false
+	for _, c := range plain {
+		hasLint = hasLint || c == "check-success = "+actionsApp+"lint"
+	}
+	if !hasLint {
+		t.Error("the default queue lacks check-success = @github-actions/lint: a code pull request needs lint to pass, a skipped lint (a cancelled run skips the job) is not accepted")
 	}
 	for _, c := range plain {
 		for _, banned := range []string{"lead-review", "approved-reviews-by", "lead-approved"} {
@@ -540,9 +547,10 @@ func TestMergify_docsQueue(t *testing.T) {
 	}
 	d := queueRule(t, m, "docs")
 	plain, ors := splitConditions(t, d.QueueConditions)
-	if len(ors) != 1 || len(ors[0]) != 2 || ors[0][1] != "label = lead-approved" || !strings.HasPrefix(ors[0][0], "-files ~= ") {
-		t.Errorf("the docs queue or groups = %v, want only the exception-path group (ADR 0182)", ors)
+	if len(ors) != 2 || len(ors[0]) != 2 || ors[0][1] != "label = lead-approved" || !strings.HasPrefix(ors[0][0], "-files ~= ") {
+		t.Errorf("the docs queue or groups = %v, want the exception-path group (ADR 0182), then the lint group", ors)
 	}
+	wantLint(t, ors, 1, "docs")
 	re := docsQueueRegex(t, m)
 	want := []string{"base = main", "-draft", "-conflict", "label != hold", `#files >= 1`, `#files < 300`, "-files ~= " + re,
 		"check-success = @github-actions/pr-check", "check-success = @github-actions/adr-lint", "check-success = @github-actions/label-reset", "check-success = medium-dispositions"}
@@ -560,8 +568,9 @@ func TestMergify_docsQueue(t *testing.T) {
 		}
 	}
 	def := queueRule(t, m, "default")
-	if strings.Join(d.MergeConditions, "|") != strings.Join(def.MergeConditions, "|") || d.MergeMethod != "fast-forward" {
-		t.Errorf("docs queue merge: conditions %v method %q, want the default queue's (%v) and fast-forward", d.MergeConditions, d.MergeMethod, def.MergeConditions)
+	// the docs queue merges on pr-check alone: a docs-only batch skips lint, which the default queue also requires on the combined commit
+	if strings.Join(d.MergeConditions, "|") != "check-success = "+actionsApp+"pr-check" || d.MergeMethod != "fast-forward" {
+		t.Errorf("docs queue merge: conditions %v method %q, want pr-check alone and fast-forward (the default queue has %v)", d.MergeConditions, d.MergeMethod, def.MergeConditions)
 	}
 	// One source: the merge_protections rule's `if` carries the same regex text as the docs queue.
 	var found bool
@@ -757,6 +766,9 @@ func TestMergify_exceptionPathsNeedTheLabelToQueue(t *testing.T) {
 			if s, ok := c.(string); ok && !(strings.HasPrefix(s, "#files") || strings.HasPrefix(s, "-files")) {
 				continue
 			}
+			if isCheckGroup(c) {
+				continue
+			}
 			conds = append(conds, c)
 		}
 		for _, c := range []struct {
@@ -781,7 +793,7 @@ func TestMergify_exceptionPathsNeedTheLabelToQueue(t *testing.T) {
 	// A code pull request on an exception path (.mergify.yml) and an ordinary code one, in the default queue.
 	var conds []any
 	for _, c := range queueRule(t, m, "default").QueueConditions {
-		if _, ok := c.(map[string]any); ok {
+		if _, ok := c.(map[string]any); ok && !isCheckGroup(c) {
 			conds = append(conds, c)
 		}
 	}
@@ -822,4 +834,31 @@ func TestMergify_exceptionRegexCoversTheScriptsWorkflowsRun(t *testing.T) {
 			}
 		}
 	}
+}
+
+// lint is a queue condition of both queues (mash#1782). A docs-only pull request skips the job at job level and the check reports as
+// skipped, which `check-success` does not accept (Mergify: success only), so the group is success or skipped, app-qualified.
+func wantLint(t *testing.T, ors [][]string, i int, queue string) {
+	t.Helper()
+	if len(ors) <= i || len(ors[i]) != 2 || ors[i][0] != "check-success = "+actionsApp+"lint" || ors[i][1] != "check-skipped = "+actionsApp+"lint" {
+		t.Errorf("%s queue or groups = %v, want [check-success = %slint, check-skipped = %slint] at %d", queue, ors, actionsApp, actionsApp, i)
+	}
+	if n := load(t, "lint.yml").Jobs["lint"].Name; n != "lint" {
+		t.Errorf("lint.yml job lint is named %q, want the check name lint", n)
+	}
+}
+
+// isCheckGroup reports whether a queue condition is an or group of check conditions (the lint group), which the file and label model skips.
+func isCheckGroup(c any) bool {
+	m, ok := c.(map[string]any)
+	if !ok {
+		return false
+	}
+	list, _ := m["or"].([]any)
+	for _, x := range list {
+		if s, ok := x.(string); ok && strings.HasPrefix(s, "check-") {
+			return true
+		}
+	}
+	return false
 }

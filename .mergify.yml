@@ -88,6 +88,11 @@ queue_rules:
       - check-success = @github-actions/pr-check
       - check-success = @github-actions/adr-lint
       - check-success = @github-actions/label-reset # on this head, so a label left by an earlier push cannot let an exception path in
+      # lint (lint.yml): staticcheck, gofmt, vet. A docs-only pull request skips the job at job level and the check reports as skipped,
+      # which check-success alone does not accept (Mergify: success only), so the skipped conclusion is allowed beside it.
+      - or:
+          - check-success = @github-actions/lint
+          - check-skipped = @github-actions/lint
       - check-success = medium-dispositions # every codex medium answered in Review-Dispositions; docs-only and no-review heads report success
     merge_conditions:
       - check-success = @github-actions/pr-check
@@ -123,11 +128,17 @@ queue_rules:
       - check-success = @github-actions/pr-check
       - check-success = @github-actions/adr-lint
       - check-success = @github-actions/label-reset
+      # lint (lint.yml): a code pull request needs it to pass; a skipped lint is not accepted here (a cancelled run also skips the job,
+      # codex H1). Only the docs queue, which takes docs-only pull requests alone, accepts a skipped lint.
+      - check-success = @github-actions/lint
       - check-success = medium-dispositions
     # To merge (evaluated on the queue branch's run of the exact combination): pr-check again, since a batch's
     # combined code can break what each pull request passed alone. It needs test (both OSes) and reproducible.
     merge_conditions:
       - check-success = @github-actions/pr-check
+      # lint on the queue branch's combined commit too (codex H1, round 2). A code batch always runs lint; the docs queue's
+      # merge_conditions stay pr-check alone, since a docs-only batch skips lint.
+      - check-success = @github-actions/lint
     # mash sees a few pull requests a day: a batch is whatever is queued, up to 5, with no wait for company. The
     # macOS leg is the slowest job, so fewer, larger runs are cheaper than many.
     batch_size:
