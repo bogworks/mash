@@ -12,9 +12,9 @@ import (
 // An endpoint is shown as owner.group.instance on every human surface of the client and the serve (ADR 0145); the
 // scripted forms (--names, the json name) stay flat.
 
-var nfCfg = config.Config{Name: "sap-go-sdk", Owner: "x", Group: "grp"}
+var nfCfg = config.Config{Name: "alice", Owner: "acme", Group: "dev"}
 
-const nfDot = "x.grp.sap-go-sdk"
+const nfDot = "acme.dev.alice"
 
 func TestToolErrorsShowDotted(t *testing.T) {
 	s := &sessionState{failed: errors.New("boom")}
@@ -25,8 +25,8 @@ func TestToolErrorsShowDotted(t *testing.T) {
 }
 
 func TestLiveHolderErrorNamesDotted(t *testing.T) {
-	e := &endpoint.LeaseHeldError{Name: "x_grp_sap-go-sdk"}
-	if got := e.Error(); !strings.Contains(got, "endpoint "+nfDot+" is already in use") || strings.Contains(got, "x_grp") {
+	e := &endpoint.LeaseHeldError{Name: "acme_dev_alice"}
+	if got := e.Error(); !strings.Contains(got, "endpoint "+nfDot+" is already in use") || strings.Contains(got, "acme_dev") {
 		t.Fatalf("%q", got)
 	}
 }

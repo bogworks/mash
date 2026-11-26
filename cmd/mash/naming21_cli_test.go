@@ -68,9 +68,9 @@ func TestNaming21_TokensShownByteIdentical(t *testing.T) {
 	if err := adm.Init(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	me, meEnv := naming21Provision(t, e, adm, "bogworks", "x", "sap-go-sdk")
-	peer, peerEnv := naming21Provision(t, e, adm, "bogworks", "x", "peer")
-	if me.Flat() != "bogworks_x_sap-go-sdk" {
+	me, meEnv := naming21Provision(t, e, adm, "acme", "dev", "alice")
+	peer, peerEnv := naming21Provision(t, e, adm, "acme", "dev", "bob")
+	if me.Flat() != "acme_dev_alice" {
 		t.Fatalf("flat %q", me.Flat())
 	}
 
@@ -87,7 +87,7 @@ func TestNaming21_TokensShownByteIdentical(t *testing.T) {
 	who := cliAs(t, peerEnv, "who")
 	assertShows(t, "who", who, me)
 	assertShows(t, "who", who, peer)
-	if !strings.Contains(who, "bogworks") || !strings.Contains(who, "sap-go-sdk") {
+	if !strings.Contains(who, "acme") || !strings.Contains(who, "alice") {
 		t.Fatalf("who lacks a token:\n%s", who)
 	}
 
