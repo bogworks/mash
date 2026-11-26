@@ -54,7 +54,7 @@ Session-only users need nothing more. Scripts: see the
 
 - **`mashctl endpoint reissue` reads the staged seed and creds file through one open that refuses symlinks and files others can read or own.** A file cannot be swapped between the check and the read. ([#177](https://github.com/bogworks/mash/issues/177))
 
-Known issues: 2 known issues, listed in the [release notes](https://github.com/bogworks/mash/blob/v0.5.10/docs/release-notes/0.5.10.md#known-issues)
+Known issues: 3 known issues, listed in the [release notes](https://github.com/bogworks/mash/blob/v0.5.10/docs/release-notes/0.5.10.md#known-issues)
 Links: [Release notes](https://github.com/bogworks/mash/blob/v0.5.10/docs/release-notes/0.5.10.md), [full changes](https://github.com/bogworks/mash/compare/v0.5.9...v0.5.10), [verify your download](https://github.com/bogworks/mash/blob/v0.5.10/docs/install.md#verify-what-you-download)
 
 ## [0.5.9] - 2026-11-25
