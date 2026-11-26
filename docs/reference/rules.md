@@ -149,7 +149,8 @@ The rules every mash command and tool follows.
    exit 1; with --json {"error": ...} alone. At a shell with several installed
    and none chosen: 'error: more than one endpoint is installed here:
    &lt;addresses&gt;' and 'hint: mash &lt;command&gt; --endpoint &lt;the
-   first, alphabetically&gt;', exit 2. As an MCP tool in a session with none
+   first, alphabetically&gt;', exit 2 (doctor is the exception: it checks
+   every installed endpoint, ADR 0192). As an MCP tool in a session with none
    named: 'No endpoint is chosen for this session.' and 'hint: start the
    session with MASH_ENDPOINT=&lt;address&gt;'.
 

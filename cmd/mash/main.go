@@ -411,7 +411,18 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 		return newCommands(mk).RunCLI("send", args[1:], stdin, stdout, stderr, global)
 	case "inbox", "read", "who", "status", "doctor":
 		mk := func(context.Context) (*cmdcore.Env, error) {
-			return &cmdcore.Env{Svc: &cliSvc{cfg: cfg, cfgErr: err, stderr: stderr}}, nil
+			svc := &cliSvc{cfg: cfg, cfgErr: err, stderr: stderr}
+			if args[0] == "doctor" && errors.As(err, &several) { // several installed and none chosen: doctor answers for each
+				svc.loadFor = func(address string) (config.Config, error) {
+					return config.Load(func(k string) (string, bool) {
+						if k == "MASH_ENDPOINT" {
+							return address, true
+						}
+						return lookup(k)
+					}, home)
+				}
+			}
+			return &cmdcore.Env{Svc: svc}, nil
 		}
 		return newCommands(mk).RunCLI(args[0], args[1:], stdin, stdout, stderr, global)
 	case "prompt":

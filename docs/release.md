@@ -335,7 +335,7 @@ read by someone outside the work comes before publishing.
 5. **Upgrading is a checklist, split by audience.**
    - Example split: "If you never used X: two steps." / "If you used X: the order matters."
    - Use numbered steps, each starting with the action.
-   - Step 1 checks the install: write `mash doctor` (with `--endpoint <address>` if you have several endpoints installed here) and `mashctl doctor`. With two endpoints installed, a bare `mash doctor` exits 2 and asks for `--endpoint`.
+   - Step 1 checks the install: write `mash doctor` and `mashctl doctor`. With several endpoints installed, a bare `mash doctor` checks every one and prints a row for each; add `--endpoint <address>` to see one endpoint's rows.
 6. **Details come after the story.**
    - Group them as Added, Changed and Fixed.
    - Each bullet opens with a bold lead of a few words, then one or two short sentences.

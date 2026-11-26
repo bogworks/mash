@@ -1196,7 +1196,8 @@
     ],
     "examples": [
      "mash doctor",
-     "mash doctor --strict"
+     "mash doctor --strict",
+     "mash doctor --endpoint acme.demo.alice"
     ],
     "exitCodes": [
      {
@@ -1236,6 +1237,30 @@
         "stream": "stdout",
         "exit": 0,
         "note": "TO-5, REQ-006, CHG-14. The row counts every refused message the inbox still holds, for any reason, and names each class on a line of its own, largest count first and ties by class name. With one message it reads `1 message was refused` and its class on the line below; with none, `no mail was refused`. The summary line is not changed by this row."
+       },
+       {
+        "case": "Several endpoints installed here and none chosen, all well",
+        "text": "Endpoints installed here: 2.\n\nENDPOINT         PROBLEMS  WARNINGS  FIRST ISSUE\nacme.demo.alice  0         0\nacme.demo.bob    0         0\n\nNo problems.",
+        "stream": "stdout",
+        "exit": 0,
+        "issue": "#1785",
+        "note": "At a shell with no --endpoint and no MASH_ENDPOINT, doctor checks every installed endpoint as 'mash doctor --endpoint <address>' would, and shows one row each, sorted by address. ADR 0192, amending ADR 0187: for doctor only this is no longer a usage error (exit 2). Every other command keeps exit 2."
+       },
+       {
+        "case": "Several endpoints installed here, one with a problem",
+        "text": "Endpoints installed here: 2.\n\nENDPOINT         PROBLEMS  WARNINGS  FIRST ISSUE\nacme.demo.alice  0         0\nacme.demo.bob    1         0         sign-in: the server refused these credentials\n\n1 problem. See it: mash doctor --endpoint acme.demo.bob",
+        "stream": "stdout",
+        "exit": 1,
+        "issue": "#1785",
+        "note": "FIRST ISSUE is '<check>: <detail>' of the endpoint's first failing row, else of its first row in state warn, cut with an ellipsis to fit 79 columns, and empty when the endpoint has neither. The address is never cut, because it is what you copy into --endpoint: when a row would leave fewer than 20 columns for the issue, the issue is printed on the next line, under the FIRST ISSUE column or 4 spaces in when that column is too far right. The last line is 'No problems.' when all are clean, else the totals and 'See it: mash doctor --endpoint <address>' for the first endpoint, in address order, with a problem, or else with a warning. The hint is printed once, in that last line: nothing is written to stderr, and the JSON hint field is null, because that command shows a result and fixes nothing (ADR 0168). Exit 1 if any endpoint has a problem, or a warning with --strict; else 0."
+       },
+       {
+        "case": "Several endpoints installed here, --json",
+        "text": "{\"endpoints\":[{\"endpoint\":\"acme.demo.alice\",\"problems\":0,\"warnings\":0,\"checks\":[...],\"hint\":null},{\"endpoint\":\"acme.demo.bob\",\"problems\":1,\"warnings\":0,\"checks\":[...],\"hint\":null}],\"problems\":1,\"warnings\":0,\"hint\":null}",
+        "stream": "stdout",
+        "exit": 1,
+        "issue": "#1785",
+        "note": "'endpoints' holds the object of each endpoint exactly as 'mash doctor --endpoint <address> --json' prints it, sorted by address; 'problems' and 'warnings' are totals; 'hint' is always null: the command that shows the first endpoint with an issue is in the text output only, because a doctor's hint is a command that fixes the problem (ADR 0168). The machine-wide claude row is run once and appears in every endpoint's checks, so a problem in it counts once for each endpoint. One endpoint installed, or one chosen with --endpoint or MASH_ENDPOINT: the object is unchanged."
        },
        {
         "case": "A problem, with one hint",

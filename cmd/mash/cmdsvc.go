@@ -10,6 +10,7 @@ import (
 	"math"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -200,6 +201,43 @@ type cliSvc struct {
 	cfg    config.Config
 	cfgErr error // what loading the configuration failed with: status and doctor report it
 	stderr io.Writer
+	// loadFor loads the configuration for one installed address, as --endpoint <address> would. Only doctor, at a
+	// shell with several endpoints installed and none chosen, sets it.
+	loadFor func(address string) (config.Config, error)
+}
+
+// doctorParallel is how many endpoints doctor checks at the same time: each check opens its own connection to the
+// server, so the number is fixed and small however many endpoints are installed.
+const doctorParallel = 4
+
+// eachBounded runs fn for 0..n-1, at most limit at a time, and returns when all have finished.
+func eachBounded(n, limit int, fn func(i int)) {
+	sem := make(chan struct{}, max(limit, 1))
+	var wg sync.WaitGroup
+	for i := range n {
+		sem <- struct{}{}
+		wg.Add(1)
+		go func() {
+			defer func() { <-sem; wg.Done() }()
+			fn(i)
+		}()
+	}
+	wg.Wait()
+}
+
+// HealthEach is doctor's report for each installed endpoint, each made as `mash doctor --endpoint <address>` makes
+// it. At most doctorParallel endpoints are checked at the same time; the reports are in the order of the addresses.
+func (s *cliSvc) HealthEach(ctx context.Context, addresses []string) ([]cmds.HealthReport, error) {
+	if s.loadFor == nil {
+		return nil, cliframe.Failf("internal: mash doctor has no way to load an endpoint")
+	}
+	reps := make([]cmds.HealthReport, len(addresses))
+	errs := make([]error, len(addresses))
+	eachBounded(len(addresses), doctorParallel, func(i int) {
+		cfg, cerr := s.loadFor(addresses[i])
+		reps[i], errs[i] = (&healthSvc{cfg: cfg, cfgErr: cerr}).Health(ctx)
+	})
+	return reps, errors.Join(errs...)
 }
 
 // Health is the checks of status and doctor. They report a configuration that did not load, so they run with it.
