@@ -145,7 +145,7 @@ func TestS5AT010_MutationRemovingTheVerifyStepIsCaught(t *testing.T) {
 			if got.Err != nil || len(got.Accepted) != 0 || got.NotVerified != 1 {
 				t.Fatalf("unmutated: %+v, want the answer refused and counted once", got)
 			}
-			if ep.judgeAnswerS5(s5Switch, f.Data, s5PromptSubjectOf(t, f.Data)) {
+			if ep.judgeAnswerS5(s5Hook(), f.Data, s5PromptSubjectOf(t, f.Data)) {
 				t.Fatalf("unmutated: the recipient discovery vouched for the %s answer", f.Name)
 			}
 		})
@@ -170,7 +170,7 @@ func TestS5AT010_MutationRemovingTheVerifyStepIsCaught(t *testing.T) {
 			if f.Name != "subject" && (len(got.Accepted) != 1 || got.Accepted[0].Address != z.bob) {
 				t.Fatalf("mutated: the %s answer was not attributed to bob: %+v", f.Name, got.Accepted)
 			}
-			if !ep.judgeAnswerS5(s5Switch, f.Data, s5PromptSubjectOf(t, f.Data)) {
+			if !ep.judgeAnswerS5(s5Hook(), f.Data, s5PromptSubjectOf(t, f.Data)) {
 				t.Fatalf("mutated: the recipient discovery did not vouch for the %s answer", f.Name)
 			}
 		})

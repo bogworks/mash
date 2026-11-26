@@ -36,13 +36,12 @@ func s5On() *s5Hooks {
 	}
 }
 
-// setS5Hook sets the switch for the test and restores what it was when the test ends. None of these tests, nor the
-// 0.5.x tests of the same package, runs in parallel, so the plain variable is safe.
+// setS5Hook sets the switch for the test and restores what it was when the test ends. The switch is atomic, so a poller
+// left over from an earlier test can read it while this one stores it.
 func setS5Hook(t *testing.T, h *s5Hooks) {
 	t.Helper()
-	prev := s5Switch
-	s5Switch = h
-	t.Cleanup(func() { s5Switch = prev })
+	prev := s5Switch.Swap(h)
+	t.Cleanup(func() { s5Switch.Store(prev) })
 }
 
 // s5Main drives main's discovery, presence and prompt sender over env.NC.
@@ -53,7 +52,7 @@ type s5Main struct {
 
 func newS5Main(t *testing.T, env s5Env) s5Caller {
 	t.Helper()
-	if s5Switch == nil { // a test that set the switch itself (the mutation of AT-010) keeps its own
+	if s5Hook() == nil { // a test that set the switch itself (the mutation of AT-010) keeps its own
 		setS5Hook(t, s5On())
 	}
 	ep := &Endpoint{cfg: config.Config{Owner: env.Asker.Owner}, ident: env.Asker, nc: env.NC,

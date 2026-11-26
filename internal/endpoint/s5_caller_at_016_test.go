@@ -8,10 +8,12 @@ package endpoint
 
 import (
 	"bytes"
+	"crypto/rand"
 	"encoding/hex"
+	"io"
+	mrand "math/rand/v2"
 	"strings"
 	"testing"
-	"testing/cryptotest"
 	"time"
 
 	"github.com/bogworks/mash/internal/admin"
@@ -53,9 +55,34 @@ func TestS5AT016_ReplyLayout(t *testing.T) {
 	}
 }
 
+// seedTokens points the reply token's random source at a deterministic stream for the test and restores it after. It
+// swaps mash's own seam and not crypto/rand's global source (cryptotest.SetGlobalRandom), which the embedded
+// nats-server reads on every accepted connection: that races under -race.
+func seedTokens(t *testing.T, seed uint64) {
+	t.Helper()
+	var key [32]byte
+	for i := range 8 {
+		key[i] = byte(seed >> (8 * i))
+	}
+	var r io.Reader = mrand.NewChaCha8(key)
+	prev := tokenRand.Swap(&r)
+	t.Cleanup(func() { tokenRand.Store(prev) })
+}
+
+// TestS5AT016_DefaultTokenSourceIsCryptoRand: with no test seam set, the reply token is drawn from crypto/rand.Reader,
+// so the seeded tests prove the token is read through the seam and this proves the seam's default is crypto/rand.
+func TestS5AT016_DefaultTokenSourceIsCryptoRand(t *testing.T) {
+	if tokenRand.Load() != nil {
+		t.Fatal("a token seam is set at the start of the test")
+	}
+	if tokenSource() != rand.Reader {
+		t.Fatal("the default token source is not crypto/rand.Reader")
+	}
+}
+
 // TestS5AT016_SecretInboxBits: secretInbox (service.go) carries 128 bits (16 bytes, 32 hex characters) after the
 // owner-scoped prefix, REQ-015's floor, and the bits are drawn from crypto/rand (the token repeats under one
-// cryptotest seed and changes with another, which a NUID, math/rand or a clock would not do).
+// seed of mash's token seam and changes with another, which a NUID, math/rand or a clock would not do).
 func TestS5AT016_SecretInboxBits(t *testing.T) {
 	z := newS5Fix(t)
 	nc := z.connect(t, z.alice).nc
@@ -66,11 +93,11 @@ func TestS5AT016_SecretInboxBits(t *testing.T) {
 		}
 		return tok
 	}
-	cryptotest.SetGlobalRandom(t, 1)
+	seedTokens(t, 1)
 	a1 := token(secretInbox(nc))
-	cryptotest.SetGlobalRandom(t, 1)
+	seedTokens(t, 1)
 	a2 := token(secretInbox(nc))
-	cryptotest.SetGlobalRandom(t, 2)
+	seedTokens(t, 2)
 	b1 := token(secretInbox(nc))
 	if raw, err := hex.DecodeString(a1); err != nil || len(raw)*8 < 128 {
 		t.Fatalf("token %q carries %d bits (%v), want at least 128", a1, len(raw)*8, err)
@@ -85,7 +112,7 @@ func TestS5AT016_SecretInboxBits(t *testing.T) {
 }
 
 // TestS5AT016_TokenComesFromCryptoRand replaces the entropy source in main's real path: with
-// cryptotest.SetGlobalRandom (which replaces crypto/rand process-wide) fixed to one seed, two callers built on two
+// mash's token seam (tokenRand, service.go) fixed to one seed, two callers built on two
 // fresh connections emit the same token for their first request; a different seed gives different ones. A token drawn
 // from anywhere but crypto/rand (math/rand, a NUID, a clock) would not repeat under the seed, or would not change with it.
 func TestS5AT016_TokenComesFromCryptoRand(t *testing.T) {
@@ -96,7 +123,7 @@ func TestS5AT016_TokenComesFromCryptoRand(t *testing.T) {
 	first := func(seed uint64) string {
 		env, _ := z.env(t, z.alice, s5Inputs{})
 		before := len(tp.replySubjectsFrom(z.alice))
-		cryptotest.SetGlobalRandom(t, seed) // after every connect: the server draws from crypto/rand when one is accepted
+		seedTokens(t, seed)
 		cl := newS5Caller(t, env)
 		if got, err := cl.Discover(s5Ctx(t), z.bob); err != nil || len(got.Accepted) != 1 {
 			t.Fatalf("discovery under seed %d: %+v, %v", seed, got, err)

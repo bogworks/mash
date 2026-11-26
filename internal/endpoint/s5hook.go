@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -19,9 +20,9 @@ import (
 // until then only the tests do. The verify step itself lives in internal/sapsdk/discovery, which the 0.5.x commands
 // must not link (scripts/releasecheck), so the hook receives it as a function and this package never imports it.
 //
-// The hook is a plain variable: it is set before a test starts its discovery and restored after, and no test that
-// sets it, or that reads what it changes, runs in parallel. A discovery that returns early keeps reading its window in
-// the background; it holds the hook it started with.
+// The hook is an atomic pointer: a poller left over from one test may read it while the next test stores it. Every read
+// loads it once through s5Hook and keeps the value. A discovery that returns early keeps reading its window in the
+// background; it holds the hook it started with.
 
 // s5Hooks is the S5 switch-on.
 type s5Hooks struct {
@@ -35,8 +36,11 @@ type s5Hooks struct {
 	promptDirectory bool
 }
 
-// s5Switch is the switch: nil in 0.5.x.
-var s5Switch *s5Hooks
+// s5Switch is the switch: nil in 0.5.x. Read it only through s5Hook.
+var s5Switch atomic.Pointer[s5Hooks]
+
+// s5Hook loads the switch once; the caller keeps the value it got.
+func s5Hook() *s5Hooks { return s5Switch.Load() }
 
 // registration is one prompt endpoint of a $SRV.INFO answer, with the metadata that vouches for it.
 type registration struct {
@@ -59,7 +63,7 @@ func (e *Endpoint) AnswersNotVerified() int { return int(e.notVerified.Load()) }
 
 // presenceInbox is the reply subject of a presence probe.
 func (e *Endpoint) presenceInbox() string {
-	if h := s5Switch; h != nil && h.secretPresence {
+	if h := s5Hook(); h != nil && h.secretPresence {
 		return secretInbox(e.nc)
 	}
 	return e.nc.NewInbox()

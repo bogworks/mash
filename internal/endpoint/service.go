@@ -12,6 +12,7 @@ import (
 	"runtime/debug"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -575,13 +576,26 @@ func promptMsg(id sap.Identity, name, subject, inbox, text string) (*nats.Msg, e
 	return m, nil
 }
 
+// tokenRand is the test seam of the reply token's random source. It is nil in production, which reads crypto/rand.
+// It is atomic so that a test can swap it while an endpoint goroutine of an earlier test still draws a token; a test
+// swaps this seam and never crypto/rand's global source, which a live nats-server reads on every accepted connection.
+var tokenRand atomic.Pointer[io.Reader]
+
+// tokenSource is the reader the reply token is drawn from: the test seam when set, else crypto/rand.Reader.
+func tokenSource() io.Reader {
+	if r := tokenRand.Load(); r != nil {
+		return *r
+	}
+	return rand.Reader
+}
+
 // secretInbox is a reply subject under the connection's inbox prefix with 128 random bits. nc.NewInbox ends in a NUID,
 // whose next value a peer that saw one (every endpoint reads the $SRV discovery requests and may publish to the inboxes of its own owner, _INBOX.<owner>.>)
 // can predict, and so answer a prompt in the target's place.
 func secretInbox(nc *nats.Conn) string {
 	in := nc.NewInbox()
 	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
+	if _, err := io.ReadFull(tokenSource(), b[:]); err != nil {
 		panic(err) // crypto/rand does not fail on supported platforms
 	}
 	return in[:strings.LastIndex(in, ".")+1] + hex.EncodeToString(b[:])

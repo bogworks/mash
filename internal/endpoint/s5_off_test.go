@@ -17,7 +17,7 @@ import (
 )
 
 func TestS5Off_DiscoveryIsMains(t *testing.T) {
-	if s5Switch != nil {
+	if s5Hook() != nil {
 		t.Fatal("the S5 switch is set at the start of a 0.5.x test")
 	}
 	z := newS5Fix(t)
@@ -57,7 +57,7 @@ func TestS5Off_DiscoveryIsMains(t *testing.T) {
 }
 
 func TestS5Off_PromptDiscoveryWithoutARecord(t *testing.T) {
-	if s5Switch != nil {
+	if s5Hook() != nil {
 		t.Fatal("the S5 switch is set at the start of a 0.5.x test")
 	}
 	z := newS5Fix(t)

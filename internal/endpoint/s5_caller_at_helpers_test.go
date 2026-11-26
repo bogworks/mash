@@ -15,12 +15,13 @@ package endpoint
 //     captured bytes, and compares everything else byte for byte (amendment 5, N8);
 //   - main's discovery verification (REQ-016): a registration is accepted only when its id_sig verifies and its
 //     prompt subject, address, account, user_nkey and owner agree with env.Directory's record, through the S5 switch
-//     (s5Switch, set by newS5Main for the test and restored with t.Cleanup);
+//     (s5Switch, atomic; set by newS5Main for the test and restored with t.Cleanup);
 //   - the presence window of main (PresenceQuiet, PresenceCap), which env.Window does not shorten.
 //
-// The random tokens are not injected: the tests fix crypto/rand for the whole process with
-// testing/cryptotest.SetGlobalRandom, which is "the fixed test random source" of REQ-015 and the replaced entropy
-// source of AT-016, applied to main's real path.
+// The random tokens are not injected: the tests swap the token seam of main's own secretInbox
+// (tokenRand, service.go; default crypto/rand.Reader), "the fixed test random source" of REQ-015 and the replaced
+// entropy source of AT-016, applied to main's real path. They never replace crypto/rand's global source: the embedded
+// nats-server reads it, and that races under -race.
 //
 // Contract of each s5Caller method is on the interface below.
 
@@ -56,7 +57,7 @@ import (
 // The seam.
 
 // s5Inputs are the deterministic inputs of REQ-015 that the constructor takes. (The random source is the process's
-// crypto/rand, fixed by the test with cryptotest.SetGlobalRandom.)
+// crypto/rand, seeded by the test through the token seam.)
 type s5Inputs struct {
 	Now   func() time.Time // the clock of the signed header; nil means time.Now
 	Nonce string           // the nonce of the signed header; empty means a fresh one
