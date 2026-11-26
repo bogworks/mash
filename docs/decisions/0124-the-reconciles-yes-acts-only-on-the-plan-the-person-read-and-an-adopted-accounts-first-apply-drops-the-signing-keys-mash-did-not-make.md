@@ -1,10 +1,11 @@
 ---
-status: accepted
+status: superseded by ADR-0131
 date: 2026-11-14
 decision-makers: the mash coordinator (mash-lead), for the mechanism; the signer change agreed with the core lane, which owns `policy serve`
 ---
 
 # The reconcile's --yes acts only on the plan the person read, and an adopted account's first apply drops the signing keys mash did not make
+Superseded by [0131](0131-mash-stands-alone-everything-works-without-homerange-or-any-upward-dependency-first.md).
 
 ## Context and Problem Statement
 

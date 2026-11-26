@@ -1,32 +1,29 @@
 ---
-status: proposed
+status: accepted
 date: 2026-11-15
 decision-makers: Randy Bias (mash maintainer)
 ---
 
-# mash stands alone: everything works without homerange or any upward dependency, first
+# mash stands alone: everything works without any layer above it, first
 
 ## Context and Problem Statement
 
 mash is used on its own and, in larger deployments, under a system that runs it for many people. Over the v0.5.0
 work, the policy path was built the other way round: the only way to apply a list set was a service that took list
-sets from a key-value bucket shared with an outside range manager, under an adoption lock
+sets from a key-value bucket shared with an outside manager, under an adoption lock
 ([ADR 0111](0111-an-adopted-account-takes-its-list-sets-only-from-its-submitter-and-mashctl-refuses-every-other-policy-change.md)).
 The engine under it (compile, check, size, generations, the applied gate, rotation, revocation, the issue record) is
-generic, but a solo developer with one NATS server and `mashctl` had no way to apply a list set at all. The maintainer's rule (2026-11-15), verbatim:
+generic, but a solo developer with one NATS server and `mashctl` had no way to apply a list set at all. The
+maintainer's rule (2026-11-15): mash works alone; a layer above may wrap `mashctl` through its documented interface.
 
-> "ALL functionality works first for mash in isolation WITHOUT homerange or any other upwards dependency. You MUST NOT
-> implement functionality that has been designed for homerange without first having the functionality work without
-> homerange."
+In more detail:
 
-Restated:
-
-* Everything works for mash in isolation, without homerange or any other upward dependency, before anything is
-  implemented that was designed for homerange.
-* homerange knows mash and wraps `mashctl`; mash does not know homerange.
+* Everything works for mash in isolation, with no upward dependency, before anything is implemented that was designed
+  for a layer above mash.
+* A layer above mash may know mash and wrap `mashctl`; mash does not know any layer above it.
 * A solo developer runs everything locally with a human `mashctl`. A large deployment drives `mashctl` with JSON in and
   out. `mashctl` is not assumed to run on the same host as mash.
-* A per-group agent on each host is the wrong place for account-wide policy.
+* An agent that runs on each host for one group of endpoints is the wrong place for account-wide policy.
 
 This is a standing decision, so it is recorded.
 
@@ -56,7 +53,7 @@ For the policy design:
 
 Chosen: for v0.5.0, option (b); for the policy design, standalone first.
 
-1. **No upward dependency.** mash does not read, name or depend on homerange, a wrangler or any other system above it. A name of such a system in mash's code or in a permission decision is a defect. (This restates the
+1. **No upward dependency.** mash does not read, name or depend on any system above it. A name of such a system in mash's code or in a permission decision is a defect. (This restates the
    boundary of the messaging-policy contract: mash does not know the roles an outside system gives its members.)
 2. **Standalone first.** A feature whose purpose is an outside system's use is implemented only after the same
    capability works with nothing above mash: one NATS server, a human at `mashctl` holding the operator keys, applying
@@ -118,6 +115,9 @@ to decide; nothing here presumes them.
 * Bad, because the standalone driver is new work with its own live proof.
 
 ## More Information
+
+This decision supersedes ADRs 0104, 0111, 0112, 0119, 0121 and 0124: the adoption, the signed list-set intake, the
+issue service and the adopted-account reconcile they accepted are withdrawn, under rule 5.
 
 The assessment that sizes the work is a scratchpad document (standalone-inventory). Related: ADR 0111 (adoption),
 ADR 0104 (issue service), ADR 0112 (intake), ADR 0121 (reconcile), ADR 0129 (the v0.5.0 decision). The messaging-policy contract (draft-3, under

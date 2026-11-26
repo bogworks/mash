@@ -1,10 +1,11 @@
 ---
-status: accepted
+status: superseded by ADR-0131
 date: 2026-11-14
 decision-makers: the mash coordinator (mash-lead), for the mechanism, under the maintainer's adoption plan in ADR 0111; built by the sdk lane
 ---
 
 # An adopted account is reconciled by an operator command after its first list set, dry run first
+Superseded by [0131](0131-mash-stands-alone-everything-works-without-homerange-or-any-upward-dependency-first.md).
 
 ## Context and Problem Statement
 

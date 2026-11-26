@@ -1,10 +1,11 @@
 ---
-status: accepted
+status: superseded by ADR-0131
 date: 2026-11-13
 decision-makers: Randy Bias (mash maintainer)
 ---
 
 # The list-set intake reads the adoption marker every time, never applies a refused document and completes a rotation only after a successful apply
+Superseded by [0131](0131-mash-stands-alone-everything-works-without-homerange-or-any-upward-dependency-first.md).
 
 ## Context and Problem Statement
 

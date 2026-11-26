@@ -1,10 +1,11 @@
 ---
-status: accepted
+status: superseded by ADR-0131
 date: 2026-11-14
 decision-makers: Randy Bias (mash maintainer); the bug was found by the mash coordinator preparing the v0.5.0 review
 ---
 
 # A submission with the content in force is refused as unchanged and uses no generation
+Superseded by [0131](0131-mash-stands-alone-everything-works-without-homerange-or-any-upward-dependency-first.md).
 
 ## Context and Problem Statement
 
