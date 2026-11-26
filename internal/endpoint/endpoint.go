@@ -23,6 +23,7 @@ import (
 
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/sap"
+	"github.com/bogworks/mash/internal/sapsdk"
 	"github.com/bogworks/mash/internal/spool"
 	"github.com/bogworks/mash/internal/store"
 )
@@ -84,7 +85,8 @@ type Endpoint struct {
 	key     string
 	nc      *nats.Conn
 	js      jetstream.JetStream
-	id      sap.Identity
+	id      sap.Identity    // the legacy key, for the instance, in-reply-to, via and urgent proofs
+	sid     sapsdk.Identity // the same key through the SDK: the sender header and the registration signature
 	subj    sap.Subjects
 	self    store.Record
 	log     *log.Logger
@@ -307,11 +309,25 @@ func credsReadError(path string, err error) error {
 }
 
 func readIdentity(path string) (sap.Identity, error) {
+	id, _, err := readIdentities(path)
+	return id, err
+}
+
+// readIdentities is the identity of the creds file at path in both forms: the legacy one and the SDK one.
+func readIdentities(path string) (sap.Identity, sapsdk.Identity, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return sap.Identity{}, credsReadError(path, err)
+		return sap.Identity{}, sapsdk.Identity{}, credsReadError(path, err)
 	}
-	return sap.IdentityFromCredsAt(path, raw)
+	id, err := sap.IdentityFromCredsAt(path, raw)
+	if err != nil {
+		return sap.Identity{}, sapsdk.Identity{}, err
+	}
+	sid, err := sapsdk.IdentityFromCredsAt(path, raw)
+	if err != nil {
+		return sap.Identity{}, sapsdk.Identity{}, err
+	}
+	return id, sid, nil
 }
 
 // connect is nats.Connect bounded by ctx: the dial's timeout is what is left of ctx's deadline, and a connect that
@@ -435,7 +451,7 @@ func OpenClientWith(ctx context.Context, cfg config.Config, opts ClientOptions) 
 	if err := config.CheckCredsMode(cfg.Creds); err != nil {
 		return nil, err
 	}
-	id, err := readIdentity(cfg.Creds)
+	id, sid, err := readIdentities(cfg.Creds)
 	if err != nil {
 		return nil, err
 	}
@@ -470,7 +486,7 @@ func OpenClientWith(ctx context.Context, cfg config.Config, opts ClientOptions) 
 	}
 	refs.flush = nc.FlushWithContext
 	refs.publish = func(_ context.Context, subject string) error { return nc.Publish(subject, nil) }
-	e := &Endpoint{cfg: cfg, ident: ident, key: key, nc: nc, id: id, subj: subj,
+	e := &Endpoint{cfg: cfg, ident: ident, key: key, nc: nc, id: id, sid: sid, subj: subj,
 		log: log.New(os.Stderr, "mash["+cfg.DisplayName()+"]: ", 0), instance: nuid.Next(), waking: newWakingTracker(), relay: newRelayTracker(cfg.RelayWindow), refusals: refs, connHook: hook,
 		failBeforeAck: failpointBeforeAck(os.Getenv("MASH_SERVE_FAILPOINT")), spoolReq: make(chan spoolBind),
 		dir: map[string]store.Record{}, byUser: map[string]string{}, lastSeen: map[string]time.Time{}}
@@ -982,7 +998,7 @@ func (e *Endpoint) Dropped() int64 { return e.dropped.Load() }
 func (e *Endpoint) Conn() *nats.Conn { return e.nc }
 
 // Identity is this endpoint's signing identity.
-func (e *Endpoint) Identity() sap.Identity { return e.id }
+func (e *Endpoint) Identity() sapsdk.Identity { return e.sid }
 
 // skewOf is the server's clock minus the local one, the server's time being taken as read at the midpoint of the
 // request (t0 to t1). A zero server time (an old server that sends none) is no reading.

@@ -16,6 +16,7 @@ import (
 
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/sap"
+	"github.com/bogworks/mash/internal/sapsdk"
 	"github.com/bogworks/mash/internal/sapsdk/discovery"
 	"github.com/bogworks/mash/internal/store"
 )
@@ -90,8 +91,12 @@ func (c *s5Main) Prompt(ctx context.Context, target sap.Address, text string) ([
 	if err != nil {
 		return nil, err
 	}
+	id, err := sapsdk.IdentityFromCredsAt("asker.creds", c.env.Creds) // Prompt takes the SDK identity (W1)
+	if err != nil {
+		return nil, err
+	}
 	var out strings.Builder
-	if err := Prompt(ctx, c.env.NC, c.env.Identity, c.env.Name, subj, text, &out); err != nil {
+	if err := Prompt(ctx, c.env.NC, id, c.env.Name, subj, text, &out); err != nil {
 		return nil, err
 	}
 	return []string{out.String()}, nil

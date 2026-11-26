@@ -380,6 +380,9 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 	if errors.As(err, &skipErr) && args[0] != "hook" && !report { // the removed names or a bad value: a configuration error, exit 1
 		return cliframe.Report(stdout, stderr, cliframe.Failf("%s", skipErr.Msg()).WithHint("mash doctor"), jsonOut)
 	}
+	if args[0] == "prompt" && len(args) < 3 { // a usage error is exit 2 whatever the configuration says, as cli words it
+		return cliframe.Report(stdout, stderr, cliframe.Usagef("mash prompt needs <to> and the message text").WithHint("mash prompt --help"), false)
+	}
 	if cfgFail != nil {
 		if slices.Contains([]string{"send", "who", "inbox", "read"}, args[0]) {
 			mk := func(context.Context) (*cmdcore.Env, error) { return nil, cfgFail }
