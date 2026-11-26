@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/bogworks/mash/internal/release"
@@ -14,8 +16,9 @@ import (
 
 // The unlinked step (standing order 16): no policy-engine package is linked into the released programs. internal/policy,
 // the size constants, is allowed; every other package of the engine is refused wherever it appears in the dependencies
-// of cmd/mash or cmd/mashctl. The same step refuses the synadia-agents.go identity, caller and host packages and mash's
-// internal/sapsdk (with subpackages) in 0.5.x; the SDK root package is allowed.
+// of cmd/mash or cmd/mashctl. The same step refuses the synadia-agents.go caller and host packages (not linked before
+// S5). internal/sapsdk and the SDK identity package are refused too, in every candidate below 0.6.0 (REQ-009): they
+// are allowed only from the switch-on release, 0.6.0 or later. The SDK root package is always allowed.
 
 // policyPrefix: every package whose path starts with it and is longer than it is refused (internal/policydoc,
 // internal/policyfoo, internal/policy/sub). internal/policy itself is allowed.
@@ -35,21 +38,40 @@ var policyNamedElsewhere = []string{
 // is allowed. Each entry matches the package and its subpackages, by whole path: .../identity/x is refused, while
 // .../identityx and .../synadia-agents.go itself are not.
 var sdkRefused = []string{
-	"github.com/bogworks/synadia-agents.go/identity",
 	"github.com/bogworks/synadia-agents.go/caller",
 	"github.com/bogworks/synadia-agents.go/host",
 }
 
-// moduleRefused lists, relative to the candidate's module, the new SDK adapter package (S4) no 0.5.x release links.
-// It matches the package and its subpackages.
-var moduleRefused = []string{
+// switchOnRefused lists the packages refused in every candidate below the switch-on release: mash's own
+// internal/sapsdk (module-relative) and the SDK identity package (full import path), each with its subpackages.
+var switchOnRefused = []string{
 	"internal/sapsdk",
+	"github.com/bogworks/synadia-agents.go/identity",
+}
+
+var semverRE = regexp.MustCompile(`^v?([0-9]+)\.([0-9]+)\.([0-9]+)(?:[-+].*)?$`)
+
+// switchedOn reports whether version is 0.6.0 or later; a pre-release or build suffix does not change the answer.
+// An unparseable version is not switched on (fail closed).
+func switchedOn(version string) bool {
+	m := semverRE.FindStringSubmatch(version)
+	if m == nil {
+		return false
+	}
+	major, err1 := strconv.Atoi(m[1])
+	minor, err2 := strconv.Atoi(m[2])
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	return major > 0 || minor >= 6
 }
 
 // linkedPolicyPackages returns, sorted and without duplicates, the refused packages named in `go list -deps` output:
-// engine and SDK-adapter packages of module as module-relative paths, SDK packages as full import paths. module is the
-// candidate's own module path, without a trailing slash.
-func linkedPolicyPackages(module, listOutput string) []string {
+// engine packages of module as module-relative paths, SDK packages as full import paths. module is the
+// candidate's own module path, without a trailing slash. version is the candidate's N.N.N: below 0.6.0 (or unparseable)
+// internal/sapsdk and the SDK identity package are refused as well.
+func linkedPolicyPackages(module, version, listOutput string) []string {
+	refuseSwitchOn := !switchedOn(version)
 	prefix := module + "/"
 	seen := map[string]bool{}
 	var out []string
@@ -58,10 +80,10 @@ func linkedPolicyPackages(module, listOutput string) []string {
 		name := path
 		if rel, ok := strings.CutPrefix(path, prefix); ok {
 			name = rel
-			if !isPolicyPackage(rel) && !matchesAny(rel, moduleRefused) {
+			if !isPolicyPackage(rel) && !(refuseSwitchOn && matchesAny(rel, switchOnRefused)) {
 				continue
 			}
-		} else if !matchesAny(path, sdkRefused) {
+		} else if !matchesAny(path, sdkRefused) && !(refuseSwitchOn && matchesAny(path, switchOnRefused)) {
 			continue
 		}
 		if !seen[name] {
@@ -85,11 +107,11 @@ func matchesAny(path string, list []string) bool {
 
 // refusalReason says why a refused package may not be linked.
 func refusalReason(pkg string) string {
-	switch {
-	case matchesAny(pkg, sdkRefused):
-		return "the SDK identity, caller and host packages are not part of any 0.5.x release"
-	case matchesAny(pkg, moduleRefused):
-		return "the SAP SDK adapter is not part of any 0.5.x release"
+	if matchesAny(pkg, switchOnRefused) {
+		return "internal/sapsdk and the SDK identity package are not linked before 0.6.0"
+	}
+	if matchesAny(pkg, sdkRefused) {
+		return "the SDK caller and host packages are not part of any 0.5.x release"
 	}
 	return "the policy engine is not part of any 0.5.x release"
 }
@@ -198,7 +220,7 @@ func policyUnlinkedStep(ctx context.Context, o Options, x string) error {
 		if err != nil {
 			return err
 		}
-		links = append(links, targetLinks{t.GOOS + "/" + t.GOARCH, linkedPolicyPackages(module, out)})
+		links = append(links, targetLinks{t.GOOS + "/" + t.GOARCH, linkedPolicyPackages(module, o.Version, out)})
 	}
 	if s := describeLinked(links); s != "" {
 		return fmt.Errorf("refused packages are linked into the released programs (standing order 16): %s; %s", s, describeReasons(links))
