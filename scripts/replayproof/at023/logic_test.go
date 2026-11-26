@@ -166,3 +166,16 @@ func TestKnownIssueCheck(t *testing.T) {
 		}
 	}
 }
+
+func TestOwnerToken(t *testing.T) {
+	for _, ok := range []string{"acme", "zeta", "a-b_9"} {
+		if !ownerRE.MatchString(ok) {
+			t.Errorf("%q should be accepted", ok)
+		}
+	}
+	for _, bad := range []string{"", "a.b", "a b", "a>", "a*", "a\n"} {
+		if ownerRE.MatchString(bad) {
+			t.Errorf("%q should be refused", bad)
+		}
+	}
+}

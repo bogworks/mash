@@ -42,7 +42,6 @@ import (
 )
 
 const (
-	owner = "acme"
 	// replyWait is how long a replay waits for the first chunk before the result is "no reply".
 	replyWait = 5 * time.Second
 	// httpTimeout bounds one download of a release file.
@@ -54,6 +53,9 @@ func releaseBase(repo string) string { return "https://github.com/" + repo + "/r
 
 var repoRE = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 var commitRE = regexp.MustCompile(`^[0-9a-f]{40}$`)
+
+// ownerRE is one subject token: the owner is part of every inbox subject.
+var ownerRE = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 var versionRE = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
 
 // logger writes the human log to stderr and keeps it for run.log.
@@ -123,6 +125,7 @@ type Record struct {
 	AT           string      `json:"at"`
 	Req          string      `json:"req"`
 	Venue        string      `json:"venue"`
+	Owner        string      `json:"owner"`
 	StartedAt    time.Time   `json:"started_at"`
 	FinishedAt   time.Time   `json:"finished_at"`
 	Environment  string      `json:"environment_lifecycle"`
@@ -152,9 +155,10 @@ func run() int {
 	repo := flag.String("release-repo", "bogworks/mash", "the GitHub repository OWNER/REPO whose releases hold the oracle")
 	knownVerified := flag.String("known-issue-verified", "", "text from the launcher saying it confirmed on the host that the -known-issue entry exists and carries the label; empty means form only")
 	venue := flag.String("venue", "", "a line describing where this runs (container image, VM), for the record")
+	ownerFlag := flag.String("owner", "acme", "the SAP owner of the proof's endpoints")
 	flag.Parse()
-	if *src == "" || *outDir == "" || !commitRE.MatchString(*commit) || !versionRE.MatchString(*version) || !versionRE.MatchString(*oracleVer) || !repoRE.MatchString(*repo) {
-		fmt.Fprintln(os.Stderr, "usage: at023 -src <clone> -commit <40 hex> -version X.Y.Z -oracle-version X.Y.Z -out <dir> [-work dir] [-known-issue URL] [-known-issue-verified text] [-release-repo OWNER/REPO] [-venue text]")
+	if *src == "" || *outDir == "" || !commitRE.MatchString(*commit) || !versionRE.MatchString(*version) || !versionRE.MatchString(*oracleVer) || !repoRE.MatchString(*repo) || !ownerRE.MatchString(*ownerFlag) {
+		fmt.Fprintln(os.Stderr, "usage: at023 -src <clone> -commit <40 hex> -version X.Y.Z -oracle-version X.Y.Z -out <dir> [-work dir] [-known-issue URL] [-known-issue-verified text] [-release-repo OWNER/REPO] [-venue text] [-owner TOKEN]")
 		return 2
 	}
 	if err := os.MkdirAll(*outDir, 0o755); err != nil {
@@ -173,7 +177,7 @@ func run() int {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
 	}
-	rec := &Record{AT: "AT-023", Req: "REQ-022", Venue: *venue, StartedAt: time.Now().UTC(), Commit: *commit, ReleaseRepo: *repo, Arch: runtime.GOARCH,
+	rec := &Record{AT: "AT-023", Req: "REQ-022", Venue: *venue, Owner: *ownerFlag, StartedAt: time.Now().UTC(), Commit: *commit, ReleaseRepo: *repo, Arch: runtime.GOARCH,
 		KnownIssue: NewKnownIssue(*known), OracleSource: releaseBase(*repo) + "v" + *oracleVer + "/",
 		Environment: "each build gets its own NATS server (operator mode, generated keys) and state directories under " + wd +
 			", created at the start of the build's run and stopped at its end; the launcher creates and destroys the container",
@@ -512,7 +516,7 @@ func (s *session) stop() {
 }
 
 // registered reports whether an endpoint answers $SRV.INFO with the prompt subject.
-func registered(nc *nats.Conn, subject string) bool {
+func registered(nc *nats.Conn, owner, subject string) bool {
 	// An endpoint may publish only to the inboxes of its own owner, so the answers are asked for there.
 	inbox := "_INBOX." + owner + ".probe." + randHex()
 	sub, err := nc.SubscribeSync(inbox)
@@ -542,10 +546,10 @@ func registered(nc *nats.Conn, subject string) bool {
 	return false
 }
 
-func waitRegistered(nc *nats.Conn, subject string, want bool, d time.Duration) bool {
+func waitRegistered(nc *nats.Conn, owner, subject string, want bool, d time.Duration) bool {
 	end := time.Now().Add(d)
 	for time.Now().Before(end) {
-		if registered(nc, subject) == want {
+		if registered(nc, owner, subject) == want {
 			return true
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -569,7 +573,7 @@ func copyHeader(h nats.Header) map[string][]string {
 
 // replayOnce publishes a copy of the captured message with a fresh reply inbox and records what comes back. When the
 // endpoint accepts it, the session answers it so the stream ends.
-func replayOnce(nc *nats.Conn, c Capture, s *session, label string) (Replay, error) {
+func replayOnce(nc *nats.Conn, owner string, c Capture, s *session, label string) (Replay, error) {
 	inbox := "_INBOX." + owner + ".capture." + randHex()
 	sub, err := nc.SubscribeSync(inbox)
 	if err != nil {
@@ -638,7 +642,7 @@ func runBuild(rec *Record, b *Build, bin, dir string) error {
 		return err
 	}
 	names := []kit.Name{{Label: "alice", Group: "dev", Instance: "alice"}, {Label: "bob", Group: "dev", Instance: "bob"}}
-	k, err := kit.NewOwner(dir, bin, b.Version, owner, names)
+	k, err := kit.NewOwner(dir, bin, b.Version, rec.Owner, names)
 	if err != nil {
 		return fmt.Errorf("server and endpoints: %w", err)
 	}
@@ -658,7 +662,7 @@ func runBuild(rec *Record, b *Build, bin, dir string) error {
 	// The capture identity: test-only. It may read Alice's prompt subject and publish to it, and read its own inboxes.
 	var perms jwt.Permissions
 	perms.Pub.Allow.Add(subj)
-	perms.Sub.Allow.Add(subj, "_INBOX."+owner+".capture.>")
+	perms.Sub.Allow.Add(subj, "_INBOX."+k.E.Owner+".capture.>")
 	creds, _, err := k.E.MintUserWith(perms, nil)
 	if err != nil {
 		return fmt.Errorf("capture identity: %w", err)
@@ -686,7 +690,7 @@ func runBuild(rec *Record, b *Build, bin, dir string) error {
 	if err := alice.handshake(); err != nil {
 		return fmt.Errorf("alice: %w", err)
 	}
-	if !waitRegistered(k.Conn, subj, true, 20*time.Second) {
+	if !waitRegistered(k.Conn, k.E.Owner, subj, true, 20*time.Second) {
 		return errors.New("alice's prompt endpoint never registered")
 	}
 	lg.f("alice's session is up (pid %d), prompt subject %s", alice.pid, subj)
@@ -748,7 +752,7 @@ func runBuild(rec *Record, b *Build, bin, dir string) error {
 
 	// Control: the same bytes to the running endpoint, whose nonce memory is intact.
 	b.Timings.ControlSentAt = time.Now().UTC()
-	if b.Control, err = replayOnce(cnc, b.Capture, alice, "control (no restart)"); err != nil {
+	if b.Control, err = replayOnce(cnc, k.E.Owner, b.Capture, alice, "control (no restart)"); err != nil {
 		return err
 	}
 
@@ -757,7 +761,7 @@ func runBuild(rec *Record, b *Build, bin, dir string) error {
 	b.Timings.OldPID = alice.pid
 	alice.stop()
 	b.Timings.OldProcessGone = time.Now().UTC()
-	if !waitRegistered(k.Conn, subj, false, 15*time.Second) {
+	if !waitRegistered(k.Conn, k.E.Owner, subj, false, 15*time.Second) {
 		return errors.New("alice's prompt endpoint stayed registered after her session stopped")
 	}
 	alice2, err := startSession(k, "alice", bin, dir, 2)
@@ -768,14 +772,14 @@ func runBuild(rec *Record, b *Build, bin, dir string) error {
 	if err := alice2.handshake(); err != nil {
 		return fmt.Errorf("alice (restarted): %w", err)
 	}
-	if !waitRegistered(k.Conn, subj, true, 20*time.Second) {
+	if !waitRegistered(k.Conn, k.E.Owner, subj, true, 20*time.Second) {
 		return errors.New("alice's prompt endpoint never registered after the restart")
 	}
 	b.Timings.NewPID = alice2.pid
 	b.Timings.RestartDone = time.Now().UTC()
 	b.PIDs = fmt.Sprintf("before the restart %d, after %d", b.Timings.OldPID, b.Timings.NewPID)
 	lg.f("alice restarted: pid %d -> %d, registered again %.2f s after the stop began", b.Timings.OldPID, b.Timings.NewPID, b.Timings.RestartDone.Sub(b.Timings.RestartBegan).Seconds())
-	if b.Replay, err = replayOnce(cnc, b.Capture, alice2, "after restart"); err != nil {
+	if b.Replay, err = replayOnce(cnc, k.E.Owner, b.Capture, alice2, "after restart"); err != nil {
 		return err
 	}
 	b.Timings.ReplaySentAt = b.Replay.SentAt
