@@ -288,7 +288,7 @@ func TestS5Today_ReplyInboxIsOneToken(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	if err := Prompt(s5Ctx(t), c.nc, identity(t, z.creds[z.alice.Flat()]), z.alice.Flat(), subj, "ping", &out); err != nil || out.String() != "pong from bob" {
+	if err := Prompt(s5Ctx(t), c.nc, sdkIdentity(t, z.creds[z.alice.Flat()]), z.alice.Flat(), subj, "ping", &out); err != nil || out.String() != "pong from bob" {
 		t.Fatalf("prompt: %q, %v", out.String(), err)
 	}
 	d, p := tp.waitRequestsFrom(t, z.alice, 1, 1)

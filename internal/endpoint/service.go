@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -20,6 +21,7 @@ import (
 	"github.com/nats-io/nuid"
 
 	"github.com/bogworks/mash/internal/sap"
+	"github.com/bogworks/mash/internal/sapsdk"
 )
 
 // Version is the mash version, reported as the SAP service version. A release build stamps it by ldflag; everything
@@ -125,7 +127,7 @@ type service struct {
 	svc      micro.Service
 	mu       sync.Mutex
 	prompts  map[string]*openPrompt
-	nonces   sap.NonceSet
+	nonces   sapsdk.NonceSet
 	quit     chan struct{} // closed by stop: ends the heartbeat
 	stopOnce sync.Once
 }
@@ -234,7 +236,7 @@ func (e *Endpoint) publishHeartbeat() {
 	}
 	_ = json.Unmarshal(payload, &hb)
 	ts, _ := time.Parse(time.RFC3339, hb.TS)
-	h, err := e.id.Sign(e.subj.HB, payload, e.key, ts, "")
+	h, err := e.sid.Sign(e.subj.HB, payload, e.key, ts, "")
 	if err != nil {
 		e.log.Printf("heartbeat: %v", err)
 		return
@@ -250,11 +252,11 @@ func (e *Endpoint) publishHeartbeat() {
 // StartService registers this endpoint as a SAP 0.3 agent (spec 7.4) and
 // starts the signed heartbeat. Prompts that pass verification go to onPrompt.
 func (e *Endpoint) StartService(ctx context.Context, onPrompt func(PromptEvent)) error {
-	idSig, err := e.id.IDSig(sap.AgentName, e.ident.Owner, e.subj.Prompt)
+	idSig, err := e.sid.IDSig(sap.AgentName, e.ident.Owner, e.subj.Prompt)
 	if err != nil {
 		return err
 	}
-	s := &service{prompts: map[string]*openPrompt{}, nonces: sap.NewNonceSet(2 * sap.LiveSkew), quit: make(chan struct{})}
+	s := &service{prompts: map[string]*openPrompt{}, nonces: sapsdk.NewNonceSet(2 * sapsdk.LiveSkew), quit: make(chan struct{})}
 	svc, err := micro.AddService(e.nc, micro.Config{
 		Name:        sap.ServiceName,
 		Version:     CurrentVersion(),
@@ -287,8 +289,9 @@ func (e *Endpoint) StartService(ctx context.Context, onPrompt func(PromptEvent))
 		return fmt.Errorf("mash: prompt endpoint: %w", err)
 	}
 	if err := svc.AddEndpoint("status", micro.HandlerFunc(func(r micro.Request) {
-		if _, tr := sap.VerifyLive(r.Headers().Get(sap.HeaderName), r.Subject(), r.Data(), time.Now(), s.nonces); tr != sap.TrustVerified && tr != sap.TrustAbsent {
-			e.log.Printf("status probe with a %s sender header", tr)
+		// Listed senders only record a nonce, as on the prompt path (REQ-020).
+		if res := sapsdk.VerifyLive(r.Headers().Values(sap.HeaderName), r.Subject(), r.Data(), time.Now(), s.nonces, e.listed); res.Trust != sap.TrustVerified && res.Trust != sap.TrustAbsent {
+			e.log.Printf("status probe with a %s sender header", res.Trust)
 		}
 		_ = r.Respond(e.heartbeat())
 	}), micro.WithEndpointSubject(e.subj.Status), micro.WithEndpointQueueGroup(sap.QueueGroup)); err != nil {
@@ -350,22 +353,32 @@ func promptText(data []byte) (string, error) {
 	return *env.Prompt, nil
 }
 
+// listed is the directory check of the live path: the sender's key belongs to an endpoint of this owner.
+func (e *Endpoint) listed(user, _ string) bool {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.byUser[user] != ""
+}
+
+// notSent words a signing refusal as TO-8 draws it: "not sent: could not sign: <class>". The cause is mash's class
+// words, never SDK text; nothing was sent.
+func notSent(err error) error { return fmt.Errorf("not sent: %w", err) }
+
 // handlePrompt serves one prompt for the service s it was registered with, never the endpoint's current one.
 func (e *Endpoint) handlePrompt(r micro.Request, s *service, onPrompt func(PromptEvent)) {
 	reply := r.Reply()
 	if reply == "" {
 		return
 	}
-	h, tr := sap.VerifyLive(r.Headers().Get(sap.HeaderName), r.Subject(), r.Data(), time.Now(), s.nonces)
-	switch tr {
-	case sap.TrustMalformed:
-		e.end(reply, "400", "malformed Agent-Sender header")
-		return
-	case sap.TrustVerified:
-	default:
-		e.end(reply, "401", "a signed Agent-Sender header is required (min_sender_trust=signed)")
+	// REQ-020: verify without recording, check the directory, and only then record the nonce. Every Agent-Sender
+	// value goes in (REQ-005); the reply status and text are the SDK adapter's (400 malformed, 401 not verified or over
+	// the nonce cap, 403 not listed).
+	res := sapsdk.VerifyLive(r.Headers().Values(sap.HeaderName), r.Subject(), r.Data(), time.Now(), s.nonces, e.listed)
+	if res.Outcome != sapsdk.Admitted {
+		e.end(reply, strconv.Itoa(res.Status()), res.Reason())
 		return
 	}
+	h := res.Header
 	e.mu.RLock()
 	from := e.byUser[h.User]
 	e.mu.RUnlock()
@@ -411,7 +424,7 @@ func (e *Endpoint) handlePrompt(r micro.Request, s *service, onPrompt func(Promp
 			}
 		}
 	}()
-	onPrompt(PromptEvent{RequestID: id, From: from, Trust: tr, Text: text})
+	onPrompt(PromptEvent{RequestID: id, From: from, Trust: res.Trust, Text: text})
 }
 
 // forget removes a finished prompt from the open set.
@@ -504,7 +517,7 @@ func discoverSubject(ctx context.Context, nc *nats.Conn, want, name string) (str
 
 // Prompt sends a signed live prompt to subject and writes the streamed reply
 // to out (SAP §5-§6, §13). It fails on an error chunk or 60 s of silence.
-func Prompt(ctx context.Context, nc *nats.Conn, id sap.Identity, name, subject, text string, out io.Writer) error {
+func Prompt(ctx context.Context, nc *nats.Conn, id sapsdk.Identity, name, subject, text string, out io.Writer) error {
 	if len(text) > MaxPromptBytes {
 		return fmt.Errorf("mash: prompt refused: %s %s (this one is %d)", PromptTooLargeCode, promptTooLarge, len(text))
 	}
@@ -512,7 +525,7 @@ func Prompt(ctx context.Context, nc *nats.Conn, id sap.Identity, name, subject, 
 }
 
 // promptSend is Prompt without the size pre-check, so a test can send what the service must refuse.
-func promptSend(ctx context.Context, nc *nats.Conn, id sap.Identity, name, subject, text string, out io.Writer) error {
+func promptSend(ctx context.Context, nc *nats.Conn, id sapsdk.Identity, name, subject, text string, out io.Writer) error {
 	inbox := secretInbox(nc)
 	sub, err := nc.SubscribeSync(inbox)
 	if err != nil {
@@ -521,7 +534,7 @@ func promptSend(ctx context.Context, nc *nats.Conn, id sap.Identity, name, subje
 	defer sub.Unsubscribe()
 	m, err := promptMsg(id, name, subject, inbox, text)
 	if err != nil {
-		return err
+		return notSent(err)
 	}
 	if err := nc.PublishMsg(m); err != nil {
 		return err
@@ -563,7 +576,7 @@ func promptSend(ctx context.Context, nc *nats.Conn, id sap.Identity, name, subje
 }
 
 // promptMsg is the signed request a prompt sends: the text as the payload and the Agent-Sender header.
-func promptMsg(id sap.Identity, name, subject, inbox, text string) (*nats.Msg, error) {
+func promptMsg(id sapsdk.Identity, name, subject, inbox, text string) (*nats.Msg, error) {
 	payload := []byte(text)
 	h, err := id.Sign(subject, payload, name, time.Now(), "")
 	if err != nil {
