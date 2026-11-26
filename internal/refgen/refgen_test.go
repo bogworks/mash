@@ -565,8 +565,8 @@ func TestCloseReleaseRendersAndUnknownFails(t *testing.T) {
 	if !strings.Contains(string(pages["mash.md"]), "[`mash future`]") {
 		t.Error("the index lacks a close-release command")
 	}
-	bad := patchedFixture(t, "mash.json", `{"name":"x-release","value":"0.6.0"}`, `{"name":"x-release","value":"0.5.10"}`)
-	if _, err := Generate(bad); err == nil || !strings.Contains(err.Error(), `release "0.5.10"`) {
+	bad := patchedFixture(t, "mash.json", `{"name":"x-release","value":"0.6.0"}`, `{"name":"x-release","value":"0.5.11"}`)
+	if _, err := Generate(bad); err == nil || !strings.Contains(err.Error(), `release "0.5.11"`) {
 		t.Errorf("unknown release: err = %v", err)
 	}
 }
