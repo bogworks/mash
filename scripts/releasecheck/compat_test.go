@@ -38,7 +38,7 @@ func fakeDownload(fail string) func(context.Context, string, string) (string, er
 			return "", errors.New("no such release")
 		}
 		p := filepath.Join(dir, "mash")
-		return p, os.WriteFile(p, []byte(fakeBinary(tag)), 0o755)
+		return p, os.WriteFile(p, []byte(fakeBinary(tag)), 0o644) // as gh writes a release asset
 	}
 }
 
@@ -60,6 +60,9 @@ func runCompat(args []string, o CompatOptions) (stdout, stderr string, code int)
 	o.Out, o.ErrOut = &so, &se
 	if o.Sums == nil {
 		o.Sums = fakeSums
+	}
+	if o.Attest == nil {
+		o.Attest = func(context.Context, string, string) error { return nil }
 	}
 	code = compatMain(args, o)
 	return so.String(), se.String(), code
@@ -656,5 +659,67 @@ func TestCompatEvidenceSatisfiesTheGate(t *testing.T) {
 	}
 	if ps := checkReceipts(exp, rs, lineSwitchOn); len(ps) != 0 {
 		t.Fatalf("the filled-in evidence is refused: %v", ps)
+	}
+}
+
+// The older binary handed to the drive is executable by its owner although the download is not, and it is attested
+// for its own tag after the checksum and before it runs.
+func TestCompatDownloadedBinaryIsExecutableAndAttested(t *testing.T) {
+	var attested []string
+	var modes []os.FileMode
+	attest := func(_ context.Context, tag, path string) error {
+		st, err := os.Stat(path)
+		if err != nil || st.Mode().Perm()&0o100 != 0 {
+			t.Errorf("attest %s: %v, mode %v: the binary must not be executable before it is attested", path, err, st)
+		}
+		attested = append(attested, tag)
+		return nil
+	}
+	drive := func(_ context.Context, w, r compatBin, c []compatMsg) ([]compatObs, error) {
+		for _, b := range []compatBin{w, r} {
+			if b.Version != "0.5.10" {
+				continue
+			}
+			st, err := os.Stat(b.Path)
+			if err != nil {
+				return nil, err
+			}
+			modes = append(modes, st.Mode().Perm())
+		}
+		return fakeDrive(nil)(nil, w, r, c)
+	}
+	_, stderr, code := runCompat([]string{"0.5.10", "0.6.0"}, CompatOptions{Download: fakeDownload(""), Attest: attest, Drive: drive})
+	if code != 0 || stderr != "" {
+		t.Fatalf("exit %d stderr %q", code, stderr)
+	}
+	if len(modes) != 2 {
+		t.Fatalf("drive saw %d older binaries", len(modes))
+	}
+	for _, m := range modes {
+		if m&0o100 == 0 {
+			t.Errorf("the older binary handed to the drive has mode %v: not executable by its owner", m)
+		}
+	}
+	if len(attested) != 2 || attested[0] != "v0.6.0" || attested[1] != "v0.5.10" {
+		t.Errorf("attested %v", attested)
+	}
+}
+
+// A binary without a verifying attestation never runs and the run could not decide (exit 4, as for a bad checksum).
+func TestCompatAttestationFailureNeverRuns(t *testing.T) {
+	ran := false
+	drive := func(context.Context, compatBin, compatBin, []compatMsg) ([]compatObs, error) {
+		ran = true
+		return nil, nil
+	}
+	attest := func(_ context.Context, tag, _ string) error {
+		if tag == "v0.5.10" {
+			return errors.New("no attestations found")
+		}
+		return nil
+	}
+	stdout, stderr, code := runCompat([]string{"0.5.10", "0.6.0"}, CompatOptions{Download: fakeDownload(""), Attest: attest, Drive: drive})
+	if code != 4 || ran || stdout != "" || !strings.Contains(stderr, "0.5.10 has no verifying build provenance attestation") {
+		t.Fatalf("exit %d ran %v stdout %q stderr %q", code, ran, stdout, stderr)
 	}
 }
