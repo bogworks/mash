@@ -2,8 +2,9 @@
 // to the candidate commit, and writes the receipt release-check reads (kind at-011), a log of every step and the
 // evidence behind each verdict.
 //
-//	at011 run -commit <full sha> -version 0.6.0 -prev 0.5.10 -out <dir> -pack <objects.pack> [-repo <url|path>] [-work <dir>] [-venue <text>]
-//	at011 finalize -out <dir> -statement <text>
+//	at011 run -commit <full sha> -version 0.6.0 -prev 0.5.10 -out <dir> -work <new absolute dir> -pack <objects.pack>
+//	          -prev-sums-sha256 <hex> [-release-repo owner/name] [-repo <url|path>] [-venue <text>]
+//	at011 finalize -out <dir> -statement <text> -container-removed=true|false
 //
 // run does everything inside the machine it runs on and must run in a throwaway one: a container (at011.sh starts it)
 // or a VM guest. It makes accounts' worth of state under -work and never touches anything outside it and the output.
@@ -52,7 +53,9 @@ func cmdRun(args []string) int {
 	fs.StringVar(&c.out, "out", "", "the output directory (receipt, log, evidence)")
 	fs.StringVar(&c.pack, "pack", "", "a git pack of the candidate commit's objects (git pack-objects --revs)")
 	fs.StringVar(&c.repo, "repo", "", "a repository to clone the candidate from, when there is no pack")
-	fs.StringVar(&c.work, "work", "", "the working directory the run makes (default $HOME/at011-work); it must not exist")
+	fs.StringVar(&c.work, "work", "", "the working directory the run makes, an absolute path; it must not exist")
+	fs.StringVar(&c.releaseRepo, "release-repo", defaultRepo, "the GitHub repository (owner/name) the previous release is read from")
+	fs.StringVar(&c.prevSumsSHA, "prev-sums-sha256", "", "the sha256 of the previous release's SHA256SUMS, as verified by `gh attestation verify` on the launching host")
 	fs.StringVar(&c.venue, "venue", "", "where the run happens, in words, for the receipt")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -61,8 +64,13 @@ func cmdRun(args []string) int {
 		fmt.Fprintln(os.Stderr, "at011 run: -commit (40 hex digits), -out, -pack or -repo are required; -prev is 0.5.10")
 		return 2
 	}
-	if c.work == "" {
-		c.work = filepath.Join(os.Getenv("HOME"), "at011-work")
+	if !filepath.IsAbs(c.work) {
+		fmt.Fprintln(os.Stderr, "at011 run: -work is required and must be an absolute path (a folder that does not exist yet)")
+		return 2
+	}
+	if !repoRE.MatchString(c.releaseRepo) {
+		fmt.Fprintf(os.Stderr, "at011 run: -release-repo %q is not owner/name\n", c.releaseRepo)
+		return 2
 	}
 	if _, err := os.Stat(c.work); err == nil {
 		fmt.Fprintf(os.Stderr, "at011 run: %s exists; the run needs a machine and a folder made for it\n", c.work)
@@ -86,7 +94,7 @@ func cmdRun(args []string) int {
 	r := &runner{cfg: c, log: &logger{w: io.MultiWriter(lf, os.Stdout)}, goos: goos, goarch: goarch,
 		pathVar: os.Getenv("PATH"), work: c.work, toolsDir: filepath.Join(c.work, "tools"),
 		personas: map[string]*persona{}, sessions: map[string]*session{}, inv: map[string]*invSet{}, evid: map[string]any{}}
-	if err := os.MkdirAll(r.work, 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(r.work, "runhome"), 0o755); err != nil {
 		fmt.Fprintln(os.Stderr, "at011:", err)
 		return 2
 	}
@@ -206,7 +214,8 @@ func (r *runner) run1() int {
 func (r *runner) receipt() (receipt.Receipt, error) {
 	rec := receipt.Receipt{Kind: receipt.KindAT011, Commit: r.cfg.commit, InstallSHA256: r.cand.installS, SumsSHA256: r.cand.sumsSHA,
 		PrevVersion: r.cfg.prev,
-		Environment: fmt.Sprintf("%s; this machine was created for this run and nothing outside it was used", r.cfg.venue)}
+		Environment: fmt.Sprintf("%s; this machine was created for this run and nothing outside it was used; the previous release was read from %s and its SHA256SUMS (sha256 %s) was attestation-verified on the launcher host",
+			r.cfg.venue, r.cfg.releaseRepo, strings.ToLower(r.cfg.prevSumsSHA))}
 	for _, n := range []string{"mash", "mashctl"} {
 		h, ok := r.cand.hashes[release.Binary{Program: n, Target: release.Target{GOOS: r.goos, GOARCH: r.goarch}}]
 		if !ok {
@@ -261,19 +270,36 @@ func (r *runner) writeEvidence(start time.Time) {
 	}
 	_ = writeJSON(filepath.Join(ev, "run.json"), map[string]any{
 		"commit": r.cfg.commit, "version": r.cfg.version, "previous": r.cfg.prev, "venue": r.cfg.venue,
+		"previous_release_repository": r.cfg.releaseRepo, "previous_sha256sums_sha256": r.cfg.prevSumsSHA,
 		"goos": runtime.GOOS, "goarch": runtime.GOARCH, "started": start.Format(time.RFC3339), "ended": time.Now().UTC().Format(time.RFC3339),
 	})
+}
+
+// finalizeReceipt adds the statement about the environment to a receipt. A receipt that says passed stays so only when
+// the environment is gone and the receipt is still well formed; otherwise it is failed.
+func finalizeReceipt(rec receipt.Receipt, statement string, removed bool) receipt.Receipt {
+	rec.Environment += "; " + statement
+	if !removed {
+		rec.Environment += "; THE ENVIRONMENT STILL EXISTS: the proof did not run in a machine destroyed after it, so this receipt is failed"
+	}
+	if rec.Result == receipt.ResultPassed && (!removed || len(rec.Problems()) > 0) {
+		rec.Result, rec.ExitStatus = receipt.ResultFailed, 1
+	}
+	return rec
 }
 
 func cmdFinalize(args []string) int {
 	fs := flag.NewFlagSet("finalize", flag.ContinueOnError)
 	out := fs.String("out", "", "the output directory of the run")
 	statement := fs.String("statement", "", "what became of the environment, in words")
+	removed := fs.Bool("container-removed", false, "the throwaway environment is gone (required: true or false); false fails the receipt")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if *out == "" || *statement == "" {
-		fmt.Fprintln(os.Stderr, "at011 finalize: -out and -statement are required")
+	given := false
+	fs.Visit(func(f *flag.Flag) { given = given || f.Name == "container-removed" })
+	if *out == "" || *statement == "" || !given {
+		fmt.Fprintln(os.Stderr, "at011 finalize: -out, -statement and -container-removed=true|false are required")
 		return 2
 	}
 	files, _ := filepath.Glob(filepath.Join(*out, "at-011-*.json"))
@@ -292,10 +318,7 @@ func cmdFinalize(args []string) int {
 			fmt.Fprintln(os.Stderr, "at011 finalize:", err)
 			return 1
 		}
-		rec.Environment += "; " + *statement
-		if rec.Result == receipt.ResultPassed && len(rec.Problems()) > 0 {
-			rec.Result, rec.ExitStatus = receipt.ResultFailed, 1
-		}
+		rec = finalizeReceipt(rec, *statement, *removed)
 		nb, err := receipt.Marshal(rec)
 		if err == nil {
 			err = os.WriteFile(f, nb, 0o644)

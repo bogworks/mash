@@ -39,7 +39,7 @@ func startMirror(dir, urlPath, caPath string) (*mirror, error) {
 	}
 	caTmpl := &x509.Certificate{
 		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "at011 run authority"},
-		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(24 * time.Hour),
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(certLife),
 		IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
 	}
 	caDER, err := x509.CreateCertificate(rand.Reader, caTmpl, caTmpl, &caKey.PublicKey, caKey)
@@ -56,7 +56,7 @@ func startMirror(dir, urlPath, caPath string) (*mirror, error) {
 	}
 	leafTmpl := &x509.Certificate{
 		SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: "127.0.0.1"},
-		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(24 * time.Hour),
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(certLife),
 		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		IPAddresses: []net.IP{net.ParseIP("127.0.0.1")}, DNSNames: []string{"localhost"},
 	}

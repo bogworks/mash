@@ -17,29 +17,19 @@ func (r *runner) upgradeOrder(s *stepCtx) []string {
 	if !s.need(err == nil, "read the upgrade page docs/compatibility.md at the candidate", "%v", err) {
 		return fallbackOrder
 	}
-	steps := pageSteps(string(b))
-	has := s.ok(len(steps) > 0, "the upgrade page has numbered steps in its Upgrading section", "%d found", len(steps))
+	steps := pageSteps(string(b), r.cfg.prev)
+	has := s.ok(len(steps) > 0, "the upgrade page has numbered steps in its \"Upgrading from "+r.cfg.prev+"\" section", "%d found", len(steps))
 	if !has {
 		s.note("falling back to the order of the 0.5.10 release notes: %s", strings.Join(fallbackOrder, "; "))
 		return fallbackOrder
 	}
 	order, unknown := orderFrom(steps)
-	s.need(len(unknown) == 0, "the runner understands every step of the page", "not understood: %v", unknown)
-	i, j := indexOf(order, actInstall), indexOf(order, actRestart)
-	s.ok(i >= 0 && j > i, "the page puts the install before the restart", "order %v", order)
-	if i < 0 || j <= i {
+	problem := orderProblem(order, unknown)
+	if !s.ok(problem == "", "the page gives all five actions (check, install, update the plugins, restart, check again), in that order, and nothing else", "%s", problem) {
+		s.note("falling back to the order of the 0.5.10 release notes: %s", strings.Join(fallbackOrder, "; "))
 		return fallbackOrder
 	}
 	return order
-}
-
-func indexOf(ss []string, x string) int {
-	for i, s := range ss {
-		if s == x {
-			return i
-		}
-	}
-	return -1
 }
 
 // step3: build and install the candidate for Alice, follow the page, REQ-023.
@@ -179,7 +169,7 @@ func (r *runner) step8(s *stepCtx) {
 	if !s.need(err == nil, "read the upgrade page", "%v", err) {
 		return
 	}
-	steps := pageSteps(string(page))
+	steps := pageSteps(string(page), r.cfg.prev)
 	s.ok(len(steps) > 0, "the upgrade page has numbered steps", "%d found", len(steps))
 	s.ok(runningRE.Match(page), "the upgrade page says an open session keeps its old version until it restarts (REQ-023)", "")
 	s.ok(oneWayRE.Match(page), "the upgrade page carries the one-way line (no way back)", "")

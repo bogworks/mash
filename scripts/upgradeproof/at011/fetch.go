@@ -32,6 +32,15 @@ func fileSHA(p string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
+// sumsDigestOK reports whether s is a sha256 in hex.
+func sumsDigestOK(s string) bool {
+	if len(s) != 64 {
+		return false
+	}
+	_, err := hex.DecodeString(s)
+	return err == nil
+}
+
 func sumBytes(b []byte) string {
 	h := sha256.Sum256(b)
 	return hex.EncodeToString(h[:])

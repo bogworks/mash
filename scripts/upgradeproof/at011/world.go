@@ -19,14 +19,38 @@ type config struct {
 	pack, repo                 string
 	work                       string
 	venue                      string // where the run happens, in the receipt's words
+	releaseRepo                string // the GitHub repository (owner/name) the previous release is read from
+	prevSumsSHA                string // the sha256 of the previous release's SHA256SUMS, verified by the launcher on its host
 }
 
 const (
-	owner   = "acme"
-	group   = "demo"
-	oldTag  = "v0.5.10"
-	relBase = "https://github.com/bogworks/mash/releases/download/"
+	owner  = "acme"
+	group  = "demo"
+	oldTag = "v0.5.10"
+	// defaultRepo is the repository the previous release is read from unless -release-repo names another.
+	defaultRepo = "bogworks/mash"
 )
+
+// The longest a command of the run may take, by kind.
+const (
+	cloneTimeout    = 10 * time.Minute
+	checkoutTimeout = 5 * time.Minute
+	compileTimeout  = 15 * time.Minute
+	buildTimeout    = 20 * time.Minute
+	setupTimeout    = 5 * time.Minute
+	scriptTimeout   = 10 * time.Minute
+	doctorTimeout   = 2 * time.Minute
+)
+
+// certLife is how long the mirror's certificates are valid.
+const certLife = 24 * time.Hour
+
+var repoRE = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
+
+// relBase is the directory the previous release's files are downloaded from.
+func relBase(repo string) string {
+	return "https://github.com/" + repo + "/releases/download/" + oldTag
+}
 
 // persona is one person on the machine with a home of their own: Alice and Bob run sessions, the admin runs mashctl.
 type persona struct {
@@ -91,8 +115,8 @@ type runner struct {
 }
 
 func (r *runner) baseEnv() []string {
-	home := os.Getenv("HOME")
-	return []string{"PATH=" + r.pathVar, "HOME=" + home, "LC_ALL=C.UTF-8",
+	// The run's own folder is its home: nothing of the machine's real home is read or written.
+	return []string{"PATH=" + r.pathVar, "HOME=" + filepath.Join(r.work, "runhome"), "LC_ALL=C.UTF-8",
 		"GOPATH=" + filepath.Join(r.work, "go"), "GOCACHE=" + filepath.Join(r.work, "gocache")}
 }
 
@@ -121,12 +145,12 @@ func (r *runner) sessionEnv(p *persona) []string {
 }
 
 func (r *runner) mash(p *persona, args ...string) cmdResult {
-	return r.run(r.env(p, false, false), p.home, 2*time.Minute, p.bin("mash"), args...)
+	return r.run(r.env(p, false, false), p.home, doctorTimeout, p.bin("mash"), args...)
 }
 
 func (r *runner) mashctl(args ...string) cmdResult {
 	a := r.personas["admin"]
-	return r.run(r.env(a, false, false), a.home, 2*time.Minute, a.bin("mashctl"), append([]string{"--config-dir", a.cfg}, args...)...)
+	return r.run(r.env(a, false, false), a.home, doctorTimeout, a.bin("mashctl"), append([]string{"--config-dir", a.cfg}, args...)...)
 }
 
 // install runs an install.sh as p for the version tag. base is the release mirror ("" for the real release); withGH says
@@ -136,10 +160,41 @@ func (r *runner) install(p *persona, script, tag, base string, withGH bool) cmdR
 	if base != "" {
 		extra = append(extra, "MASH_RELEASE_BASE="+base, "CURL_CA_BUNDLE="+r.mir.caPath, "SSL_CERT_FILE="+r.mir.caPath)
 	}
-	if !withGH && onPath(envValue(r.env(p, false, false, extra...), "PATH"), "gh") {
-		return cmdResult{Err: fmt.Errorf("gh is on the PATH of the gh-free install"), Code: -1}
+	env := r.env(p, withGH, false, extra...)
+	var dropped []string
+	if !withGH {
+		var path string
+		path, dropped = dropFromPath(envValue(env, "PATH"), "gh")
+		for i, kv := range env {
+			if strings.HasPrefix(kv, "PATH=") {
+				env[i] = "PATH=" + path
+			}
+		}
+		if onPath(path, "gh") {
+			return cmdResult{Err: fmt.Errorf("gh is on the PATH of the gh-free install"), Code: -1}
+		}
 	}
-	return r.run(r.env(p, withGH, false, extra...), p.home, 10*time.Minute, "bash", script)
+	if len(dropped) > 0 {
+		r.log.printf("  note: gh-free install: PATH without the folders holding gh: %s", strings.Join(dropped, ", "))
+	}
+	res := r.run(env, p.home, scriptTimeout, "bash", script)
+	if len(dropped) > 0 {
+		res.Out = "gh-free install: dropped from PATH (they hold gh): " + strings.Join(dropped, ", ") + "\n" + res.Out
+	}
+	return res
+}
+
+// dropFromPath returns pathVar without every folder that holds an executable name (order kept), and the folders dropped.
+func dropFromPath(pathVar, name string) (string, []string) {
+	var keep, dropped []string
+	for _, d := range strings.Split(pathVar, string(os.PathListSeparator)) {
+		if d != "" && onPath(d, name) {
+			dropped = append(dropped, d)
+			continue
+		}
+		keep = append(keep, d)
+	}
+	return strings.Join(keep, string(os.PathListSeparator)), dropped
 }
 
 func envValue(env []string, k string) string {
@@ -195,7 +250,7 @@ func parseHook(out string) []shown {
 // hook runs the session's hook as p once and returns the messages it showed and its raw output.
 func (r *runner) hook(p *persona) ([]shown, string, error) {
 	in := fmt.Sprintf(`{"hook_event_name":"PostToolUse","session_id":"sess-%s"}`, p.name)
-	res := r.runIn(r.sessionEnv(p), p.home, in, 2*time.Minute, p.bin("mash"), "hook")
+	res := r.runIn(r.sessionEnv(p), p.home, in, doctorTimeout, p.bin("mash"), "hook")
 	if !res.ok() {
 		return nil, res.Out, fmt.Errorf("mash hook: exit %d %v", res.Code, res.Err)
 	}

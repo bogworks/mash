@@ -30,15 +30,22 @@ var fallbackOrder = []string{actCheck, actInstall, actPlugins, actRestart, actAf
 
 var numberedRE = regexp.MustCompile(`(?m)^\s*\d+[.)]\s+(.+)$`)
 
-// pageSteps is the numbered steps in the "Upgrading" section of the page, or none.
-func pageSteps(page string) []string {
-	lines := strings.Split(page, "\n")
-	in := false
+// pageSteps is the numbered steps of the section "Upgrading from <prev>" of the page, or none. The section runs to the
+// next heading of its level or above; other upgrade sections (an older version's) are not read.
+func pageSteps(page, prev string) []string {
+	head := regexp.MustCompile(`(?i)upgrading from ` + regexp.QuoteMeta(prev) + `(?:$|[^0-9.]|\.(?:$|[^0-9]))`)
+	in, level := false, 0
 	var sect []string
-	for _, l := range lines {
+	for _, l := range strings.Split(page, "\n") {
 		if strings.HasPrefix(l, "#") {
-			in = strings.Contains(strings.ToLower(l), "upgrad")
-			continue
+			n := len(l) - len(strings.TrimLeft(l, "#"))
+			if !in && head.MatchString(l) {
+				in, level = true, n
+				continue
+			}
+			if in && n <= level {
+				in = false
+			}
 		}
 		if in {
 			sect = append(sect, l)
@@ -75,6 +82,28 @@ func orderFrom(steps []string) (order []string, unknown []string) {
 	return order, unknown
 }
 
+// orderProblem says what is wrong with the order the page gives, or "" when it is exactly the five actions of an
+// upgrade, each once, in order, and every step is one the runner knows.
+func orderProblem(order, unknown []string) string {
+	var bad []string
+	if len(unknown) > 0 {
+		bad = append(bad, fmt.Sprintf("steps the runner does not understand: %q", unknown))
+	}
+	var missing []string
+	for _, a := range fallbackOrder {
+		if !containsAct(order, a) {
+			missing = append(missing, a)
+		}
+	}
+	if len(missing) > 0 {
+		bad = append(bad, fmt.Sprintf("missing: %s", strings.Join(missing, "; ")))
+	}
+	if len(unknown) == 0 && len(missing) == 0 && strings.Join(order, "|") != strings.Join(fallbackOrder, "|") {
+		bad = append(bad, fmt.Sprintf("the actions are repeated or out of order: got %s; want %s", strings.Join(order, "; "), strings.Join(fallbackOrder, "; ")))
+	}
+	return strings.Join(bad, "; ")
+}
+
 func containsAct(order []string, a string) bool {
 	for _, o := range order {
 		if o == a {
@@ -102,7 +131,7 @@ func (r *runner) upgrade(s *stepCtx, p *persona, order []string, mailFrom *perso
 		case actCheck, actAfter:
 			bin := p.bin("mash")
 			v := r.run(r.env(p, false, false), p.home, time.Minute, bin, "version")
-			d := r.run(r.env(p, false, false), p.home, 2*time.Minute, bin, "doctor")
+			d := r.run(r.env(p, false, false), p.home, doctorTimeout, bin, "doctor")
 			ctl := r.mashctl("doctor")
 			if act == actAfter {
 				s.ok(strings.Contains(v.Out, newVer), p.name+": mash version reports "+newVer+" after the upgrade", "%s", strings.TrimSpace(v.Out))

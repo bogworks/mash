@@ -47,13 +47,13 @@ func (r *runner) checkoutSource(src string) error {
 			return fmt.Errorf("git unpack-objects: %v: %s", err, b)
 		}
 	case r.cfg.repo != "":
-		if res := r.run(env, filepath.Dir(src), 10*time.Minute, "git", "clone", "-q", "--no-checkout", r.cfg.repo, src); !res.ok() {
+		if res := r.run(env, filepath.Dir(src), cloneTimeout, "git", "clone", "-q", "--no-checkout", r.cfg.repo, src); !res.ok() {
 			return fmt.Errorf("git clone: %s", res.Out)
 		}
 	default:
 		return fmt.Errorf("give -pack or -repo: the candidate source")
 	}
-	if res := r.run(env, src, 5*time.Minute, "git", "-c", "advice.detachedHead=false", "checkout", "-q", "--detach", r.cfg.commit); !res.ok() {
+	if res := r.run(env, src, checkoutTimeout, "git", "-c", "advice.detachedHead=false", "checkout", "-q", "--detach", r.cfg.commit); !res.ok() {
 		return fmt.Errorf("git checkout: %s", res.Out)
 	}
 	res := r.run(env, src, time.Minute, "git", "rev-parse", "HEAD")
@@ -72,7 +72,7 @@ func (r *runner) buildCandidate(src, dir string) (*candidateSet, error) {
 		return nil, err
 	}
 	br := filepath.Join(tools, "buildrelease")
-	if res := r.run(env, src, 15*time.Minute, "go", "build", "-o", br, "./scripts/buildrelease"); !res.ok() {
+	if res := r.run(env, src, compileTimeout, "go", "build", "-o", br, "./scripts/buildrelease"); !res.ok() {
 		return nil, fmt.Errorf("go build buildrelease: %s", res.Out)
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -91,7 +91,7 @@ func (r *runner) buildCandidate(src, dir string) (*candidateSet, error) {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 			out := filepath.Join(dir, b.AssetName())
-			res := r.run(env, src, 20*time.Minute, br, "-src", src, "-out", out, "-goos", b.GOOS, "-goarch", b.GOARCH,
+			res := r.run(env, src, buildTimeout, br, "-src", src, "-out", out, "-goos", b.GOOS, "-goarch", b.GOARCH,
 				"-version", r.cfg.version, "-commit", r.cfg.commit, "-cmd", b.Program)
 			mu.Lock()
 			defer mu.Unlock()

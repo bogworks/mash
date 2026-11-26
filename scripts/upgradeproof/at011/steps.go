@@ -45,12 +45,29 @@ func (r *runner) prereq(s *stepCtx) bool {
 		need(false, "make the folder for the previous release's files", "%v", err)
 		return false
 	}
-	base := relBase + oldTag
+	// The previous release's files and its SHA256SUMS come from the same place, so the checksums authenticate nothing by
+	// themselves. The launcher verified SHA256SUMS' attestation on its own host and hands over the digest it verified;
+	// the file fetched here must have exactly that digest before anything is checked against it.
+	base := relBase(r.cfg.releaseRepo)
+	digestDetail := "digest " + strings.ToLower(r.cfg.prevSumsSHA)
+	if !sumsDigestOK(r.cfg.prevSumsSHA) {
+		digestDetail = fmt.Sprintf("none was given: run scripts/upgradeproof/at011.sh, which verifies the attestation of SHA256SUMS on its host with gh and passes the digest in; or run `gh attestation verify SHA256SUMS -R %s --signer-workflow %s/.github/workflows/release.yml --source-ref refs/tags/%s --source-digest <commit of the tag>` and pass the sha256 of that file", r.cfg.releaseRepo, r.cfg.releaseRepo, oldTag)
+	}
+	if !s.need(sumsDigestOK(r.cfg.prevSumsSHA), "the verified digest of "+oldTag+" SHA256SUMS was supplied (-prev-sums-sha256)", "%s", digestDetail) {
+		return false
+	}
 	sums, err := get(base + "/SHA256SUMS")
-	need(err == nil, "download "+oldTag+" SHA256SUMS", "%v", err)
+	need(err == nil, "download "+oldTag+" SHA256SUMS from "+r.cfg.releaseRepo, "%v", err)
 	if !okAll {
 		return false
 	}
+	if got := sumBytes(sums); !s.need(got == strings.ToLower(r.cfg.prevSumsSHA), oldTag+" SHA256SUMS is the file the launcher verified",
+		"fetched sha256 %s, verified sha256 %s: nothing fetched from the release is trusted", got, r.cfg.prevSumsSHA) {
+		return false
+	}
+	s.note("%s SHA256SUMS sha256 %s: attestation-verified on the launcher host (gh attestation verify, repository %s); the guest checks only that it fetched that exact file", oldTag, r.cfg.prevSumsSHA, r.cfg.releaseRepo)
+	r.evid["previous-release.json"] = map[string]string{"repository": r.cfg.releaseRepo, "tag": oldTag, "sha256sums_sha256": strings.ToLower(r.cfg.prevSumsSHA),
+		"sha256sums_attestation": "verified on the launcher host with gh attestation verify, signer workflow release.yml, source ref refs/tags/" + oldTag}
 	r.prevSums = string(sums)
 	_ = os.WriteFile(filepath.Join(r.prevDir, "SHA256SUMS"), sums, 0o644)
 	for _, n := range []string{"install.sh", "mash-local-nats-setup.sh"} {
@@ -154,7 +171,7 @@ func (r *runner) step1(s *stepCtx) {
 	// The local server.
 	admin := r.personas["admin"]
 	r.natsDir = filepath.Join(r.work, "nats")
-	res := r.run(r.env(admin, false, true), r.work, 5*time.Minute, "bash", r.prevSetup, "--owner", owner, "--dir", r.natsDir)
+	res := r.run(r.env(admin, false, true), r.work, setupTimeout, "bash", r.prevSetup, "--owner", owner, "--dir", r.natsDir)
 	if !s.need(res.ok(), "mash-local-nats-setup.sh "+oldTag, "exit %d", res.Code) {
 		return
 	}

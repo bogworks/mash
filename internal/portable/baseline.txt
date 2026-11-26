@@ -7,6 +7,11 @@ R2-home-and-tmp internal/claudesettings/claudesettings.go 1
 R2-home-and-tmp internal/config/config.go 1
 R2-home-and-tmp scripts/releasecheck/publish.go 1
 R2-home-and-tmp scripts/releasecheck/sums.go 1
+
+# test-only proof runner that downloads pinned upstream tools (gh, nats-server, natscli) into a throwaway guest, each checked against its release checksums; no installed mash reaches these URLs
+R3-foreign-org-url scripts/upgradeproof/at011/fetch.go 3
+
+# baseline 2026-11-01
 R4-long-timeout internal/config/config.go 1
 R4-long-timeout internal/config/limits.go 3
 R4-long-timeout scripts/releasecheck/latency.go 1

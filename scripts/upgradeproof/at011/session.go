@@ -105,7 +105,8 @@ func (s *session) read(out io.Reader) {
 			delete(s.pending, *id)
 			s.mu.Unlock()
 			if ch != nil {
-				ch <- sc.Bytes()
+				// The scanner reuses its buffer on the next scan: the receiver gets its own copy.
+				ch <- append(json.RawMessage(nil), sc.Bytes()...)
 			}
 		}
 	}
