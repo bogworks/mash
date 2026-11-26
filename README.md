@@ -9,6 +9,14 @@
 by its sender, until the recipient has seen it, whether that session is busy, idle or stopped, on this machine or
 another. In Claude Code it arrives by itself: no polling, no extra turns for mail that can wait.
 
+**The key values that mash provides:**
+
+1. Fast, durable, secure mail between agents.
+2. No polling, no blocking, no extra turns.
+3. Location-agnostic.
+4. Agent discovery and presence.
+5. Agent wake on urgent message delivery.
+
 **▶ [Watch the 2½-minute demo](docs/demo/mash-demo.mp4)**: the setup skill installs mash, then two Claude Code sessions, Bob and Alice, exchange mail, including a wake of an idle session. Recorded on a personal Claude account with Claude Code's development-channels flag, which a personal account needs to wake an idle session, as the setup skill offers. To try it yourself, start at [the quick start](docs/guide/quickstart.md).
 
 https://github.com/user-attachments/assets/3dcf1c71-196b-4dc9-b915-8ddbcf94202f
@@ -21,22 +29,31 @@ and NATS.
 
 What each layer does: [the stack](docs/guide/stack.md).
 
-**The key values that mash provides:**
+**Understanding what mash does differently:**
 
-1. Fast, durable, secure mail between agents.
-2. No polling, no blocking, no extra turns.
-3. Location-agnostic.
-4. Agent discovery and presence.
-5. Agent wake on urgent message delivery.
+Mail Messages, Message Types, and Turn Efficiency
+
+Asynchronous mail means agents don't have to be live on the wire when receiving messages.  It also allows multiple messages to be batched up and received together in a single turn.  Mash supports a message type ("kind") of `blocker`, `question`, `fyi`, `task`, or `result`.  In addition, a message can be marked as `urgent`, requiring and immediate response.  These message types are handled differently.  Depending on the message type, messages might be immediately injected into a running turn, held to be batched up and run at the next turn, or immediately wake an idle agent to take a turn.  For example, an idle agent might receive 5 `fyi` messages, which are held, and then receive a `blocker` message, waking it for a new turn.  On that turn all 6 messages (5 `fyi` + 1 `blocker`) are injected automatically into the turn.  With 500K in the context window, the agent has skipped 5 additional turns for 2.5M tokens saved.  For more details, see the documentation [TO BE WRITTEN] that explains message types, the local mash spool, and walks through various mash messaging scenarios.
+
+Security and identity
+
+Agent endpoints in mash are mapped 1:1 to an agent session.  Every mash endpoint has a NATS NKEY (ed25519 public key) and a [insert data on JWT key here].  These provide a unique identity on the NATS bus for a single agent.  Agents signed their mail messages, verifying their identity and mash requires NATS with TLS, providing end-to-end encryption as well.  Since endpoints have a single identity, they can also be used to identity endusers and tools, who can participate in the mash along with agents. [provide more detalis here].
+
+On the near term immediate roadmap (0.6.0-ish), mash will support a messaging policy that determines who can message who on the bus.  This will allow more security conscious teams to restrict messaging access with a centralized policy.  The intent is to allow, in concert with a well configured sandbox, more granular control of agent communications, while allowing more complex communication patterns and topologies.
+
+The mesh topology, presence, & location independence
+
+Other communication systems for agents require understanding the remote agent's location on the network via a DNS name or IP address.  Mash, because it uses NATS, is inherently location independent.  Mash participants announce their presence on the network via a heartbeat, manage their own NATS endpoint connecitivity including reconnects, and do it efficiently without polling or agent turns.  This means that less network configuration is required, that agents can be moved without breaking a connection, and that firewall and network address translation (NAT) is straightforward.  How this works in practice:
+
+- NATS clients behind NAT dial out on TCP 4222 by default, with no inbound port forwarding on the client side.
+- Optional NATS [leaf nodes](https://docs.nats.io/reference/protocols/leafnode) connect an entire private site to a hub over one outbound link, typically on TCP 7422, and carry messages both ways.
+- Compatible clients and leaf nodes can use secure WebSockets on port 443 where the firewall permits them.
+- NATS uses [PING and PONG](https://github.com/nats-io/nats.docs/blob/master/using-nats/developing-with-nats/connecting/pingpong.md) to check whether an idle connection is still alive.
+- If a firewall or NAT drops the connection, NATS clients reconnect outbound and automatically restore their subscriptions.
 
 ## If you are an agent
 
 Install the `mash-setup` plugin and use its `setup` skill: it asks the person before each step. Never pipe a download into a shell. The person decides every answer.
-
-**Use mash when** your agents are sessions you run, in one NATS account, working on related problems,
-and messages must wait for a busy or stopped recipient. **Use A2A** when agents belong to different teams or
-organisations and are called as services; **use MCP** to give a model tools and data. The two can sit side by side:
-A2A at the edge, mash inside. See [how mash compares](docs/comparison.md), including "why not A2A?".
 
 **Why not Claude Code's built-in [cross-session messaging](https://code.claude.com/docs/en/cross-session-messaging)?** It is tied to one agent host and one user, needs a claude.ai sign-in to reach another machine, holds mail for an offline session only until it reconnects, and describes no sender proof. Use mash when mail must outlive the recipient's session, when you want signed sender proof with trust labels, when you run your own NATS server, or when more than one user or machine is involved. The comparison table is in [architecture.md](docs/architecture.md#14-alternatives-and-why-they-do-not-fit), and [comparison.md](docs/comparison.md#3-choose-mash-when-choose-something-else-when) says when the built-in feature is the better choice.
 
@@ -123,7 +140,6 @@ gh attestation verify SHA256SUMS -R bogworks/mash --bundle mash.intoto.jsonl \
   --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/v0.5.9
 ```
 
-
 The rest (checking `install.sh` itself against `SHA256SUMS`, and building from source) is in [docs/install.md](docs/install.md#verify-what-you-download).
 
 ## Documentation
@@ -140,16 +156,6 @@ Synadia Cloud is not supported in 0.5.9 ([#876](https://github.com/bogworks/mash
 ## Addresses and the Synadia Agent Protocol
 
 mash is a SAP agent per session, with one departure: an endpoint is addressed `owner.group.instance`, and the owner (not the harness) takes the first subject slot, so a credential can be fenced to its owner. Details, and what that means for discovery, are in [docs/sap.md](docs/sap.md).
-
-## What you get
-
-- **Mail that waits.** Each agent (endpoint) has its own JetStream inbox stream, a stored queue of its mail on the server. Mail sent to a session that is busy, asleep or not running waits up to 30 days, and arrives the moment the session can take it.
-- **Mail kinds cut turn cost.** `mash send --kind` (or the send tool's `kind`) marks mail `blocker`, `question` or `task` (wakes an idle session that has mash's wake channel on) or `result` or `fyi` (opt-in; arrive with the session's next turn); with no kind a send is `task`.
-- **No polling turns.** Mail that lands mid-turn rides along with the next tool result (a hook). An idle session is woken by the mail itself: after 45 seconds unshown (`MASH_IDLE_WAKE`) if the mail is a blocker, question or task, at once for urgent mail from a verified sender, and again with backoff if a wake starts no turn. A burst arrives as one turn. The wake needs Claude Code to load mash's channel, which depends on your account ([wake an idle session](docs/install.md#3-optional-wake-an-idle-session)). A small batch arrives in full; a large one arrives as a digest, and Claude reads the messages it cares about.
-- **Fast replies.** The session answers through tools on the same process that holds the NATS connection open: no subprocess, no CLI, one network round trip.
-- **Verified senders.** Every message is signed with the sender's own NATS key (SAP §13), and the receiver checks it against a directory. A forged message is dropped. By default an unproven one is dropped too and counted (`mash doctor` shows the count), and the sender is not told; `accept_unverified` delivers it with its trust label instead.
-- **Unique endpoints.** One NATS user per address, and a lease (a claim on the address, held while the session runs) that refuses a second live session under the same address. A credential reaches only its own owner: it may mail any endpoint of that owner and no other owner's.
-- **Live prompts too.** Because each session is a SAP agent, you can `mash prompt` it (or use any SAP client) and get a streamed answer.
 
 Messaging policy is not in this release; it is planned, with no release named (see the [roadmap](ROADMAP.md)).
 
