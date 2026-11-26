@@ -128,9 +128,12 @@ const (
 	CheckConfig = "config"
 	// CheckClaude is the Claude Code version against the tested range. It stands alone: no other row decides it.
 	CheckClaude = "claude"
-	CheckCreds  = "creds"
-	CheckServer = "server"
-	CheckSignIn = "sign-in"
+	// CheckLauncher is which mash the Claude Code plugin's launcher ran. It appears only when the launcher set
+	// MASH_LAUNCHED_FROM, so nothing changes for anyone who does not use the plugin.
+	CheckLauncher = "launcher"
+	CheckCreds    = "creds"
+	CheckServer   = "server"
+	CheckSignIn   = "sign-in"
 	// CheckDelivery is whether mail that arrives can be stored on this machine. It is checked only inside a session.
 	CheckDelivery = "delivery"
 	CheckRefused  = "refused"
@@ -221,6 +224,12 @@ type Health interface {
 // range. Status never asks for it, so status never looks for claude (ADR 0169).
 type ClaudeChecker interface {
 	ClaudeCheck(ctx context.Context) HealthCheck
+}
+
+// LauncherChecker is the optional service of the launcher row: it returns false when mash was not started by the plugin's
+// launcher (the row is then left out).
+type LauncherChecker interface {
+	LauncherCheck() (HealthCheck, bool)
 }
 
 func healthOf(ctx context.Context, env *cmdcore.Env, name string) (HealthReport, error) {
@@ -512,6 +521,17 @@ var Doctor = cmdcore.Command[DoctorParams, DoctorResult]{
 				at = 1
 			}
 			checks = append(append(append([]HealthCheck{}, checks[:at]...), row), checks[at:]...)
+		}
+		if lc, ok := env.Svc.(LauncherChecker); ok && lc != nil { // the launcher row follows claude, or config
+			if row, shown := lc.LauncherCheck(); shown {
+				at := 0
+				for i, c := range checks {
+					if c.Name == CheckConfig || c.Name == CheckClaude {
+						at = i + 1
+					}
+				}
+				checks = append(append(append([]HealthCheck{}, checks[:at]...), row), checks[at:]...)
+			}
 		}
 		var fixes, warnFixes []string
 		for _, c := range checks {

@@ -642,6 +642,53 @@ check "pin-plugin --remote without --attested writes nothing" absent "$PINS"
 "$PS" "$VER" "$REL/SHA256SUMS" --sig x --remote https://github.com/o/n.git >/dev/null 2>&1; RC=$?
 check "pin-plugin --remote with --sig exits 2" eq "$RC" 2
 
+# --- OFF (the default): the cached copy is re-hashed once per session, at serve and __prefetch, never in hook mode
+rc_run() { # data-dir, args...   (default setting, release base as given by the caller's env)
+  _rd=$1; shift
+  env -u MASH_PLUGIN_REQUIRE_VERIFIED CLAUDE_PLUGIN_DATA="$_rd" PATH="$PB:$BASEPATH" sh "$P/scripts/mash" "$@" > "$T/out" 2> "$T/err"
+  RC=$?
+}
+tamper "$T/rc1"
+rc_run "$T/rc1" serve
+check "off, tampered cache, serve: fresh copy runs" eq "$(cat "$T/out")" "fake-mash ran: serve"
+check "off, tampered cache, serve: one line says it was replaced" eq "$(grep -c 'did not match mash.pins' "$T/err")" 1
+check "off, tampered cache, serve: old file moved aside, not deleted" eq "$(cat "$T"/rc1/bin/mash-$VER.bad-* | grep -c TAMPERED)" 1
+check "off, tampered cache, serve: pinned copy is the verified one" eq "$(sha "$T/rc1/bin/mash-$VER")" "$(sha "$REL/v$VER/mash-linux-amd64")"
+rc_run "$T/rc1" serve
+check "off, matching cache, serve: runs untouched and silent" eq "$(cat "$T/out")$(wc -c < "$T/err" | tr -d ' ')" "fake-mash ran: serve0"
+tamper "$T/rc2"
+rc_run "$T/rc2" hook
+check "off, tampered cache, hook: not re-hashed, cached copy runs" eq "$(cat "$T/out")" "TAMPERED ran"
+check "off, tampered cache, hook: nothing moved aside" eq "$(ls "$T/rc2/bin" | grep -c bad)" 0
+tamper "$T/rc3"
+rc_run "$T/rc3" __prefetch
+check "off, tampered cache, prefetch: replaced" eq "$(sha "$T/rc3/bin/mash-$VER")" "$(sha "$REL/v$VER/mash-linux-amd64")"
+tamper "$T/rc4"
+rc_run "$T/rc4" status
+check "off, tampered cache, other subcommand: not re-hashed" eq "$(cat "$T/out")" "TAMPERED ran"
+tamper "$T/rc5"
+MASH_RELEASE_BASE="$NOREL" rc_run "$T/rc5" serve
+check "off, tampered cache, serve, download fails: PATH fallback as before" eq "$(cat "$T/out")" "path-mash: serve"
+check "off, tampered cache, serve, download fails: bad file kept aside" eq "$(ls "$T/rc5/bin" | grep -c 'bad-')" 1
+
+# --- MASH_LAUNCHED_FROM names the kind of mash that was exec'd
+printf '#!/bin/sh\necho "from=$MASH_LAUNCHED_FROM"\n' > "$PB/mash"; chmod +x "$PB/mash"
+printf '#!/bin/sh\nif [ "$1" = version ]; then echo "mash v%s (abcdef0)"; exit 0; fi\necho "from=$MASH_LAUNCHED_FROM"\n' "$VER" > "$T/lf-asset"
+LFREL="$T/lfrel"; mkdir -p "$LFREL/v$VER"
+for a in $ASSETS; do cp "$T/lf-asset" "$LFREL/v$VER/$a"; done
+P6="$T/plugin6"; newplugin "$P6"
+: > "$LFREL/SHA256SUMS"
+for a in $ASSETS; do printf '%s  %s\n' "$(sha "$LFREL/v$VER/$a")" "$a" >> "$LFREL/SHA256SUMS"; done
+"$P6/scripts/pin-plugin" "$VER" "$LFREL/SHA256SUMS" --unverified >/dev/null 2>&1
+env -u MASH_PLUGIN_REQUIRE_VERIFIED MASH_LAUNCHED_FROM=stale MASH_RELEASE_BASE="file://$LFREL" CLAUDE_PLUGIN_DATA="$T/lf1" PATH="$PB:$BASEPATH" sh "$P6/scripts/mash" serve > "$T/out" 2>/dev/null
+check "launched-from: pinned managed binary is managed (inherited value replaced)" eq "$(cat "$T/out")" "from=managed"
+env -u MASH_PLUGIN_REQUIRE_VERIFIED MASH_RELEASE_BASE="$NOREL" CLAUDE_PLUGIN_DATA="$T/lf2" PATH="$PB:$BASEPATH" sh "$P6/scripts/mash" serve > "$T/out" 2>/dev/null
+check "launched-from: PATH fallback after failed download is path" eq "$(cat "$T/out")" "from=path"
+env -u MASH_PLUGIN_REQUIRE_VERIFIED CLAUDE_PLUGIN_DATA="$T/lf3" PATH="$PB:$BASEPATH" sh "$P3/scripts/mash" serve > "$T/out" 2>/dev/null
+check "launched-from: unpinned PATH mash is path" eq "$(cat "$T/out")" "from=path"
+env -u MASH_PLUGIN_REQUIRE_VERIFIED MASH_BIN="$PB/mash" CLAUDE_PLUGIN_DATA="$T/lf4" PATH="$BASEPATH" sh "$P6/scripts/mash" serve > "$T/out" 2>/dev/null
+check "launched-from: MASH_BIN is override" eq "$(cat "$T/out")" "from=override"
+
 echo
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" = 0 ]

@@ -127,6 +127,22 @@ Stream: stdout. Exit code: 0.
 claude    warn  the version of claude could not be read
 ```
 
+### Started by the plugin's launcher, running the pinned mash
+
+Stream: stdout. Exit code: 0.
+
+```text
+launcher  ok    pinned mash
+```
+
+### Started by the plugin's launcher, running a mash from PATH
+
+Stream: stdout. Exit code: 0.
+
+```text
+launcher  warn  mash from PATH, not the pinned one
+```
+
 ### Arriving mail cannot be stored here
 
 Stream: stdout. Exit code: 1.

@@ -1337,6 +1337,22 @@
         "note": "REQ-017: New row after config. Doctors report, never refuse: status and serve are unchanged. --json: the same row as {\"name\": \"claude\", \"state\": ..., \"detail\": ..., \"fix\": null}."
        },
        {
+        "case": "Started by the plugin's launcher, running the pinned mash",
+        "text": "launcher  ok    pinned mash",
+        "stream": "stdout",
+        "exit": 0,
+        "issue": "#1290",
+        "note": "New row after claude, shown only when the plugin's launcher set MASH_LAUNCHED_FROM (managed); a mash started any other way shows no launcher row. MASH_BIN shows ok with MASH_BIN."
+       },
+       {
+        "case": "Started by the plugin's launcher, running a mash from PATH",
+        "text": "launcher  warn  mash from PATH, not the pinned one",
+        "stream": "stdout",
+        "exit": 0,
+        "issue": "#1290",
+        "note": "The launcher fell back to the mash on PATH (the pinned download failed, or the plugin is unpinned), so the pin in mash.pins did not decide which mash runs. A warning, exit 1 with --strict. No hint: no command of ours fixes it; docs/troubleshooting.md says what to do. --json: the same row as {\"name\": \"launcher\", \"state\": \"warn\", \"detail\": ..., \"fix\": null}."
+       },
+       {
         "case": "Arriving mail cannot be stored here",
         "issue": "#1099",
         "stream": "stdout",
