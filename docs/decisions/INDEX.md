@@ -165,3 +165,7 @@
 | [0186](0186-every-queue-entry-requires-the-medium-dispositions-status-and-docs-only-heads-report-success.md) | Every queue entry requires the `medium-dispositions` status, and docs-only heads report success | accepted | 2026-11-26 |
 | [0187](0187-one-exit-rule-for-mash-and-mashctl-and-the-plain-url-and-encryption-override-refusals-exit-1.md) | One exit rule for mash and mashctl, and the plain-URL and encryption-override refusals exit 1 | accepted | 2026-11-26 |
 | [0188](0188-under-s5-presence-also-checks-the-registration-account-and-owner-against-the-directory.md) | Under S5 presence also checks the registration's account and owner against the directory | accepted | 2026-11-26 |
+| [0189](0189-the-scorecard-workflow-is-the-one-job-that-runs-on-a-github-hosted-runner.md) | The Scorecard workflow is the one job that runs on a GitHub-hosted runner | accepted | 2026-11-26 |
+| [0190](0190-staticcheck-findings-fail-the-lint-job-in-ci.md) | Staticcheck findings fail the lint job in CI | accepted | 2026-11-26 |
+| [0191](0191-a-pinned-plugin-rechecks-its-cached-mash-once-per-session-and-doctor-shows-which-mash-runs.md) | A pinned plugin re-checks its cached mash once per session, and doctor shows which mash runs | accepted | 2026-11-26 |
+| [0193](0193-after-a-release-the-plugin-version-gets-a-pin-suffix-so-installed-plugins-receive-the-pin.md) | After a release the plugin version gets a `-pin.1` suffix, so installed plugins receive the pin | accepted | 2026-11-26 |
