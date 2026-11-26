@@ -1,6 +1,6 @@
 // Package discovery is the verify step of a discovery answer (S5, REQ-016). It is a pure function of the registration
-// and the directory's view: it holds no NATS connection and calls nothing. Like the rest of internal/sapsdk it is not
-// linked by a 0.5.x command (scripts/releasecheck refuses it), so 0.5.x discovery is main's own; the switch-on links it.
+// and the directory's view: it holds no NATS connection and calls nothing. The shipped mash links it and
+// turns it on at startup (cmd/mash); scripts/releasecheck refuses it in any candidate below 0.6.0.
 package discovery
 
 import "github.com/bogworks/mash/internal/sap"

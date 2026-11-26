@@ -1,6 +1,7 @@
 package endpoint
 
-// The 0.5.x regression of S5: with the switch off (s5Switch nil, as in every 0.5.x command), discovery is main's own.
+// The 0.5.x regression of S5: with the switch off (s5Switch nil, which is the state of a test process and was that of every 0.5.x command; the shipped mash
+// sets it at startup, see cmd/mash/s5wire.go), discovery is main's own.
 // Presence uses the client's NewInbox for its reply subject, the recipient discovery of prompt takes the first answer
 // that names the prompt subject (with no directory record read), and nothing is counted.
 

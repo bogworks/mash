@@ -136,6 +136,7 @@ func usageFor(r *cmdcore.Registry) string {
 var usage = usageFor(newCommands(nil))
 
 func main() {
+	enableVerifiedDiscovery()
 	// A session that is killed (Claude Code exiting, a closed terminal) shuts
 	// down cleanly, so serve releases its lease instead of leaving it to expire.
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGHUP, syscall.SIGINT)
