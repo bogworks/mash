@@ -47,7 +47,13 @@ func TestVerify(t *testing.T) {
 	unsigned := reg(t, bob, "acme", subject)
 	delete(unsigned.Metadata, "id_sig")
 	flipped := reg(t, bob, "acme", subject)
-	flipped.Metadata["id_sig"] = "A" + flipped.Metadata["id_sig"][1:]
+	// A different first character than the signature has: replacing it with a fixed "A" left the signature unchanged
+	// (and valid) about one time in 64, when it already began with "A".
+	first := "A"
+	if flipped.Metadata["id_sig"][:1] == first {
+		first = "B"
+	}
+	flipped.Metadata["id_sig"] = first + flipped.Metadata["id_sig"][1:]
 	otherOwner := reg(t, bob, "someone-else", subject)            // validly signed, owner differs from the record
 	otherAccount := reg(t, identity(t, "OTHER"), "acme", subject) // account is not the record's
 
