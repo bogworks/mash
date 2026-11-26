@@ -1,8 +1,8 @@
 # Who may mail whom: reach today, and the security policy
 
-> **Status.** The security policy described in the second half of this page is
-> planned and is **not in any release**. No command for it exists, and nothing
-> in a release can switch it on. The first half describes what mash does today.
+> **Status.** The security policy mentioned in section 2 is planned and is **not
+> in any release**. No command for it exists. Section 1 describes what mash does
+> today.
 
 ## 1. Today: the owner is the wall
 
@@ -42,85 +42,16 @@ your server to run `mashctl doctor`.
 - Other NATS accounts. mash is a tenant of its account; it does not own it and
   does not make claims about other users in it.
 
-## 2. Planned: a policy file that narrows reach inside an owner
+## 2. Planned: narrowing reach inside an owner
 
-The plan, for a later release with no date, is that an administrator can narrow
-reach inside one owner. The default stays as it is today, wide open.
-
-### The shape
-
-- One small JSON file per owner, kept by the administrator (a git repository is
-  a good home for it).
-- For a group and a verb (mail, prompt, status, heartbeat), a switch: `shared`
-  (every endpoint of the group reaches every endpoint of the group) or `closed`
-  (only what the file adds).
-- For one sending endpoint, a list of exact addresses it may reach and a list of
-  addresses taken away from it. An empty list means nobody, never everybody.
-- Each file carries a generation number and names the one it replaces, so an old
-  file cannot be applied by mistake.
-
-```json
-{
-  "schema": "mash.listset/1",
-  "owner": "acme",
-  "generation": 2,
-  "base_generation": 1,
-  "groups": {
-    "team": { "mail": "closed", "prompt": "closed",
-              "status": "shared", "heartbeat": "shared" }
-  },
-  "senders": {
-    "acme.team.alice": { "allow": ["acme.team.bob"], "deny": [] },
-    "acme.team.bob":   { "allow": [], "deny": [] },
-    "acme.team.carol": { "allow": [], "deny": [] }
-  }
-}
-```
-
-The format is not final. With this file, Alice may mail Bob but not Carol; Bob
-and Carol may mail nobody, and all three can still see one another's status.
-
-### How it would work
-
-1. `mashctl` checks the file and lists every problem in it.
-2. It shows what would change.
-3. It turns the file into permission rules, signs them into the endpoints'
-   credentials and into the account, and pushes them to the server.
-4. It proves the result on every server it knows: a send that should be refused
-   is refused, and the sender is told in plain words.
-
-A change closes the open connections under the changed rules, and the endpoint
-reconnects with the new ones. If a server does not answer, `mashctl` says how
-many servers have the new policy, and running the same apply again finishes it.
-There is no revert command: you apply a new file.
-
-### Limits that stay
-
-- The owner stays the wall. A policy file governs one owner and cannot give an
-  endpoint reach into another owner.
-- Only exact addresses are listed in the first version.
-- The server enforces size limits on credentials, so a file that would exceed
-  them is refused before anything is pushed.
-- The policy narrows who may mail whom. It does not narrow the reply and service
-  subjects of section 1.
-- mash does not sign or accept policy from any outside tool, and does not take
-  over another party's account policy.
-
-### Where the code is
-
-The engine lives in `internal/listset`, `internal/policydoc` and
-`internal/policyapply`, with tests that run against a real, throwaway
-`nats-server`. A check in the release gate refuses any release in which either
-program links a policy package, so nothing here is reachable in a released
-binary.
+A later release, with no date, is planned to let an administrator narrow reach
+inside one owner. The default stays as it is today, wide open. The NATS server
+enforces the narrowing, not mash, as it does the fixed permissions of section 1.
+The details come when it is designed. Until then nothing in a release can turn
+it on.
 
 ## 3. Words
 
 - **Owner, group, instance**: the three parts of an address; each is lower case,
   starts with a letter, and is at most 32 characters.
-- **Verb**: what is being done: mail, prompt, status or heartbeat.
 - **Account**: the NATS server's unit of isolation.
-- **Template and tag**: a permission rule kept once in the account with blanks,
-  and the values in a credential that fill the blanks. One template serves a
-  whole group.
-- **Generation**: the version number of the policy file in force.
