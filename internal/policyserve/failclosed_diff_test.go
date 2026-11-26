@@ -63,8 +63,7 @@ func diffWith(t *testing.T, inForce, next []byte, inboxes InboxChecker) policydo
 	fc := func(ctx context.Context, prev, target *listset.Compiled) ([]listset.Refusal, error) {
 		return FailClosed(ctx, prev, target, inboxes, true)
 	}
-	p, err := policydoc.Diff(context.Background(), diffReader{account: "A", inForce: inForce}, next, "foo", nil,
-		&policydoc.RotationContext{Adopted: true}, fc)
+	p, err := policydoc.Diff(context.Background(), diffReader{account: "A", inForce: inForce}, next, "foo", nil, fc)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +130,7 @@ func TestDiffRefusesAnAddedAddressWithASuspendedInboxAtStageInbox(t *testing.T) 
 
 func TestDiffWithoutTheChecksSaysInboxNotChecked(t *testing.T) {
 	first := fcDoc(t, 1, 0, map[string][]string{"foo.c.core": {}})
-	p, err := policydoc.Diff(context.Background(), diffReader{account: "A"}, first, "foo", nil, &policydoc.RotationContext{Adopted: true}, nil)
+	p, err := policydoc.Diff(context.Background(), diffReader{account: "A"}, first, "foo", nil, nil)
 	if err != nil || p.Refused {
 		t.Fatalf("%+v, %v", p, err)
 	}

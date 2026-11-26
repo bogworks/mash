@@ -12,4 +12,3 @@ new credential (not issued by the apply: request it from the issue service, `mas
 revoke: (none)
 first credential (not issued by the apply: request it from the issue service, `mashctl issue serve`): (none)
 inbox not checked: the apply's inbox and narrowing checks were not run, so it may still refuse
-signature not checked: give --submitter to check it against the adoption marker
