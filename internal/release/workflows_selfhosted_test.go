@@ -27,7 +27,23 @@ const (
 	scorecardJob    = "analysis"
 	scorecardRunsOn = "ubuntu-latest"
 	scorecardIf     = "!github.event.repository.fork"
+	scorecardCron   = "23 4 * * 1"
 )
+
+// scorecardSteps are the job's only steps, by full uses string, in order (ADR 0189). A change of pin changes this list.
+var scorecardSteps = []string{
+	"actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+	"ossf/scorecard-action@23f22cd43608bae7a1f1fa2603d7314dee9538a5",
+	"github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d",
+}
+
+// scorecardJobPermissions is the exact permission set of the job analysis.
+var scorecardJobPermissions = map[string]string{
+	"security-events": "write",
+	"id-token":        "write",
+	"contents":        "read",
+	"actions":         "read",
+}
 
 // scorecardIfExpr strips an optional ${{ }} wrapper and surrounding space from a job-level if.
 func scorecardIfExpr(s string) string {
@@ -88,10 +104,17 @@ func allowedLabels(v any) bool {
 // scorecardProblems lists why text is not the ADR 0189 Scorecard workflow; nothing means the exception applies to it.
 func scorecardProblems(text string) []string {
 	var w struct {
-		On   any `yaml:"on"`
-		Jobs map[string]struct {
-			If     string `yaml:"if"`
-			RunsOn any    `yaml:"runs-on"`
+		On          any `yaml:"on"`
+		Permissions any `yaml:"permissions"`
+		Jobs        map[string]struct {
+			If          string `yaml:"if"`
+			RunsOn      any    `yaml:"runs-on"`
+			Permissions any    `yaml:"permissions"`
+			Steps       []struct {
+				Uses string         `yaml:"uses"`
+				Run  string         `yaml:"run"`
+				With map[string]any `yaml:"with"`
+			} `yaml:"steps"`
 		} `yaml:"jobs"`
 	}
 	if err := yaml.Unmarshal([]byte(text), &w); err != nil {
@@ -109,6 +132,20 @@ func scorecardProblems(text string) []string {
 	}
 	if ok && (triggers["schedule"] == nil || triggers["push"] == nil) {
 		out = append(out, "want both the schedule and push triggers")
+	}
+	if ok && triggers["schedule"] != nil {
+		sc, _ := triggers["schedule"].([]any)
+		var cron any
+		if len(sc) == 1 {
+			e, _ := sc[0].(map[string]any)
+			cron = e["cron"]
+			if len(e) != 1 {
+				cron = nil
+			}
+		}
+		if cron != scorecardCron {
+			out = append(out, "the schedule must be exactly one entry with cron '"+scorecardCron+"' (weekly)")
+		}
 	}
 	if ok && triggers["push"] != nil {
 		// the push trigger selects only main: branches is exactly [main] and it has no other key
@@ -128,6 +165,35 @@ func scorecardProblems(text string) []string {
 	}
 	if j := w.Jobs[scorecardJob]; scorecardIfExpr(j.If) != scorecardIf {
 		out = append(out, fmt.Sprintf("job %s if %q is not the fork exclusion ${{ %s }}", scorecardJob, j.If, scorecardIf))
+	}
+	if w.Permissions != "read-all" {
+		out = append(out, "the top-level permissions must be exactly read-all")
+	}
+	j := w.Jobs[scorecardJob]
+	if pm, isMap := j.Permissions.(map[string]any); !isMap || len(pm) != len(scorecardJobPermissions) {
+		out = append(out, "the job permissions must be exactly security-events: write, id-token: write, contents: read, actions: read")
+	} else {
+		for k, v := range scorecardJobPermissions {
+			if pm[k] != v {
+				out = append(out, fmt.Sprintf("the job permissions must be exactly security-events: write, id-token: write, contents: read, actions: read (%s is %v)", k, pm[k]))
+			}
+		}
+	}
+	steps := j.Steps
+	if len(steps) != len(scorecardSteps) {
+		out = append(out, fmt.Sprintf("the job steps must be exactly the %d approved uses in order, have %d steps", len(scorecardSteps), len(steps)))
+	} else {
+		for i, st := range steps {
+			if st.Uses != scorecardSteps[i] || st.Run != "" {
+				out = append(out, fmt.Sprintf("step %d must be exactly uses %s and no run", i+1, scorecardSteps[i]))
+			}
+		}
+		if steps[0].With["persist-credentials"] != false {
+			out = append(out, "the checkout step must keep persist-credentials: false")
+		}
+		if steps[1].With["publish_results"] != true || steps[1].With["fail_on_publish_error"] != true {
+			out = append(out, "the scorecard step must set publish_results: true and fail_on_publish_error: true")
+		}
 	}
 	return out
 }
@@ -342,8 +408,24 @@ jobs:
   analysis:
     if: ${{ !github.event.repository.fork }}
     runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      id-token: write
+      contents: read
+      actions: read
     steps:
-      - uses: actions/checkout@0123456789012345678901234567890123456789 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ossf/scorecard-action@23f22cd43608bae7a1f1fa2603d7314dee9538a5 # v2.6.0
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          publish_results: true
+          fail_on_publish_error: true
+      - uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          sarif_file: results.sarif
 `
 	if v := selfHostedViolations("scorecard.yml", good); len(v) != 0 {
 		t.Fatalf("the Scorecard workflow was refused: %v", v)
@@ -376,6 +458,23 @@ jobs:
 		"push with branches dev":                 {"scorecard.yml", swap("[main]", "[dev]"), "push trigger"},
 		"a missing if":                           {"scorecard.yml", swap("    if: ${{ !github.event.repository.fork }}\n", ""), "fork exclusion"},
 		"an if that is true":                     {"scorecard.yml", swap("${{ !github.event.repository.fork }}", "true"), "fork exclusion"},
+		"permissions contents write":             {"scorecard.yml", swap("contents: read", "contents: write"), "permissions"},
+		"an extra permission scope":              {"scorecard.yml", swap("      actions: read\n", "      actions: read\n      packages: write\n"), "permissions"},
+		"a missing permission scope":             {"scorecard.yml", swap("      actions: read\n", ""), "permissions"},
+		"no job permissions":                     {"scorecard.yml", swap("    permissions:\n      security-events: write\n      id-token: write\n      contents: read\n      actions: read\n", ""), "permissions"},
+		"no top-level permissions":               {"scorecard.yml", swap("permissions: read-all\n", ""), "permissions"},
+		"top-level write-all":                    {"scorecard.yml", swap("permissions: read-all", "permissions: write-all"), "permissions"},
+		"an added run step":                      {"scorecard.yml", good + "      - run: make\n", "steps"},
+		"an unpinned action":                     {"scorecard.yml", swap("actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", "actions/checkout@v4"), "step 1"},
+		"a different action":                     {"scorecard.yml", swap("ossf/scorecard-action@", "evil/scorecard-action@"), "step 2"},
+		"a swapped sha":                          {"scorecard.yml", swap("upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d", "upload-sarif@0000000000000000000000000000000000000000"), "step 3"},
+		"publish_results false":                  {"scorecard.yml", swap("publish_results: true", "publish_results: false"), "publish_results"},
+		"no fail_on_publish_error":               {"scorecard.yml", swap("          fail_on_publish_error: true\n", ""), "fail_on_publish_error"},
+		"checkout persisting credentials":        {"scorecard.yml", swap("persist-credentials: false", "persist-credentials: true"), "persist-credentials"},
+		"a missing step":                         {"scorecard.yml", swap("      - uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3\n        with:\n          sarif_file: results.sarif\n", ""), "steps"},
+		"a cron every five minutes":              {"scorecard.yml", swap("'23 4 * * 1'", "'*/5 * * * *'"), "cron"},
+		"two schedule entries":                   {"scorecard.yml", swap("    - cron: '23 4 * * 1'\n", "    - cron: '23 4 * * 1'\n    - cron: '23 5 * * 1'\n"), "cron"},
+		"a different weekly cron":                {"scorecard.yml", swap("'23 4 * * 1'", "'30 6 * * 2'"), "cron"},
 		"an if comparing the repository name":    {"scorecard.yml", swap("${{ !github.event.repository.fork }}", "github.repository == 'bogworks/mash'"), "fork exclusion"},
 	} {
 		v := selfHostedViolations(c.file, c.text)

@@ -39,14 +39,18 @@ The workflow:
   `workflow_dispatch`;
 * has one job, `analysis`, on `runs-on: ubuntu-latest`, with `if: ${{ !github.event.repository.fork }}`, so a
   fork skips it;
-* sets `permissions: read-all` at the top and, on the job, `security-events: write`, `id-token: write`,
-  `contents: read` and `actions: read`, as the action's documentation asks for `publish_results`;
-* pins `actions/checkout`, `ossf/scorecard-action` and `github/codeql-action/upload-sarif` by full commit sha with a
-  version comment, and uploads the SARIF result to code scanning.
+* has exactly one schedule entry, cron `23 4 * * 1` (weekly); a change of cron changes the constant in the guard;
+* sets `permissions: read-all` at the top and, on the job, exactly `security-events: write`, `id-token: write`,
+  `contents: read` and `actions: read` (no more, no fewer, those values), as the action's documentation asks for
+  `publish_results`;
+* has exactly three steps, no `run` step, by full `uses` string and in this order: `actions/checkout`,
+  `ossf/scorecard-action` and `github/codeql-action/upload-sarif`, each pinned by full commit sha (a version comment
+  follows); checkout keeps `persist-credentials: false`; the Scorecard step sets `publish_results: true` and
+  `fail_on_publish_error: true`, so a failed publication fails the job; the SARIF result goes to code scanning.
 
 What stays true from ADR 0079: no other job moves; there is no `||` fallback to a hosted label; forks skip; and the
 guard allows a GitHub-hosted label only in the file named exactly `scorecard.yml`, only `ubuntu-latest`, only for the
-job `analysis`, and only while the file's triggers are `schedule` and `push` to `main` and the job keeps the fork exclusion. The same text under another file name, a
+job `analysis`, and only while the file's triggers are `schedule` and `push` to `main`, the job keeps the fork exclusion, and the cron, permissions and steps above hold exactly. The same text under another file name, a
 pull-request trigger, another job name, another label or a fallback fails the guard.
 
 ### Consequences
