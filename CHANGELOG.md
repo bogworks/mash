@@ -8,11 +8,18 @@ All notable user-facing changes to mash are recorded here. The format follows [K
 
 ### Summary
 
-REPLACE THIS PARAGRAPH: in at least 40 words of prose, no list, say what this release is for and who should care, what changed for the user, how to verify the download, and any known limits.
+0.5.10 changes what scripts read: some `--json` names, exit codes and wording. For people, `mash` and `mashctl`
+now read alike, and mail signed with a replaced key is no longer labelled verified.
 
 ### Upgrading
 
-REPLACE THIS: say what an operator must do after upgrading, or write "Nothing to do."
+One-way. Still on 0.5.5's configuration folder? Upgrade through 0.5.9 first.
+1. Check: `mash doctor` (and `mashctl doctor`) end clean; if not, see docs/troubleshooting.md.
+2. Install `mash` and `mashctl` 0.5.10; endpoints, keys and mail stay.
+3. Update the `mash` and `mash-setup` plugins; a session asked for mash's version says `mash v0.5.10`.
+4. Restart each Claude Code session, then check again.
+Session-only users need nothing more. Scripts: see the
+[release notes](https://github.com/bogworks/mash/blob/v0.5.10/docs/release-notes/0.5.10.md).
 
 ### Added
 
