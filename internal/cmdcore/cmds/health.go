@@ -1,11 +1,15 @@
 package cmds
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/bogworks/mash/internal/cliframe"
 	"github.com/bogworks/mash/internal/cmdcore"
@@ -337,7 +341,9 @@ type LauncherChecker interface {
 	LauncherCheck() (HealthCheck, bool)
 }
 
-func healthOf(ctx context.Context, env *cmdcore.Env, name string) (HealthReport, error) {
+// rawHealth is healthOf without the translation of the two no-endpoint errors: doctor, at a shell with several
+// endpoints installed, answers for all of them instead of failing.
+func rawHealth(ctx context.Context, env *cmdcore.Env, name string) (HealthReport, error) {
 	if env == nil {
 		return HealthReport{}, cliframe.Failf("internal: mash %s has no environment to run in", name)
 	}
@@ -345,15 +351,31 @@ func healthOf(ctx context.Context, env *cmdcore.Env, name string) (HealthReport,
 	if !ok || svc == nil {
 		return HealthReport{}, cliframe.Failf("internal: mash %s has no way to check the endpoint", name)
 	}
-	r, err := svc.Health(ctx)
+	return svc.Health(ctx)
+}
+
+func healthOf(ctx context.Context, env *cmdcore.Env, name string) (HealthReport, error) {
+	r, err := rawHealth(ctx, env, name)
+	return r, noEndpointError(err, name)
+}
+
+// noEndpointError turns config.SeveralEndpointsError and ErrNoEndpointInstalled into the framed errors of
+// cmdcore.NoEndpoint; any other error is returned as it is.
+func noEndpointError(err error, name string) error {
 	var se *config.SeveralEndpointsError
 	if errors.As(err, &se) && len(se.Addresses) > 0 {
-		return HealthReport{}, cmdcore.NoEndpoint(cmdcore.SeveralInstalled, name, se.Addresses)
+		return cmdcore.NoEndpoint(cmdcore.SeveralInstalled, name, se.Addresses)
 	}
 	if errors.Is(err, ErrNoEndpointInstalled) {
-		return HealthReport{}, cmdcore.NoEndpoint(cmdcore.NoneInstalled, name, nil)
+		return cmdcore.NoEndpoint(cmdcore.NoneInstalled, name, nil)
 	}
-	return r, err
+	return err
+}
+
+// HealthEacher is the optional service doctor uses at a shell with several endpoints installed and none chosen: the
+// report of each address, in the order given, each made exactly as a run with --endpoint <address> would make it.
+type HealthEacher interface {
+	HealthEach(ctx context.Context, addresses []string) ([]HealthReport, error)
 }
 
 func strPtr(s string) *string {
@@ -549,12 +571,47 @@ type DoctorResult struct {
 	strict  bool
 	hint    string
 	refused RefusedCounts
+	// several is set for a shell with several endpoints installed and none chosen: one result per endpoint, and
+	// Problems and Warnings are the totals. Its JSON form is severalDoctor.
+	several []DoctorResult
+	addrs   []string
+}
+
+// severalDoctor is the --json form of a doctor that answered for several endpoints: each endpoint's own object, the
+// totals, and the one hint.
+type severalDoctor struct {
+	Endpoints []DoctorResult `json:"endpoints"`
+	Problems  int            `json:"problems"`
+	Warnings  int            `json:"warnings"`
+	Hint      *string        `json:"hint"`
+}
+
+// MarshalJSON is the object of one endpoint, or severalDoctor for several. It does not escape <, > and &, as the rest of
+// the command line's JSON does not.
+func (r DoctorResult) MarshalJSON() ([]byte, error) {
+	var v any
+	type plain DoctorResult
+	if r.several != nil {
+		v = severalDoctor{r.several, r.Problems, r.Warnings, r.HintText}
+	} else {
+		v = plain(r)
+	}
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return nil, err
+	}
+	return bytes.TrimRight(b.Bytes(), "\n"), nil
 }
 
 // Text is a row per check (the name in 10 columns, the state in 6, then the detail), a blank line, and the count:
 // "No problems.", or the problems and the warnings that there are ("1 problem, 1 warning.", "2 problems.", "1 warning.").
 // A session that names no endpoint says "No endpoint is chosen for this session." instead.
 func (r DoctorResult) Text(cmdcore.Opts) string {
+	if r.several != nil {
+		return r.severalText()
+	}
 	if r.Endpoint == nil && len(r.Checks) > 0 && r.Checks[0].Name == CheckConfig && r.Checks[0].State == CheckFail &&
 		r.Checks[0].Detail != nil && *r.Checks[0].Detail == ReasonNoSessionEndpoint {
 		return cmdcore.NoEndpoint(cmdcore.NoneForSession, "", nil).Msg
@@ -614,6 +671,83 @@ func (r DoctorResult) Text(cmdcore.Opts) string {
 	return b.String()
 }
 
+// maxLine is the width the table of several endpoints fits.
+const maxLine = 79
+
+// firstIssue is "<check>: <detail>" of the first failing row, else of the first row in state warn ("" when none).
+func (r DoctorResult) firstIssue() string {
+	for _, state := range []string{CheckFail, CheckWarn} {
+		for _, c := range r.Checks {
+			if c.State != state {
+				continue
+			}
+			if c.Detail == nil || *c.Detail == "" {
+				return c.Name
+			}
+			return c.Name + ": " + config.Clean(*c.Detail)
+		}
+	}
+	return ""
+}
+
+// severalText is the table of a doctor that answered for several endpoints: a row per endpoint with its counts and its
+// first issue, then the totals and the command that shows the first endpoint with a problem (else a warning).
+func (r DoctorResult) severalText() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Endpoints installed here: %d.\n\n", len(r.several))
+	w := utf8.RuneCountInString("ENDPOINT")
+	for _, a := range r.addrs {
+		w = max(w, utf8.RuneCountInString(config.Clean(a)))
+	}
+	w += 2
+	const pw, ww = 10, 10 // "PROBLEMS  " and "WARNINGS  ": the headers and two spaces, as wide as any count
+	const minIssue = 20   // a row that leaves less room than this for its issue prints the issue on the next line
+	cut := func(t string, room int) string {
+		if utf8.RuneCountInString(t) > room {
+			return string([]rune(t)[:max(room-1, 0)]) + "…"
+		}
+		return t
+	}
+	line := func(a, p, wn, first string) {
+		head := fmt.Sprintf("%-*s%-*s%-*s", w, a, pw, p, ww, wn)
+		next := ""
+		if first != "" {
+			room := maxLine - utf8.RuneCountInString(head)
+			if room < minIssue {
+				// the address is never cut, it is what a person copies into --endpoint: the issue goes under the
+				// ISSUE column, or 4 spaces in when that column is too far right to leave it room
+				indent := w + pw + ww
+				if maxLine-indent < minIssue {
+					indent = 4
+				}
+				next = "\n" + strings.Repeat(" ", indent) + cut(first, maxLine-indent)
+				first = ""
+			} else {
+				first = cut(first, room)
+			}
+		}
+		b.WriteString(strings.TrimRight(head+first, " ") + next + "\n")
+	}
+	line("ENDPOINT", "PROBLEMS", "WARNINGS", "FIRST ISSUE")
+	for i, e := range r.several {
+		line(config.Clean(r.addrs[i]), fmt.Sprint(e.Problems), fmt.Sprint(e.Warnings), e.firstIssue())
+	}
+	b.WriteString("\n")
+	var parts []string
+	if r.Problems > 0 {
+		parts = append(parts, plural(r.Problems, "problem"))
+	}
+	if r.Warnings > 0 {
+		parts = append(parts, plural(r.Warnings, "warning"))
+	}
+	if len(parts) == 0 {
+		b.WriteString("No problems.")
+	} else {
+		b.WriteString(strings.Join(parts, ", ") + ". See it: " + r.hint)
+	}
+	return b.String()
+}
+
 func plural(n int, word string) string {
 	if n == 1 {
 		return "1 " + word
@@ -628,7 +762,14 @@ func (r DoctorResult) ExitCode() int {
 
 // Hint is the one command that fixes the first problem (cmdcore.DoctorHint): none when that row has no command of ours.
 // With no problem it is the command of the first warning that has one that fixes it, or none.
-func (r DoctorResult) Hint() string { return r.hint }
+// For several endpoints it is none: the text's last line names the command that shows the first endpoint with an
+// issue, and the JSON hint is null (ADR 0168).
+func (r DoctorResult) Hint() string {
+	if r.several != nil {
+		return ""
+	}
+	return r.hint
+}
 
 // Doctor is the doctor command.
 var Doctor = cmdcore.Command[DoctorParams, DoctorResult]{
@@ -637,57 +778,120 @@ var Doctor = cmdcore.Command[DoctorParams, DoctorResult]{
 	Summary:     "Check everything mail depends on for this endpoint, and say how to fix what is wrong. Changes nothing.",
 	Description: "Check everything mail depends on for this endpoint, and say how to fix what is wrong. Changes nothing.",
 	Globals:     cmdcore.GlobalsAll,
-	Examples:    []string{"mash doctor", "mash doctor --strict"},
+	Examples:    []string{"mash doctor", "mash doctor --strict", "mash doctor --endpoint acme.demo.alice"},
 	Run: func(ctx context.Context, env *cmdcore.Env, p DoctorParams) (DoctorResult, error) {
-		rep, err := healthOf(ctx, env, "doctor")
-		if err != nil {
+		rep, err := rawHealth(ctx, env, "doctor")
+		var se *config.SeveralEndpointsError
+		if errors.As(err, &se) && len(se.Addresses) > 0 {
+			if he, ok := env.Svc.(HealthEacher); ok && he != nil {
+				return doctorSeveral(ctx, env, he, slices.Sorted(slices.Values(se.Addresses)), p.Strict)
+			}
+		}
+		if err = noEndpointError(err, "doctor"); err != nil {
 			return DoctorResult{}, err
 		}
-		r := DoctorResult{Endpoint: strPtr(rep.Endpoint), Checks: []DoctorCheck{}, strict: p.Strict, Refused: rep.Refused.Total,
-			RefusedByClass: rep.Refused.byClass(), refused: rep.Refused}
-		checks := rep.Checks
+		var claude *HealthCheck
 		if cc, ok := env.Svc.(ClaudeChecker); ok && cc != nil { // the claude row sits right after config and waits on nothing
 			row := cc.ClaudeCheck(ctx)
-			at := 0
-			if len(checks) > 0 && checks[0].Name == CheckConfig {
-				at = 1
-			}
-			checks = append(append(append([]HealthCheck{}, checks[:at]...), row), checks[at:]...)
+			claude = &row
 		}
-		if lc, ok := env.Svc.(LauncherChecker); ok && lc != nil { // the launcher row follows claude, or config
-			if row, shown := lc.LauncherCheck(); shown {
-				at := 0
-				for i, c := range checks {
-					if c.Name == CheckConfig || c.Name == CheckClaude {
-						at = i + 1
-					}
-				}
-				checks = append(append(append([]HealthCheck{}, checks[:at]...), row), checks[at:]...)
-			}
-		}
-		if rep.StoredSkipDir != "" { // the scan was skipped: a skip row after delivery, which changes no count
-			at := len(checks)
-			for i, c := range checks {
-				if c.Name == CheckDelivery {
-					at = i + 1
-				}
-			}
-			checks = append(append(append([]HealthCheck{}, checks[:at]...), StoredMailCheck(rep.StoredSkipDir)), checks[at:]...)
-		}
-		var fixes, warnFixes []string
-		for _, c := range checks {
-			switch c.State {
-			case CheckFail:
-				r.Problems++
-				fixes = append(fixes, c.Fix)
-			case CheckWarn:
-				r.Warnings++
-				warnFixes = append(warnFixes, c.Fix)
-			}
-			r.Checks = append(r.Checks, DoctorCheck{Name: c.Name, State: c.State, Detail: strPtr(c.Detail), Fix: strPtr(c.Fix)})
-		}
-		r.hint = cmdcore.DoctorHint(fixes, warnFixes)
-		r.HintText = strPtr(r.hint)
-		return r, nil
+		return doctorOf(rep, claude, launcherRow(env), p.Strict), nil
 	},
+}
+
+// launcherRow is the launcher row, or nil when mash was not started by the plugin's launcher. It is machine-wide, like
+// the claude row.
+func launcherRow(env *cmdcore.Env) *HealthCheck {
+	if lc, ok := env.Svc.(LauncherChecker); ok && lc != nil {
+		if row, shown := lc.LauncherCheck(); shown {
+			return &row
+		}
+	}
+	return nil
+}
+
+// doctorOf is the result of one endpoint's report, with the claude row after config and the launcher row after that (a
+// nil row is left out).
+func doctorOf(rep HealthReport, claude, launcher *HealthCheck, strict bool) DoctorResult {
+	r := DoctorResult{Endpoint: strPtr(rep.Endpoint), Checks: []DoctorCheck{}, strict: strict, Refused: rep.Refused.Total,
+		RefusedByClass: rep.Refused.byClass(), refused: rep.Refused}
+	checks := rep.Checks
+	if claude != nil {
+		at := 0
+		if len(checks) > 0 && checks[0].Name == CheckConfig {
+			at = 1
+		}
+		checks = append(append(append([]HealthCheck{}, checks[:at]...), *claude), checks[at:]...)
+	}
+	if launcher != nil { // the launcher row follows claude, or config
+		at := 0
+		for i, c := range checks {
+			if c.Name == CheckConfig || c.Name == CheckClaude {
+				at = i + 1
+			}
+		}
+		checks = append(append(append([]HealthCheck{}, checks[:at]...), *launcher), checks[at:]...)
+	}
+	if rep.StoredSkipDir != "" { // the scan was skipped: a skip row after delivery, which changes no count
+		at := len(checks)
+		for i, c := range checks {
+			if c.Name == CheckDelivery {
+				at = i + 1
+			}
+		}
+		checks = append(append(append([]HealthCheck{}, checks[:at]...), StoredMailCheck(rep.StoredSkipDir)), checks[at:]...)
+	}
+	var fixes, warnFixes []string
+	for _, c := range checks {
+		switch c.State {
+		case CheckFail:
+			r.Problems++
+			fixes = append(fixes, c.Fix)
+		case CheckWarn:
+			r.Warnings++
+			warnFixes = append(warnFixes, c.Fix)
+		}
+		r.Checks = append(r.Checks, DoctorCheck{Name: c.Name, State: c.State, Detail: strPtr(c.Detail), Fix: strPtr(c.Fix)})
+	}
+	r.hint = cmdcore.DoctorHint(fixes, warnFixes)
+	r.HintText = strPtr(r.hint)
+	return r
+}
+
+// doctorSeveral checks every installed endpoint as a run with --endpoint would, and totals them. The claude row is
+// machine-wide: it is run once and the same row is in every endpoint's result, so a claude problem counts once for each.
+func doctorSeveral(ctx context.Context, env *cmdcore.Env, he HealthEacher, addrs []string, strict bool) (DoctorResult, error) {
+	reps, err := he.HealthEach(ctx, addrs)
+	if err != nil {
+		return DoctorResult{}, err
+	}
+	var claude *HealthCheck
+	if cc, ok := env.Svc.(ClaudeChecker); ok && cc != nil {
+		row := cc.ClaudeCheck(ctx)
+		claude = &row
+	}
+	launcher := launcherRow(env)
+	r := DoctorResult{Checks: []DoctorCheck{}, strict: strict, several: []DoctorResult{}, addrs: addrs}
+	hintAt, warnAt := -1, -1
+	for i, rep := range reps {
+		e := doctorOf(rep, claude, launcher, strict)
+		r.several = append(r.several, e)
+		r.Problems += e.Problems
+		r.Warnings += e.Warnings
+		if e.Problems > 0 && hintAt < 0 {
+			hintAt = i
+		}
+		if e.Warnings > 0 && warnAt < 0 {
+			warnAt = i
+		}
+	}
+	if hintAt < 0 {
+		hintAt = warnAt
+	}
+	if hintAt >= 0 {
+		// Only the text's See-it line names it: `--endpoint` shows a result, it fixes nothing, so by ADR 0168 the JSON
+		// hint stays null.
+		r.hint = "mash doctor --endpoint " + addrs[hintAt]
+	}
+	return r, nil
 }

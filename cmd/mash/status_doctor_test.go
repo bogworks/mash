@@ -204,8 +204,9 @@ func TestStatusAndDoctorNoEndpointInstalled(t *testing.T) {
 	}
 }
 
-// Several endpoints installed and none chosen: the one error of the specification, on stderr, exit 2.
-func TestStatusAndDoctorSeveralInstalled(t *testing.T) {
+// Several endpoints installed and none chosen: status is the one error of the specification, on stderr, exit 2.
+// (doctor checks them all: doctor_several_test.go)
+func TestStatusSeveralInstalled(t *testing.T) {
 	w := tlsWorld(t, "a", "b")
 	home := t.TempDir()
 	dir := filepath.Join(home, ".config", "mash")
@@ -222,7 +223,7 @@ func TestStatusAndDoctorSeveralInstalled(t *testing.T) {
 		}
 	}
 	env := map[string]string{"HOME": home, "MASH_SERVER": w.env["a"]["MASH_SERVER"], "MASH_CA": w.e.CAFile}
-	for _, verb := range []string{"status", "doctor"} {
+	for _, verb := range []string{"status"} {
 		r := runMash(env, verb)
 		want := "error: more than one endpoint is installed here: " + tTo("a") + ", " + tTo("b") + "\n"
 		if r.code != 2 || r.out != "" || r.errs != want+"hint: mash "+verb+" --endpoint "+tTo("a")+"\n" {

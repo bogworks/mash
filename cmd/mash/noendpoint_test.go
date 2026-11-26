@@ -58,13 +58,16 @@ func TestEveryCommandWordsSeveralEndpointsInstalledTheSame(t *testing.T) {
 	}
 	env := map[string]string{"HOME": home, "MASH_SERVER": w.env["a"]["MASH_SERVER"], "MASH_CA": w.e.CAFile}
 	for _, args := range noEndpointCommands {
+		if args[0] == "doctor" { // doctor answers for every installed endpoint: TestDoctorSeveral*
+			continue
+		}
 		r := runMash(env, args...)
 		want := "error: more than one endpoint is installed here: " + tTo("a") + ", " + tTo("b") + "\nhint: mash " + args[0] + " --endpoint " + tTo("a") + "\n"
 		if r.code != 2 || r.out != "" || r.errs != want {
 			t.Errorf("%v: %+v, want %q", args, r, want)
 		}
 	}
-	for _, args := range [][]string{{"send", "acme.demo.bob", "hi"}, {"who"}, {"status"}, {"doctor"}} {
+	for _, args := range [][]string{{"send", "acme.demo.bob", "hi"}, {"who"}, {"status"}} {
 		j := runMash(env, append(args, "--json")...)
 		want := `{"error":"more than one endpoint is installed here: ` + tTo("a") + `, ` + tTo("b") + `","hint":"mash ` + args[0] + ` --endpoint ` + tTo("a") + `"}` + "\n"
 		if j.code != 2 || j.errs != "" || j.out != want {

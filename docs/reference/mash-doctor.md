@@ -26,6 +26,7 @@ The global options of `mash` also apply: see [mash](mash.md#global-options).
 ```text
 mash doctor
 mash doctor --strict
+mash doctor --endpoint acme.demo.alice
 ```
 
 ## Exit codes
@@ -71,6 +72,42 @@ refused   ok    4 messages were refused
                 1 two sender headers
 
 No problems.
+```
+
+### Several endpoints installed here and none chosen, all well
+
+Stream: stdout. Exit code: 0.
+
+```text
+Endpoints installed here: 2.
+
+ENDPOINT         PROBLEMS  WARNINGS  FIRST ISSUE
+acme.demo.alice  0         0
+acme.demo.bob    0         0
+
+No problems.
+```
+
+### Several endpoints installed here, one with a problem
+
+Stream: stdout. Exit code: 1.
+
+```text
+Endpoints installed here: 2.
+
+ENDPOINT         PROBLEMS  WARNINGS  FIRST ISSUE
+acme.demo.alice  0         0
+acme.demo.bob    1         0         sign-in: the server refused these credentials
+
+1 problem. See it: mash doctor --endpoint acme.demo.bob
+```
+
+### Several endpoints installed here, --json
+
+Stream: stdout. Exit code: 1.
+
+```text
+{"endpoints":[{"endpoint":"acme.demo.alice","problems":0,"warnings":0,"checks":[...],"hint":null},{"endpoint":"acme.demo.bob","problems":1,"warnings":0,"checks":[...],"hint":null}],"problems":1,"warnings":0,"hint":null}
 ```
 
 ### A problem, with one hint

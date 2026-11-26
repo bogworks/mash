@@ -78,7 +78,7 @@
   },
   {
    "rule": "Having no endpoint reads the same in every mash command",
-   "detail": "Three wordings, by where it is asked. At a shell with none installed: 'error: no endpoint is installed here (set mash up with the setup skill: see the quick start)' and no hint line, since no single command fixes a fresh machine (ADR 0168), exit 1; with --json {\"error\": ...} alone. At a shell with several installed and none chosen: 'error: more than one endpoint is installed here: <addresses>' and 'hint: mash <command> --endpoint <the first, alphabetically>', exit 2. As an MCP tool in a session with none named: 'No endpoint is chosen for this session.' and 'hint: start the session with MASH_ENDPOINT=<address>'."
+   "detail": "Three wordings, by where it is asked. At a shell with none installed: 'error: no endpoint is installed here (set mash up with the setup skill: see the quick start)' and no hint line, since no single command fixes a fresh machine (ADR 0168), exit 1; with --json {\"error\": ...} alone. At a shell with several installed and none chosen: 'error: more than one endpoint is installed here: <addresses>' and 'hint: mash <command> --endpoint <the first, alphabetically>', exit 2 (doctor is the exception: it checks every installed endpoint, ADR 0192). As an MCP tool in a session with none named: 'No endpoint is chosen for this session.' and 'hint: start the session with MASH_ENDPOINT=<address>'."
   },
   {
    "rule": "--json when a command fails",

@@ -462,6 +462,9 @@ func TestDoctorMatchesSpec(t *testing.T) {
 			if mcp != oc["text"] {
 				t.Errorf("%s: mcp spec text %q, cli spec text %q", oc["case"], mcp, oc["text"])
 			}
+		case "Several endpoints installed here and none chosen, all well", "Several endpoints installed here, one with a problem", "Several endpoints installed here, --json":
+			// made by the command from every installed endpoint (cmd/mash/doctor_several_test.go), not by one report
+			continue
 		case "Claude Code is recent enough", "Claude Code is too old", "Claude Code is newer than tested", "No claude command", "The version of claude is unreadable":
 			// the claude row is made by the command (cmd/mash/claudecheck_test.go), not by the report this package renders
 			continue
