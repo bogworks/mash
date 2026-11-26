@@ -463,6 +463,20 @@ func (s *At5) InitBuckets() bool {
 	return s.check("M1: mashctl init --config with all three servers and ca makes mash's buckets over the cluster", res.Code == 0, exitDetail(res))
 }
 
+// InitM2 sets M2 up with the same authority as M1: the operator signing seed, the account identity seed,
+// sys.creds and the admin creds are copied by the harness (mode 0600) to M2, `mashctl init --config` runs there against
+// the cluster (it does not mint an admin: M2 uses M1's admin creds), and the seed and sys.creds copies are removed by their exact paths afterwards.
+func (s *At5) InitM2() bool {
+	res, gone, err := s.initFromSetup(s.M(2))
+	if err != nil {
+		s.check("M2: the setup file for mashctl init --config is made", false, err.Error())
+		return false
+	}
+	ok := s.check("M2: mashctl init --config with all three servers and ca, with the same keys and creds", res.Code == 0, exitDetail(res))
+	s.check("the copies of the seeds and sys.creds that the harness made on M2 are deleted by exact path", gone, "")
+	return ok
+}
+
 func errText(err error) string {
 	if err == nil {
 		return ""
@@ -554,7 +568,7 @@ func (s *At5) ClusterCheck(h Host, name string) bool {
 	return a && b
 }
 
-// Setup is everything before the scenario: certificates, M1 by the setup script, the cluster, the buckets (init --config), and the
+// Setup is everything before the scenario: certificates, M1 by the setup script, the cluster, the buckets (init --config), M2 by init --config, and the
 // first look from both machines.
 func (s *At5) Setup(now time.Time) bool {
 	if err := s.BuildCerts(now); err != nil {
@@ -562,7 +576,7 @@ func (s *At5) Setup(now time.Time) bool {
 		return false
 	}
 	s.check("the harness makes its certificate authority and one certificate per node, each chain verified with the SANs of the node's address", true, "")
-	return s.InitM1() && s.StartServers() && s.InitRefusedForOneServer() && s.InitBuckets() &&
+	return s.InitM1() && s.StartServers() && s.InitRefusedForOneServer() && s.InitBuckets() && s.InitM2() &&
 		s.ClusterCheck(s.M(1), "M1") && s.ClusterCheck(s.M(2), "M2") && s.listBoth()
 }
 
