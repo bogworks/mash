@@ -42,12 +42,15 @@ import (
 )
 
 const (
-	owner       = "acme"
-	releaseBase = "https://github.com/bogworks/mash/releases/download/"
+	owner = "acme"
 	// replyWait is how long a replay waits for the first chunk before the result is "no reply".
 	replyWait = 5 * time.Second
 )
 
+// releaseBase is the download URL prefix of the releases of repo (OWNER/REPO on GitHub).
+func releaseBase(repo string) string { return "https://github.com/" + repo + "/releases/download/" }
+
+var repoRE = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 var commitRE = regexp.MustCompile(`^[0-9a-f]{40}$`)
 var versionRE = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
 
@@ -123,6 +126,7 @@ type Record struct {
 	Environment  string      `json:"environment_lifecycle"`
 	Commit       string      `json:"candidate_commit"`
 	Arch         string      `json:"arch"`
+	ReleaseRepo  string      `json:"oracle_release_repo"`
 	KnownIssue   KnownIssue  `json:"known_issue"`
 	Builds       []Build     `json:"builds"`
 	Equal        bool        `json:"results_equal"`
@@ -142,11 +146,12 @@ func run() int {
 	oracleVer := flag.String("oracle-version", "0.5.10", "the oracle release, the last 0.5.x")
 	outDir := flag.String("out", "", "directory for record.json, run.log and the captured messages")
 	work := flag.String("work", "", "scratch directory for servers, state and binaries (default: a new temp directory)")
-	known := flag.String("known-issue", "", "URL of the known-0.6.0 entry (REQ-022); empty is recorded as empty")
+	known := flag.String("known-issue", "", "URL of the known-0.6.0 entry (REQ-022); empty fails the run")
+	repo := flag.String("release-repo", "bogworks/mash", "the GitHub repository OWNER/REPO whose releases hold the oracle")
 	venue := flag.String("venue", "", "a line describing where this runs (container image, VM), for the record")
 	flag.Parse()
-	if *src == "" || *outDir == "" || !commitRE.MatchString(*commit) || !versionRE.MatchString(*version) || !versionRE.MatchString(*oracleVer) {
-		fmt.Fprintln(os.Stderr, "usage: at023 -src <clone> -commit <40 hex> -version X.Y.Z -oracle-version X.Y.Z -out <dir> [-work dir] [-known-issue URL] [-venue text]")
+	if *src == "" || *outDir == "" || !commitRE.MatchString(*commit) || !versionRE.MatchString(*version) || !versionRE.MatchString(*oracleVer) || !repoRE.MatchString(*repo) {
+		fmt.Fprintln(os.Stderr, "usage: at023 -src <clone> -commit <40 hex> -version X.Y.Z -oracle-version X.Y.Z -out <dir> [-work dir] [-known-issue URL] [-release-repo OWNER/REPO] [-venue text]")
 		return 2
 	}
 	if err := os.MkdirAll(*outDir, 0o755); err != nil {
@@ -165,8 +170,8 @@ func run() int {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
 	}
-	rec := &Record{AT: "AT-023", Req: "REQ-022", Venue: *venue, StartedAt: time.Now().UTC(), Commit: *commit, Arch: runtime.GOARCH,
-		KnownIssue: NewKnownIssue(*known), OracleSource: releaseBase + "v" + *oracleVer + "/",
+	rec := &Record{AT: "AT-023", Req: "REQ-022", Venue: *venue, StartedAt: time.Now().UTC(), Commit: *commit, ReleaseRepo: *repo, Arch: runtime.GOARCH,
+		KnownIssue: NewKnownIssue(*known), OracleSource: releaseBase(*repo) + "v" + *oracleVer + "/",
 		Environment: "each build gets its own NATS server (operator mode, generated keys) and state directories under " + wd +
 			", created at the start of the build's run and stopped at its end; the launcher creates and destroys the container",
 		Pointer: "the replay is asserted accepted because that is today's behaviour; the test does not assert that the window is closed"}
@@ -174,7 +179,10 @@ func run() int {
 	lg.f("venue: %s", *venue)
 	lg.f("known-issue entry: %s", rec.KnownIssue.Status+" "+rec.KnownIssue.URL)
 
-	ok := execute(rec, *src, *commit, *version, *oracleVer, wd)
+	ok := execute(rec, *src, *commit, *version, *oracleVer, *repo, wd)
+	if !rec.check("the known-issues entry is linked (REQ-022)", rec.KnownIssue.URL != "", rec.KnownIssue.Status+" "+rec.KnownIssue.URL) {
+		ok = false
+	}
 	rec.FinishedAt = time.Now().UTC()
 	rec.Pass = ok
 	if len(rec.Assertions) == 0 {
@@ -183,13 +191,21 @@ func run() int {
 	for _, a := range rec.Assertions {
 		lg.f("%s %s %s", map[bool]string{true: "PASS", false: "FAIL"}[a.Pass], a.Name, a.Detail)
 	}
-	if rec.KnownIssue.URL == "" {
-		lg.f("NOTE: the known-issues link is empty in this record")
-	}
 	lg.f("RESULT: %s", map[bool]string{true: "PASS", false: "FAIL"}[rec.Pass])
 	b, _ := json.MarshalIndent(rec, "", "  ")
-	_ = os.WriteFile(filepath.Join(*outDir, "record.json"), append(b, '\n'), 0o644)
-	_ = os.WriteFile(filepath.Join(*outDir, "run.log"), lg.buf.Bytes(), 0o644)
+	werr := false
+	for _, w := range []struct {
+		name string
+		data []byte
+	}{{"record.json", append(b, '\n')}, {"run.log", lg.buf.Bytes()}} {
+		if err := os.WriteFile(filepath.Join(*outDir, w.name), w.data, 0o644); err != nil {
+			fmt.Fprintf(os.Stderr, "at023: writing %s: %v\n", w.name, err)
+			werr = true
+		}
+	}
+	if werr {
+		return 3
+	}
 	if rec.Pass {
 		return 0
 	}
@@ -202,9 +218,9 @@ func (r *Record) check(name string, pass bool, detail string) bool {
 }
 
 // execute fetches both binaries and runs both builds. It returns whether every assertion held.
-func execute(rec *Record, src, commit, version, oracleVer, wd string) bool {
+func execute(rec *Record, src, commit, version, oracleVer, repo, wd string) bool {
 	arch := runtime.GOARCH
-	oracleBin, oracleSum, err := fetchOracle(oracleVer, arch, filepath.Join(wd, "oracle"))
+	oracleBin, oracleSum, err := fetchOracle(repo, oracleVer, arch, filepath.Join(wd, "oracle"))
 	if !rec.check("oracle v"+oracleVer+" binary downloaded and matches the release's SHA256SUMS", err == nil, errText(err)) {
 		return false
 	}
@@ -219,7 +235,7 @@ func execute(rec *Record, src, commit, version, oracleVer, wd string) bool {
 	ok := true
 	var builds [2]*Build
 	for i, bc := range []struct{ role, ver, bin, sum, source string }{
-		{"oracle", oracleVer, oracleBin, oracleSum, releaseBase + "v" + oracleVer + "/mash-linux-" + arch},
+		{"oracle", oracleVer, oracleBin, oracleSum, releaseBase(repo) + "v" + oracleVer + "/mash-linux-" + arch},
 		{"candidate", version, candBin, candSum, "scripts/buildrelease at " + commit},
 	} {
 		lg.f("=== build %s %s ===", bc.role, bc.ver)
@@ -283,11 +299,11 @@ func httpGet(url string) ([]byte, error) {
 }
 
 // fetchOracle downloads the release's SHA256SUMS and mash-linux-<arch>, and checks the binary against the sums.
-func fetchOracle(ver, arch, dir string) (path, sum string, err error) {
+func fetchOracle(repo, ver, arch, dir string) (path, sum string, err error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", "", err
 	}
-	base := releaseBase + "v" + ver + "/"
+	base := releaseBase(repo) + "v" + ver + "/"
 	sums, err := httpGet(base + "SHA256SUMS")
 	if err != nil {
 		return "", "", err
@@ -684,7 +700,9 @@ func runBuild(rec *Record, b *Build, bin, dir string) error {
 	b.Timings.CaptureTS = b.Capture.TS
 	lg.f("captured a prompt: subject %s, headers %d, body %d bytes, ts %s", msg.Subject, len(msg.Header), len(msg.Data), hdr.TS)
 	capJSON, _ := json.MarshalIndent(b.Capture, "", "  ")
-	_ = os.WriteFile(filepath.Join(dir, "capture.json"), capJSON, 0o600)
+	if err := os.WriteFile(filepath.Join(dir, "capture.json"), capJSON, 0o600); err != nil {
+		return fmt.Errorf("writing capture.json: %w", err)
+	}
 
 	id, ok := alice.prompt(10 * time.Second)
 	b.Baseline = Replay{SentAt: b.Capture.ReceivedAt, SessionSaw: ok, Outcome: "no reply", Chunks: []Chunk{}}
