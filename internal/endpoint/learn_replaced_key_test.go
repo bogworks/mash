@@ -172,12 +172,18 @@ func TestPromptReplacedKeyIsRefused(t *testing.T) {
 	b := f.client(t, "b")
 	rec := f.record(t, tkey("b"))
 	a.learn(map[string]recordResult{tkey("b"): {rec: rec}})
-	rec.User = newFormIdentity(t).User // b's key was reissued; a read the new record
+	// b's key is rotated in the directory through the admin's SetUser, as a real rotation does, so a directory poll or
+	// a sender reload confirms the new key instead of restoring b's real one; a learns it now, poll or no poll.
+	rotated, err := f.adm.SetUser(context.Background(), taddr("b"), f.e.Account, rec.User, newFormIdentity(t).User)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec = rotated
 	a.learn(map[string]recordResult{tkey("b"): {rec: rec}})
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	var out bytes.Buffer
-	err := promptSend(ctx, b.Conn(), b.Identity(), tkey("b"), mustSubj(taddr("a")).Prompt, "hello", &out)
+	err = promptSend(ctx, b.Conn(), b.Identity(), tkey("b"), mustSubj(taddr("a")).Prompt, "hello", &out)
 	if err == nil || !strings.Contains(err.Error(), "403") {
 		t.Fatalf("prompt signed by the replaced key: err %v, want a 403 refusal", err)
 	}
