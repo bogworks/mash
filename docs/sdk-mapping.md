@@ -15,7 +15,7 @@ The SDK is a dependency of `mash` and `mashctl` from v0.5.10: both build address
 | S3 | Constants and subjects built through the SDK's subject constructor. |
 | S4 | The identity adapter in `internal/sapsdk`: signing, id signatures, stored and live verification, sender classification, the nonce set. |
 | C | `release-check --compat`. |
-| S5 | Under amendment 5 of the SDK adoption contract, REQ-016's checks and the count of answers that fail them (TO-12) in mash's own discovery, presence and prompt sender. The verify step is `internal/sapsdk/discovery`, guarded out of 0.5.x binaries; in 0.5.x discovery is main's own, and the switch-on (W) turns the checks on. No SDK caller is built, and the reply subject stays mash's own. The four rows marked `kept in mash: SAP departure` below say what would have to change for the SDK caller to replace them. |
+| S5 | Under amendment 5 of the SDK adoption contract, REQ-016's checks and the count of answers that fail them (TO-12) in mash's own discovery, presence and prompt sender. The verify step is `internal/sapsdk/discovery`, guarded out of 0.5.x binaries; in 0.5.x discovery is main's own, and the shipped `mash` turns the checks on at startup (`cmd/mash/s5wire.go`). No SDK caller is built, and the reply subject stays mash's own. The four rows marked `kept in mash: SAP departure` below say what would have to change for the SDK caller to replace them. |
 | W | Wiring and views: the refused-malformed record, the scan, and the inbox, read, status, doctor, mashctl and MCP views. |
 | S6 | The SDK host. Waits on Synadia. mash will not wrap, patch or copy it. |
 | M | Mash-only. No stage; there is nothing to adopt. |

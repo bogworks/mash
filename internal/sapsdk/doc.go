@@ -2,7 +2,7 @@
 // behind mash's own types. It is the 0.6.0 sender-identity adapter (stage S4 of the SDK adoption contract, REQ-005).
 //
 // It depends on internal/sap for the types (sap.SenderHeader, sap.Trust) and never the other way round. The binaries
-// link it from the switch-on release (stage W); the release check's linked-package guard no longer refuses this package
+// link it (mash since W1); the release check's linked-package guard no longer refuses this package
 // or the SDK identity package (it still refuses the SDK caller and host, which S5 owns). The old code in internal/sap
 // stays as the test oracle.
 //

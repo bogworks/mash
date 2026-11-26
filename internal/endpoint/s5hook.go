@@ -13,12 +13,12 @@ import (
 	"github.com/bogworks/mash/internal/store"
 )
 
-// The S5 checks of discovery (REQ-016, TO-12) sit behind a switch that is off in 0.5.x. s5Switch is nil by default,
-// and while it is nil every discovery path is main's own: presence uses the client's NewInbox and counts an answer
-// whose id_sig verifies and whose user_nkey is the directory's for the subject's address; the recipient discovery of
-// prompt returns on the first answer that names the prompt subject; nothing is counted. The switch-on (W) sets it, and
-// until then only the tests do. The verify step itself lives in internal/sapsdk/discovery, which the 0.5.x commands
-// must not link (scripts/releasecheck), so the hook receives it as a function and this package never imports it.
+// The S5 checks of discovery (REQ-016, TO-12) sit behind a switch. s5Switch is nil until something sets it, and while
+// it is nil every discovery path is main's own: presence uses the client's NewInbox and counts an answer whose id_sig
+// verifies and whose user_nkey is the directory's for the subject's address; the recipient discovery of prompt returns
+// on the first answer that names the prompt subject; nothing is counted. The shipped mash binary sets the switch once at
+// startup, through EnableVerifiedDiscovery (cmd/mash/s5wire.go); the tests set it themselves. The verify step itself
+// lives in internal/sapsdk/discovery, which this package never imports, so the hook receives it as a function.
 //
 // The hook is an atomic pointer: a poller left over from one test may read it while the next test stores it. Every read
 // loads it once through s5Hook and keeps the value. A discovery that returns early keeps reading its window in the
@@ -36,8 +36,30 @@ type s5Hooks struct {
 	promptDirectory bool
 }
 
-// s5Switch is the switch: nil in 0.5.x. Read it only through s5Hook.
+// s5Switch is the switch: nil until EnableVerifiedDiscovery (or a test) sets it. Read it only through s5Hook.
 var s5Switch atomic.Pointer[s5Hooks]
+
+// EnableVerifiedDiscovery turns the S5 checks on for the life of the process: the verify step, the secret presence
+// reply subject, and the directory check in the recipient discovery of prompt. verify is the step of
+// internal/sapsdk/discovery, handed in by the command (this package does not import it): the registration's prompt
+// subject and metadata, and what the directory says about it (whether a record exists, and the record's user key, owner
+// and account). It returns the address name the registration vouches for and whether it is verified.
+func EnableVerifiedDiscovery(verify func(subject string, metadata map[string]string, hasRecord bool, user, owner, account string) (name string, ok bool)) {
+	s5Switch.Store(&s5Hooks{
+		verify: func(reg registration, d *dirView) (string, bool) {
+			return verify(reg.Subject, reg.Metadata, d.hasRec, d.rec.User, d.rec.Owner, d.rec.Account)
+		},
+		secretPresence:  true,
+		promptDirectory: true,
+	})
+}
+
+// DisableVerifiedDiscoveryForTest clears the switch, so a test that set it through EnableVerifiedDiscovery leaves the
+// process as it found it. Nothing in the shipped binaries calls it.
+func DisableVerifiedDiscoveryForTest() { s5Switch.Store(nil) }
+
+// VerifiedDiscoveryEnabled reports whether the S5 checks are on.
+func VerifiedDiscoveryEnabled() bool { return s5Hook() != nil }
 
 // s5Hook loads the switch once; the caller keeps the value it got.
 func s5Hook() *s5Hooks { return s5Switch.Load() }
@@ -57,7 +79,7 @@ type dirView struct {
 
 // AnswersNotVerified is how many discovery answers failed verification over this endpoint's life, each counted once
 // per discovery (TO-12, REQ-016). `mash who` and the MCP who tool show it (the warning line and
-// answers_not_verified). It stays 0 while the S5 switch is off.
+// answers_not_verified). It stays 0 while the S5 switch is off; the shipped binaries turn it on at startup.
 func (e *Endpoint) AnswersNotVerified() int { return int(e.notVerified.Load()) }
 
 // presenceInbox is the reply subject of a presence probe.
