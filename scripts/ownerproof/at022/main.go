@@ -234,7 +234,7 @@ func execute(rec *Record, src, commit, version, oracleVer, repo, wd string) bool
 	if !rec.setup("oracle v"+oracleVer+" binary downloaded and matches the release's SHA256SUMS", err == nil, errText(err)) {
 		return false
 	}
-	lg.f("oracle mash-linux-%s sha256 %s (matches SHA256SUMS)", arch, oracleSum)
+	lg.f("oracle mash-%s-%s sha256 %s (matches SHA256SUMS)", runtime.GOOS, arch, oracleSum)
 	candBin := filepath.Join(wd, "candidate", "mash")
 	candSum, err := buildCandidate(src, commit, version, arch, candBin)
 	if !rec.setup("candidate "+version+" built by scripts/buildrelease at "+commit[:12], err == nil, errText(err)) {
@@ -242,7 +242,7 @@ func execute(rec *Record, src, commit, version, oracleVer, repo, wd string) bool
 	}
 	lg.f("candidate mash sha256 %s", candSum)
 	cand := BuildInfo{Role: "candidate", Version: version, Source: "scripts/buildrelease at " + commit, SHA256: candSum}
-	orc := BuildInfo{Role: "oracle", Version: oracleVer, Source: releaseBase(repo) + "v" + oracleVer + "/mash-linux-" + arch, SHA256: oracleSum}
+	orc := BuildInfo{Role: "oracle", Version: oracleVer, Source: releaseBase(repo) + "v" + oracleVer + "/mash-" + runtime.GOOS + "-" + arch, SHA256: oracleSum}
 	cand.VersionText = versionText(candBin)
 	orc.VersionText = versionText(oracleBin)
 	rec.Builds = []BuildInfo{cand, orc}
@@ -322,7 +322,7 @@ func httpGet(url string) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(resp.Body, 200<<20))
 }
 
-// fetchOracle downloads the release's SHA256SUMS and mash-linux-<arch>, and checks the binary against the sums.
+// fetchOracle downloads the release's SHA256SUMS and mash-<os>-<arch> for the OS it runs on, and checks the binary against the sums.
 func fetchOracle(repo, ver, arch, dir string) (path, sum string, err error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", "", err
@@ -336,7 +336,7 @@ func fetchOracle(repo, ver, arch, dir string) (path, sum string, err error) {
 	if err != nil {
 		return "", "", err
 	}
-	name := "mash-linux-" + arch
+	name := "mash-" + runtime.GOOS + "-" + arch
 	want := m[name]
 	if want == "" {
 		return "", "", fmt.Errorf("SHA256SUMS of v%s has no %s", ver, name)
@@ -362,7 +362,7 @@ func buildCandidate(src, commit, version, arch, out string) (string, error) {
 	if err := os.MkdirAll(filepath.Dir(out), 0o700); err != nil {
 		return "", err
 	}
-	cmd := exec.Command("go", "run", "./scripts/buildrelease", "-src", ".", "-out", out, "-goos", "linux", "-goarch", arch,
+	cmd := exec.Command("go", "run", "./scripts/buildrelease", "-src", ".", "-out", out, "-goos", runtime.GOOS, "-goarch", arch,
 		"-version", version, "-commit", commit)
 	cmd.Dir = src
 	var o, e bytes.Buffer
