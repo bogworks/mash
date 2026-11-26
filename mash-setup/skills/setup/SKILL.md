@@ -581,9 +581,9 @@ bob
 alice
 ```
 
-Each session says on its first turn which mode it is in. `--name` shows the
-agent's address as the session's name; for a session already open,
-`/rename acme.demo.alice` does the same.
+Waking an idle session needs mash's channel; without it, mail arrives at the
+next prompt. `--name` shows the agent's address as the session's name; for a
+session already open, `/rename acme.demo.alice` does the same.
 
 Close by pointing the person at the quick start's step 4: in Bob's session
 say "Send alice a note: lunch at noon?", and in Alice's "Do I have mail?"

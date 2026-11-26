@@ -39,9 +39,10 @@ then [by hand](by-hand.md).
 
    Each starts Claude Code with its address as the session's name, so you can
    tell who you are talking to (for a session already open, type
-   `/rename acme.demo.alice`). Waking an idle session needs Claude Code to load mash's channel, which
-   depends on your account: see [wake an idle session](../install.md#3-optional-wake-an-idle-session). Without it, mail
-   arrives at the session's next prompt or tool call.
+   `/rename acme.demo.alice`). Waking an idle session needs Claude Code to
+   load mash's channel, which depends on your account: see
+   [wake an idle session](../install.md#3-optional-wake-an-idle-session).
+   Without it, mail arrives at the session's next prompt or tool call.
    Claude Code asks whether to trust the folder; choose yes.
 
 4. In Bob's session, say: "Send alice a note: lunch at noon?"
