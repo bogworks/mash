@@ -15,7 +15,7 @@ Nothing here is shipped in a 0.5.x release, and `main` has no SDK import yet. Wh
 | S3 | Constants and subjects built through the SDK's subject constructor. |
 | S4 | The identity adapter in `internal/sapsdk`: signing, id signatures, stored and live verification, sender classification, the nonce set. |
 | C | `release-check --compat`. |
-| S5 | One caller constructor on the SDK's caller, with the verified-identity option. SDK #81 is in v0.1.1; S5 needs the pin bump to it. |
+| S5 | One caller constructor on the SDK's caller, with the verified-identity option. SDK #81 is in v0.1.1, and go.mod pins v0.1.1. |
 | W | Wiring and views: the refused-malformed record, the scan, and the inbox, read, status, doctor, mashctl and MCP views. |
 | S6 | The SDK host. Waits on Synadia. mash will not wrap, patch or copy it. |
 | M | Mash-only. No stage; there is nothing to adopt. |

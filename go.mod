@@ -3,7 +3,7 @@ module github.com/bogworks/mash
 go 1.27.4
 
 require (
-	github.com/bogworks/synadia-agents.go v0.1.0
+	github.com/bogworks/synadia-agents.go v0.1.1
 	github.com/nats-io/jwt/v2 v2.8.2
 	github.com/nats-io/nats-server/v2 v2.15.1
 	github.com/nats-io/nats.go v1.55.0

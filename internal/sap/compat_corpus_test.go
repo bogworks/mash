@@ -14,7 +14,7 @@ import (
 	"github.com/nats-io/nkeys"
 )
 
-// Compatibility gate: mash's sender-header classifier (sender.go) against the SAP Go SDK's (identity, v0.1.0), on every
+// Compatibility gate: mash's sender-header classifier (sender.go) against the SAP Go SDK's (identity, v0.1.1), on every
 // header shape mash can have stored. Each case names the label each classifier gives today; a case where they differ
 // carries a `why`. The test fails if either classifier moves off its expectation, or if the two differ and no `why`
 // says so, so a later swap of the implementation cannot change a label unnoticed.

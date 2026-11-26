@@ -160,7 +160,7 @@ func TestSubjectsEmptyOwnerNeverClaudeCode(t *testing.T) {
 	}
 }
 
-// The characters mash accepts in a token are a-z, 0-9 and dash. SDK v0.1.0 tokens.go ValidateToken refuses a dot, space,
+// The characters mash accepts in a token are a-z, 0-9 and dash. SDK v0.1.1 tokens.go ValidateToken refuses a dot, space,
 // tab, CR, LF, NUL, a leading $ and a whole * or >; none of those is in mash's alphabet, so the SDK builder cannot refuse
 // an address mash accepted.
 const tokenAlphabet = "abcdefghijklmnopqrstuvwxyz0123456789-"

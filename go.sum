@@ -1,7 +1,7 @@
 github.com/antithesishq/antithesis-sdk-go v0.8.0-default-no-op h1:1BOWQJweNyvZMlpAHXGLiZQn9S+QXGcz3xh94lC0w6E=
 github.com/antithesishq/antithesis-sdk-go v0.8.0-default-no-op/go.mod h1:FQyySiasQQM8735Ddel3MRojmy4dA1IqCeyJ5jmPMbI=
-github.com/bogworks/synadia-agents.go v0.1.0 h1:qiVaDq2tFgLcxtyUboAl/zPS7PmW3ed+sp9ZZe7k5/g=
-github.com/bogworks/synadia-agents.go v0.1.0/go.mod h1:ESxZzWjh4zkaKI9jICxGRqK7iMrUvNXstZ2fAWVe+Gc=
+github.com/bogworks/synadia-agents.go v0.1.1 h1:DyfJdA5wz/8yai6p8o9tBk1EnTicwVBuwtKxxRcJJk0=
+github.com/bogworks/synadia-agents.go v0.1.1/go.mod h1:ESxZzWjh4zkaKI9jICxGRqK7iMrUvNXstZ2fAWVe+Gc=
 github.com/google/go-tpm v0.9.8 h1:slArAR9Ft+1ybZu0lBwpSmpwhRXaa85hWtMinMyRAWo=
 github.com/google/go-tpm v0.9.8/go.mod h1:h9jEsEECg7gtLis0upRBQU+GhYVH6jMjrFxI8u6bVUY=
 github.com/klauspost/compress v1.20.4 h1:dD0v/bvxtjCBqQu6sx1TNWkalEY5lNTIe+HY9w8TeNI=
