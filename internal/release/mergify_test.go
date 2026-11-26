@@ -108,8 +108,8 @@ func loadMergify(t *testing.T) mergify {
 // publishes can never be satisfied, and the queue times out on every pull request.
 func TestMergify_waitsOnlyForChecksThatExist(t *testing.T) {
 	// A check's name is the job's name: when set, else its key (a matrix job's name is not one a queue condition names).
-	names := map[string]string{}                                              // check name -> the workflow file that runs it
-	for _, f := range []string{"ci.yml", "adr-lint.yml", "label-reset.yml"} { // the checks the queue waits for
+	names := map[string]string{}                                                          // check name -> the workflow file that runs it
+	for _, f := range []string{"ci.yml", "adr-lint.yml", "label-reset.yml", "lint.yml"} { // the checks the queue waits for
 		for key, j := range load(t, f).Jobs {
 			n := j.Name
 			if n == "" {
@@ -170,11 +170,13 @@ func TestMergify_entryNeedsNoApproval(t *testing.T) {
 	m := loadMergify(t)
 	plain, ors := splitConditions(t, queueRule(t, m, "default").QueueConditions)
 	// the exception-path group, and the size group beside it (a pull request GitHub cannot list whole needs the label too)
-	if len(ors) != 3 || len(ors[0]) != 2 || ors[0][1] != "label = lead-approved" || !strings.HasPrefix(ors[0][0], "-files ~= ") ||
+	if len(ors) != 2 || len(ors[0]) != 2 || ors[0][1] != "label = lead-approved" || !strings.HasPrefix(ors[0][0], "-files ~= ") ||
 		len(ors[1]) != 2 || ors[1][0] != "#files < 3000" || ors[1][1] != "label = lead-approved" {
-		t.Errorf("queue_conditions or groups = %v, want the exception-path group and the #files < 3000 group (ADR 0182), then the lint group", ors)
+		t.Errorf("queue_conditions or groups = %v, want the exception-path group and the #files < 3000 group (ADR 0182)", ors)
 	}
-	wantLint(t, ors, 2, "default")
+	if !strings.Contains(strings.Join(plain, "\n"), "check-success = "+actionsApp+"lint") {
+		t.Error("the default queue lacks check-success = @github-actions/lint: a code pull request needs lint to pass, a skipped lint (a cancelled run skips the job) is not accepted")
+	}
 	for _, c := range plain {
 		for _, banned := range []string{"lead-review", "approved-reviews-by", "lead-approved"} {
 			if strings.Contains(c, banned) {
