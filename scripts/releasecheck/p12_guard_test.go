@@ -4,6 +4,7 @@ import (
 	"context"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -19,7 +20,8 @@ import (
 // release.Targets entry, links no refused package; (b) for every target and program, one engine package injected by
 // text into a dependency listing is reported by linkedPolicyPackages and described by the step's describe functions.
 func TestP12_ReleaseGuardUnlinkedEveryTarget(t *testing.T) {
-	const module = "github.com/bogworks/mash"
+	// The injected listings are text, so their module name is a fixture, not the real tree's.
+	const module = "example.test/mash"
 	// 0.6.0: judge the engine and the SDK caller and host packages, not the switch-on packages (REQ-009).
 	const version = "0.6.0"
 	engine := []string{"internal/policydoc", "internal/listset", "internal/policyapply", "internal/policyview"}
@@ -31,7 +33,13 @@ func TestP12_ReleaseGuardUnlinkedEveryTarget(t *testing.T) {
 		if _, err := exec.LookPath("go"); err != nil {
 			t.Skip("go is not on PATH")
 		}
-		root, err := filepath.Abs("../..")
+		// The root is the module that holds this file, found from the file's own location, not the working directory.
+		_, self, _, ok := runtime.Caller(0)
+		if !ok {
+			t.Fatal("cannot locate the test source")
+		}
+		root := filepath.Join(filepath.Dir(self), "..", "..")
+		realModule, err := modulePath(context.Background(), root)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -42,11 +50,11 @@ func TestP12_ReleaseGuardUnlinkedEveryTarget(t *testing.T) {
 				t.Fatalf("%s/%s: %v", tg.GOOS, tg.GOARCH, err)
 			}
 			for _, prog := range release.Programs {
-				if !strings.Contains(out, module+"/cmd/"+prog+"\n") {
+				if !strings.Contains(out, realModule+"/cmd/"+prog+"\n") {
 					t.Errorf("%s/%s: the listing does not contain cmd/%s", tg.GOOS, tg.GOARCH, prog)
 				}
 			}
-			if got := linkedPolicyPackages(module, version, out); len(got) != 0 {
+			if got := linkedPolicyPackages(realModule, version, out); len(got) != 0 {
 				t.Errorf("%s/%s: refused packages are linked: %v", tg.GOOS, tg.GOARCH, got)
 			}
 		}
