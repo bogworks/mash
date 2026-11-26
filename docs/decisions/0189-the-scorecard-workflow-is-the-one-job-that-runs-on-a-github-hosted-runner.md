@@ -46,11 +46,11 @@ The workflow:
 * has exactly three steps, no `run` step, by full `uses` string and in this order: `actions/checkout`,
   `ossf/scorecard-action` and `github/codeql-action/upload-sarif`, each pinned by full commit sha (a version comment
   follows); checkout keeps `persist-credentials: false`; the Scorecard step sets `publish_results: true` and
-  `fail_on_publish_error: true`, so a failed publication fails the job; the SARIF result goes to code scanning.
+  `fail_on_publish_error: true`, so a failed publication fails the job; the upload step runs `if: always()`, so the SARIF result reaches code scanning even then; no other step has an `if` and no step has `continue-on-error`.
 
 What stays true from ADR 0079: no other job moves; there is no `||` fallback to a hosted label; forks skip; and the
 guard allows a GitHub-hosted label only in the file named exactly `scorecard.yml`, only `ubuntu-latest`, only for the
-job `analysis`, and only while the file's triggers are `schedule` and `push` to `main`, the job keeps the fork exclusion, and the cron, permissions and steps above hold exactly. The same text under another file name, a
+job `analysis`, and only while the file's triggers are `schedule` and `push` to `main`, the job keeps the fork exclusion, and the cron, permissions, steps and their `if` and `continue-on-error` above hold exactly. The same text under another file name, a
 pull-request trigger, another job name, another label or a fallback fails the guard.
 
 ### Consequences

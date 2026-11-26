@@ -111,9 +111,11 @@ func scorecardProblems(text string) []string {
 			RunsOn      any    `yaml:"runs-on"`
 			Permissions any    `yaml:"permissions"`
 			Steps       []struct {
-				Uses string         `yaml:"uses"`
-				Run  string         `yaml:"run"`
-				With map[string]any `yaml:"with"`
+				Uses            string         `yaml:"uses"`
+				Run             string         `yaml:"run"`
+				If              string         `yaml:"if"`
+				ContinueOnError any            `yaml:"continue-on-error"`
+				With            map[string]any `yaml:"with"`
 			} `yaml:"steps"`
 		} `yaml:"jobs"`
 	}
@@ -186,6 +188,14 @@ func scorecardProblems(text string) []string {
 		for i, st := range steps {
 			if st.Uses != scorecardSteps[i] || st.Run != "" {
 				out = append(out, fmt.Sprintf("step %d must be exactly uses %s and no run", i+1, scorecardSteps[i]))
+			}
+		}
+		for i, st := range steps {
+			if st.ContinueOnError != nil {
+				out = append(out, fmt.Sprintf("step %d must not set continue-on-error", i+1))
+			}
+			if want := map[bool]string{true: "always()"}[i == 2]; st.If != want {
+				out = append(out, fmt.Sprintf("step %d if %q must be %q (only the upload step runs if: always(); no other step has an if)", i+1, st.If, want))
 			}
 		}
 		if steps[0].With["persist-credentials"] != false {
@@ -424,6 +434,7 @@ jobs:
           publish_results: true
           fail_on_publish_error: true
       - uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        if: always()
         with:
           sarif_file: results.sarif
 `
@@ -437,45 +448,51 @@ jobs:
 		return strings.Replace(good, old, repl, 1)
 	}
 	for name, c := range map[string]struct{ file, text, want string }{
-		"the same text under another file name":  {"other.yml", good, "ubuntu-latest"},
-		"a name that only ends in scorecard.yml": {"my-scorecard.yml", good, "ubuntu-latest"},
-		"a pull_request trigger":                 {"scorecard.yml", swap("  push:", "  pull_request:\n  push:"), "pull_request"},
-		"a pull_request_target trigger":          {"scorecard.yml", swap("  push:", "  pull_request_target:\n  push:"), "pull_request_target"},
-		"a workflow_dispatch trigger":            {"scorecard.yml", swap("  push:", "  workflow_dispatch:\n  push:"), "workflow_dispatch"},
-		"a string trigger":                       {"scorecard.yml", swap("on:\n  schedule:\n    - cron: '23 4 * * 1'\n  push:\n    branches: [main]\n", "on: pull_request\n"), "not a mapping"},
-		"a job name other than analysis":         {"scorecard.yml", swap("  analysis:", "  scan:"), "analysis"},
-		"a second job":                           {"scorecard.yml", good + "  b:\n    runs-on: ubuntu-latest\n", "exactly the one job"},
-		"runs-on macos-14":                       {"scorecard.yml", swap("ubuntu-latest", "macos-14"), "macos-14"},
-		"runs-on ubuntu-22.04":                   {"scorecard.yml", swap("ubuntu-latest", "ubuntu-22.04"), "ubuntu-22.04"},
-		"a fallback":                             {"scorecard.yml", swap("ubuntu-latest", "${{ vars.R || 'ubuntu-latest' }}"), "fallback"},
-		"a self-hosted list":                     {"scorecard.yml", swap("ubuntu-latest", "[self-hosted, rh-linux]"), "is not"},
-		"a hosted label in a step":               {"scorecard.yml", good + "      - run: echo ubuntu-latest\n", "ubuntu-latest"},
-		"a host name":                            {"scorecard.yml", good + "      - run: ssh bf1\n", "bf1"},
-		"push with no branches":                  {"scorecard.yml", swap("    branches: [main]\n", ""), "push trigger"},
-		"push with branches main and dev":        {"scorecard.yml", swap("[main]", "[main, dev]"), "push trigger"},
-		"push with branches-ignore":              {"scorecard.yml", swap("    branches: [main]\n", "    branches-ignore: [dev]\n"), "push trigger"},
-		"push with tags":                         {"scorecard.yml", swap("    branches: [main]\n", "    branches: [main]\n    tags: ['v*']\n"), "push trigger"},
-		"push with branches dev":                 {"scorecard.yml", swap("[main]", "[dev]"), "push trigger"},
-		"a missing if":                           {"scorecard.yml", swap("    if: ${{ !github.event.repository.fork }}\n", ""), "fork exclusion"},
-		"an if that is true":                     {"scorecard.yml", swap("${{ !github.event.repository.fork }}", "true"), "fork exclusion"},
-		"permissions contents write":             {"scorecard.yml", swap("contents: read", "contents: write"), "permissions"},
-		"an extra permission scope":              {"scorecard.yml", swap("      actions: read\n", "      actions: read\n      packages: write\n"), "permissions"},
-		"a missing permission scope":             {"scorecard.yml", swap("      actions: read\n", ""), "permissions"},
-		"no job permissions":                     {"scorecard.yml", swap("    permissions:\n      security-events: write\n      id-token: write\n      contents: read\n      actions: read\n", ""), "permissions"},
-		"no top-level permissions":               {"scorecard.yml", swap("permissions: read-all\n", ""), "permissions"},
-		"top-level write-all":                    {"scorecard.yml", swap("permissions: read-all", "permissions: write-all"), "permissions"},
-		"an added run step":                      {"scorecard.yml", good + "      - run: make\n", "steps"},
-		"an unpinned action":                     {"scorecard.yml", swap("actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", "actions/checkout@v4"), "step 1"},
-		"a different action":                     {"scorecard.yml", swap("ossf/scorecard-action@", "evil/scorecard-action@"), "step 2"},
-		"a swapped sha":                          {"scorecard.yml", swap("upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d", "upload-sarif@0000000000000000000000000000000000000000"), "step 3"},
-		"publish_results false":                  {"scorecard.yml", swap("publish_results: true", "publish_results: false"), "publish_results"},
-		"no fail_on_publish_error":               {"scorecard.yml", swap("          fail_on_publish_error: true\n", ""), "fail_on_publish_error"},
-		"checkout persisting credentials":        {"scorecard.yml", swap("persist-credentials: false", "persist-credentials: true"), "persist-credentials"},
-		"a missing step":                         {"scorecard.yml", swap("      - uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3\n        with:\n          sarif_file: results.sarif\n", ""), "steps"},
-		"a cron every five minutes":              {"scorecard.yml", swap("'23 4 * * 1'", "'*/5 * * * *'"), "cron"},
-		"two schedule entries":                   {"scorecard.yml", swap("    - cron: '23 4 * * 1'\n", "    - cron: '23 4 * * 1'\n    - cron: '23 5 * * 1'\n"), "cron"},
-		"a different weekly cron":                {"scorecard.yml", swap("'23 4 * * 1'", "'30 6 * * 2'"), "cron"},
-		"an if comparing the repository name":    {"scorecard.yml", swap("${{ !github.event.repository.fork }}", "github.repository == 'bogworks/mash'"), "fork exclusion"},
+		"the same text under another file name":   {"other.yml", good, "ubuntu-latest"},
+		"a name that only ends in scorecard.yml":  {"my-scorecard.yml", good, "ubuntu-latest"},
+		"a pull_request trigger":                  {"scorecard.yml", swap("  push:", "  pull_request:\n  push:"), "pull_request"},
+		"a pull_request_target trigger":           {"scorecard.yml", swap("  push:", "  pull_request_target:\n  push:"), "pull_request_target"},
+		"a workflow_dispatch trigger":             {"scorecard.yml", swap("  push:", "  workflow_dispatch:\n  push:"), "workflow_dispatch"},
+		"a string trigger":                        {"scorecard.yml", swap("on:\n  schedule:\n    - cron: '23 4 * * 1'\n  push:\n    branches: [main]\n", "on: pull_request\n"), "not a mapping"},
+		"a job name other than analysis":          {"scorecard.yml", swap("  analysis:", "  scan:"), "analysis"},
+		"a second job":                            {"scorecard.yml", good + "  b:\n    runs-on: ubuntu-latest\n", "exactly the one job"},
+		"runs-on macos-14":                        {"scorecard.yml", swap("ubuntu-latest", "macos-14"), "macos-14"},
+		"runs-on ubuntu-22.04":                    {"scorecard.yml", swap("ubuntu-latest", "ubuntu-22.04"), "ubuntu-22.04"},
+		"a fallback":                              {"scorecard.yml", swap("ubuntu-latest", "${{ vars.R || 'ubuntu-latest' }}"), "fallback"},
+		"a self-hosted list":                      {"scorecard.yml", swap("ubuntu-latest", "[self-hosted, rh-linux]"), "is not"},
+		"a hosted label in a step":                {"scorecard.yml", good + "      - run: echo ubuntu-latest\n", "ubuntu-latest"},
+		"a host name":                             {"scorecard.yml", good + "      - run: ssh bf1\n", "bf1"},
+		"push with no branches":                   {"scorecard.yml", swap("    branches: [main]\n", ""), "push trigger"},
+		"push with branches main and dev":         {"scorecard.yml", swap("[main]", "[main, dev]"), "push trigger"},
+		"push with branches-ignore":               {"scorecard.yml", swap("    branches: [main]\n", "    branches-ignore: [dev]\n"), "push trigger"},
+		"push with tags":                          {"scorecard.yml", swap("    branches: [main]\n", "    branches: [main]\n    tags: ['v*']\n"), "push trigger"},
+		"push with branches dev":                  {"scorecard.yml", swap("[main]", "[dev]"), "push trigger"},
+		"a missing if":                            {"scorecard.yml", swap("    if: ${{ !github.event.repository.fork }}\n", ""), "fork exclusion"},
+		"an if that is true":                      {"scorecard.yml", swap("${{ !github.event.repository.fork }}", "true"), "fork exclusion"},
+		"permissions contents write":              {"scorecard.yml", swap("contents: read", "contents: write"), "permissions"},
+		"an extra permission scope":               {"scorecard.yml", swap("      actions: read\n", "      actions: read\n      packages: write\n"), "permissions"},
+		"a missing permission scope":              {"scorecard.yml", swap("      actions: read\n", ""), "permissions"},
+		"no job permissions":                      {"scorecard.yml", swap("    permissions:\n      security-events: write\n      id-token: write\n      contents: read\n      actions: read\n", ""), "permissions"},
+		"no top-level permissions":                {"scorecard.yml", swap("permissions: read-all\n", ""), "permissions"},
+		"top-level write-all":                     {"scorecard.yml", swap("permissions: read-all", "permissions: write-all"), "permissions"},
+		"an added run step":                       {"scorecard.yml", good + "      - run: make\n", "steps"},
+		"an unpinned action":                      {"scorecard.yml", swap("actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", "actions/checkout@v4"), "step 1"},
+		"a different action":                      {"scorecard.yml", swap("ossf/scorecard-action@", "evil/scorecard-action@"), "step 2"},
+		"a swapped sha":                           {"scorecard.yml", swap("upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d", "upload-sarif@0000000000000000000000000000000000000000"), "step 3"},
+		"publish_results false":                   {"scorecard.yml", swap("publish_results: true", "publish_results: false"), "publish_results"},
+		"no fail_on_publish_error":                {"scorecard.yml", swap("          fail_on_publish_error: true\n", ""), "fail_on_publish_error"},
+		"checkout persisting credentials":         {"scorecard.yml", swap("persist-credentials: false", "persist-credentials: true"), "persist-credentials"},
+		"a missing step":                          {"scorecard.yml", swap("      - uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3\n        if: always()\n        with:\n          sarif_file: results.sarif\n", ""), "steps"},
+		"if false on the upload step":             {"scorecard.yml", swap("        if: always()\n", "        if: false\n"), "step 3 if"},
+		"no if on the upload step":                {"scorecard.yml", swap("        if: always()\n", ""), "step 3 if"},
+		"if always on the scorecard step":         {"scorecard.yml", swap("# v2.6.0\n", "# v2.6.0\n        if: always()\n"), "step 2 if"},
+		"continue-on-error on the scorecard step": {"scorecard.yml", swap("# v2.6.0\n", "# v2.6.0\n        continue-on-error: true\n"), "step 2 must not set continue-on-error"},
+		"continue-on-error on the checkout step":  {"scorecard.yml", swap("# v7.0.1\n", "# v7.0.1\n        continue-on-error: true\n"), "step 1 must not set continue-on-error"},
+		"continue-on-error on the upload step":    {"scorecard.yml", swap("        if: always()\n", "        if: always()\n        continue-on-error: true\n"), "step 3 must not set continue-on-error"},
+		"a cron every five minutes":               {"scorecard.yml", swap("'23 4 * * 1'", "'*/5 * * * *'"), "cron"},
+		"two schedule entries":                    {"scorecard.yml", swap("    - cron: '23 4 * * 1'\n", "    - cron: '23 4 * * 1'\n    - cron: '23 5 * * 1'\n"), "cron"},
+		"a different weekly cron":                 {"scorecard.yml", swap("'23 4 * * 1'", "'30 6 * * 2'"), "cron"},
+		"an if comparing the repository name":     {"scorecard.yml", swap("${{ !github.event.repository.fork }}", "github.repository == 'bogworks/mash'"), "fork exclusion"},
 	} {
 		v := selfHostedViolations(c.file, c.text)
 		if len(v) == 0 || !strings.Contains(strings.Join(v, "\n"), c.want) {
