@@ -110,6 +110,30 @@ func s5MaskSender(h nats.Header) map[string][]string {
 	return out
 }
 
+var (
+	s5TSForm    = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$`)
+	s5NonceForm = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`) // the form internal/sap accepts (nonceRE); nuid.Next gives 22 of it
+)
+
+// s5CheckSenderForm checks the two masked values by form: ts is UTC RFC 3339 as Sign writes it, nonce has the form
+// main's nonce has. The signature is verified separately, over the captured bytes.
+func s5CheckSenderForm(t *testing.T, what string, m s5Msg) {
+	t.Helper()
+	var h struct{ TS, Nonce string }
+	if err := json.Unmarshal([]byte(m.Header.Get(sap.HeaderName)), &h); err != nil {
+		t.Errorf("%s: Agent-Sender is not JSON: %q", what, m.Header.Get(sap.HeaderName))
+		return
+	}
+	if !s5TSForm.MatchString(h.TS) {
+		t.Errorf("%s: ts %q is not UTC RFC 3339 (2006-01-02T15:04:05Z)", what, h.TS)
+	} else if _, err := time.Parse(time.RFC3339, h.TS); err != nil {
+		t.Errorf("%s: ts %q does not parse: %v", what, h.TS, err)
+	}
+	if !s5NonceForm.MatchString(h.Nonce) {
+		t.Errorf("%s: nonce %q does not have main's form", what, h.Nonce)
+	}
+}
+
 // s5MaskedHeader is an Agent-Sender header with the fields that differ by clock, nonce and signature taken out.
 func s5MaskedHeader(t *testing.T, m s5Msg) map[string]any {
 	t.Helper()
@@ -205,14 +229,18 @@ func TestS5AT008_WireEqualsToday(t *testing.T) {
 			t.Errorf("%s payload: %q, main %q", what, got.Data, exp.Data)
 		}
 		// Headers: byte-equal once the three values that depend on the clock, the nonce and the signature are masked
-		// (SDK v0.1.1 has no clock or nonce option, see the s5Env note), and the new signature must verify.
+		// (SDK v0.1.1 has no clock or nonce option, see the s5Env note), and ts and nonce are format-checked and the new signature must verify over the captured bytes.
 		gh, eh := s5MaskSender(got.Header), s5MaskSender(exp.Header)
 		if !reflect.DeepEqual(gh, eh) {
 			t.Errorf("%s headers: %v, main %v", what, gh, eh)
 		}
-	}
-	if _, trust := sap.VerifyStored(p[0].Header.Get(sap.HeaderName), p[0].Subject, p[0].Data); trust != sap.TrustVerified {
-		t.Errorf("the constructor's Agent-Sender does not verify over its prompt: %s", trust)
+		if got.Header.Get(sap.HeaderName) != "" {
+			s5CheckSenderForm(t, what+" (constructor)", got)
+			_, trust := sap.VerifyStored(got.Header.Get(sap.HeaderName), got.Subject, got.Data)
+			if trust != sap.TrustVerified {
+				t.Errorf("%s: the constructor's Agent-Sender does not verify over the captured bytes: %s", what, trust)
+			}
+		}
 	}
 	same("discovery", d[0], want.Discovery)
 	same("prompt", p[0], want.Prompt)
