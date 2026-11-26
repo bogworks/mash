@@ -282,6 +282,9 @@ func (a *Admin) InspectInbox(ctx context.Context, addr sap.Address, opts Inspect
 			m := InspectedMessage{Seq: raw.Sequence, StoredAt: raw.Time.UTC(), Size: len(raw.Data),
 				MsgID: config.Clean(raw.Header.Get(jetstream.MsgIDHeader)), Kind: config.Clean(raw.Header.Get("Mash-Kind")),
 				Sender: sender, Trust: trust, Reason: reason}
+			if trust == "malformed" {
+				m.Kind = "" // a malformed message's headers are the sender's claims, not kept
+			}
 			if m.Seq == 0 {
 				m.Seq = seq
 			}

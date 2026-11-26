@@ -1110,6 +1110,13 @@ func (e *Endpoint) readInbox(ctx context.Context, q InboxQuery) (InboxRead, erro
 		ci := cons.CachedInfo()
 		st.Waiting = int(ci.NumPending) + ci.NumAckPending
 		st.AckFloor = ci.AckFloor.Stream
+		// The consumer counts the refused mail still above its floor as pending, but it is never delivered, so it is
+		// not waiting.
+		for seq := range classes {
+			if seq > st.AckFloor {
+				st.Waiting--
+			}
+		}
 	}
 	if st.Waiting < 0 {
 		st.Waiting = 0

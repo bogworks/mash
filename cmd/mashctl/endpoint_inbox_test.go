@@ -663,3 +663,38 @@ func TestInboxRefusedCountIsMalformedOnly(t *testing.T) {
 		t.Errorf("header part %q", got)
 	}
 }
+
+// A malformed message's headers are the sender's claims: its Mash-Kind is not shown. The inspection carries no kind for
+// it, the JSON leaves it empty and the table prints "-".
+func TestInspectInboxMalformedMessageHasNoKind(t *testing.T) {
+	f := newAuditEnv(t)
+	f.endpoint(t, ad("box"))
+	subject := ad("box").MailSubject()
+	h := nats.Header{}
+	h.Set(sap.HeaderName, "{not json")
+	h.Set(jetstream.MsgIDHeader, "msg-1")
+	h.Set("Mash-Kind", "task")
+	sendSigned(t, f.js, subject, []byte("bad"), h)
+	adm, err := admin.New(f.e.Conn(t, f.e.AdminCreds), f.e.Owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in, err := adm.InspectInbox(context.Background(), ad("box"), admin.InspectOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(in.Messages) != 1 || in.Messages[0].Trust != "malformed" || in.Messages[0].Kind != "" {
+		t.Fatalf("messages %+v: want one malformed message with no kind", in.Messages)
+	}
+	rep := buildInboxJSON(ad("box"), in)
+	if rep.Messages[0].Kind != "" {
+		t.Errorf("JSON kind %q, want empty", rep.Messages[0].Kind)
+	}
+	var buf strings.Builder
+	if err := writeInboxTable(&buf, ad("box"), rep.Messages, in.Messages, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(buf.String(), "task") || !regexp.MustCompile(`refused\s+no\s+-\s`).MatchString(buf.String()) {
+		t.Errorf("table:\n%s\nwant kind -", buf.String())
+	}
+}
