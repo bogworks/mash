@@ -1,0 +1,1 @@
+**`mashctl endpoint inbox --json` shows when each message arrived.** Each message has a `when` field: the time the server stored it, in RFC 3339 and UTC, for example `2026-11-26T15:04:05Z`. The text table is unchanged.

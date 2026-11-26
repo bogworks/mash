@@ -72,7 +72,8 @@ With `--json` the result is this shape. The values are an example.
       "trust": "verified",
       "delivered": true,
       "kind": "task",
-      "size": 48
+      "size": 48,
+      "when": "2026-11-26T15:03:05Z"
     },
     {
       "number": 8,
@@ -80,7 +81,8 @@ With `--json` the result is this shape. The values are an example.
       "trust": "absent",
       "delivered": false,
       "kind": "task",
-      "size": 61
+      "size": 61,
+      "when": "2026-11-26T15:04:05Z"
     }
   ]
 }
@@ -101,7 +103,8 @@ means only that the endpoint took the message off the server. Whether the
 endpoint then showed it or refused it is decided on the endpoint's own machine
 and is not something mashctl can see: by default an endpoint refuses
 everything that is not verified, so a 'yes' beside any other trust label most
-likely means it was refused.
+likely means it was refused. In --json, `when` is the time the message was
+stored, in RFC 3339 and UTC (for example 2026-11-26T15:04:05Z).
 
 ## What it replaces
 

@@ -104,6 +104,17 @@ func TestEndpointInboxJSONGolden(t *testing.T) {
 	if got != string(want) {
 		t.Fatalf("endpoint inbox --json differs from %s (run with -update-inspect after checking the diff)\n got: %s\nwant: %s", golden, got, want)
 	}
+	// when is the stored time in RFC 3339 and UTC
+	var parsed inboxJSON
+	if err := json.Unmarshal([]byte(got), &parsed); err != nil {
+		t.Fatal(err)
+	}
+	for i, m := range parsed.Messages {
+		w, err := time.Parse(time.RFC3339, m.When)
+		if err != nil || !strings.HasSuffix(m.When, "Z") || !w.Equal(ts.Add(time.Duration(i)*time.Minute)) {
+			t.Errorf("message %d when %q, want RFC 3339 UTC %s", m.Number, m.When, ts.Add(time.Duration(i)*time.Minute).Format(time.RFC3339))
+		}
+	}
 	// no consumer: every message is not delivered; the messages array is never null
 	empty := buildInboxJSON(sap.Address{Owner: "o", Group: "g", Instance: "a"}, &admin.InboxInspection{Stream: admin.InspectedStream{Name: "inbox-o_g_a"}})
 	eb, _ := json.Marshal(empty)

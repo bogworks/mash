@@ -60,6 +60,7 @@ type inboxMessageJSON struct {
 	Delivered bool   `json:"delivered"`
 	Kind      string `json:"kind"`
 	Size      int    `json:"size"`
+	When      string `json:"when"`
 }
 
 // inboxJSON is the JSON of `mashctl endpoint inbox`.
@@ -125,7 +126,7 @@ func buildInboxJSON(addr sap.Address, in *admin.InboxInspection) inboxJSON {
 		rep.Undelivered = in.Consumer.NumPending
 	}
 	for _, m := range in.Messages {
-		rep.Messages = append(rep.Messages, inboxMessageJSON{Number: m.Seq, From: senderAddress(m.Sender), Trust: inboxTrust(m.Trust), Delivered: m.State != admin.StateUndelivered, Kind: m.Kind, Size: m.Size})
+		rep.Messages = append(rep.Messages, inboxMessageJSON{Number: m.Seq, From: senderAddress(m.Sender), Trust: inboxTrust(m.Trust), Delivered: m.State != admin.StateUndelivered, Kind: m.Kind, Size: m.Size, When: m.StoredAt.UTC().Format(time.RFC3339)})
 	}
 	return rep
 }

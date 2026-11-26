@@ -9,7 +9,8 @@
       "trust": "verified",
       "delivered": true,
       "kind": "message",
-      "size": 10
+      "size": 10,
+      "when": "2026-11-12T10:00:00Z"
     },
     {
       "number": 2,
@@ -17,7 +18,8 @@
       "trust": "claimed",
       "delivered": true,
       "kind": "message",
-      "size": 20
+      "size": 20,
+      "when": "2026-11-12T10:01:00Z"
     },
     {
       "number": 3,
@@ -25,7 +27,8 @@
       "trust": "forged",
       "delivered": true,
       "kind": "message",
-      "size": 30
+      "size": 30,
+      "when": "2026-11-12T10:02:00Z"
     },
     {
       "number": 4,
@@ -33,7 +36,8 @@
       "trust": "unknown-signer",
       "delivered": false,
       "kind": "message",
-      "size": 40
+      "size": 40,
+      "when": "2026-11-12T10:03:00Z"
     }
   ]
 }
