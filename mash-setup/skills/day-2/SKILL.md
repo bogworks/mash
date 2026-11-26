@@ -5,7 +5,8 @@ description: >-
   server, add or remove an agent mailbox (endpoint), see why mail is not
   arriving. Use when the person asks to add an agent, give a session a
   mailbox, see mash status, fix mail delivery, or bring the server back after
-  a reboot ("start mash's server again"), and `mash version` works. If mash is not installed, use the setup
+  a reboot ("start mash's server again"), and `mash version` works. If mash
+  is not installed, use the setup
   skill instead.
 ---
 

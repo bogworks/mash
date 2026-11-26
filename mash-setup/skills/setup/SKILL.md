@@ -305,11 +305,12 @@ Each block starts with `set -e`, so a checksum that does not match stops it
 before anything is unpacked or installed. Each checksum line should end in `OK`
 (a mismatch: stop, install nothing, ask).
 `nats-server --version` prints `nats-server: v2.15.1` and `nats --version`
-prints `0.5.2`. `BIN` must be on the PATH: if it is not, give them the line for their shell (`echo $SHELL` says which): for bash
+prints `0.5.2`. `BIN` must be on the PATH: if it is not, give them the line
+for their shell (`echo $SHELL` says which): for bash
 `echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc`, for zsh the same
 with `~/.zshrc`, then a new terminal. They run it themselves (do not edit
-their shell files); for this session use the full path, or
-put `PATH="$BIN:$PATH"` in front of a command. Both programs are explained at
+their shell files); for this session use the full path, or put
+`PATH="$BIN:$PATH"` in front of a command. Both programs are explained at
 https://github.com/bogworks/mash/blob/main/docs/nats-server.md#getting-nats-server-and-the-nats-command
 
 Verify: `nats-server --version` is 2.10.7 or newer, and
@@ -383,7 +384,8 @@ MASH_INSTALL_DIR="$BIN" MASH_VERSION="$TAG" bash "$DL/install.sh"
 Replace `vX.Y.Z` with the tag from step 3.
 
 Expected: `Installed mash v<version> (<commit>) in <folder>` and the same for
-`mashctl`. If it says the folder is not on the PATH, give them the line for their shell (`echo $SHELL` says which): for bash
+`mashctl`. If it says the folder is not on the PATH, give them the line for
+their shell (`echo $SHELL` says which): for bash
 `echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc`, for zsh the same
 with `~/.zshrc`, then a new terminal. They run it themselves (do not edit
 their shell files): for this session use the full path the line
