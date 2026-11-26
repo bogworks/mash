@@ -13,10 +13,10 @@ import (
 	"github.com/bogworks/mash/internal/listset"
 )
 
-// The kept signers are the other ranges' group keys that the account JWT carries; a group whose name merely starts
-// with the range's name, without the dot, is another range's. A key store key of another range that the JWT does not
+// The kept signers are the other owners' group keys that the account JWT carries; a group whose name merely starts
+// with the owner's name, without the dot, is another owner's. A key store key of another owner that the JWT does not
 // carry is neither kept (the gate would require it) nor retained by Sign (the target would lack it).
-func TestKeptSignersAreOtherRangesGroupsInTheJWT(t *testing.T) {
+func TestKeptSignersAreOtherOwnersGroupsInTheJWT(t *testing.T) {
 	op, _ := nkeys.CreateOperator()
 	acct, _ := nkeys.CreateAccount()
 	apub := pubOf(acct)
@@ -38,7 +38,7 @@ func TestKeptSignersAreOtherRangesGroupsInTheJWT(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().Add(5 * time.Second)
-	iss := &Issuer{Ctx: context.Background(), Keys: keys, Resolver: oneJWT{tok}, Account: apub, Trust: trust, Servers: 1, Range: "foo",
+	iss := &Issuer{Ctx: context.Background(), Keys: keys, Resolver: oneJWT{tok}, Account: apub, Trust: trust, Servers: 1, Owner: "foo",
 		Now: func() time.Time { return now }}
 	got, err := iss.Kept(context.Background(), 0)
 	if err != nil {
@@ -97,7 +97,7 @@ func TestSignKeepsTheConfiguredAccountSigningKey(t *testing.T) {
 			t.Fatal(err)
 		}
 		now := time.Now().Add(5 * time.Second)
-		return &Issuer{Ctx: context.Background(), Keys: keys, Resolver: oneJWT{tok}, Account: apub, Trust: trust, Servers: 1, Range: "foo",
+		return &Issuer{Ctx: context.Background(), Keys: keys, Resolver: oneJWT{tok}, Account: apub, Trust: trust, Servers: 1, Owner: "foo",
 			Now: func() time.Time { return now }}
 	}
 	c, err := listset.Compile(listset.ListSet{

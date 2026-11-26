@@ -85,7 +85,7 @@ func scopeOf(t *testing.T, ac *jwt.AccountClaims, pub string) *jwt.UserScope {
 
 func pubOf(kp nkeys.KeyPair) string { p, _ := kp.PublicKey(); return p }
 
-func TestSignKeepsOtherRangesGroupKeys(t *testing.T) {
+func TestSignKeepsOtherOwnersGroupKeys(t *testing.T) {
 	op, _ := nkeys.CreateOperator()
 	acct, _ := nkeys.CreateAccount()
 	apub := pubOf(acct)
@@ -117,7 +117,7 @@ func TestSignKeepsOtherRangesGroupKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().Add(5 * time.Second)
-	iss := &Issuer{Ctx: context.Background(), Keys: keys, Resolver: oneJWT{tok}, Account: apub, Trust: trust, Servers: 1, Range: "foo",
+	iss := &Issuer{Ctx: context.Background(), Keys: keys, Resolver: oneJWT{tok}, Account: apub, Trust: trust, Servers: 1, Owner: "foo",
 		Now: func() time.Time { return now }}
 	out, err := iss.Sign(listset.Record{}, c)
 	if err != nil {
@@ -127,15 +127,15 @@ func TestSignKeepsOtherRangesGroupKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The other range's signer stays, with its own scope.
+	// The other owner's signer stays, with its own scope.
 	us := scopeOf(t, got, pubOf(keys.groups["bar.d"]))
 	if us.Role != "bar.d" || !slices.Contains([]string(us.Template.Pub.Allow), "keep.bar.d") {
-		t.Errorf("the other range's scope changed: %+v", us)
+		t.Errorf("the other owner's scope changed: %+v", us)
 	}
-	// This range's group of the list set is there; a this-range group no longer in the list set is gone.
+	// This owner's group of the list set is there; a group of this owner no longer in the list set is gone.
 	scopeOf(t, got, pubOf(keys.groups["foo.c"]))
 	if _, ok := got.SigningKeys.GetScope(pubOf(keys.groups["foo.gone"])); ok {
-		t.Error("a group of this range that left the list set still has a valid signer")
+		t.Error("a group of this owner that left the list set still has a valid signer")
 	}
 }
 
@@ -188,8 +188,8 @@ func TestSignPreviousStampsThePlannedRevocationTime(t *testing.T) {
 	}
 }
 
-// dropWorld is an account JWT with a plain (non-mash) signing key and another range's held group key, and an Issuer
-// for range foo over it.
+// dropWorld is an account JWT with a plain (non-mash) signing key and another owner's held group key, and an Issuer
+// for owner foo over it.
 type dropWorld struct {
 	keys        storeKeys
 	acct        string
@@ -231,7 +231,7 @@ func newDropWorld(t *testing.T) *dropWorld {
 		t.Fatal(err)
 	}
 	now := time.Now().Add(5 * time.Second)
-	w.iss = &Issuer{Ctx: context.Background(), Keys: w.keys, Resolver: oneJWT{tok}, Account: w.acct, Trust: trust, Servers: 1, Range: "foo",
+	w.iss = &Issuer{Ctx: context.Background(), Keys: w.keys, Resolver: oneJWT{tok}, Account: w.acct, Trust: trust, Servers: 1, Owner: "foo",
 		Now: func() time.Time { return now }}
 	return w
 }
@@ -264,7 +264,7 @@ func TestSignRefusesANonMashKeyWithoutTheDropFields(t *testing.T) {
 	}
 }
 
-func TestSignDropsANonMashKeyAfterTheIssuerCheckAndKeepsOtherRanges(t *testing.T) {
+func TestSignDropsANonMashKeyAfterTheIssuerCheckAndKeepsOtherOwners(t *testing.T) {
 	w := newDropWorld(t)
 	other := newGroupKey()
 	w.enable(w.acct, map[string][]string{"UCONN": {w.acct, w.otherRange}, "USYS": {pubOf(other)}}) // USYS is under a key that is neither kept nor in the JWT
@@ -284,7 +284,7 @@ func TestSignDropsANonMashKeyAfterTheIssuerCheckAndKeepsOtherRanges(t *testing.T
 		t.Error("the non-mash key stays")
 	}
 	if us := scopeOf(t, got, w.otherRange); us.Role != "bar.d" {
-		t.Errorf("the other range's key changed: %+v", us)
+		t.Errorf("the other owner's key changed: %+v", us)
 	}
 	scopeOf(t, got, pubOf(w.keys.groups["foo.c"]))
 	if len(got.SigningKeys) != 2 {
@@ -393,7 +393,7 @@ func TestSignCarriesEveryPlainSigningKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().Add(5 * time.Second)
-	iss := &Issuer{Ctx: context.Background(), Keys: keys, Resolver: oneJWT{tok}, Account: apub, Trust: trust, Servers: 1, Range: "foo",
+	iss := &Issuer{Ctx: context.Background(), Keys: keys, Resolver: oneJWT{tok}, Account: apub, Trust: trust, Servers: 1, Owner: "foo",
 		Now: func() time.Time { return now }}
 	c, err := listset.Compile(listset.ListSet{
 		Owner: "foo",
@@ -432,7 +432,7 @@ func TestSignCarriesEveryPlainSigningKey(t *testing.T) {
 }
 
 // foreignScopedWorld is the drop world with the configured plain account signing key (signing.nk) and a foreign scoped
-// key (addForeignScoped) in the account JWT, plus another range's held group key.
+// key (addForeignScoped) in the account JWT, plus another owner's held group key.
 func foreignScopedWorld(t *testing.T) (*dropWorld, string) {
 	t.Helper()
 	w := newDropWorld(t)
