@@ -1,6 +1,7 @@
 package endpoint
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"strconv"
@@ -165,6 +166,23 @@ func TestClearHookStateRemovesOnlyItsOwn(t *testing.T) {
 	e.clearHookState()
 	if _, found := sp.HookState(); !found {
 		t.Error("another serve's record was removed")
+	}
+}
+
+// A record call that comes after serve's shutdown clear, on the cancelled context of the Run, does not write the record
+// back: the lock can be taken on a cancelled context when it is free (#1872).
+func TestRecordHookStateAfterClearWritesNothing(t *testing.T) {
+	e, sp := boundEndpoint(t, time.Now().Add(-time.Minute))
+	e.RecordHookState()
+	if _, found := sp.HookState(); !found {
+		t.Fatal("nothing recorded")
+	}
+	e.clearHookState()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	e.recordHookState(ctx)
+	if b, found := sp.HookState(); found {
+		t.Errorf("the record was written back after the clear: %s", b)
 	}
 }
 
