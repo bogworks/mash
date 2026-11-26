@@ -7,9 +7,9 @@
 # label-reset; qualifying with the app binds the condition to GitHub Actions. codex-review stays plain: it IS a commit
 # status (scripts/review-pr), no app posts it as a check. lead-review (scripts/lead-approve) is no longer a queue condition.
 
-# Commands in a comment (`@mergifyio requeue`): Mergify's default restriction is `sender-permission >= write`. The lanes comment as the miremanager GitHub App
-# (login miremanager[bot]), which Mergify sees with permission none, so a lane's `@mergifyio requeue` was refused (x-lead #1180, 2026-11-21). An App cannot be a
-# collaborator, so the one command the lanes need is allowed for that one sender; every other command and sender keeps the default. Requeue only puts a pull request
+# Commands in a comment (`@mergifyio requeue`): Mergify's default restriction is `sender-permission >= write`. Our automation comments as a GitHub App
+# (login miremanager[bot]), which Mergify sees with permission none, so its `@mergifyio requeue` was refused. An App cannot be a
+# collaborator, so the one command the automation needs is allowed for that one sender; every other command and sender keeps the default. Requeue only puts a pull request
 # that already passed the merge protections back into the queue; it merges nothing itself.
 commands_restrictions:
   requeue:
@@ -39,7 +39,7 @@ merge_protections_settings:
 # not held (same spelling as queue_conditions; internal/release/mergify_test.go fails if they drift). It must NOT hold check-success conditions: Mergify applies the
 # rule's conditions to the queue draft's commit as merge conditions too, and a check such as adr-lint is skipped on a
 # draft, so the queue refused every pull request (#424 deadlocked it). codex-review and adr-lint are enforced by the
-# queue's queue_conditions at entry, and D204's `update` rule on main refuses any merge that is not Mergify's. pr-check
+# queue's queue_conditions at entry, and the branch rule on main refuses any merge that is not Mergify's. pr-check
 # and label-reset are not repeated either.
 # The rule is also kept off Mergify's own queue draft pull requests (head ref mergify/merge-queue/<hash>). The exemption needs BOTH the head ref and the author mergify[bot]: a head ref alone is not
 # enough, because any same-repository writer can push a branch named mergify/merge-queue/x and switch the rule off. The
@@ -61,7 +61,7 @@ merge_protections:
     success_conditions:
       - label != hold
 
-# A docs-only pull request needs only the docs lint (Randy 2026-11-21: "linting docs is all that's required"): pr-check carries
+# A docs-only pull request needs only the docs lint ("linting docs is all that's required"): pr-check carries
 # docs-lint, adr-lint is the ADR syntax check, and there is no codex-review and no lead-review. It has its
 # own queue, first, so a docs-only pull request is never batched with a code one (a batch with one code pull request runs the
 # full set) and a batch of docs-only ones clears in about the lint's time. A pull request enters it only when NO changed file

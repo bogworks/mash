@@ -20,7 +20,7 @@ import (
 // workflow outside this repository (its jobs would run on runners this repository does not pick). A local
 // ./.github/workflows/... caller is fine; step-level `uses:` of actions is not covered.
 
-// ADR 0189 (decision 309) is the one exception: the file named exactly scorecard.yml may run its job `analysis` on
+// ADR 0189 is the one exception: the file named exactly scorecard.yml may run its job `analysis` on
 // ubuntu-latest, because the OpenSSF API takes published results only from a GitHub-hosted runner with OIDC. The exception
 // holds only while the file's triggers are schedule and push (no pull request, no manual dispatch) and it has no other job.
 const (

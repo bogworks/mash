@@ -17,7 +17,7 @@ import (
 // when changes answered code=false, run when changes failed (an empty output), and never run after a cancellation.
 const heavyIf = "${{ !cancelled() && needs.changes.outputs.code != 'false' }}"
 
-// reproIf: heavyIf, and not on an ordinary pull request push: it runs on a queue draft and on a push (Randy 2026-11-21).
+// reproIf: heavyIf, and not on an ordinary pull request push: it runs on a queue draft and on a push.
 const reproIf = "${{ !cancelled() && needs.changes.outputs.code != 'false' && (github.event_name != 'pull_request' || startsWith(github.head_ref, 'mergify/')) }}"
 
 // Every workflow may filter by branch or tag, but none by path: the checks pr-check, adr-lint, label-reset, test (linux),
@@ -210,7 +210,7 @@ func TestDocsOnly_classifier(t *testing.T) {
 		{"a lower-case agents file is the instruction file (documentation, rules 20 and 21)", pr, "f/x", []string{"docs/agents.md"}, "false"},
 		{"a quoted path (git escapes it)", pr, "f/x", []string{`"docs/\303\251.md"`}, "true"},
 		{"no paths at all", pr, "f/x", nil, "true"},
-		// A push to main and a queue draft are classified by the paths they add, like a pull request (Randy 2026-11-21: a docs-only
+		// A push to main and a queue draft are classified by the paths they add, like a pull request (a docs-only
 		// change runs only the docs lint, on the pull request, in the queue and on main). A schedule and a merge group are code.
 		{"a push to main, docs only", "push", "", []string{"docs/faq.md"}, "false"},
 		{"a push to main with code", "push", "", []string{"docs/faq.md", "internal/x.go"}, "true"},

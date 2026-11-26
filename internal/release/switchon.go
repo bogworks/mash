@@ -1,6 +1,6 @@
 package release
 
-// SwitchOnVersion is the switch-on release of the 0.6.0 SDK adoption (REQ-019). DEC-001, settled by the planner's ruling on decision 300 (0.6.0 is the SDK move): it is version
+// SwitchOnVersion is the switch-on release of the 0.6.0 SDK adoption (REQ-019). DEC-001 (0.6.0 is the SDK move): it is version
 // 0.6.0. From this version the release gate requires the upgrade-proof receipts (AT-011 and AT-012) and refuses a
 // candidate that has none; below it the receipts are checked only when the maintainer gives them.
 const SwitchOnVersion = "0.6.0"

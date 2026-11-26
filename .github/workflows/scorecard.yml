@@ -1,5 +1,5 @@
 name: Scorecard
-# OpenSSF Scorecard (ADR 0189, decision 309). The one workflow that runs on a GitHub-hosted runner, an exception to
+# OpenSSF Scorecard (ADR 0189). The one workflow that runs on a GitHub-hosted runner, an exception to
 # ADR 0079: publish_results needs OIDC on a GitHub-hosted runner to publish to the OpenSSF API. It runs only on the weekly
 # schedule and on a push to main, never on a pull request, so no pull-request code reaches this runner. Forks skip.
 on:

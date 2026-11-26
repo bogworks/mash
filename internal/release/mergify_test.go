@@ -415,9 +415,9 @@ func TestMergify_mergeProtectionsSkipsQueueDrafts(t *testing.T) {
 		active       bool
 	}{
 		{"mergify/merge-queue/abc", "mergify[bot]", false},
-		{"mergify/merge-queue/abc", "randybias", true},
-		{"pr/ctl/x", "mergify[bot]", true},
-		{"pr/ctl/x", "randybias", true},
+		{"mergify/merge-queue/abc", "alice", true},
+		{"pr/alice/x", "mergify[bot]", true},
+		{"pr/alice/x", "alice", true},
 	} {
 		attrs := map[string]string{"base": "main", "head": c.head, "author": c.author, "files": "internal/x.go"}
 		if got := evalCondition(t, r.If, attrs); got != c.active {
@@ -653,7 +653,7 @@ func TestMergify_aHugePullRequestIsNeverDocsOnly(t *testing.T) {
 	for i := 0; i < 400; i++ {
 		docs = append(docs, "docs/guide/page"+strconv.Itoa(i)+".md")
 	}
-	attrs := map[string]string{"base": "main", "head": "pr/x/y", "author": "randybias", "files": strings.Join(docs, "\n")}
+	attrs := map[string]string{"base": "main", "head": "pr/x/y", "author": "alice", "files": strings.Join(docs, "\n")}
 	if !evalCondition(t, m.MergeProtections[0].If, attrs) {
 		t.Error("the merge protection rule must stay active for 400 docs files")
 	}
@@ -671,7 +671,7 @@ func TestMergify_aHugePullRequestIsNeverDocsOnly(t *testing.T) {
 	if !evalCondition(t, fileConds, map[string]string{"files": "docs/a.md\ndocs/b.md"}) {
 		t.Error("the docs queue must admit two docs files")
 	}
-	small := map[string]string{"base": "main", "head": "pr/x/y", "author": "randybias", "files": "docs/a.md"}
+	small := map[string]string{"base": "main", "head": "pr/x/y", "author": "alice", "files": "docs/a.md"}
 	if evalCondition(t, m.MergeProtections[0].If, small) {
 		t.Error("the merge protection rule must be inactive for one docs file")
 	}

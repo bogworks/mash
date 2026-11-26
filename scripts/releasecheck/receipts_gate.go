@@ -11,7 +11,7 @@ import (
 	"github.com/bogworks/mash/internal/release"
 )
 
-// The gate step of REQ-019 (receipts.go holds the check itself). DEC-001 (the planner's ruling on decision 300): the switch-on release is version
+// The gate step of REQ-019 (receipts.go holds the check itself). DEC-001 (0.6.0 is the SDK move): the switch-on release is version
 // 0.6.0 (release.SwitchOnVersion). From it the gate requires the AT-011 and AT-012 receipts and refuses a candidate
 // without them. Below it the step runs only when --receipts is given, and then holds the AT-011 receipts alone (the
 // 0.5.x candidate that carries S1 to S3); with no --receipts the gate is exactly what it was.
