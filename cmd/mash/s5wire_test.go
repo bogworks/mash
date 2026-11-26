@@ -29,21 +29,22 @@ func TestEnableVerifiedDiscoverySetsTheSwitch(t *testing.T) {
 	}
 }
 
-// forgedAnswer is a $SRV.INFO answer that names bob's prompt subject and fails verification: "unsigned" has no id_sig,
-// "wrong-key" is validly signed, by carol's key, for bob's address.
-func forgedAnswer(t *testing.T, kind string, carolCreds string, bob sap.Address) []byte {
+// discoveryAnswer is a $SRV.INFO answer that names bob's prompt subject, with the identity and signature of the key at
+// signerCreds. "unsigned" has no id_sig and fails verification; "wrong-key" is validly signed by carol's key (signerCreds)
+// for bob's address and fails; "valid" is signed by bob's own key (signerCreds is bob's creds) and verifies.
+func discoveryAnswer(t *testing.T, kind string, signerCreds string, bob sap.Address) []byte {
 	t.Helper()
 	subj, err := bob.Subjects()
 	if err != nil {
 		t.Fatal(err)
 	}
-	id, err := sapsdk.IdentityFromCredsAt(carolCreds, mustReadFile(t, carolCreds))
+	id, err := sapsdk.IdentityFromCredsAt(signerCreds, mustReadFile(t, signerCreds))
 	if err != nil {
 		t.Fatal(err)
 	}
 	md := map[string]string{"agent": sap.AgentName, "owner": bob.Owner, "group": bob.Group, "instance": bob.Instance,
 		"protocol_version": sap.ProtocolVersion, "user_nkey": id.User, "account": id.Account, "mail_subject": subj.Mail}
-	if kind == "wrong-key" {
+	if kind == "wrong-key" || kind == "valid" {
 		if md["id_sig"], err = id.IDSig(sap.AgentName, bob.Owner, subj.Prompt); err != nil {
 			t.Fatal(err)
 		}
@@ -130,22 +131,26 @@ func TestBuiltBinaryWhoCountsForgedDiscoveryAnswers(t *testing.T) {
 			t.Fatalf("answers_not_verified %d, bob online %v; want 0 and offline", *w.AnswersNotVerified, online(w, "bob"))
 		}
 	})
+	// answer has carol's connection answer the discovery request with data until the returned stop is called.
+	answer := func(t *testing.T, data []byte) (stop func()) {
+		t.Helper()
+		nc := e.ConnAs(t, creds["carol"], tAddr("carol").Flat())
+		sub, err := nc.Subscribe("$SRV.INFO."+sap.ServiceName, func(m *nats.Msg) {
+			if m.Reply != "" {
+				_ = nc.Publish(m.Reply, data)
+			}
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := nc.FlushTimeout(5 * time.Second); err != nil {
+			t.Fatal(err)
+		}
+		return func() { _ = sub.Unsubscribe() }
+	}
 	for _, kind := range []string{"unsigned", "wrong-key"} {
 		t.Run(kind, func(t *testing.T) {
-			data := forgedAnswer(t, kind, creds["carol"], tAddr("bob"))
-			nc := e.ConnAs(t, creds["carol"], tAddr("carol").Flat())
-			sub, err := nc.Subscribe("$SRV.INFO."+sap.ServiceName, func(m *nats.Msg) {
-				if m.Reply != "" {
-					_ = nc.Publish(m.Reply, data)
-				}
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := nc.FlushTimeout(5 * time.Second); err != nil {
-				t.Fatal(err)
-			}
-			defer sub.Unsubscribe()
+			defer answer(t, discoveryAnswer(t, kind, creds["carol"], tAddr("bob")))()
 			w := who(t)
 			if *w.AnswersNotVerified < 1 {
 				t.Fatalf("answers_not_verified %d for a %s answer naming bob; want at least 1 (the binary did not verify)", *w.AnswersNotVerified, kind)
@@ -155,4 +160,16 @@ func TestBuiltBinaryWhoCountsForgedDiscoveryAnswers(t *testing.T) {
 			}
 		})
 	}
+	// The counterpart: a binary that rejected every registration would pass the subtests above. A validly signed
+	// registration of bob's serving endpoint shows bob online and is not counted.
+	t.Run("valid-registration", func(t *testing.T) {
+		defer answer(t, discoveryAnswer(t, "valid", creds["bob"], tAddr("bob")))()
+		w := who(t)
+		if *w.AnswersNotVerified != 0 {
+			t.Fatalf("answers_not_verified %d for a validly signed answer; want 0", *w.AnswersNotVerified)
+		}
+		if !online(w, "bob") {
+			t.Fatal("bob is not shown online on the strength of a validly signed registration")
+		}
+	})
 }
