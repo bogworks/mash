@@ -156,9 +156,10 @@ I will:
                                     from their GitHub releases, checked against
                                     SHA256SUMS, into ~/.local/bin
   checks                            checksums of every download [gh missing,
-                                    older than 2.102.0 or not running: add
-                                    "(install gh to also verify the
-                                    signature)"]
+                                    too old or not running: "checksums only;
+                                    they come from the same download, so they
+                                    do not prove who made it. Install gh to
+                                    also verify the signature."]
   use no sudo                       unless you choose a system route and say
                                     yes to that exact command
   make a NATS server                in ~/mash-nats, this machine only, run as you

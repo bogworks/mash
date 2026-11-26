@@ -87,7 +87,7 @@ If `command -v nats-server` fails and the person chose a system package,
 find its folder again from the package's file list (`dpkg -L nats-server |
 grep 'bin/nats-server$'` on Debian and Ubuntu, `rpm -ql` or `pacman -Ql`
 elsewhere; never assume `/usr/sbin`). Put that folder in front for the
-command: `PATH="<folder>:$BIN:$PATH" bash "$DL/mash-local-nats-setup.sh"
+command: `PATH="<folder>:$BIN:$PATH" bash "$S"
 --dir "$SRV" --start`.
 
 `--start` never creates a server: if the folder is missing it says so and

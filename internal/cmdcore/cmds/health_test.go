@@ -494,11 +494,11 @@ func TestDoctorNoSessionEndpoint(t *testing.T) {
 		t.Errorf("object %s", out)
 	}
 	if code, out, errs := runDoctor(&fakeHealth{err: cmds.ErrNoEndpointInstalled}, cliframe.Global{}); code != 1 || out != "" ||
-		errs != "error: no endpoint is installed here (set mash up with the setup skill: see the quick start)\nhint: mash join <file>\n" {
+		errs != "error: no endpoint is installed here (set mash up with the setup skill: see the quick start)\n" {
 		t.Errorf("none installed: %d %q %q", code, out, errs)
 	}
 	if code, out, errs := runDoctor(&fakeHealth{err: cmds.ErrNoEndpointInstalled}, cliframe.Global{JSON: true}); code != 1 || errs != "" ||
-		out != `{"error":"no endpoint is installed here (set mash up with the setup skill: see the quick start)","hint":"mash join <file>"}`+"\n" {
+		out != `{"error":"no endpoint is installed here (set mash up with the setup skill: see the quick start)"}`+"\n" {
 		t.Errorf("none installed, json: %d %q %q", code, out, errs)
 	}
 }
