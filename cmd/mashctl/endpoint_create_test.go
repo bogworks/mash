@@ -695,6 +695,87 @@ func TestEndpointCreateNextLineConfigDir(t *testing.T) {
 	})
 }
 
+// The Next line names MASH_SERVER and MASH_CA only when the --server or --ca flag gave them: an environment variable or
+// config.json is there for the next command too. A relative CA path is written absolute. A CA makes the client ask for
+// TLS, which the test server does not speak, so the CA cases call nextEnvPrefix on the configuration a flag gives.
+func TestEndpointCreateNextLineServerAndCA(t *testing.T) {
+	next := func(so string) string { return so[strings.Index(so, "Next: "):] }
+	cfgDir := func(h *fleetEnv) string { return "MASH_CONFIG_DIR=" + shellQuote(h.dir) + " " }
+	t.Run("--server", func(t *testing.T) {
+		h := newFleetEnv(t)
+		a := ad("sv1")
+		so, se, code := h.run("endpoint", "create", a.String(), "--server", h.env["MASH_SERVER"])
+		want := "Next: " + cfgDir(h) + "MASH_SERVER=" + shellQuote(h.env["MASH_SERVER"]) + " MASH_ENDPOINT=" + a.String() + " claude\n"
+		if code != 0 || next(so) != want {
+			t.Fatalf("%d %q %q want %q", code, so, se, want)
+		}
+	})
+	t.Run("config.json holds the server, no flag", func(t *testing.T) {
+		h := newFleetEnv(t)
+		b, err := json.Marshal(map[string]any{"servers": []string{h.env["MASH_SERVER"]}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		h.writeConfig(string(b))
+		delete(h.env, "MASH_SERVER")
+		a := ad("sv4")
+		so, se, code := h.run("endpoint", "create", a.String())
+		want := "Next: " + cfgDir(h) + "MASH_ENDPOINT=" + a.String() + " claude\n"
+		if code != 0 || next(so) != want {
+			t.Fatalf("%d %q %q want %q", code, so, se, want)
+		}
+	})
+	t.Run("MASH_SERVER in the environment, no flag", func(t *testing.T) {
+		h := newFleetEnv(t)
+		a := ad("sv5")
+		so, se, code := h.run("endpoint", "create", a.String())
+		want := "Next: " + cfgDir(h) + "MASH_ENDPOINT=" + a.String() + " claude\n"
+		if code != 0 || next(so) != want {
+			t.Fatalf("%d %q %q want %q", code, so, se, want)
+		}
+	})
+	env := func(k string) string {
+		if k == "HOME" {
+			return "/home/u"
+		}
+		return ""
+	}
+	t.Run("--ca, a relative path is made absolute", func(t *testing.T) {
+		t.Chdir(t.TempDir())
+		abs, err := filepath.Abs("my ca.pem")
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := nextEnvPrefix(config.Config{Dir: "/home/u/.config/mash", TLSCA: "my ca.pem", Source: map[string]string{"servers": "config.json", "ca": "flag:--ca"}}, env)
+		if want := "MASH_CA=" + shellQuote(abs) + " "; got != want || !filepath.IsAbs(abs) {
+			t.Fatalf("%q want %q", got, want)
+		}
+	})
+	t.Run("--server and --ca, with the comma list", func(t *testing.T) {
+		got := nextEnvPrefix(config.Config{Dir: "/home/u/.config/mash", URL: "tls://a:4222,tls://b:4222", TLSCA: "/etc/ca.pem",
+			Source: map[string]string{"servers": "flag:--server", "ca": "flag:--ca"}}, env)
+		if want := "MASH_SERVER=tls://a:4222,tls://b:4222 MASH_CA=/etc/ca.pem "; got != want {
+			t.Fatalf("%q want %q", got, want)
+		}
+	})
+	t.Run("config.json or the environment holds server and CA: nothing", func(t *testing.T) {
+		for _, src := range []string{"config.json", "MASH_SERVER", "default", "unset"} {
+			got := nextEnvPrefix(config.Config{Dir: "/home/u/.config/mash", URL: "tls://a:4222", TLSCA: "/etc/ca.pem",
+				Source: map[string]string{"servers": src, "ca": strings.Replace(src, "MASH_SERVER", "MASH_CA", 1)}}, env)
+			if got != "" {
+				t.Errorf("source %s: %q", src, got)
+			}
+		}
+	})
+	t.Run("all three, in order", func(t *testing.T) {
+		got := nextEnvPrefix(config.Config{Dir: "/srv/m", URL: "tls://a:4222", TLSCA: "/etc/ca.pem",
+			Source: map[string]string{"servers": "flag:--server", "ca": "flag:--ca"}}, env)
+		if want := "MASH_CONFIG_DIR=/srv/m MASH_SERVER=tls://a:4222 MASH_CA=/etc/ca.pem "; got != want {
+			t.Fatalf("%q want %q", got, want)
+		}
+	})
+}
+
 func TestShellQuote(t *testing.T) {
 	for in, want := range map[string]string{
 		"/a/b-c_d.e:f@g%h+i=j,k": "/a/b-c_d.e:f@g%h+i=j,k",

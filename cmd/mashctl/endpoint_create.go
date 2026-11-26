@@ -120,7 +120,7 @@ type epTarget struct {
 	outPath string // the join file with --out, else the creds file in the config folder
 	again   string // the command that finishes a run that did part of its work
 
-	configDirPrefix string // "MASH_CONFIG_DIR=<dir> " for the Next line when the creds went to a folder other than mash's default
+	nextEnvPrefix string // the settings the Next line must carry for a later session: MASH_CONFIG_DIR, and MASH_SERVER and MASH_CA when a flag gave them
 }
 
 // epLoadTarget reads the configuration and the options. Nothing is written and no server is asked.
@@ -134,7 +134,7 @@ func epLoadTarget(verb string, in *epInput, env func(string) string, lookup conf
 		return t, failErr(err)
 	}
 	t.cfg = cfg
-	t.configDirPrefix = configDirPrefix(cfg.Dir, env)
+	t.nextEnvPrefix = nextEnvPrefix(cfg, env)
 	if t.base, err = joinBaseOf(cfg); err != nil {
 		if errors.Is(err, errCAFile) {
 			return t, cliframe.Failf("%s", strings.TrimPrefix(err.Error(), errCAFile.Error()+": "))
@@ -260,7 +260,7 @@ func epPrint(w io.Writer, verb string, t epTarget, res epResult, detail, jsonOut
 		fmt.Fprintf(w, "Credentials: %s\n", t.outPath)
 		// the creds are installed here: the next step is a session as this endpoint, which finds them only in the folder they
 		// went to, so a folder other than the one mash uses by default is named
-		fmt.Fprintf(w, "Next: %sMASH_ENDPOINT=%s claude\n", t.configDirPrefix, name)
+		fmt.Fprintf(w, "Next: %sMASH_ENDPOINT=%s claude\n", t.nextEnvPrefix, name)
 	}
 	if verb == "reissue" && detail {
 		rows = append(rows, cliframe.Row{Label: "servers acknowledged", Value: strconv.Itoa(res.acked)})
@@ -728,22 +728,34 @@ func epCredsUserOf(raw []byte, path string, addr sap.Address) (string, error) {
 var enrollCreate = enroll.Create
 var enrollReissue = enroll.Reissue
 
-// configDirPrefix is "MASH_CONFIG_DIR=<dir> " when dir is not the folder mash uses with no --config-dir and no
-// MASH_CONFIG_DIR (a later session in a plain shell), and "" when it is.
-func configDirPrefix(dir string, env func(string) string) string {
-	if dir == "" {
-		return ""
-	}
-	def := config.ConfigDir(func(k string) string {
-		if k == "MASH_CONFIG_DIR" {
-			return ""
+// nextEnvPrefix is what goes before MASH_ENDPOINT on the Next line, each part only when a later session in a plain shell
+// would not get the same setting: "MASH_CONFIG_DIR=<dir> " when dir is not the folder mash uses with no --config-dir and
+// no MASH_CONFIG_DIR, and "MASH_SERVER=<list> " and "MASH_CA=<path> " when the --server or --ca flag gave the value
+// (an environment variable or config.json is there for the next command too). A relative CA path is made absolute.
+func nextEnvPrefix(cfg config.Config, env func(string) string) string {
+	var b strings.Builder
+	if dir := cfg.Dir; dir != "" {
+		def := config.ConfigDir(func(k string) string {
+			if k == "MASH_CONFIG_DIR" {
+				return ""
+			}
+			return env(k)
+		}, env("HOME"))
+		if def == "" || filepath.Clean(dir) != def {
+			b.WriteString("MASH_CONFIG_DIR=" + shellQuote(dir) + " ")
 		}
-		return env(k)
-	}, env("HOME"))
-	if def != "" && filepath.Clean(dir) == def {
-		return ""
 	}
-	return "MASH_CONFIG_DIR=" + shellQuote(dir) + " "
+	if cfg.Source["servers"] == "flag:--server" && cfg.URL != "" {
+		b.WriteString("MASH_SERVER=" + shellQuote(cfg.URL) + " ")
+	}
+	if cfg.Source["ca"] == "flag:--ca" && cfg.TLSCA != "" {
+		ca := cfg.TLSCA
+		if abs, err := filepath.Abs(ca); err == nil {
+			ca = abs
+		}
+		b.WriteString("MASH_CA=" + shellQuote(ca) + " ")
+	}
+	return b.String()
 }
 
 // shellQuote writes s as one word for a POSIX shell: bare when it holds only [A-Za-z0-9_./:@%+=,-], else in single

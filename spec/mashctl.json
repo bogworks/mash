@@ -904,6 +904,12 @@
           "exit": 0
          },
          {
+          "case": "Created with --server: the next step names the server",
+          "text": "Created endpoint acme.demo.bob\nCredentials: <config dir>/acme.demo.bob.creds\nNext: MASH_SERVER=tls://localhost:4222 MASH_ENDPOINT=acme.demo.bob claude",
+          "stream": "stdout",
+          "exit": 0
+         },
+         {
           "case": "Created, with a join file",
           "text": "Created endpoint acme.demo.bob\nJoin file: acme.demo.bob.join",
           "stream": "stdout",

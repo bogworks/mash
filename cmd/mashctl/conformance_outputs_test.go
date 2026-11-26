@@ -508,6 +508,10 @@ func init() {
 		}
 		return confOutRun{ran: w.run("endpoint", "create", "acme.demo.bob", "--config-dir", other), subs: []string{"<config dir>", other}}
 	})
+	reg("endpoint create Created with --server: the next step names the server", func(t *testing.T) confOutRun {
+		w := newConfWorld(t, true)
+		return confOutRun{ran: w.run("endpoint", "create", "acme.demo.bob", "--server", w.url), subs: append(urlSub(w), "<config dir>", w.a.env["MASH_CONFIG_DIR"])}
+	})
 	reg("endpoint create Created, with a join file", func(t *testing.T) confOutRun {
 		w := newConfWorld(t, true)
 		inTmp(t)
