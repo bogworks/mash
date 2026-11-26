@@ -316,12 +316,14 @@ type s5Msg struct {
 type s5Tap struct {
 	mu   sync.Mutex
 	msgs []s5Msg
+	nc   *nats.Conn // the tap's own connection, flushed before the final read
 }
 
 func (z *s5Fix) tap(t *testing.T, subjects ...string) *s5Tap {
 	t.Helper()
 	tp := &s5Tap{}
 	nc := z.e.Conn(t, z.e.AdminCreds)
+	tp.nc = nc
 	for _, s := range subjects {
 		if _, err := nc.Subscribe(s, func(m *nats.Msg) {
 			cp := s5Msg{Subject: m.Subject, Reply: m.Reply, Data: append([]byte(nil), m.Data...)}
@@ -376,14 +378,24 @@ func (tp *s5Tap) requestsFrom(asker sap.Address) (discovery, prompt []s5Msg) {
 
 // waitRequestsFrom is requestsFrom for a caller that knows how many requests it expects: the tap is its own
 // connection and may not have received the last request when the traffic's reply returns, so it polls until at
-// least wantDiscovery and wantPrompt are there (5 s at most) and returns what it has, for the caller's count check.
+// least wantDiscovery and wantPrompt are there (5 s at most), then flushes, settles 200 ms and reads again so an extra
+// request is counted; it returns what it has, for the caller's exact-count check.
 func (tp *s5Tap) waitRequestsFrom(t *testing.T, asker sap.Address, wantDiscovery, wantPrompt int) (discovery, prompt []s5Msg) {
 	t.Helper()
 	end := time.Now().Add(5 * time.Second)
 	for {
 		discovery, prompt = tp.requestsFrom(asker)
-		if (len(discovery) >= wantDiscovery && len(prompt) >= wantPrompt) || time.Now().After(end) {
+		if time.Now().After(end) {
 			return
+		}
+		if len(discovery) >= wantDiscovery && len(prompt) >= wantPrompt {
+			// The minimum is here; an extra request may still be on its way, and the callers' exact-count checks
+			// must see it: flush the tap's connection, settle, and read again.
+			if err := tp.nc.Flush(); err != nil {
+				t.Fatal(err)
+			}
+			time.Sleep(200 * time.Millisecond)
+			return tp.requestsFrom(asker)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
