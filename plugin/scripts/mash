@@ -89,7 +89,7 @@ dl_recently_failed() {
 
 # True when the managed binary for the pinned version exists (not yet verified; see cached_verified).
 managed_ok() {
-  [ -n "$MASH_VERSION" ] && [ -x "$BIN" ]
+  [ -z "${CACHE_BAD:-}" ] && [ -n "$MASH_VERSION" ] && [ -x "$BIN" ]
 }
 
 # `mash` on PATH that is not this script.
@@ -162,7 +162,11 @@ recheck_cache() {
   cached_verified && return 0
   _bad="$BIN.bad-$(date +%s)"
   log "the cached mash $BIN did not match mash.pins ($CACHEWHY) and is being replaced; the old file is kept as $_bad"
-  mv -f "$BIN" "$_bad" 2>/dev/null || log "could not move $BIN aside"
+  if ! mv -f "$BIN" "$_bad" 2>/dev/null; then
+    # never run a copy that did not match: treat the cache as absent so resolve downloads or falls back
+    log "could not move $BIN aside; not using it"
+    CACHE_BAD=1
+  fi
   return 0
 }
 

@@ -670,6 +670,12 @@ tamper "$T/rc5"
 MASH_RELEASE_BASE="$NOREL" rc_run "$T/rc5" serve
 check "off, tampered cache, serve, download fails: PATH fallback as before" eq "$(cat "$T/out")" "path-mash: serve"
 check "off, tampered cache, serve, download fails: bad file kept aside" eq "$(ls "$T/rc5/bin" | grep -c 'bad-')" 1
+tamper "$T/rc6"
+chmod 555 "$T/rc6/bin"
+MASH_RELEASE_BASE="$NOREL" rc_run "$T/rc6" serve
+chmod 755 "$T/rc6/bin"
+check "off, tampered cache, cannot move aside: the mismatched copy is not run" eq "$(grep -c TAMPERED "$T/out")" 0
+check "off, tampered cache, cannot move aside: says so" eq "$(grep -c 'not using it' "$T/err")" 1
 
 # --- MASH_LAUNCHED_FROM names the kind of mash that was exec'd
 printf '#!/bin/sh\necho "from=$MASH_LAUNCHED_FROM"\n' > "$PB/mash"; chmod +x "$PB/mash"
