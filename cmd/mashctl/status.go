@@ -46,7 +46,8 @@ func serverStatus(cfg config.Config, server string) statusRow {
 	}
 	cfg.URL = server
 	cfg.AdminTimeout = statusDeadline // one silent server must not hold the others' rows
-	if cfg.AdminCreds == "" { // OpenAdminWith checks the owner first; a missing credential is reported either way
+	// OpenAdminWith checks the owner first; a missing credential is reported either way.
+	if cfg.AdminCreds == "" {
 		row.unset = true
 		return notOK("admin credentials are not set: set MASH_ADMIN_CREDS, or \"admin_creds\" in config.json")
 	}
