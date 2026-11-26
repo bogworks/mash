@@ -79,14 +79,25 @@ func TestInboxUsageAndOldVerb(t *testing.T) {
 func TestEndpointInboxJSONGolden(t *testing.T) {
 	atTerminal(t) // expects the terminal form of --json (#1043)
 	in := &admin.InboxInspection{
-		Stream:   admin.InspectedStream{Name: "inbox-acme_team1_alpha", FirstSeq: 1, LastSeq: 4, Messages: 4, Bytes: 812},
-		Consumer: &admin.InspectedConsumer{Name: "deliver", AckFloor: admin.Cursor{Stream: 1, Consumer: 1}, Delivered: admin.Cursor{Stream: 3, Consumer: 3}, NumPending: 1, NumRedelivered: 0, NumAckPending: 2},
+		Refused:   4,
+		Malformed: 1,
+		Stream:    admin.InspectedStream{Name: "inbox-acme_team1_alpha", FirstSeq: 1, LastSeq: 5, Messages: 5, Bytes: 812},
+		Consumer:  &admin.InspectedConsumer{Name: "deliver", AckFloor: admin.Cursor{Stream: 1, Consumer: 1}, Delivered: admin.Cursor{Stream: 3, Consumer: 3}, NumPending: 1, NumRedelivered: 0, NumAckPending: 2},
 	}
 	ts := time.Date(2026, 11, 12, 10, 0, 0, 0, time.UTC)
-	for i, tr := range []string{"verified", "claimed", "forged", "unknown-signer"} {
+	// claimed, forged and unknown-signer mail was not verified, so each has that class as its reason; a header fault is shown as
+	// refused with its class and no sender (REQ-006, CHG-9); verified mail has no reason
+	for i, tr := range []string{"verified", "claimed", "forged", "unknown-signer", "malformed"} {
 		seq := uint64(i + 1)
-		in.Messages = append(in.Messages, admin.InspectedMessage{Seq: seq, MsgID: fmt.Sprintf("id%d", seq), Sender: "acme_team1_bob", Trust: tr,
-			StoredAt: ts.Add(time.Duration(i) * time.Minute), Size: 10 * (i + 1), Kind: "message", State: admin.DeliveryState(seq, in.Consumer)})
+		m := admin.InspectedMessage{Seq: seq, MsgID: fmt.Sprintf("id%d", seq), Sender: "acme_team1_bob", Trust: tr,
+			StoredAt: ts.Add(time.Duration(i) * time.Minute), Size: 10 * (i + 1), Kind: "message", State: admin.DeliveryState(seq, in.Consumer)}
+		switch tr {
+		case "claimed", "forged", "unknown-signer":
+			m.Reason = "not verified"
+		case "malformed":
+			m.Sender, m.Reason = "?", "control character in name"
+		}
+		in.Messages = append(in.Messages, m)
 	}
 	var buf strings.Builder
 	writeJSON(&buf, buildInboxJSON(sap.Address{Owner: "acme", Group: "team1", Instance: "alpha"}, in))
@@ -138,7 +149,8 @@ func TestEndpointInboxJSONGolden(t *testing.T) {
 	}
 }
 
-// TestEndpointInboxTable pins the text table: the TRUST column, malformed shown as forged, with DELIVERED yes or no only.
+// TestEndpointInboxTable pins the text table: the TRUST column, a header fault shown as refused (CHG-9) with its class as the
+// REASON, not-verified mail with its own label and the class not verified, DELIVERED yes or no only.
 func TestEndpointInboxTable(t *testing.T) {
 	addr := sap.Address{Owner: "acme", Group: "demo", Instance: "bob"}
 	now := time.Date(2026, 11, 19, 12, 0, 0, 0, time.UTC)
@@ -148,8 +160,10 @@ func TestEndpointInboxTable(t *testing.T) {
 		Messages: []admin.InspectedMessage{
 			{Seq: 1, Sender: "acme_demo_alice", Trust: "verified", StoredAt: now.Add(-2 * time.Minute), Size: 48, Kind: "task", State: admin.DeliveryState(1, nil)},
 			{Seq: 2, Sender: "acme_lab_mallet", Trust: "forged", StoredAt: now.Add(-time.Minute), Size: 61, Kind: "task", State: admin.DeliveryState(2, nil)},
-			{Seq: 3, Sender: "acme_lab_mallet", Trust: "malformed", StoredAt: now.Add(-time.Minute), Size: 5, Kind: "task", State: admin.DeliveryState(3, nil)},
+			{Seq: 3, Sender: "?", Trust: "malformed", Reason: "control character in name and a very long tail of words that goes on past column seventy-nine", StoredAt: now.Add(-time.Minute), Size: 5, State: admin.DeliveryState(3, nil)},
 			{Seq: 4, Sender: "acme_demo_alice", Trust: "", StoredAt: now.Add(-time.Minute), Size: 5, Kind: "task", State: admin.DeliveryState(4, in3())},
+			{Seq: 5, Sender: "?", Trust: "absent", Reason: "not verified", StoredAt: now.Add(-time.Minute), Size: 7, Kind: "task", State: admin.DeliveryState(5, nil)},
+			{Seq: 6, Sender: "?", Trust: "malformed", StoredAt: now.Add(-time.Minute), Size: 9, State: admin.DeliveryState(6, nil)},
 		},
 	}
 	rep := buildInboxJSON(addr, in)
@@ -158,15 +172,18 @@ func TestEndpointInboxTable(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := "\n" +
-		"NUMBER  FROM             SENT    TRUST     DELIVERED  KIND  SIZE\n" +
+		"NUMBER  FROM             SENT    TRUST     DELIVERED  KIND  SIZE  REASON\n" +
 		"1       alice            2m ago  verified  no         task  48 B\n" +
 		"2       acme.lab.mallet  1m ago  forged    no         task  61 B\n" +
-		"3       acme.lab.mallet  1m ago  forged    no         task  5 B\n" +
-		"4       alice            1m ago  -         yes        task  5 B\n"
+		"3       ?                1m ago  refused   no         -     5 B   control char\u2026\n" +
+		"4       alice            1m ago  -         yes        task  5 B\n" +
+		"5       ?                1m ago  absent    no         task  7 B   not verified\n" +
+		"6       ?                1m ago  refused   no         -     9 B   unreadable s…\n"
 	if buf.String() != want {
 		t.Errorf("table:\n%s\nwant:\n%s", buf.String(), want)
 	}
-	if rep.Messages[1].Trust != "forged" || rep.Messages[1].Delivered || rep.Messages[2].Trust != "forged" {
+	if rep.Messages[1].Trust != "forged" || rep.Messages[1].Delivered || rep.Messages[2].Trust != "refused" || rep.Messages[2].Reason == "" || rep.Messages[1].Reason != "" ||
+		rep.Messages[4].Trust != "absent" || rep.Messages[4].Reason != "not verified" || rep.Messages[5].Reason != "unreadable sender header" {
 		t.Errorf("json rows: %+v", rep.Messages)
 	}
 }
@@ -505,6 +522,9 @@ func TestInspectInboxCallKeepsTrustAndCursors(t *testing.T) {
 	if len(in.Messages) != 6 {
 		t.Fatalf("%d messages", len(in.Messages))
 	}
+	if got := in.Messages[2]; got.Trust != "forged" || got.Reason != "not verified" {
+		t.Errorf("forged message: trust %q, reason %q, want reason \"not verified\"", got.Trust, got.Reason)
+	}
 	for i, m := range in.Messages {
 		if m.Seq != uint64(i+1) || m.Trust != wantTrust[i] || m.State != wantState[i] || m.MsgID != fmt.Sprintf("msg-%d", i+1) {
 			t.Errorf("message %d: %+v, want trust %s state %s", i+1, m, wantTrust[i], wantState[i])
@@ -602,5 +622,79 @@ func TestEndpointInboxCannotComplete(t *testing.T) {
 	var out, errb strings.Builder
 	if code := runEnv([]string{"endpoint", "inbox", "o.g.x"}, func(k string) string { return env[k] }, &out, &errb); code != 1 || out.String() != "" || !strings.HasPrefix(errb.String(), "error: ") {
 		t.Fatalf("exit %d, want 1: %q %q", code, out.String(), errb.String())
+	}
+}
+
+// A window past the stream's last sequence lists nothing, but the header count is still the stream's: the refused mail
+// is counted over the whole stream, not over the window.
+func TestInspectCountsRefusedPastTheWindow(t *testing.T) {
+	f, _ := inspectFixture(t)
+	adm, err := admin.New(f.e.Conn(t, f.e.AdminCreds), f.e.Owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	whole, err := adm.InspectInbox(context.Background(), ad("box"), admin.InspectOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if whole.Refused == 0 {
+		t.Fatalf("fixture has no refused mail: %+v", whole.Messages)
+	}
+	past, err := adm.InspectInbox(context.Background(), ad("box"), admin.InspectOptions{From: whole.Stream.LastSeq + 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(past.Messages) != 0 {
+		t.Errorf("%d messages listed past the last sequence", len(past.Messages))
+	}
+	if past.Refused != whole.Refused {
+		t.Errorf("refused %d past the window, want the stream's %d", past.Refused, whole.Refused)
+	}
+}
+
+// The JSON refused count and the text header count only the mail mashctl finds malformed, not every message the endpoint
+// would refuse.
+func TestInboxRefusedCountIsMalformedOnly(t *testing.T) {
+	in := &admin.InboxInspection{Refused: 4, Malformed: 1, Stream: admin.InspectedStream{Name: "inbox-o_g_a", Messages: 5}}
+	if rep := buildInboxJSON(sap.Address{Owner: "o", Group: "g", Instance: "a"}, in); rep.Refused != 1 {
+		t.Errorf("refused %d, want 1 (the malformed count)", rep.Refused)
+	}
+	if got := malformedPart(in.Malformed); got != ", 1 refused as malformed" {
+		t.Errorf("header part %q", got)
+	}
+}
+
+// A malformed message's headers are the sender's claims: its Mash-Kind is not shown. The inspection carries no kind for
+// it, the JSON leaves it empty and the table prints "-".
+func TestInspectInboxMalformedMessageHasNoKind(t *testing.T) {
+	f := newAuditEnv(t)
+	f.endpoint(t, ad("box"))
+	subject := ad("box").MailSubject()
+	h := nats.Header{}
+	h.Set(sap.HeaderName, "{not json")
+	h.Set(jetstream.MsgIDHeader, "msg-1")
+	h.Set("Mash-Kind", "task")
+	sendSigned(t, f.js, subject, []byte("bad"), h)
+	adm, err := admin.New(f.e.Conn(t, f.e.AdminCreds), f.e.Owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in, err := adm.InspectInbox(context.Background(), ad("box"), admin.InspectOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(in.Messages) != 1 || in.Messages[0].Trust != "malformed" || in.Messages[0].Kind != "" {
+		t.Fatalf("messages %+v: want one malformed message with no kind", in.Messages)
+	}
+	rep := buildInboxJSON(ad("box"), in)
+	if rep.Messages[0].Kind != "" {
+		t.Errorf("JSON kind %q, want empty", rep.Messages[0].Kind)
+	}
+	var buf strings.Builder
+	if err := writeInboxTable(&buf, ad("box"), rep.Messages, in.Messages, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(buf.String(), "task") || !regexp.MustCompile(`refused\s+no\s+-\s`).MatchString(buf.String()) {
+		t.Errorf("table:\n%s\nwant kind -", buf.String())
 	}
 }

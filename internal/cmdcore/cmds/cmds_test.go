@@ -668,6 +668,8 @@ var sendCasesComparedInCmdMash = map[string]string{
 	"No credentials here":                       "cmd/mash/spec_failures_test.go (TestMissingCredsMatchesSpec, reads the spec text)",
 	"Not signed in":                             "cmd/mash/frame_auth_test.go",
 	"mash send --help":                          "cmd/mash/help_cases_test.go (TestHelpCasesMatchSpec)",
+	"A send that signing refuses":               "internal/cmdcore/cmds/cmds_test.go (TestSigningRefusalMatchesSpec)",
+	"A reply that signing refuses":              "internal/cmdcore/cmds/cmds_test.go (TestSigningRefusalMatchesSpec)",
 }
 
 // The descriptions, examples, tool description and objects are the specification's, word for word.
@@ -901,6 +903,35 @@ func TestImplicitStdinHasADeadline(t *testing.T) {
 		}
 		if !asJSON && (o.String() != "" || e.String() != "error: no message text arrived on standard input\n") {
 			t.Errorf("text: %q %q", o.String(), e.String())
+		}
+	}
+}
+
+// TO-8: a send, or a stored-mail reply (send --reply-to), that signing refuses prints the spec's one line on standard error
+// with no hint, exits 1, and the MCP tool gives the same words as its error. The words are the endpoint's (internal/endpoint).
+func TestSigningRefusalMatchesSpec(t *testing.T) {
+	_, meta := specCommand(t, "send")
+	cause := errors.New("not sent: could not sign: your name is too long")
+	for _, x := range meta["x-output"].([]any) {
+		c := x.(map[string]any)
+		var args []string
+		switch c["case"] {
+		case "A send that signing refuses":
+			args = []string{"acme.demo.bob", "ready?"}
+		case "A reply that signing refuses":
+			args = []string{"acme.demo.bob", "yes", "--reply-to", "2"}
+		default:
+			continue
+		}
+		code, out, errs := runSend(&fakeSvc{err: cause}, "", nil, cliframe.Global{}, args...)
+		if code != 1 || out != "" || errs != c["text"].(string)+"\n" || c["stream"] != "stderr" || int(c["exit"].(float64)) != 1 {
+			t.Errorf("%v: %d %q %q, spec %q", c["case"], code, out, errs, c["text"])
+		}
+	}
+	for _, e := range specTool(t, "send")["errors"].([]any) {
+		m := e.(map[string]any)
+		if m["case"] == "A send that signing refuses" && m["text"] != "error: "+cause.Error() {
+			t.Errorf("mcp send error %q", m["text"])
 		}
 	}
 }

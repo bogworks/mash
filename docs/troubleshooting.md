@@ -2,6 +2,16 @@
 
 Symptoms, their causes, how to check, and the fix, using the exact messages mash prints. Related: [faq.md](faq.md), [install.md](install.md), [operations.md](operations.md), [synadia.md](synadia.md), [threat-model](security/threat-model.md).
 
+## A refused message
+
+By default only verified mail is kept, and `MASH_ACCEPT_UNVERIFIED=1` changes that. A refused message is one mash did not hand to a session, either because its sender header has a fault (the class says which, such as `time not in UTC` or `control character in name`) or because its sender could not be proved (the class `not verified`). It is kept, not lost: it stays in the list for as long as other mail does, until it ages out (30 days by default) or newer mail pushes it out past the inbox size (16 MiB by default). It cannot be deleted or released, and nothing needs doing: the `refused` row of `doctor` stays `ok` whatever it counts.
+
+You see it in four places, and each says the class and never the message: `mash inbox` lists it with the state `refused`, the sender `?` and the class as the reason, and counts it in the header (`1 refused`); `mash read <number>` says `error: message <number> was refused: <class>`; `mash status --detail` and `mash doctor` count the refused messages, and name each class. `mash status`, the one line, does not mention them.
+
+The sender is not shown, because a refused header cannot be trusted. If someone says they sent a message that did not arrive, ask them to send it again.
+
+The first start after the switch-on release can wait one pass while stored mail is checked: `mash status` says `not ready: mail is waiting while stored mail is checked` until the pass ends. It happens once, and nothing needs doing.
+
 ## First check
 
 In the session, ask Claude to call the `status` tool. It answers in every session, even one with no `MASH_ENDPOINT`, and says one line: `<endpoint>: ready, offline`, `<endpoint>: ready, online` (online means an agent session holds the endpoint open now) or `<endpoint>: not ready: <reason>`. The reasons are `the server refused its credentials`, `the server did not answer: <address>`, `the creds file is missing: <path>`, `the creds file can be read by other users: <path>`, `the server's certificate is not trusted: <address>`, `the server did not offer TLS: <address>`, `mail is held: its folder cannot be written` (MASH_SPOOL_REQUIRED is set and the folder that stores arriving mail cannot be written, so mail waits in the inbox; read it with the `inbox` and `read` tools; `doctor` names the folder) and `no server is set`. A session with no endpoint named says `No endpoint is chosen for this session.` instead. When it is not ready, call the `doctor` tool.
@@ -147,9 +157,9 @@ Check:
 
 `who` lists only the endpoints of your own owner, and `mash who --wide` adds the role, host and description on record; other endpoints' live host is not shown without admin access.
 
-## Mail does not arrive and `mash doctor` says unverified messages were refused
+## Mail does not arrive and `mash doctor` counts refused messages
 
-By default `mash serve` delivers only mail whose trust is `verified`. Mail that is unsigned (`[absent]`), signed by an unknown key (`[unknown-signer]`), `[claimed]` or `[stale]` is dropped and counted; the `refused` row of `mash doctor` shows the count, the sender is not told, and serve writes one line to its log for each: `refused message 12 from acme.demo.x: not verified (absent)` (the address the message claims, and its trust label). A refused message is not in `mash inbox`, and `mash read 12` says `error: message 12 was refused: it was not verified` with the hint `mash doctor`. Find out why the sender is not verified (below). To receive such mail anyway, with its label, start the session with `MASH_ACCEPT_UNVERIFIED=1` (or set `accept_unverified` in `config.json`, or run `mash serve --accept-unverified`). Mail refused earlier is not delivered afterwards.
+By default `mash serve` delivers only mail whose trust is `verified`. Mail that is unsigned (`[absent]`), signed by an unknown key (`[unknown-signer]`), `[claimed]` or `[stale]` is not delivered and is counted as `not verified`; serve writes one line to its log for each: `refused message 12 from acme.demo.x: not verified (absent)`. The sender is not told. The `refused` row of `mash doctor` shows the count and a count for each class, and its state is `ok`: it reports mail, it is not a fault of this machine. `mash inbox` lists the message as a `refused` row with the sender `?` and the class as the reason, and `mash read 12` says `error: message 12 was refused: it was not verified` with the hint `mash doctor`. Neither shows the text. See "A refused message" above for the other classes. Find out why the sender is not verified (below). To receive such mail anyway, with its label, start the session with `MASH_ACCEPT_UNVERIFIED=1` (or set `accept_unverified` in `config.json`, or run `mash serve --accept-unverified`). Mail refused earlier is not delivered afterwards.
 
 ## Mail arrives labelled `[unknown-signer]`, `[claimed]`, `[absent]` or `[stale]`
 

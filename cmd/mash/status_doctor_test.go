@@ -257,7 +257,7 @@ func TestDoctorAllWell(t *testing.T) {
 		"server    ok    " + w.e.URL + "\n" +
 		"sign-in   ok\n" +
 		"delivery  skip  checked only inside a Claude Code session\n" +
-		"refused   ok    no message was refused for lacking its sender's signature\n" +
+		"refused   ok    no mail was refused\n" +
 		"\n" +
 		"No problems.\n"
 	if r.code != 0 || r.out != want || r.errs != "" {
@@ -291,8 +291,8 @@ func TestDoctorAllWell(t *testing.T) {
 	}
 }
 
-// A refused sign-in and refused mail: the specification's own example, with the fix as the one hint on stderr.
-func TestDoctorAProblemAndAWarning(t *testing.T) {
+// A refused sign-in and refused mail (the refused row is ok, CHG-14): the specification's own example, with the fix as the one hint on stderr.
+func TestDoctorAProblemAndRefusedMail(t *testing.T) {
 	w := tlsWorld(t, "a")
 	other := testenv.Start(t)
 	creds, _ := other.Mint(t, tAddr("a"))
@@ -305,31 +305,17 @@ func TestDoctorAProblemAndAWarning(t *testing.T) {
 		"server    ok    " + w.e.URL + "\n" +
 		"sign-in   FAIL  the server refused these credentials\n" +
 		"delivery  skip  needs sign-in\n" +
-		"refused   warn  3 unverified messages were refused\n" +
+		"refused   ok    3 messages were refused\n" +
+		"                3 not verified\n" +
 		"\n" +
-		"1 problem, 1 warning.\n"
+		"1 problem.\n"
 	if r.code != 1 || r.out != want || r.errs != "" { // MASH_CREDS is a custom path: no join hint
 		t.Fatalf("doctor:\n%+v\nwant %q", r, want)
 	}
 	j := runMash(env, "doctor", "--json")
-	if j.code != 1 || j.errs != "" || !strings.Contains(j.out, `"problems":1,"warnings":1`) ||
+	if j.code != 1 || j.errs != "" || !strings.Contains(j.out, `"problems":1,"warnings":0`) ||
 		!strings.Contains(j.out, `{"name":"sign-in","state":"fail","detail":"the server refused these credentials","fix":null}`) {
 		t.Fatalf("doctor --json: %+v", j)
-	}
-}
-
-// A warning alone does not fail the command.
-func TestDoctorAWarningAloneExitsZero(t *testing.T) {
-	w := tlsWorld(t, "a")
-	env := strictEnv(w, "a", nil)
-	writeRefused(t, env, 1)
-	r := runMash(env, "doctor")
-	if r.code != 0 || r.errs != "" || !strings.Contains(r.out, "refused   warn  1 unverified message was refused\n") || !strings.HasSuffix(r.out, "\n\n1 warning.\n") {
-		t.Fatalf("doctor: %+v", r)
-	}
-	// and status is not about it
-	if s := runMash(env, "status"); s.code != 0 || s.out != tTo("a")+": ready, offline\n" {
-		t.Fatalf("status: %+v", s)
 	}
 }
 
@@ -337,7 +323,7 @@ func TestDoctorServerNotAnsweringAndCredsProblems(t *testing.T) {
 	w := tlsWorld(t, "a")
 	env := strictEnv(w, "a", map[string]string{"MASH_SERVER": "tls://127.0.0.1:1", "MASH_OPEN_TIMEOUT": "2s"})
 	r := runMash(env, "doctor")
-	want := "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    FAIL  the server did not answer: tls://127.0.0.1:1\nsign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no message was refused for lacking its sender's signature\n\n1 problem.\n"
+	want := "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    FAIL  the server did not answer: tls://127.0.0.1:1\nsign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no mail was refused\n\n1 problem.\n"
 	if r.code != 1 || r.out != want || r.errs != "" { // no command mends it: no hint
 		t.Fatalf("doctor:\n%+v", r)
 	}
@@ -391,7 +377,7 @@ func TestDoctorPlainURL(t *testing.T) {
 	delete(env, "MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION")
 	r = runMash(env, "doctor")
 	if r.code != 1 || !strings.Contains(r.out, "server    FAIL  the server address is not tls://: "+w.e.URL+"\n") ||
-		!strings.Contains(r.out, "sign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no message was refused for lacking its sender's signature\n") ||
+		!strings.Contains(r.out, "sign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no mail was refused\n") ||
 		strings.Contains(r.out, "MASH_CA") || r.errs != "" { // no command of ours fixes the address: no hint
 		t.Fatalf("doctor without it: %+v", r)
 	}
@@ -417,7 +403,8 @@ func TestDoctorShowsNoSecrets(t *testing.T) {
 	}
 }
 
-// writeRefused records n refused unverified messages where the reading side looks for them.
+// writeRefused records n refused not-verified messages, numbers 1 to n of the stream "t", where the reading side looks for
+// them: the list of refused not-verified messages (REQ-006).
 func writeRefused(t *testing.T, env map[string]string, n int) {
 	t.Helper()
 	cfg, err := loadCfg(env)
@@ -431,7 +418,11 @@ func writeRefused(t *testing.T, env map[string]string, n int) {
 	if err := os.MkdirAll(d, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(d, endpoint.RefusedFile), []byte(fmt.Sprint(n)+"\n"), 0o600); err != nil {
+	list := "stream t\n"
+	for i := 1; i <= n; i++ {
+		list += fmt.Sprintln(i)
+	}
+	if err := os.WriteFile(filepath.Join(d, "refused-unverified.seqs"), []byte(list), 0o600); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -576,7 +567,7 @@ func TestStatusAndDoctorUntrustedCertificate(t *testing.T) {
 		t.Fatalf("status --json: %+v", j)
 	}
 	d := runMash(env, "doctor")
-	want := "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    FAIL  " + text + "\nsign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no message was refused for lacking its sender's signature\n\n1 problem.\n"
+	want := "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    FAIL  " + text + "\nsign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no mail was refused\n\n1 problem.\n"
 	if d.code != 1 || d.out != want || d.errs != "" || strings.Contains(d.out, "did not answer") {
 		t.Fatalf("doctor:\n%+v\nwant %q", d, want)
 	}
@@ -601,7 +592,7 @@ func TestStatusAndDoctorNotATLSServer(t *testing.T) {
 		t.Fatalf("status --json: %+v", j)
 	}
 	d := runMash(env, "doctor")
-	want := "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    FAIL  " + text + "\nsign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no message was refused for lacking its sender's signature\n\n1 problem.\n"
+	want := "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    FAIL  " + text + "\nsign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no mail was refused\n\n1 problem.\n"
 	if d.code != 1 || d.out != want || d.errs != "" || strings.Contains(d.out, "did not answer:") {
 		t.Fatalf("doctor:\n%+v\nwant %q", d, want)
 	}

@@ -1,7 +1,8 @@
 {
   "address": "acme.team1.alpha",
-  "total": 4,
+  "total": 5,
   "undelivered": 1,
+  "refused": 1,
   "messages": [
     {
       "number": 1,
@@ -19,7 +20,8 @@
       "delivered": true,
       "kind": "message",
       "size": 20,
-      "when": "2026-11-12T10:01:00Z"
+      "when": "2026-11-12T10:01:00Z",
+      "reason": "not verified"
     },
     {
       "number": 3,
@@ -28,7 +30,8 @@
       "delivered": true,
       "kind": "message",
       "size": 30,
-      "when": "2026-11-12T10:02:00Z"
+      "when": "2026-11-12T10:02:00Z",
+      "reason": "not verified"
     },
     {
       "number": 4,
@@ -37,7 +40,18 @@
       "delivered": false,
       "kind": "message",
       "size": 40,
-      "when": "2026-11-12T10:03:00Z"
+      "when": "2026-11-12T10:03:00Z",
+      "reason": "not verified"
+    },
+    {
+      "number": 5,
+      "from": "?",
+      "trust": "refused",
+      "delivered": false,
+      "kind": "message",
+      "size": 50,
+      "when": "2026-11-12T10:04:00Z",
+      "reason": "control character in name"
     }
   ]
 }

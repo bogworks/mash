@@ -352,6 +352,20 @@
         "exit": 1
        },
        {
+        "case": "A send that signing refuses",
+        "text": "error: not sent: could not sign: your name is too long",
+        "stream": "stderr",
+        "exit": 1,
+        "note": "TO-8, REQ-004, CHG-8. Nothing was sent. One line and no hint: no command shows a signing failure. The cause after the second colon is the class of the refusal, from a fixed list that names whose it is: `your account is not valid`, `the subject is not valid`, `your name is too long`, `the message id is not valid`; any other refusal by the SDK has no cause (`error: not sent: could not sign`). The SDK's own text is never printed."
+       },
+       {
+        "case": "A reply that signing refuses",
+        "text": "error: not sent: could not sign: your name is too long",
+        "stream": "stderr",
+        "exit": 1,
+        "note": "TO-8, CHG-8. The same for a stored-mail reply, which is `mash send` with `--reply-to`: there is no `mash reply` command. The MCP `send` tool, with and without `reply_to`, returns the same words as its error result and sends nothing. MCP `reply` is not signed and has no signing failure."
+       },
+       {
         "case": "A deleted endpoint here",
         "text": "error: acme.dev.bob: this endpoint was deleted; its address cannot be used again\nhint: mash doctor",
         "stream": "stderr",
@@ -365,35 +379,6 @@
         "issue": "#1100",
         "note": "No Global options: block: per-command help lists the options that apply to it, among its own. send reads the connection (--endpoint, --creds, --server, --ca, --config-dir), prints a fuller answer with --detail and a JSON object with --json, and honours --no-color, so all of them are listed; send's own options are today's, unchanged, with the labels re-padded to the longest. The --endpoint text drops the sentence about serve and hook, which are not this command. Today the help ends with the Global options block, the same text as mash --help, nine entries. Which options apply was read from cmd/mash/main.go: the connection options feed config.Load; the verbs without a --json form are prompt, serve and hook.",
         "verbatim": true
-       }
-      ]
-     },
-     {
-      "name": "x-output-next",
-      "value": [
-       {
-        "case": "The signing is refused (TO-8)",
-        "text": "error: not sent: could not sign: your name is too long",
-        "stream": "stderr",
-        "exit": 1,
-        "issue": "#1142",
-        "note": "Contract 0.6.0 SDK adoption r8, TO-8 (CHG-8): nothing is sent. One line, no hint: no command shows a signing failure. The cause after the second colon is one of `your account is not valid`, `the subject is not valid`, `your name is too long`, `the message id is not valid`; any other refusal by the SDK prints `error: not sent: could not sign`, and the SDK's own text is never printed. The MCP `send` tool returns the same words as its error and sends nothing. Promoted with W."
-       },
-       {
-        "case": "The signing is refused, with --reply-to (TO-8)",
-        "text": "error: not sent: could not sign: your name is too long",
-        "stream": "stderr",
-        "exit": 1,
-        "issue": "#1142",
-        "note": "Contract 0.6.0 SDK adoption r8, TO-8: the stored-mail reply, which on main is `mash send` with `--reply-to` (there is no `mash reply` command). Same line as the case above. The MCP `send` tool with `reply_to` returns the same words; MCP `reply` is not signed and its result stays `Answered.`. Promoted with W."
-       },
-       {
-        "case": "The signing is refused, no cause named (TO-8)",
-        "text": "error: not sent: could not sign",
-        "stream": "stderr",
-        "exit": 1,
-        "issue": "#1142",
-        "note": "Contract 0.6.0 SDK adoption r8, TO-8: the form for any refusal by the SDK that mash cannot tell apart. The SDK's own text is never printed. Promoted with W."
        }
       ]
      },
@@ -504,6 +489,27 @@
         "exit": 0
        },
        {
+        "case": "A refused message",
+        "text": "3 messages for acme.demo.alice, 1 new, 0 urgent, 1 refused.\n\nNUMBER  FROM           SENT     STATE    URGENT  KIND  MESSAGE\n1       acme.demo.bob  2h ago   read     no      task  lunch at noon?\n2       acme.demo.bob  10s ago  new      no      task  ready?\n3       ?              1h ago   refused  -       -     control character in na…",
+        "stream": "stdout",
+        "exit": 0,
+        "note": "TO-1, REQ-006, CHG-14. A message mash refused is listed from the endpoint's refused lists, not from the stream's text: the state is `refused`, FROM is `?` (the sender of a refused message is never shown), URGENT and KIND are `-`, and MESSAGE is the class alone: no body and no preview. The header counts it in the total and adds `, N refused` after the urgent count, only when N is not 0. A message refused for its header and one that was not verified are both listed; one on both lists is one row, as a header refusal. A row is listed only while it is still in the stream: when it ages out the count falls."
+       },
+       {
+        "case": "Every kind side by side",
+        "text": "17 messages for o.dev.bob, 0 new, 0 urgent, 12 refused.\n\nNUMBER  FROM         SENT    STATE    URGENT  KIND  MESSAGE\n1       o.dev.alice  3m ago  read     no      task  verified: real mash send f…\n2       UCNY…4UHK    3m ago  read     no      task  claimed: header without a …\n3       UCVG…3VVW    3m ago  read     no      task  unknown-signer: signed by …\n4       ?            3m ago  read     no      task  absent: no Agent-Sender he…\n5       o.dev.frank  3m ago  read     no      task  stale: signed an hour befo…\n6       ?            2m ago  refused  -       -     not verified\n7       ?            2m ago  refused  -       -     header too long\n8       ?            2m ago  refused  -       -     time not in UTC\n9       ?            2m ago  refused  -       -     control character in name\n10      ?            2m ago  refused  -       -     name too long\n11      ?            2m ago  refused  -       -     broken character in name\n12      ?            1m ago  refused  -       -     a field appears twice\n13      ?            1m ago  refused  -       -     space in subject\n14      ?            1m ago  refused  -       -     signature unreadable\n15      ?            1m ago  refused  -       -     empty sender header\n16      ?            1m ago  refused  -       -     two sender headers\n17      ?            1m ago  refused  -       -     unreadable sender header",
+        "stream": "stdout",
+        "exit": 0,
+        "note": "TO-1, planner #3612: one state word. Rows 1 to 5 are the five trust kinds, which appear only on an endpoint that sets MASH_ACCEPT_UNVERIFIED=1; row 6 is a refused message that was not verified (an endpoint with the default when it arrived); rows 7 to 17 are one refused message for each header class, in the order of the frozen list. Every row is `refused` in STATE; the class is the MESSAGE cell. The narrow table has no TRUST column, so FROM is `?` on a refused row as on an absent one and the state tells them apart; --wide adds TRUST. The longest line is 79 columns."
+       },
+       {
+        "case": "--json, a refused message",
+        "text": "{\n \"endpoint\": \"acme.demo.alice\",\n \"total\": 3,\n \"new\": 1,\n \"urgent\": 0,\n \"refused\": 1,\n \"exact\": true,\n \"wake_count\": 15,\n \"over_wake_count\": false,\n \"wake_age\": \"1h\",\n \"oldest_waiting\": \"10s\",\n \"over_wake_age\": false,\n \"messages\": [\n  {\n   \"number\": 1,\n   \"from\": \"acme.demo.bob\",\n   \"sent\": \"2026-11-19T07:44:12Z\",\n   \"state\": \"read\",\n   \"urgent\": false,\n   \"kind\": \"task\",\n   \"trust\": \"verified\",\n   \"preview\": \"lunch at noon?\"\n  },\n  {\n   \"number\": 2,\n   \"from\": \"acme.demo.bob\",\n   \"sent\": \"2026-11-19T09:44:02Z\",\n   \"state\": \"new\",\n   \"urgent\": false,\n   \"kind\": \"task\",\n   \"trust\": \"verified\",\n   \"preview\": \"ready?\"\n  },\n  {\n   \"number\": 3,\n   \"from\": \"?\",\n   \"sent\": \"2026-11-19T08:44:12Z\",\n   \"state\": \"refused\",\n   \"urgent\": false,\n   \"kind\": \"\",\n   \"trust\": \"refused\",\n   \"preview\": \"\",\n   \"reason\": \"control character in name\"\n  }\n ]\n}\n",
+        "stream": "stdout",
+        "exit": 0,
+        "note": "TO-2. The whole document of the refused-message drawing, its third entry refused; the object gains `\"refused\": 1`. `reason` (a frozen class string) is present on refused entries only and absent on every other entry. `state` and `trust` gain the value `refused`, both existing string fields. Nothing becomes null: `from` is the string `?`, `kind` and `preview` are empty strings, `urgent` is false and `sent` is the time the message was stored, as RFC 3339."
+       },
+       {
         "case": "A long message, or one of several lines",
         "text": "NUMBER  FROM           SENT    STATE  URGENT  KIND    MESSAGE\n3       acme.demo.bob  1m ago  new    no      result  The build passed on all …",
         "stream": "stdout",
@@ -592,35 +598,14 @@
         "exit": 0,
         "issue": "#958",
         "note": "From mash-core (#1395). Both reasons apply: one About line, then one \"exact: no (<reason>)\" line per reason, the capped one first, then the serve one, each under the count line and within 80 columns. The table shows two rows here; it lists the waiting messages as in \"Messages\" with --detail."
-       }
-      ]
-     },
-     {
-      "name": "x-output-next",
-      "value": [
-       {
-        "case": "One refused message (TO-1)",
-        "text": "3 messages for acme.demo.alice, 1 new, 0 urgent, 1 refused.\n\nNUMBER  FROM  WHEN     STATE    URGENT  KIND  MESSAGE\n1       bob   2h ago   read     no      task  lunch at noon?\n2       bob   10s ago  new      no      task  ready?\n3       ?     5s ago   refused  -       -     control character in name",
-        "stream": "stdout",
-        "exit": 0,
-        "issue": "#1142",
-        "note": "Contract 0.6.0 SDK adoption r8, TO-1. The header counts the refused messages in the total, and `refused` is the last count; with no refused message the header has no `, N refused` part, as today. `-` marks a field a refused message does not have. FROM is `?`: the sender of a refused message is never shown (REQ-017). The MESSAGE cell holds the class alone; where an endpoint name or a column makes the row wider, the cell is cut with `…` at 79 columns as a preview is. Promoted with W."
        },
        {
-        "case": "Every kind of message side by side (TO-1)",
-        "text": "17 messages for o.dev.bob, 0 new, 0 urgent, 12 refused.\n\nNUMBER  FROM       WHEN    STATE    URGENT  KIND  MESSAGE\n1       alice      3m ago  read     no      task  verified: real mash send fro…\n2       UCNY…4UHK  3m ago  read     no      task  claimed: header without a si…\n3       UCVG…3VVW  3m ago  read     no      task  unknown-signer: signed by a …\n4       ?          3m ago  read     no      task  absent: no Agent-Sender head…\n5       frank      3m ago  read     no      task  stale: signed an hour before…\n6       ?          2m ago  refused  -       -     not verified\n7       ?          2m ago  refused  -       -     header too long\n8       ?          2m ago  refused  -       -     time not in UTC\n9       ?          2m ago  refused  -       -     control character in name\n10      ?          2m ago  refused  -       -     name too long\n11      ?          2m ago  refused  -       -     broken character in name\n12      ?          1m ago  refused  -       -     a field appears twice\n13      ?          1m ago  refused  -       -     space in subject\n14      ?          1m ago  refused  -       -     signature unreadable\n15      ?          1m ago  refused  -       -     empty sender header\n16      ?          1m ago  refused  -       -     two sender headers\n17      ?          1m ago  refused  -       -     unreadable sender header",
+        "case": "The class strings",
+        "text": "not verified\nheader too long\ntime not in UTC\ncontrol character in name\nname too long\nbroken character in name\na field appears twice\nspace in subject\nsignature unreadable\nempty sender header\ntwo sender headers\nunreadable sender header\nheader is not a JSON object\nversion missing\nversion is not a number\nfield is not text\naccount or user not valid\nsigned header incomplete\nmessage id not valid\ntime not valid",
         "stream": "stdout",
         "exit": 0,
-        "issue": "#1142",
-        "note": "Contract 0.6.0 SDK adoption r8, TO-1. Rows 1 to 5 are the five trust kinds main prints (captures-main-2, item 2.1) and appear only on an endpoint with MASH_ACCEPT_UNVERIFIED=1; row 6 is a message refused as not verified, on an endpoint that had the default when it arrived; rows 7 to 17 are one refused message for each header class, in the order of the frozen class list. Every refused row is `refused` in the STATE column and FROM is `?`; --wide adds TRUST as on main. `refused` widens the STATE column by two, so the previews are cut two characters shorter than captures-main-2's mock-up. The longest line is 79 columns. Promoted with W."
-       },
-       {
-        "case": "--json, a refused entry (TO-2)",
-        "text": "{\n \"number\": 3,\n \"from\": \"?\",\n \"sent\": \"2026-11-24T21:10:00Z\",\n \"state\": \"refused\",\n \"urgent\": false,\n \"kind\": \"\",\n \"trust\": \"refused\",\n \"preview\": \"\",\n \"reason\": \"control character in name\"\n}",
-        "stream": "stdout",
-        "exit": 0,
-        "issue": "#1142",
-        "note": "Contract 0.6.0 SDK adoption r8, TO-2: one entry of the list. The object gains \"refused\": 1: `refused` (an integer) is always present on the object, 0 when none. `reason` (a string, one of the frozen classes) is present on refused entries only. `state` gains the value `refused` and `trust` gains the value `refused`. Nothing becomes null: `from` is the string `?`, `kind` and `preview` are empty strings, `urgent` is false, `sent` is the time the message was stored, as RFC 3339. No existing field changes type. The MCP `inbox` tool returns the same structured result. Promoted with W."
+        "issue": "0.6.0 sdk adoption contract, REQ-017",
+        "note": "The classes a refused message can show, as MESSAGE, as `reason` in the JSON and in `mash doctor` and `mash status --detail`. They are part of the JSON contract (REQ-017) and do not change in a patch release. The first twelve are the TO-1 rows; the rest are the other malformed cases mash refuses. `not verified` is a refusal reason, not a trust kind: it is the class of a message that was not verified. A message refused for its header is never also shown as `forged`."
        }
       ]
      },
@@ -631,6 +616,7 @@
        "total": 2,
        "new": 2,
        "urgent": 1,
+       "refused": 0,
        "exact": true,
        "wake_count": 15,
        "over_wake_count": false,
@@ -664,7 +650,7 @@
      },
      {
       "name": "x-notes",
-      "value": "FROM is the sender's full address. MESSAGE is the sender's words, as untrusted as the full text; it is not quoted because the column already marks it. It shows the first line of the text, cut to fit 80 columns and ending in … when there is more; mash read shows all of it. The JSON carries the same cut text as 'preview'."
+      "value": "FROM is the sender's full address. MESSAGE is the sender's words, as untrusted as the full text; it is not quoted because the column already marks it. It shows the first line of the text, cut to fit 80 columns and ending in … when there is more; mash read shows all of it. The JSON carries the same cut text as 'preview'. A message mash refused is listed too, with the state `refused`, FROM `?` and its class as MESSAGE and as `reason`: never its body, its preview or its sender. It stays in the list, and in the count, until it ages out of the stream."
      }
     ]
    },
@@ -736,6 +722,13 @@
         "exit": 1
        },
        {
+        "case": "A message refused for its header",
+        "text": "error: message 3 was refused: control character in name\nhint: mash doctor",
+        "stream": "stderr",
+        "exit": 1,
+        "note": "TO-3, REQ-006. The frame is the not-verified line's: the words after the second colon are the class. The text of the message is never shown. `mash doctor` shows the count of each class."
+       },
+       {
         "case": "A shell reports what serve delivered",
         "text": "(what serve refused is invisible at a shell; what serve delivered is\nshown there with its label)",
         "stream": "n/a",
@@ -748,35 +741,6 @@
         "text": "error: acme.dev.bob: this endpoint was deleted; its address cannot be used again\nhint: mash doctor",
         "stream": "stderr",
         "exit": 1
-       }
-      ]
-     },
-     {
-      "name": "x-output-next",
-      "value": [
-       {
-        "case": "A message refused for its header (TO-3)",
-        "text": "error: message 3 was refused: control character in name\nhint: mash doctor",
-        "stream": "stderr",
-        "exit": 1,
-        "issue": "#1142",
-        "note": "Contract 0.6.0 SDK adoption r8, TO-3. The frame is the current case's. The class is the whole reason. The MCP `read` tool gives the same words as its error. `mash doctor` shows the count of each class. Promoted with W."
-       },
-       {
-        "case": "A message that was not verified, on a default endpoint (TO-1)",
-        "text": "error: message 6 was refused: it was not verified\nhint: mash doctor",
-        "stream": "stderr",
-        "exit": 1,
-        "issue": "#1142",
-        "note": "Contract 0.6.0 SDK adoption r8, TO-1: the form main already prints for such a message (captures-main-2, item 1.4), kept. Promoted with W."
-       },
-       {
-        "case": "A message refused for a header class, in the every-kind inbox (TO-1)",
-        "text": "error: message 9 was refused: control character in name\nhint: mash doctor",
-        "stream": "stderr",
-        "exit": 1,
-        "issue": "#1142",
-        "note": "Contract 0.6.0 SDK adoption r8, TO-1: message 9 of the every-kind inbox. Promoted with W."
        }
       ]
      },
@@ -1083,15 +1047,36 @@
        },
        {
         "case": "With --detail, inside a session",
-        "text": "acme.demo.bob: ready, online\nholds endpoint: yes\nhooks:          ran\nstorage:        ok",
+        "text": "acme.demo.bob: ready, online\nholds endpoint: yes\nhooks:          ran\nstorage:        ok\nrefused:        none",
         "stream": "stdout",
         "exit": 0
        },
        {
         "case": "With --detail, at a shell with no session",
-        "text": "acme.demo.bob: ready, offline\nsession:        none",
+        "text": "acme.demo.bob: ready, offline\nsession:        none\nrefused:        none",
         "stream": "stdout",
         "exit": 0
+       },
+       {
+        "case": "With --detail, one class refused",
+        "text": "acme.demo.bob: ready, online\nholds endpoint: yes\nhooks:          ran\nstorage:        ok\nrefused:        1 message: time not in UTC",
+        "stream": "stdout",
+        "exit": 0,
+        "note": "TO-4. With one class and several messages the row reads `3 messages: time not in UTC`."
+       },
+       {
+        "case": "With --detail, several classes refused",
+        "text": "acme.demo.bob: ready, online\nholds endpoint: yes\nhooks:          ran\nstorage:        ok\nrefused:        4 messages\n                2 not verified\n                1 time not in UTC\n                1 two sender headers",
+        "stream": "stdout",
+        "exit": 0,
+        "note": "TO-4. The total, then one line per class, largest count first and ties by class name. `mash status`, the one line, is unchanged (TO-15)."
+       },
+       {
+        "case": "With --detail, while the stored-mail check is skipped",
+        "text": "acme.demo.bob: ready, online\nholds endpoint: yes\nhooks:          ran\nstorage:        ok\nrefused:        none\nstored mail:    not checked: ~/.local/state/mash/acme.demo.bob is not writable",
+        "stream": "stdout",
+        "exit": 0,
+        "note": "REQ-006. The first start of the switched-on build checks the stored mail once; when its state directory cannot be written the check is skipped, and this row shows it for as long as the skip lasts (until a start that can write checks). The row is absent otherwise. --detail --json: `stored_mail` is null, and only while the skip lasts the object {\"checked\": false, \"dir\": \"~/.local/state/mash/acme.demo.bob\", \"reason\": \"state directory not writable\"}; it is always present with --detail and never has a checked: true form. Readiness and the exit status do not change."
        },
        {
         "case": "Not working",
@@ -1130,6 +1115,13 @@
         "exit": 1
        },
        {
+        "case": "While stored mail is checked before delivery",
+        "text": "acme.demo.bob: not ready: mail is waiting while stored mail is checked\nhint: mash doctor",
+        "stream": "stdout",
+        "exit": 1,
+        "note": "TO-14, CHG-16, REQ-006. The first start of the switched-on build checks the stored mail once before it delivers any, and `status` is not ready for that one pass, in the form of every other not-ready case. `reason_code` is `checking_stored_mail`. It happens once, on the first start after the upgrade; nothing needs doing, and a later `status` is ready."
+       },
+       {
         "case": "After the endpoint was deleted, on the machine that deleted it",
         "text": "acme.demo.bob: not ready: this endpoint was deleted; its address cannot be used again\nhint: mash doctor",
         "stream": "stdout",
@@ -1146,51 +1138,6 @@
         "text": "error: no endpoint is installed here (set mash up with the setup skill: see the quick start)",
         "stream": "stderr",
         "exit": 1
-       }
-      ]
-     },
-     {
-      "name": "x-output-next",
-      "value": [
-       {
-        "case": "With --detail, one refused message (TO-4)",
-        "text": "acme.demo.alice: ready, online\nholds endpoint: yes\nhooks:          ran\nstorage:        ok\nrefused:        1 message: time not in UTC",
-        "stream": "stdout",
-        "exit": 0,
-        "issue": "#1142",
-        "note": "Contract 0.6.0 SDK adoption r8, TO-4. One new row. `mash status`, the one line, is unchanged (TO-15, option a). With one class and several messages the row reads `refused:        3 messages: time not in UTC`. Promoted with W."
-       },
-       {
-        "case": "With --detail, no refused message (TO-4)",
-        "text": "acme.demo.alice: ready, online\nholds endpoint: yes\nhooks:          ran\nstorage:        ok\nrefused:        none",
-        "stream": "stdout",
-        "exit": 0,
-        "issue": "#1142",
-        "note": "Contract 0.6.0 SDK adoption r8, TO-4: r8 draws the row `refused:        none`; the other four lines are the current case's. Promoted with W."
-       },
-       {
-        "case": "With --detail, several classes (TO-4)",
-        "text": "acme.demo.alice: ready, online\nholds endpoint: yes\nhooks:          ran\nstorage:        ok\nrefused:        4 messages\n                2 not verified\n                1 time not in UTC\n                1 two sender headers",
-        "stream": "stdout",
-        "exit": 0,
-        "issue": "#1142",
-        "note": "Contract 0.6.0 SDK adoption r8, TO-4: with several classes the row gives the total and then one line per class, largest count first, ties by class name. Promoted with W."
-       },
-       {
-        "case": "With --detail --json, the new fields (TO-4)",
-        "text": " \"refused\": 4,\n \"refused_by_class\": {\n  \"not verified\": 2,\n  \"time not in UTC\": 1,\n  \"two sender headers\": 1\n }",
-        "stream": "stdout",
-        "exit": 0,
-        "issue": "#1142",
-        "note": "Contract 0.6.0 SDK adoption r8, TO-4: the two new members of the object, shown in the layout --json prints. `refused` (an integer) and `refused_by_class` (an object, `{}` when none) are always present with --detail, and absent without it. Nothing becomes null and no existing field changes type. Promoted with W."
-       },
-       {
-        "case": "The first start after the upgrade is still checking stored mail (TO-14)",
-        "text": "acme.demo.alice: not ready: mail is waiting while stored mail is checked\nhint: mash doctor",
-        "stream": "stdout",
-        "exit": 1,
-        "issue": "#1142",
-        "note": "Contract 0.6.0 SDK adoption r8, TO-14 (planner #3608, option 1). The first start of the switched-on build waits for one pass of the stream (up to 16 MiB) before it delivers mail (REQ-006 item 3, CHG-16); no view shows a partial count. The form is the current `not ready` case's, with one new reason; the hint goes to stderr as in that case. The MCP `status` tool gives the same words. Promoted with W."
        }
       ]
      },
@@ -1215,7 +1162,10 @@
         "holds_endpoint": true,
         "hooks": "ran",
         "storage": "ok"
-       }
+       },
+       "refused": 0,
+       "refused_by_class": {},
+       "stored_mail": null
       }
      },
      {
@@ -1231,7 +1181,7 @@
      },
      {
       "name": "x-notes",
-      "value": "The usual answer is one line, and --json is the same four things as an object. --detail gives the fuller answer, for a person who wants it and for a program that watches a session; with --json it adds reason_code and session. 'reason_code' is a fixed word beside the free-text reason, null when ready: no_endpoint, endpoints_ambiguous, config_unreadable, creds_missing, creds_refused, endpoint_deleted, server_unreachable, server_untrusted, server_no_tls, endpoint_held_elsewhere, endpoint_lost, endpoint_not_taken, storage_unwritable, checking_stored_mail, unknown. creds_refused covers every way the server refuses who we are, a client certificate included; server_untrusted is only for a server we do not trust; checking_stored_mail is reported, not ready, while the first start's check of stored mail runs; unknown is for a failure that fits none, and its free-text reason then carries what was seen. 'session' is null at a shell and, inside a session, says three things about that session: holds_endpoint (true or false); hooks, whether the agent host's hooks have delivered mail in this session: ran, not_run, suspected, degraded or refused, with the meanings 0.5.5's delivery line had; and storage, ok or failing. A program proving that a newly started session can receive mail reads holds_endpoint true and hooks ran. At a shell on the session's own machine, status reads the same state from what serve has recorded on disk, so the command and the tool agree. These names, in the usual and the fuller object alike, are part of what 0.5.6 promises not to change. 'ready' means: the configuration is readable, the server answers, and it accepts this endpoint's credentials. A DELETED ENDPOINT: on the machine where mashctl endpoint delete ran, the set-aside file <address>.creds.deleted is the evidence, and status names it with reason_code endpoint_deleted (the case above), as doctor does in its sign-in row; on another machine, where a creds file survives, the server's refusal is what is seen, and status and doctor both report it. In 0.5.6 the everyday commands (send, inbox, read, who) say the creds file is missing where the set-aside file is present, and the hint leads to doctor, which says deleted. Planned for 0.5.7: they read the same as status, 'this endpoint was deleted; its address cannot be used again' with hint 'mash doctor'. Inside a session, when the configuration, the creds, the server or sign-in fails, that failure is what status reports, even if the session also does not hold its endpoint: the root cause comes first, and a session and a shell then name the same cause. Asked inside a session (the MCP tool), status and doctor report on that session itself, not on a fresh connection: 'ready, online' there means this session holds the endpoint and its mail will reach it. A hint names the first installed address in alphabetical order. At a shell every 'hint:' line goes to stderr; an MCP tool's text block puts the hint on the line after the result."
+      "value": "The usual answer is one line, and --json is the same four things as an object. --detail gives the fuller answer, for a person who wants it and for a program that watches a session; with --json it adds reason_code and session. 'reason_code' is a fixed word beside the free-text reason, null when ready: no_endpoint, endpoints_ambiguous, config_unreadable, creds_missing, creds_refused, endpoint_deleted, server_unreachable, server_untrusted, server_no_tls, endpoint_held_elsewhere, endpoint_lost, endpoint_not_taken, storage_unwritable, checking_stored_mail, unknown. creds_refused covers every way the server refuses who we are, a client certificate included; server_untrusted is only for a server we do not trust; checking_stored_mail is reported, not ready, while the first start's check of stored mail runs; unknown is for a failure that fits none, and its free-text reason then carries what was seen. 'session' is null at a shell and, inside a session, says three things about that session: holds_endpoint (true or false); hooks, whether the agent host's hooks have delivered mail in this session: ran, not_run, suspected, degraded or refused, with the meanings 0.5.5's delivery line had; and storage, ok or failing. A program proving that a newly started session can receive mail reads holds_endpoint true and hooks ran. At a shell on the session's own machine, status reads the same state from what serve has recorded on disk, so the command and the tool agree. These names, in the usual and the fuller object alike, are part of what 0.5.6 promises not to change. 'ready' means: the configuration is readable, the server answers, and it accepts this endpoint's credentials. A DELETED ENDPOINT: on the machine where mashctl endpoint delete ran, the set-aside file <address>.creds.deleted is the evidence, and status names it with reason_code endpoint_deleted (the case above), as doctor does in its sign-in row; on another machine, where a creds file survives, the server's refusal is what is seen, and status and doctor both report it. In 0.5.6 the everyday commands (send, inbox, read, who) say the creds file is missing where the set-aside file is present, and the hint leads to doctor, which says deleted. Planned for 0.5.7: they read the same as status, 'this endpoint was deleted; its address cannot be used again' with hint 'mash doctor'. Inside a session, when the configuration, the creds, the server or sign-in fails, that failure is what status reports, even if the session also does not hold its endpoint: the root cause comes first, and a session and a shell then name the same cause. Asked inside a session (the MCP tool), status and doctor report on that session itself, not on a fresh connection: 'ready, online' there means this session holds the endpoint and its mail will reach it. A hint names the first installed address in alphabetical order. At a shell every 'hint:' line goes to stderr; an MCP tool's text block puts the hint on the line after the result. With --detail the answer also has a refused row, and with --json it adds refused (an integer: how many refused messages the inbox still holds, 0 when none, a message on both of the refused lists counted once) and refused_by_class (an object with the count of each class, {} when none; a message that was not verified is the class `not verified`). Both are always present with --detail and absent without it. With --detail the answer also has, only while the first start's check of the stored mail is skipped because the state directory cannot be written, a stored mail row, and with --json the field stored_mail: null otherwise (always present with --detail), and while the skip lasts the object {checked: false, dir, reason: \"state directory not writable\"}; there is no checked: true form."
      }
     ]
    },
@@ -1276,21 +1226,28 @@
       "value": [
        {
         "case": "All well",
-        "text": "config    ok\nclaude    ok    2.1.320\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   ok\ndelivery  ok\nrefused   ok    no message was refused for lacking its sender's signature\n\nNo problems.",
+        "text": "config    ok\nclaude    ok    2.1.320\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   ok\ndelivery  ok\nrefused   ok    no mail was refused\n\nNo problems.",
         "stream": "stdout",
         "exit": 0
        },
        {
-        "case": "A problem and a warning, with one hint",
+        "case": "Mail was refused",
+        "text": "config    ok\nclaude    ok    2.1.320\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   ok\ndelivery  ok\nrefused   ok    4 messages were refused\n                2 not verified\n                1 time not in UTC\n                1 two sender headers\n\nNo problems.",
+        "stream": "stdout",
+        "exit": 0,
+        "note": "TO-5, REQ-006, CHG-14. The row counts every refused message the inbox still holds, for any reason, and names each class on a line of its own, largest count first and ties by class name. With one message it reads `1 message was refused` and its class on the line below; with none, `no mail was refused`. The summary line is not changed by this row."
+       },
+       {
+        "case": "A problem, with one hint",
         "issue": "#1099",
         "stream": "stdout, then the hint on stderr",
         "exit": 1,
-        "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   FAIL  the server refused these credentials\ndelivery  skip  needs sign-in\nrefused   warn  3 unverified messages were refused\n\n1 problem, 1 warning.\nhint: mash join <file> --replace",
-        "note": "REQ-006, core #1403. The hint is a command of ours that fixes the first problem: a new join file brings new credentials, and --replace because creds for this address are installed (mash join refuses them otherwise). v0.5.8 printed a sentence ('ask whoever runs your mesh to run: mashctl endpoint reissue ...'); ADR 0168 says a hint is a command or there is none."
+        "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   FAIL  the server refused these credentials\ndelivery  skip  needs sign-in\nrefused   ok    3 messages were refused\n                2 not verified\n                1 time not in UTC\n\n1 problem.\nhint: mash join <file> --replace",
+        "note": "REQ-006, core #1403. The hint is a command of ours that fixes the first problem: a new join file brings new credentials, and --replace because creds for this address are installed (mash join refuses them otherwise). v0.5.8 printed a sentence ('ask whoever runs your mesh to run: mashctl endpoint reissue ...'); ADR 0168 says a hint is a command or there is none. The refused row is ok whatever it counts (CHG-14, TO-5): a refused message cannot be fixed by anyone and cannot be removed before it ages out, so it never turns the verdict to warn and never changes the exit status. Today's warn row for not-verified mail is ok now."
        },
        {
         "case": "Server not answering",
-        "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    FAIL  the server did not answer: tls://myserver:4222\nsign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no message was refused for lacking its sender's signature\n\n1 problem.",
+        "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    FAIL  the server did not answer: tls://myserver:4222\nsign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no mail was refused\n\n1 problem.",
         "stream": "stdout",
         "exit": 1,
         "issue": "#1099",
@@ -1351,13 +1308,20 @@
         "exit": 0,
         "issue": "#1290",
         "note": "The launcher fell back to the mash on PATH (the pinned download failed, or the plugin is unpinned), so the pin in mash.pins did not decide which mash runs. A warning, exit 1 with --strict. No hint: no command of ours fixes it; docs/troubleshooting.md says what to do. --json: the same row as {\"name\": \"launcher\", \"state\": \"warn\", \"detail\": ..., \"fix\": null}."
+        },
+        {
+        "case": "The stored-mail check was skipped",
+        "stream": "stdout",
+        "exit": 0,
+        "text": "config       ok\nclaude       ok    2.1.320\ncreds        ok\nserver       ok    tls://myserver:4222\nsign-in      ok\ndelivery     ok\nstored mail  skip  not checked: ~/.local/state/mash/acme.demo.bob is not writable\nrefused      ok    no mail was refused\n\nNo problems.",
+        "note": "REQ-006. One row, named `stored mail`, with state skip, shown only while the first start's check of the stored mail is skipped because the state directory cannot be written; there is no row, and no ok row, otherwise. The names are padded to the longest name and two, so every row moves out with it. No hint, and no fix in the text. A skip changes neither the verdict nor the exit status. --json has the row in the usual shape: {\"name\": \"stored mail\", \"state\": \"skip\", \"detail\": \"not checked: ~/.local/state/mash/acme.demo.bob is not writable\", \"fix\": \"make that folder writable, then restart the session\"}. It clears at the next start that can write."
        },
        {
         "case": "Arriving mail cannot be stored here",
         "issue": "#1099",
         "stream": "stdout",
         "exit": 1,
-        "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   ok\ndelivery  FAIL  cannot write ~/.local/state/mash/acme.demo.bob\nrefused   ok    no message was refused for lacking its sender's signature\n\n1 problem.",
+        "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   ok\ndelivery  FAIL  cannot write ~/.local/state/mash/acme.demo.bob\nrefused   ok    no mail was refused\n\n1 problem.",
         "note": "REQ-006. The count line follows the rows and any hint goes to stderr. Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors. No hint: no command of ours fixes a folder that cannot be written, and the row names the folder. Today the row wraps and reads \"mail is held: its folder cannot be written\"."
        },
        {
@@ -1371,7 +1335,7 @@
         "issue": "#1099",
         "stream": "stdout",
         "exit": 1,
-        "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   ok\ndelivery  FAIL  another session holds this endpoint\nrefused   ok    no message was refused for lacking its sender's signature\n\n1 problem.",
+        "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   ok\ndelivery  FAIL  another session holds this endpoint\nrefused   ok    no mail was refused\n\n1 problem.",
         "note": "REQ-006. The count line follows the rows and any hint goes to stderr. Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors. No hint: the row says what is wrong, and closing the other session is not a command of ours."
        },
        {
@@ -1387,11 +1351,18 @@
         "exit": 1
        },
        {
+        "case": "While stored mail is checked before delivery",
+        "text": "delivery  FAIL  mail is waiting while stored mail is checked\n\n1 problem.",
+        "stream": "stdout",
+        "exit": 1,
+        "note": "TO-14, CHG-16. The `delivery` row has the same words as `mash status`, and `fix` is null in the JSON (nothing to do: it happens once, on the first start after the upgrade), so there is no hint."
+       },
+       {
         "case": "A newer session replaced this one",
         "issue": "#1099",
         "stream": "stdout",
         "exit": 1,
-        "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   ok\ndelivery  FAIL  this session lost this endpoint to a newer one\nrefused   ok    no message was refused for lacking its sender's signature\n\n1 problem.",
+        "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   ok\ndelivery  FAIL  this session lost this endpoint to a newer one\nrefused   ok    no mail was refused\n\n1 problem.",
         "note": "REQ-006. The count line follows the rows and any hint goes to stderr. Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors. No hint: the row says what is wrong."
        },
        {
@@ -1399,7 +1370,7 @@
         "issue": "#1099",
         "stream": "stdout, then the hint on stderr",
         "exit": 1,
-        "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   FAIL  this endpoint was deleted; its address cannot be used again\ndelivery  skip  needs sign-in\nrefused   ok    no message was refused for lacking its sender's signature\n\n1 problem.\nhint: mash join <file>",
+        "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   FAIL  this endpoint was deleted; its address cannot be used again\ndelivery  skip  needs sign-in\nrefused   ok    no mail was refused\n\n1 problem.\nhint: mash join <file>",
         "note": "REQ-006, core #1403. The hint is a command: a join file to a new endpoint. v0.5.8 printed the sentence 'ask whoever runs your mesh for a join file to a new endpoint'."
        },
        {
@@ -1407,7 +1378,7 @@
         "issue": "#1099",
         "stream": "stdout, then the hint on stderr",
         "exit": 1,
-        "text": "config    ok\nclaude    skip  no claude command found\ncreds     FAIL  this endpoint was deleted; its address cannot be used again\nserver    ok    tls://myserver:4222\nsign-in   skip  needs the creds\ndelivery  skip  needs sign-in\nrefused   ok    no message was refused for lacking its sender's signature\n\n1 problem.\nhint: mash join <file>",
+        "text": "config    ok\nclaude    skip  no claude command found\ncreds     FAIL  this endpoint was deleted; its address cannot be used again\nserver    ok    tls://myserver:4222\nsign-in   skip  needs the creds\ndelivery  skip  needs sign-in\nrefused   ok    no mail was refused\n\n1 problem.\nhint: mash join <file>",
         "note": "REQ-006, core #1403. As on another machine: the hint is a join file to a new endpoint."
        },
        {
@@ -1415,7 +1386,7 @@
         "issue": "#1099",
         "stream": "stdout",
         "exit": 1,
-        "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    FAIL  the server's certificate is not trusted: tls://myserver:4222\nsign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no message was refused for lacking its sender's signature\n\n1 problem.",
+        "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    FAIL  the server's certificate is not trusted: tls://myserver:4222\nsign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no mail was refused\n\n1 problem.",
         "note": "REQ-006. The count line follows the rows and any hint goes to stderr. Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors. No hint: mash join cannot change the folder's certificate authority, even with --replace, and no other command of ours does. The server row is fixed wording (rule: \"The server not answering reads the same everywhere\"), so its 76 columns stay; it is under the 80 limit."
        },
        {
@@ -1423,7 +1394,7 @@
         "issue": "#1099",
         "stream": "stdout",
         "exit": 1,
-        "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    FAIL  the server did not offer TLS: tls://myserver:4222\nsign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no message was refused for lacking its sender's signature\n\n1 problem.",
+        "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    FAIL  the server did not offer TLS: tls://myserver:4222\nsign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no mail was refused\n\n1 problem.",
         "note": "REQ-006. The count line follows the rows and any hint goes to stderr. Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors. No hint: nothing the reader can run fixes a server that offers no TLS."
        },
        {
@@ -1431,7 +1402,7 @@
         "issue": "#1099",
         "stream": "stdout, then the hint on stderr",
         "exit": 1,
-        "text": "config    ok\nclaude    skip  no claude command found\ncreds     FAIL  ~/.config/mash/acme.demo.bob.creds is missing\nserver    ok    tls://myserver:4222\nsign-in   skip  needs the creds\ndelivery  skip  needs sign-in\nrefused   ok    no message was refused for lacking its sender's signature\n\n1 problem.\nhint: mash join <file>",
+        "text": "config    ok\nclaude    skip  no claude command found\ncreds     FAIL  ~/.config/mash/acme.demo.bob.creds is missing\nserver    ok    tls://myserver:4222\nsign-in   skip  needs the creds\ndelivery  skip  needs sign-in\nrefused   ok    no mail was refused\n\n1 problem.\nhint: mash join <file>",
         "note": "REQ-006. The count line follows the rows and any hint goes to stderr. Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors. The hint is the command that installs new creds (<file> is the join file the person is given)."
        },
        {
@@ -1439,7 +1410,7 @@
         "issue": "#1099",
         "stream": "stdout, then the hint on stderr",
         "exit": 1,
-        "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   FAIL  the server refused these credentials\ndelivery  skip  needs sign-in\nrefused   ok    no message was refused for lacking its sender's signature\n\n1 problem.\nhint: mash join <file> --replace",
+        "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   FAIL  the server refused these credentials\ndelivery  skip  needs sign-in\nrefused   ok    no mail was refused\n\n1 problem.\nhint: mash join <file> --replace",
         "note": "REQ-006, core #1403. Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors. Also the hint for a creds file that belongs to another endpoint. The person needs a new join file from whoever runs the mesh; --replace, because creds for this address are installed."
        },
        {
@@ -1447,7 +1418,7 @@
         "issue": "#1099",
         "stream": "stdout, then the hint on stderr",
         "exit": 1,
-        "text": "config    ok\nclaude    skip  no claude command found\ncreds     FAIL  ~/.config/mash/acme.demo.bob.creds is not a creds file\nserver    ok    tls://myserver:4222\nsign-in   skip  needs the creds\ndelivery  skip  needs sign-in\nrefused   ok    no message was refused for lacking its sender's signature\n\n1 problem.\nhint: mash join <file> --replace",
+        "text": "config    ok\nclaude    skip  no claude command found\ncreds     FAIL  ~/.config/mash/acme.demo.bob.creds is not a creds file\nserver    ok    tls://myserver:4222\nsign-in   skip  needs the creds\ndelivery  skip  needs sign-in\nrefused   ok    no mail was refused\n\n1 problem.\nhint: mash join <file> --replace",
         "note": "REQ-006, core #1403. Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors. The file's content is never printed. Same shape as 'A creds file is missing' (the file, with ~, then what is wrong), so the row fits in 80 columns; status keeps its longer sentence as the reason. --replace, because a file is installed at the creds path."
        },
        {
@@ -1455,7 +1426,7 @@
         "issue": "#1099",
         "stream": "stdout",
         "exit": 1,
-        "text": "config    ok\nclaude    skip  no claude command found\ncreds     FAIL  ~/.config/mash/acme.demo.bob.creds can be read by others\nserver    ok    tls://myserver:4222\nsign-in   skip  needs the creds\ndelivery  skip  needs sign-in\nrefused   ok    no message was refused for lacking its sender's signature\n\n1 problem.",
+        "text": "config    ok\nclaude    skip  no claude command found\ncreds     FAIL  ~/.config/mash/acme.demo.bob.creds can be read by others\nserver    ok    tls://myserver:4222\nsign-in   skip  needs the creds\ndelivery  skip  needs sign-in\nrefused   ok    no mail was refused\n\n1 problem.",
         "note": "REQ-006, core #1403. Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors. No hint: no command of ours changes a file's permissions (v0.5.8 printed 'hint: chmod 600 <file>'). Same shape as 'A creds file is missing', so the row fits in 80 columns."
        },
        {
@@ -1463,7 +1434,7 @@
         "issue": "#1099",
         "stream": "stdout",
         "exit": 1,
-        "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    FAIL  the server address is not tls://: nats://myserver:4222\nsign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no message was refused for lacking its sender's signature\n\n1 problem.",
+        "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    FAIL  the server address is not tls://: nats://myserver:4222\nsign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no mail was refused\n\n1 problem.",
         "note": "REQ-006, core #1403. Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors. A plain nats:// address without MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1. One short row; no hint, since no command of ours changes the address (v0.5.8 printed the whole refusal and a sentence hint). mash status keeps the whole refusal as its reason."
        },
        {
@@ -1479,48 +1450,8 @@
         "issue": "#1099",
         "stream": "stdout",
         "exit": 1,
-        "text": "{\n \"endpoint\": \"acme.demo.bob\",\n \"problems\": 1,\n \"warnings\": 1,\n \"checks\": [\n  {\n   \"name\": \"config\",\n   \"state\": \"ok\",\n   \"detail\": null,\n   \"fix\": null\n  },\n  {\n   \"name\": \"claude\",\n   \"state\": \"ok\",\n   \"detail\": \"2.1.320\",\n   \"fix\": null\n  },\n  {\n   \"name\": \"creds\",\n   \"state\": \"ok\",\n   \"detail\": null,\n   \"fix\": null\n  },\n  {\n   \"name\": \"server\",\n   \"state\": \"ok\",\n   \"detail\": \"tls://myserver:4222\",\n   \"fix\": null\n  },\n  {\n   \"name\": \"sign-in\",\n   \"state\": \"fail\",\n   \"detail\": \"the server refused these credentials\",\n   \"fix\": \"mash join <file> --replace\"\n  },\n  {\n   \"name\": \"delivery\",\n   \"state\": \"skip\",\n   \"detail\": \"needs sign-in\",\n   \"fix\": null\n  },\n  {\n   \"name\": \"refused\",\n   \"state\": \"warn\",\n   \"detail\": \"3 unverified messages were refused\",\n   \"fix\": null\n  }\n ],\n \"hint\": \"mash join <file> --replace\"\n}",
+        "text": "{\n \"endpoint\": \"acme.demo.bob\",\n \"problems\": 1,\n \"warnings\": 0,\n \"checks\": [\n  {\n   \"name\": \"config\",\n   \"state\": \"ok\",\n   \"detail\": null,\n   \"fix\": null\n  },\n  {\n   \"name\": \"claude\",\n   \"state\": \"ok\",\n   \"detail\": \"2.1.320\",\n   \"fix\": null\n  },\n  {\n   \"name\": \"creds\",\n   \"state\": \"ok\",\n   \"detail\": null,\n   \"fix\": null\n  },\n  {\n   \"name\": \"server\",\n   \"state\": \"ok\",\n   \"detail\": \"tls://myserver:4222\",\n   \"fix\": null\n  },\n  {\n   \"name\": \"sign-in\",\n   \"state\": \"fail\",\n   \"detail\": \"the server refused these credentials\",\n   \"fix\": \"mash join <file> --replace\"\n  },\n  {\n   \"name\": \"delivery\",\n   \"state\": \"skip\",\n   \"detail\": \"needs sign-in\",\n   \"fix\": null\n  },\n  {\n   \"name\": \"refused\",\n   \"state\": \"ok\",\n   \"detail\": \"3 messages were refused\",\n   \"fix\": null\n  }\n ],\n \"refused\": 3,\n \"refused_by_class\": {\n  \"not verified\": 2,\n  \"time not in UTC\": 1\n },\n \"hint\": \"mash join <file> --replace\"\n}",
         "note": "REQ-006, core #1403. The example above with the sign-in fix 'mash join <file> --replace' and a top-level \"hint\": the one hint the text prints, null when there is none. Each row's \"fix\" stays."
-       }
-      ]
-     },
-     {
-      "name": "x-output-next",
-      "value": [
-       {
-        "case": "The refused row, several messages and classes (TO-5)",
-        "text": "refused   ok    4 messages were refused\n                2 not verified\n                1 time not in UTC\n                1 two sender headers",
-        "stream": "stdout",
-        "exit": 0,
-        "issue": "#1142",
-        "replaces": "A problem and a warning, with one hint",
-        "note": "Contract 0.6.0 SDK adoption r8, TO-5, CHG-14: the refused row only; the other rows and the summary line are as in the current cases. The row is `ok` whatever the count: it does not turn the verdict to `warn` and does not change the exit status. The classes are counted as in `status --detail`. The JSON carries the same `refused` and `refused_by_class` members as `status --detail --json`, always present, 0 and `{}` when none; the `refused` entry of `checks` has state `ok`, detail `4 messages were refused` (`no mail was refused` with none) and `fix` null. Promoted with W."
-       },
-       {
-        "case": "The refused row, one message (TO-5)",
-        "text": "refused   ok    1 message was refused\n                time not in UTC",
-        "stream": "stdout",
-        "exit": 0,
-        "issue": "#1142",
-        "replaces": "A problem and a warning, with one hint",
-        "note": "Contract 0.6.0 SDK adoption r8, TO-5: the refused row only. Promoted with W."
-       },
-       {
-        "case": "The refused row, none (TO-5)",
-        "text": "refused   ok    no mail was refused",
-        "stream": "stdout",
-        "exit": 0,
-        "issue": "#1142",
-        "replaces": "All well",
-        "note": "Contract 0.6.0 SDK adoption r8, TO-5: the refused row only (today: \"no unverified mail was refused\"). Promoted with W."
-       },
-       {
-        "case": "The first start after the upgrade is still checking stored mail (TO-14)",
-        "text": "delivery  FAIL  mail is waiting while stored mail is checked",
-        "stream": "stdout",
-        "exit": 1,
-        "issue": "#1142",
-        "note": "Contract 0.6.0 SDK adoption r8, TO-14: the delivery row only, as for a held mail folder; `fix` is null in the JSON (nothing to do: it happens once, on the first start after the upgrade). The MCP `doctor` tool gives the same words. Promoted with W."
        }
       ]
      },
@@ -1529,7 +1460,7 @@
       "value": {
        "endpoint": "acme.demo.bob",
        "problems": 1,
-       "warnings": 1,
+       "warnings": 0,
        "checks": [
         {
          "name": "config",
@@ -1569,11 +1500,16 @@
         },
         {
          "name": "refused",
-         "state": "warn",
-         "detail": "3 unverified messages were refused",
+         "state": "ok",
+         "detail": "3 messages were refused",
          "fix": null
         }
        ],
+       "refused": 3,
+       "refused_by_class": {
+        "not verified": 2,
+        "time not in UTC": 1
+       },
        "hint": "mash join <file> --replace"
       }
      },
@@ -1590,7 +1526,7 @@
      },
      {
       "name": "x-notes",
-      "value": "doctor is the one everyday command that prints many lines, as brew doctor and flutter doctor do. It reports on stdout and exits 1 when it found a problem. Every row is always printed, and 'checks' in the JSON always lists every row, each with a state of ok, warn, fail or skip; a row is skipped when an earlier failure means it cannot be run. The delivery row says whether mail that arrives can be stored on this machine for the session; it is checked only inside a session and skipped at a shell. In a session that has just started, the row is 'warn' until the first prompt or tool call, so 'doctor --strict' exits 1 until then: a program that waits for a session to be ready repeats the check. The 'hooks not run yet' warning has no hint, because no command fixes it. Whether storage is failing is decided by whoever asks, by trying the folder, not from a record kept in it. An agent host that has no hooks would warn for as long as it runs; only Claude Code is in scope for 0.5.6. The refused count is kept on this machine, so its row shows even when the server is down. The 'refused' row counts unverified mail that was refused on arrival (see mash serve). Mail that was verified on arrival and whose sender was deleted afterwards is not counted: mash read shows it as refused, and that is where it is seen. The launcher row, which says which mash the plugin's launcher started, reports how the mash it runs in was launched: it shows in a session's own doctor (the MCP tool), and a mash doctor typed in a shell has no launcher row."
+      "value": "doctor is the one everyday command that prints many lines, as brew doctor and flutter doctor do. It reports on stdout and exits 1 when it found a problem. Every row is always printed, and 'checks' in the JSON always lists every row, each with a state of ok, warn, fail or skip; a row is skipped when an earlier failure means it cannot be run. The delivery row says whether mail that arrives can be stored on this machine for the session; it is checked only inside a session and skipped at a shell. In a session that has just started, the row is 'warn' until the first prompt or tool call, so 'doctor --strict' exits 1 until then: a program that waits for a session to be ready repeats the check. The 'hooks not run yet' warning has no hint, because no command fixes it. Whether storage is failing is decided by whoever asks, by trying the folder, not from a record kept in it. An agent host that has no hooks would warn for as long as it runs; only Claude Code is in scope for 0.5.6. The refused count is kept on this machine, so its row shows even when the server is down. The 'refused' row counts the refused messages the inbox still holds, for any reason: a message whose sender header was refused, and mail that was not verified on arrival (see mash serve); a message on both counts once. Its state is always ok: nothing a person can do removes a refused message before it ages out. Mail that was verified on arrival and whose sender was deleted afterwards is not counted: mash read shows it as refused, and that is where it is seen. The JSON adds refused (an integer, 0 when none) and refused_by_class (an object with the count of each class, {} when none); the classes are in refused_by_class only, and the refused entry of checks has no more than the usual four keys. While the first start's check of the stored mail is skipped because the state directory cannot be written, and only then, a row named `stored mail` with state skip follows the delivery row; it changes neither the problem count nor the exit status. The launcher row, which says which mash the plugin's launcher started, reports how the mash it runs in was launched: it shows in a session's own doctor (the MCP tool), and a mash doctor typed in a shell has no launcher row."
      }
     ]
    },
@@ -2108,7 +2044,7 @@
      },
      {
       "name": "x-notes",
-      "value": "Which endpoint. serve never picks an endpoint by itself, even when only one is installed: it acts as the one named by --endpoint, MASH_ENDPOINT or the configuration file, and with none named, or one that is not a valid address, it still starts and offers only status, doctor and version, whose answer is 'no endpoint is chosen for this session' with the hint 'start the session with MASH_ENDPOINT=<address>'. Otherwise every agent session on a machine with one endpoint installed would become that endpoint by accident, and two sessions would fight over it. Waking for a backlog. Whatever the kinds of the messages, serve wakes the session when more than --wake-count are waiting or the oldest has waited longer than --wake-age, at most once every 10 minutes and not in the first 10 minutes after it starts. mash inbox says so on its second line. Refusing unverified mail. Only mail whose trust is 'verified' reaches the session, the inbox listing and mash read. Mail that is unsigned, signed by an unknown key, claimed but unproven, or stale is dropped and counted; mash doctor shows the count. The sender is not told. --accept-unverified delivers it instead, labelled. A refused message is invisible at a shell too: it is not in mash inbox's count or listing, and mash read on its number says it was refused. When serve refuses a message it writes one line to its log: 'refused message 12 from acme.demo.x: not verified (absent)', where the address is the one the message claims, with control characters escaped, and the word in brackets is the trust label. What 'waiting' means for the wake: a message that has arrived and has not yet reached the session. In a session that takes delivery by channel alone, a message reaches it on arrival, so nothing waits and the wake never fires; the wake exists for sessions where mail can pile up."
+      "value": "Which endpoint. serve never picks an endpoint by itself, even when only one is installed: it acts as the one named by --endpoint, MASH_ENDPOINT or the configuration file, and with none named, or one that is not a valid address, it still starts and offers only status, doctor and version, whose answer is 'no endpoint is chosen for this session' with the hint 'start the session with MASH_ENDPOINT=<address>'. Otherwise every agent session on a machine with one endpoint installed would become that endpoint by accident, and two sessions would fight over it. Waking for a backlog. Whatever the kinds of the messages, serve wakes the session when more than --wake-count are waiting or the oldest has waited longer than --wake-age, at most once every 10 minutes and not in the first 10 minutes after it starts. mash inbox says so on its second line. Refusing unverified mail. Only mail whose trust is 'verified' reaches the session, the inbox listing and mash read. Mail that is unsigned, signed by an unknown key, claimed but unproven, or stale is dropped and counted; mash doctor shows the count. The sender is not told. --accept-unverified delivers it instead, labelled. A refused message is shown at a shell too, as the views show it: mash inbox lists it as a row with the state refused and its class, and counts it in the total and in the refused count; mash status --detail and mash doctor count it by class; mash read on its number says it was refused and why. Its sender and its text are never shown. When serve refuses a message it writes one line to its log: 'refused message 12 from acme.demo.x: not verified (absent)', where the address is the one the message claims, with control characters escaped, and the word in brackets is the trust label. What 'waiting' means for the wake: a message that has arrived and has not yet reached the session. In a session that takes delivery by channel alone, a message reaches it on arrival, so nothing waits and the wake never fires; the wake exists for sessions where mail can pile up."
      },
      {
       "name": "x-long",
@@ -2237,6 +2173,27 @@
         "exit": 0
        },
        {
+        "case": "A prompt that signing refuses",
+        "text": "error: not sent: could not sign: your name is too long",
+        "stream": "stderr",
+        "exit": 1,
+        "note": "TO-8, CHG-8, CHG-17. Style A, as every `mash prompt` error: `error: MSG` on standard error, and no hint. Nothing was sent."
+       },
+       {
+        "case": "A prompt a peer refuses",
+        "text": "error: prompt refused: 400 malformed Agent-Sender header",
+        "stream": "stderr",
+        "exit": 1,
+        "note": "TO-10, CHG-5, CHG-6, CHG-17. Style A, as every `mash prompt` error. The peer's reply on the wire stays `400` with `malformed Agent-Sender header`; main printed `mash: prompt refused: 400 malformed Agent-Sender header`. No hint: no command shows the peer's reason. The codes move for two shapes (`401` to `400`) and for a replay from an unlisted sender (`401` to `403`); the release notes name both, and the new `error:` prefix."
+       },
+       {
+        "case": "A live prompt past a nonce cap",
+        "text": "error: prompt refused: 401 too many recent prompts: try again shortly",
+        "stream": "stderr",
+        "exit": 1,
+        "note": "TO-11, CHG-7, CHG-17. The same frame and path as a refused prompt, with status `401` and its own text: main's `401` text for this case said a signed header is required, the wrong reason for a correctly signed sender. The missing-header `401` keeps today's text. No hint."
+       },
+       {
         "case": "mash prompt --help",
         "text": "Ask an endpoint a live question and wait for its answer. Not stored: if the\nrecipient is not there, it fails.\n\nUsage:\n  mash prompt <address> <text>\n\nArguments:\n  address  Who to ask.\n  text     The question.\n\nOptions:\n  --endpoint <address>  Which endpoint to act as, as owner.group.name. Not\n                        needed when only one is installed here.\n  --creds <path>        The creds file to sign in with. Default: <config\n                        folder>/<address>.creds.\n  --server <url>        The server address. May be given more than once.\n  --ca <path>           The certificate authority's certificate, when the server\n                        uses its own.\n  --config-dir <path>   The configuration folder. Default: ~/.config/mash.\n  -h, --help            Show help for the command.",
         "stream": "stdout",
@@ -2244,35 +2201,6 @@
         "issue": "#1100",
         "note": "Same two changes as hook: the Examples: entry goes (mash prompt acme.demo.alice \"are you there?\" only restates the usage line with values) and the Global options: block becomes the options that apply. prompt has no --json form (refused), so --json is not listed; the connection options and --endpoint are. --detail is left out: prompt prints the answer and nothing fuller (not verified against a live answer here). Today: the full nine-entry block and the Examples: line.",
         "verbatim": true
-       }
-      ]
-     },
-     {
-      "name": "x-output-next",
-      "value": [
-       {
-        "case": "The signing is refused (TO-8)",
-        "text": "error: not sent: could not sign: your name is too long",
-        "stream": "stderr",
-        "exit": 1,
-        "issue": "#1142",
-        "note": "Contract 0.6.0 SDK adoption r8, TO-8, style A as ruled in planner #3612: `error:` where main prints a plain `mash: ` line. Nothing is sent. Promoted with W."
-       },
-       {
-        "case": "A peer refuses the prompt (TO-10)",
-        "text": "error: prompt refused: 400 malformed Agent-Sender header",
-        "stream": "stderr",
-        "exit": 1,
-        "issue": "#1142",
-        "note": "Contract 0.6.0 SDK adoption r8, TO-10 (CHG-5, CHG-6, CHG-17). Seen by a sender that is not mash, or by a mash sender with a test-made header. Main prints `mash: prompt refused: 400 malformed Agent-Sender header` (captures-main, case 1a). At the switch-on the prefix becomes `error: `; the status code and the reason words stay, and there is no hint because no command shows the peer's reason. The codes move for shapes 8 and 9 (CHG-6, `401` to `400`) and for a replay from an unlisted sender (CHG-13, `401` to `403`). Promoted with W."
-       },
-       {
-        "case": "A peer refuses a prompt past a nonce cap (TO-11)",
-        "text": "error: prompt refused: 401 too many recent prompts: try again shortly",
-        "stream": "stderr",
-        "exit": 1,
-        "issue": "#1142",
-        "note": "Contract 0.6.0 SDK adoption r8, TO-11 (CHG-7, CHG-17). Same style-A frame as above, status `401`, with its own text: main's text for the `401` it has, `a signed Agent-Sender header is required (min_sender_trust=signed)`, is the wrong reason for a correctly signed sender. The missing-header `401` keeps today's text. The line is 69 columns. Promoted with W."
        }
       ]
      },

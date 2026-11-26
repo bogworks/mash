@@ -106,7 +106,7 @@ func TestUnverifiedMailIsRefusedByDefault(t *testing.T) {
 		t.Fatalf("the sender's inbox: %+v %v", ms, err)
 	}
 
-	// The listing, a read and the counts leave the refused mail out; the stream still holds it.
+	// The listing (Inbox) leaves the refused mail out; the view (ReadInbox) lists it by its class and counts it.
 	c, err := OpenClient(context.Background(), cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -117,8 +117,13 @@ func TestUnverifiedMailIsRefusedByDefault(t *testing.T) {
 		t.Fatalf("inbox: %+v %v", ms, err)
 	}
 	r, err := c.ReadInbox(context.Background(), InboxQuery{Limit: 20})
-	if err != nil || len(r.Mail) != 1 || r.State.Total != 1 {
-		t.Fatalf("ReadInbox: %d messages, total %d, %v", len(r.Mail), r.State.Total, err)
+	if err != nil || len(r.Mail) != 5 || r.State.Total != 5 || r.Refused != 4 {
+		t.Fatalf("ReadInbox: %d messages, total %d, refused %d, %v", len(r.Mail), r.State.Total, r.Refused, err)
+	}
+	for _, m := range r.Mail {
+		if (m.Seq == seq) == (m.Refused != "") || (m.Refused != "" && (m.From != "?" || m.Trust != TrustRefused || len(m.Body) != 0)) {
+			t.Fatalf("view entry: %+v", m)
+		}
 	}
 	for n := uint64(1); n <= 5; n++ {
 		m, err := c.Read(context.Background(), n)

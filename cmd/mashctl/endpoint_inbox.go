@@ -4,13 +4,16 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"strings"
 	"text/tabwriter"
 	"time"
 
 	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/cliframe"
+	"github.com/bogworks/mash/internal/cmdcore/render"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/sap"
+	"github.com/bogworks/mash/internal/sapsdk"
 )
 
 const endpointInboxUsage = `Usage: mashctl endpoint inbox <address> [--after number] [--limit n] [--json]
@@ -61,6 +64,8 @@ type inboxMessageJSON struct {
 	Kind      string `json:"kind"`
 	Size      int    `json:"size"`
 	When      string `json:"when"`
+	// Reason is the class of a refusal (a frozen class string); present on refused entries only.
+	Reason string `json:"reason,omitempty"`
 }
 
 // inboxJSON is the JSON of `mashctl endpoint inbox`.
@@ -68,18 +73,29 @@ type inboxJSON struct {
 	Address     string             `json:"address"`
 	Total       uint64             `json:"total"`
 	Undelivered uint64             `json:"undelivered"`
+	Refused     int                `json:"refused"`
 	Messages    []inboxMessageJSON `json:"messages"`
 }
 
-// inboxTrust is a message's trust label as shown: malformed mail is treated like forged, and no label is "-".
+// inboxTrust is a message's trust label as shown: a message with a header fault is "refused" (CHG-9; its class is the
+// reason), and no label is "-".
 func inboxTrust(t string) string {
 	switch t {
 	case "":
 		return "-"
 	case "malformed":
-		return "forged"
+		return "refused"
 	}
 	return t
+}
+
+// inboxReason is the class shown as a message's reason: the one the inspection found, and for a header fault that gave
+// none, the class for an unreadable header. Messages mash does not refuse have none.
+func inboxReason(m admin.InspectedMessage) string {
+	if m.Reason == "" && m.Trust == "malformed" {
+		return sapsdk.ClassUnreadable
+	}
+	return m.Reason
 }
 
 // senderAddress is a message's sender as an address: the stored flat name read as owner.group.name, else as stored.
@@ -121,12 +137,12 @@ func byteSize(n int) string {
 // buildInboxJSON is the list an inspection holds: the stream's message count, the messages the deliver consumer has not
 // delivered (all of them when there is no consumer), and the messages inspected. It carries no message text.
 func buildInboxJSON(addr sap.Address, in *admin.InboxInspection) inboxJSON {
-	rep := inboxJSON{Address: addr.String(), Total: in.Stream.Messages, Undelivered: in.Stream.Messages, Messages: make([]inboxMessageJSON, 0, len(in.Messages))}
+	rep := inboxJSON{Address: addr.String(), Total: in.Stream.Messages, Undelivered: in.Stream.Messages, Refused: in.Malformed, Messages: make([]inboxMessageJSON, 0, len(in.Messages))}
 	if in.Consumer != nil {
 		rep.Undelivered = in.Consumer.NumPending
 	}
 	for _, m := range in.Messages {
-		rep.Messages = append(rep.Messages, inboxMessageJSON{Number: m.Seq, From: senderAddress(m.Sender), Trust: inboxTrust(m.Trust), Delivered: m.State != admin.StateUndelivered, Kind: m.Kind, Size: m.Size, When: m.StoredAt.UTC().Format(time.RFC3339Nano)})
+		rep.Messages = append(rep.Messages, inboxMessageJSON{Number: m.Seq, From: senderAddress(m.Sender), Trust: inboxTrust(m.Trust), Delivered: m.State != admin.StateUndelivered, Kind: m.Kind, Size: m.Size, When: m.StoredAt.UTC().Format(time.RFC3339Nano), Reason: inboxReason(m)})
 	}
 	return rep
 }
@@ -157,7 +173,7 @@ func runEndpointInbox(args []string, g cliframe.Global, env func(string) string,
 			fmt.Fprintf(stdout, "No messages for %s.\n", addr)
 			return nil
 		}
-		fmt.Fprintf(stdout, "%s for %s, %d not delivered.\n", messages(total), addr, undelivered)
+		fmt.Fprintf(stdout, "%s for %s, %d not delivered%s.\n", messages(total), addr, undelivered, malformedPart(in.Malformed))
 		if len(msgs) == 0 {
 			return nil
 		}
@@ -165,11 +181,21 @@ func runEndpointInbox(args []string, g cliframe.Global, env func(string) string,
 	})
 }
 
+// malformedPart is ", N refused as malformed" for the header line, nothing when none is. The header counts only the mail
+// mashctl itself finds malformed, and says so: it cannot know the endpoint's refusal setting (ADR 0174, TO-6).
+func malformedPart(n int) string {
+	if n == 0 {
+		return ""
+	}
+	return fmt.Sprintf(", %d refused as malformed", n)
+}
+
 // writeInboxTable prints the message table: one row per message, FROM short inside the endpoint's own owner and group.
 func writeInboxTable(stdout io.Writer, addr sap.Address, msgs []inboxMessageJSON, raw []admin.InspectedMessage, now time.Time) error {
 	fmt.Fprintln(stdout)
-	tw := tabwriter.NewWriter(stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(tw, "NUMBER\tFROM\tSENT\tTRUST\tDELIVERED\tKIND\tSIZE")
+	var buf strings.Builder
+	tw := tabwriter.NewWriter(&buf, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(tw, "NUMBER\tFROM\tSENT\tTRUST\tDELIVERED\tKIND\tSIZE\t")
 	for i, m := range msgs {
 		from := config.Clean(m.From)
 		if a, err := sap.ParseAddress(m.From); err == nil && a.Owner == addr.Owner && a.Group == addr.Group {
@@ -184,7 +210,26 @@ func writeInboxTable(stdout io.Writer, addr sap.Address, msgs []inboxMessageJSON
 		if kind == "" {
 			kind = "-"
 		}
-		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\t%s\n", m.Number, from, ago(now, raw[i].StoredAt), config.Clean(m.Trust), delivered, config.Clean(kind), byteSize(m.Size))
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t\n", m.Number, from, ago(now, raw[i].StoredAt), config.Clean(m.Trust), delivered, config.Clean(kind), byteSize(m.Size))
 	}
-	return tw.Flush()
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	// REASON is the last cell and the only one cut: with the ellipsis, at 79 columns, as a preview is. The header names it
+	// only when some message has one.
+	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
+	anyReason := false
+	for _, m := range msgs {
+		anyReason = anyReason || m.Reason != ""
+	}
+	for i, l := range lines {
+		switch {
+		case i == 0 && anyReason:
+			l += "REASON"
+		case i > 0 && msgs[i-1].Reason != "":
+			l += render.Cut(config.Clean(msgs[i-1].Reason), max(79-render.DisplayWidth(l), 1))
+		}
+		fmt.Fprintln(stdout, strings.TrimRight(l, " "))
+	}
+	return nil
 }

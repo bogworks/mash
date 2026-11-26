@@ -110,6 +110,12 @@
      "text": "error: acme.demo.bob cannot sign in: the server refused its credentials\nhint: mash doctor",
      "stream": "stderr",
      "exit": 1
+    },
+    {
+     "case": "A send that signing refuses",
+     "text": "error: not sent: could not sign: your name is too long",
+     "stream": "stderr",
+     "exit": 1
     }
    ]
   },
@@ -150,6 +156,7 @@
     "total": 2,
     "new": 2,
     "urgent": 1,
+    "refused": 0,
     "exact": true,
     "wake_count": 15,
     "over_wake_count": false,
@@ -175,6 +182,13 @@
      "text": "2 messages for acme.demo.alice, 2 new, 1 urgent.\n\nNUMBER  FROM  SENT     STATE  URGENT  KIND      MESSAGE\n1       bob   10s ago  new    no      task      lunch at noon?\n2       bob   8s ago   new    yes     question  ready?",
      "stream": "stdout",
      "exit": 0
+    },
+    {
+     "case": "A refused message",
+     "text": "3 messages for acme.demo.alice, 1 new, 0 urgent, 1 refused.\n\nNUMBER  FROM  SENT     STATE    URGENT  KIND  MESSAGE\n1       bob   2h ago   read     no      task  lunch at noon?\n2       bob   10s ago  new      no      task  ready?\n3       ?     1h ago   refused  -       -     control character in name",
+     "stream": "stdout",
+     "exit": 0,
+     "note": "TO-1, REQ-006, CHG-14. A message mash refused is listed from the endpoint's refused lists, not from the stream's text: the state is `refused`, FROM is `?` (the sender of a refused message is never shown), URGENT and KIND are `-`, and MESSAGE is the class alone: no body and no preview. The header counts it in the total and adds `, N refused` after the urgent count, only when N is not 0. A message refused for its header and one that was not verified are both listed; one on both lists is one row, as a header refusal. A row is listed only while it is still in the stream: when it ages out the count falls."
     }
    ],
    "errors": [
@@ -230,6 +244,12 @@
     {
      "case": "A message that was refused",
      "text": "error: message 12 was refused: it was not verified\nhint: mash doctor",
+     "stream": "stderr",
+     "exit": 1
+    },
+    {
+     "case": "A message refused for its header",
+     "text": "error: message 3 was refused: control character in name\nhint: mash doctor",
      "stream": "stderr",
      "exit": 1
     },
@@ -347,7 +367,10 @@
      "holds_endpoint": true,
      "hooks": "ran",
      "storage": "ok"
-    }
+    },
+    "refused": 0,
+    "refused_by_class": {},
+    "stored_mail": null
    },
    "release": "0.5.9",
    "params": [
@@ -440,7 +463,7 @@
    "structured": {
     "endpoint": "acme.demo.bob",
     "problems": 1,
-    "warnings": 1,
+    "warnings": 0,
     "checks": [
      {
       "name": "config",
@@ -480,31 +503,48 @@
      },
      {
       "name": "refused",
-      "state": "warn",
-      "detail": "3 unverified messages were refused",
+      "state": "ok",
+      "detail": "3 messages were refused",
       "fix": null
      }
     ],
+    "refused": 3,
+    "refused_by_class": {
+     "not verified": 2,
+     "time not in UTC": 1
+    },
     "hint": "mash join <file> --replace"
    },
    "text": [
     {
      "case": "All well",
-     "text": "config    ok\nclaude    ok    2.1.320\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   ok\ndelivery  ok\nrefused   ok    no message was refused for lacking its sender's signature\n\nNo problems.",
+     "text": "config    ok\nclaude    ok    2.1.320\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   ok\ndelivery  ok\nrefused   ok    no mail was refused\n\nNo problems.",
+     "stream": "stdout",
+     "exit": 0
+    },
+    {
+     "case": "Mail was refused",
+     "text": "config    ok\nclaude    ok    2.1.320\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   ok\ndelivery  ok\nrefused   ok    4 messages were refused\n                2 not verified\n                1 time not in UTC\n                1 two sender headers\n\nNo problems.",
+     "stream": "stdout",
+     "exit": 0
+    },
+    {
+     "case": "The stored-mail check was skipped",
+     "text": "config       ok\nclaude       ok    2.1.320\ncreds        ok\nserver       ok    tls://myserver:4222\nsign-in      ok\ndelivery     ok\nstored mail  skip  not checked: ~/.local/state/mash/acme.demo.bob is not writable\nrefused      ok    no mail was refused\n\nNo problems.",
      "stream": "stdout",
      "exit": 0
     }
    ],
    "errors": [
     {
-     "case": "A problem and a warning, with one hint",
-     "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   FAIL  the server refused these credentials\ndelivery  skip  needs sign-in\nrefused   warn  3 unverified messages were refused\n\n1 problem, 1 warning.\nhint: mash join <file> --replace",
+     "case": "A problem, with one hint",
+     "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   FAIL  the server refused these credentials\ndelivery  skip  needs sign-in\nrefused   ok    3 messages were refused\n                2 not verified\n                1 time not in UTC\n\n1 problem.\nhint: mash join <file> --replace",
      "stream": "stdout",
      "exit": 1
     },
     {
      "case": "Server not answering",
-     "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    FAIL  the server did not answer: tls://myserver:4222\nsign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no message was refused for lacking its sender's signature\n\n1 problem.",
+     "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    FAIL  the server did not answer: tls://myserver:4222\nsign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no mail was refused\n\n1 problem.",
      "stream": "stdout",
      "exit": 1
     },
@@ -516,13 +556,13 @@
     },
     {
      "case": "The endpoint was deleted, seen from another machine, with one hint",
-     "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   FAIL  this endpoint was deleted; its address cannot be used again\ndelivery  skip  needs sign-in\nrefused   ok    no message was refused for lacking its sender's signature\n\n1 problem.\nhint: mash join <file>",
+     "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   FAIL  this endpoint was deleted; its address cannot be used again\ndelivery  skip  needs sign-in\nrefused   ok    no mail was refused\n\n1 problem.\nhint: mash join <file>",
      "stream": "stdout",
      "exit": 1
     },
     {
      "case": "The endpoint was deleted, on the machine that deleted it, with one hint",
-     "text": "config    ok\nclaude    skip  no claude command found\ncreds     FAIL  this endpoint was deleted; its address cannot be used again\nserver    ok    tls://myserver:4222\nsign-in   skip  needs the creds\ndelivery  skip  needs sign-in\nrefused   ok    no message was refused for lacking its sender's signature\n\n1 problem.\nhint: mash join <file>",
+     "text": "config    ok\nclaude    skip  no claude command found\ncreds     FAIL  this endpoint was deleted; its address cannot be used again\nserver    ok    tls://myserver:4222\nsign-in   skip  needs the creds\ndelivery  skip  needs sign-in\nrefused   ok    no mail was refused\n\n1 problem.\nhint: mash join <file>",
      "stream": "stdout",
      "exit": 1
     },

@@ -183,7 +183,7 @@ func TestDoctorOneHintACommandThatFixesIt(t *testing.T) {
 	}
 }
 
-// No problem: exit 0, six rows, no hint, hint null. A warning alone with no command that fixes it does not make a hint, and exits 0 (1 with --strict).
+// No problem: exit 0, six rows, no hint, hint null. Refused mail is not a warning (CHG-14): it changes neither the exit status nor --strict.
 func TestDoctorNoProblemNoHint(t *testing.T) {
 	w := tlsWorld(t, "a")
 	env := strictEnv(w, "a", nil)
@@ -191,16 +191,11 @@ func TestDoctorNoProblemNoHint(t *testing.T) {
 	if r.code != 0 || r.errs != "" || !strings.HasSuffix(r.out, "\n\nNo problems.\n") {
 		t.Fatalf("%+v", r)
 	}
-	if j := runMash(env, "doctor", "--json"); j.code != 0 || !strings.HasSuffix(j.out, `],"hint":null}`+"\n") {
+	if j := runMash(env, "doctor", "--json"); j.code != 0 || !strings.HasSuffix(j.out, `"refused":0,"refused_by_class":{},"hint":null}`+"\n") {
 		t.Fatalf("%+v", j)
 	}
-	writeRefused(t, env, 2)
-	if r := runMash(env, "doctor"); r.code != 0 || r.errs != "" {
-		t.Fatalf("warning: %+v", r)
-	}
-	if r := runMash(env, "doctor", "--strict"); r.code != 1 || r.errs != "" {
-		t.Fatalf("warning, strict: %+v", r)
-	}
+	// refused mail never changes the verdict, with or without --strict (CHG-14): cmd/mash/serve_refuse_test.go refuses
+	// real mail and checks doctor and doctor --strict after it
 }
 
 // Standing order 17: other users in the account never make a mash doctor row fail. mash doctor reads nothing about the

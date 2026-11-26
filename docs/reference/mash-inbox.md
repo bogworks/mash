@@ -52,6 +52,100 @@ NUMBER  FROM           SENT     STATE  URGENT  KIND      MESSAGE
 2       acme.demo.bob  8s ago   new    yes     question  ready?
 ```
 
+### A refused message
+
+Stream: stdout. Exit code: 0.
+
+```text
+3 messages for acme.demo.alice, 1 new, 0 urgent, 1 refused.
+
+NUMBER  FROM           SENT     STATE    URGENT  KIND  MESSAGE
+1       acme.demo.bob  2h ago   read     no      task  lunch at noon?
+2       acme.demo.bob  10s ago  new      no      task  ready?
+3       ?              1h ago   refused  -       -     control character in na…
+```
+
+### Every kind side by side
+
+Stream: stdout. Exit code: 0.
+
+```text
+17 messages for o.dev.bob, 0 new, 0 urgent, 12 refused.
+
+NUMBER  FROM         SENT    STATE    URGENT  KIND  MESSAGE
+1       o.dev.alice  3m ago  read     no      task  verified: real mash send f…
+2       UCNY…4UHK    3m ago  read     no      task  claimed: header without a …
+3       UCVG…3VVW    3m ago  read     no      task  unknown-signer: signed by …
+4       ?            3m ago  read     no      task  absent: no Agent-Sender he…
+5       o.dev.frank  3m ago  read     no      task  stale: signed an hour befo…
+6       ?            2m ago  refused  -       -     not verified
+7       ?            2m ago  refused  -       -     header too long
+8       ?            2m ago  refused  -       -     time not in UTC
+9       ?            2m ago  refused  -       -     control character in name
+10      ?            2m ago  refused  -       -     name too long
+11      ?            2m ago  refused  -       -     broken character in name
+12      ?            1m ago  refused  -       -     a field appears twice
+13      ?            1m ago  refused  -       -     space in subject
+14      ?            1m ago  refused  -       -     signature unreadable
+15      ?            1m ago  refused  -       -     empty sender header
+16      ?            1m ago  refused  -       -     two sender headers
+17      ?            1m ago  refused  -       -     unreadable sender header
+```
+
+### --json, a refused message
+
+Stream: stdout. Exit code: 0.
+
+```text
+{
+ "endpoint": "acme.demo.alice",
+ "total": 3,
+ "new": 1,
+ "urgent": 0,
+ "refused": 1,
+ "exact": true,
+ "wake_count": 15,
+ "over_wake_count": false,
+ "wake_age": "1h",
+ "oldest_waiting": "10s",
+ "over_wake_age": false,
+ "messages": [
+  {
+   "number": 1,
+   "from": "acme.demo.bob",
+   "sent": "2026-11-19T07:44:12Z",
+   "state": "read",
+   "urgent": false,
+   "kind": "task",
+   "trust": "verified",
+   "preview": "lunch at noon?"
+  },
+  {
+   "number": 2,
+   "from": "acme.demo.bob",
+   "sent": "2026-11-19T09:44:02Z",
+   "state": "new",
+   "urgent": false,
+   "kind": "task",
+   "trust": "verified",
+   "preview": "ready?"
+  },
+  {
+   "number": 3,
+   "from": "?",
+   "sent": "2026-11-19T08:44:12Z",
+   "state": "refused",
+   "urgent": false,
+   "kind": "",
+   "trust": "refused",
+   "preview": "",
+   "reason": "control character in name"
+  }
+ ]
+}
+
+```
+
 ### A long message, or one of several lines
 
 Stream: stdout. Exit code: 0.
@@ -196,6 +290,33 @@ NUMBER  FROM           SENT     STATE  URGENT  KIND      MESSAGE
 2       acme.demo.bob  8s ago   new    yes     question  ready?
 ```
 
+### The class strings
+
+Stream: stdout. Exit code: 0.
+
+```text
+not verified
+header too long
+time not in UTC
+control character in name
+name too long
+broken character in name
+a field appears twice
+space in subject
+signature unreadable
+empty sender header
+two sender headers
+unreadable sender header
+header is not a JSON object
+version missing
+version is not a number
+field is not text
+account or user not valid
+signed header incomplete
+message id not valid
+time not valid
+```
+
 ## JSON
 
 With `--json` the result is this shape. The values are an example.
@@ -206,6 +327,7 @@ With `--json` the result is this shape. The values are an example.
   "total": 2,
   "new": 2,
   "urgent": 1,
+  "refused": 0,
   "exact": true,
   "wake_count": 15,
   "over_wake_count": false,
@@ -237,7 +359,10 @@ FROM is the sender's full address. MESSAGE is the sender's words, as untrusted
 as the full text; it is not quoted because the column already marks it. It
 shows the first line of the text, cut to fit 80 columns and ending in … when
 there is more; mash read shows all of it. The JSON carries the same cut text
-as 'preview'.
+as 'preview'. A message mash refused is listed too, with the state `refused`,
+FROM `?` and its class as MESSAGE and as `reason`: never its body, its preview
+or its sender. It stays in the list, and in the count, until it ages out of
+the stream.
 
 ## What it replaces
 

@@ -25,6 +25,7 @@ The structured content of a successful result. The values are an example.
   "total": 2,
   "new": 2,
   "urgent": 1,
+  "refused": 0,
   "exact": true,
   "wake_count": 15,
   "over_wake_count": false,
@@ -58,6 +59,19 @@ The call returns this text.
 NUMBER  FROM  SENT     STATE  URGENT  KIND      MESSAGE
 1       bob   10s ago  new    no      task      lunch at noon?
 2       bob   8s ago   new    yes     question  ready?
+```
+
+### A refused message
+
+The call returns this text.
+
+```text
+3 messages for acme.demo.alice, 1 new, 0 urgent, 1 refused.
+
+NUMBER  FROM  SENT     STATE    URGENT  KIND  MESSAGE
+1       bob   2h ago   read     no      task  lunch at noon?
+2       bob   10s ago  new      no      task  ready?
+3       ?     1h ago   refused  -       -     control character in name
 ```
 
 ## Errors

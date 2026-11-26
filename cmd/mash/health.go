@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io/fs"
 	"os"
 	"strings"
@@ -28,6 +27,8 @@ type healthSvc struct {
 	mailHeld func() bool
 	// scanning says, in a session, whether it is checking the stored mail before it delivers any (TO-14). nil at a shell.
 	scanning func() bool
+	// scanSkipped says, in a session, which state directory made it skip the stored-mail scan ("" when it did not). nil at a shell.
+	scanSkipped func() string
 	// lease says, in a session, whether it holds its endpoint now: "" when it does (or at a shell, where it is nil),
 	// else cmds.LeaseOther, LeaseLost or LeaseFailed with the cause of the last.
 	lease func() (state, cause string)
@@ -198,7 +199,7 @@ func (h *healthSvc) serverCheck(ctx context.Context) cmds.HealthCheck {
 
 // signInCheck is the sign-in row: the server accepts this endpoint's credentials and knows the endpoint. It also says
 // whether an agent session holds the endpoint open now (its lease).
-func (h *healthSvc) signInCheck(ctx context.Context) (c cmds.HealthCheck, online bool) {
+func (h *healthSvc) signInCheck(ctx context.Context) (c cmds.HealthCheck, online bool, refused *endpoint.RefusedCounts) {
 	c = cmds.HealthCheck{Name: cmds.CheckSignIn, State: cmds.CheckFail}
 	octx, cancel := context.WithTimeout(ctx, openFor(h.cfg))
 	ep, err := endpoint.OpenClientWith(octx, h.cfg, endpoint.ClientOptions{Lease: true})
@@ -225,26 +226,36 @@ func (h *healthSvc) signInCheck(ctx context.Context) (c cmds.HealthCheck, online
 		if c.Reason == "" {
 			c.Reason = c.Detail
 		}
-		return c, false
+		return c, false, nil
 	}
 	defer ep.Close()
 	lctx, lcancel := context.WithTimeout(ctx, callFor(h.cfg))
 	_, online = ep.OwnLease(lctx)
 	lcancel()
+	// The refused count is of what the stream still holds: the one read of its range, while the endpoint is open.
+	rctx, rcancel := context.WithTimeout(ctx, callFor(h.cfg))
+	if rc, err := ep.RefusedCounts(rctx); err == nil {
+		refused = &rc
+	}
+	rcancel()
 	c.State = cmds.CheckOK
-	return c, online
+	return c, online, refused
 }
 
-// refusedCheck is the refused row: how many unverified messages the endpoint refused.
-func (h *healthSvc) refusedCheck() cmds.HealthCheck {
-	n := endpoint.RefusedCount(h.cfg)
-	switch n {
-	case 0:
-		return cmds.HealthCheck{Name: cmds.CheckRefused, State: cmds.CheckOK, Detail: "no message was refused for lacking its sender's signature"}
-	case 1:
-		return cmds.HealthCheck{Name: cmds.CheckRefused, State: cmds.CheckWarn, Detail: "1 unverified message was refused"}
+// refusedCounts is what the refused row and status --detail count: the refused messages the stream still holds when it
+// could be read (rc), else everything the two lists on this machine record (shown with the server down).
+func (h *healthSvc) refusedCounts(rc *endpoint.RefusedCounts) cmds.RefusedCounts {
+	if rc == nil {
+		d := endpoint.RefusedCountsOnDisk(h.cfg)
+		rc = &d
 	}
-	return cmds.HealthCheck{Name: cmds.CheckRefused, State: cmds.CheckWarn, Detail: fmt.Sprintf("%d unverified messages were refused", n)}
+	return cmds.RefusedCounts{Total: rc.Total, ByClass: rc.ByClass}
+}
+
+// refusedCheck is the refused row (TO-5): how many messages were refused, whatever the reason. Its state is ok whatever it
+// counts: a refused message cannot be mended, so it never changes doctor's verdict or exit status (CHG-14).
+func refusedCheck(rc cmds.RefusedCounts) cmds.HealthCheck {
+	return cmds.HealthCheck{Name: cmds.CheckRefused, State: cmds.CheckOK, Detail: cmds.RefusedDetail(rc.Total)}
 }
 
 // skipped is a row that could not be run: needs says which earlier row it waits on.
@@ -335,13 +346,15 @@ func (h *healthSvc) Health(ctx context.Context) (cmds.HealthReport, error) {
 	server := h.serverCheck(ctx)
 	rep.Checks = append(rep.Checks, creds, server)
 	signedIn := false
+	var stored *endpoint.RefusedCounts
 	switch {
 	case creds.State == cmds.CheckFail:
 		rep.Checks = append(rep.Checks, skipped(cmds.CheckSignIn, "creds"))
 	case server.State == cmds.CheckFail:
 		rep.Checks = append(rep.Checks, skipped(cmds.CheckSignIn, "server"))
 	default:
-		sign, online := h.signInCheck(ctx)
+		sign, online, rc := h.signInCheck(ctx)
+		stored = rc
 		rep.Checks = append(rep.Checks, sign)
 		rep.Online = online
 		signedIn = sign.State == cmds.CheckOK
@@ -356,15 +369,22 @@ func (h *healthSvc) Health(ctx context.Context) (cmds.HealthReport, error) {
 	default:
 		rep.Checks = append(rep.Checks, h.deliveryCheck())
 	}
-	rep.Checks = append(rep.Checks, h.refusedCheck()) // the count is kept on this machine: it shows with the server down
+	rep.Refused = h.refusedCounts(stored) // the lists are kept on this machine: they show with the server down
+	rep.Checks = append(rep.Checks, refusedCheck(rep.Refused))
 	rep.MailHeld = h.mailHeld != nil && h.mailHeld()
 	rep.StoredScan = h.scanning != nil && h.scanning()
+	if h.scanSkipped != nil {
+		rep.StoredSkipDir = config.Tilde(h.scanSkipped())
+	}
 	if !h.session { // a shell on the session's machine reads what its serve recorded, as the tool would say it, whatever the sign-in said
 		if rep.Session = h.sessionOnDisk(); rep.Session != nil && rep.Session.Storage == cmds.StorageFailing {
 			rep.MailHeld = true
 		}
 		if dir, err := endpoint.SpoolDir(h.cfg); err == nil && endpoint.ScanOnDisk(spool.Spool{Dir: dir}) {
 			rep.StoredScan = true
+		}
+		if dir, err := endpoint.SpoolDir(h.cfg); err == nil {
+			rep.StoredSkipDir = config.Tilde(endpoint.ScanSkipOnDisk(spool.Spool{Dir: dir}))
 		}
 	}
 	if rep.Lease, rep.LeaseCause = h.leaseNow(); rep.Lease != "" {

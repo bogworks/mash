@@ -67,6 +67,15 @@ error: message 12 was refused: it was not verified
 hint: mash doctor
 ```
 
+### A message refused for its header
+
+The call returns this text with `isError` set.
+
+```text
+error: message 3 was refused: control character in name
+hint: mash doctor
+```
+
 ### A deleted endpoint here
 
 The call returns this text with `isError` set.

@@ -83,17 +83,7 @@
   "issue": "#1047",
   "note": "mashctl accepts global options before the verb, as mash does (today: error: unknown command \"--json\"). The result is exactly that of mashctl status --json. The rule \"Options go anywhere after the tool's name\" already says so; the code does not yet.",
   "verbatim": true
- },
- {
-   "id": "class-strings",
-   "where": "sender classes",
-   "case": "The frozen class strings",
-   "text": "not verified\nheader too long\ntime not in UTC\ncontrol character in name\nname too long\nbroken character in name\na field appears twice\nspace in subject\nsignature unreadable\nempty sender header\ntwo sender headers\nunreadable sender header\nheader is not a JSON object\nversion missing\nversion is not a number\nfield is not text\naccount or user not valid\nsigned header incomplete\nmessage id not valid\ntime not valid",
-   "stream": "stdout",
-   "exit": 0,
-   "issue": "0.6.0 sdk adoption contract, REQ-017",
-   "note": "The class strings are part of the JSON contract (REQ-017). The first twelve match the TO-1 rows of the Gate 1 render (#1560) byte for byte; the rest are the other malformed cases mash refuses today, which S4 adds to the spec. `not verified` is a refusal reason, not a trust kind: it is the class of a forged sender only. Stays in spec/next.json until W writes the tool entries."
-  }
+ }
  ],
  "rules_next": [
  {

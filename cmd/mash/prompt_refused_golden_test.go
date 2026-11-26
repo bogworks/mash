@@ -145,3 +145,31 @@ func TestPromptUsageBeatsAConfigurationError(t *testing.T) {
 		}
 	}
 }
+
+// TO-8: a prompt that signing refuses is the spec's one line in style A, with no hint, exit 1 (CHG-8, CHG-17).
+func TestPromptSigningRefusalMatchesSpec(t *testing.T) {
+	c, ok := specCases(t, "prompt")["A prompt that signing refuses"]
+	if !ok {
+		t.Fatal("spec/mash.json has no 'A prompt that signing refuses' case for prompt")
+	}
+	var stdout, stderr bytes.Buffer
+	code := cliframe.Report(&stdout, &stderr, promptFailure(errors.New("not sent: could not sign: your name is too long")), false)
+	c.check(t, ran{code: code, out: stdout.String(), errs: stderr.String()})
+}
+
+// TO-10 and TO-11: a prompt the peer refuses, and one past a nonce cap, are the spec's lines in style A, with no hint, exit 1
+// (CHG-5 to CHG-7, CHG-17).
+func TestPromptPeerRefusalsMatchSpec(t *testing.T) {
+	for name, in := range map[string]string{
+		"A prompt a peer refuses":        "mash: prompt refused: 400 malformed Agent-Sender header",
+		"A live prompt past a nonce cap": "mash: prompt refused: 401 too many recent prompts: try again shortly",
+	} {
+		c, ok := specCases(t, "prompt")[name]
+		if !ok {
+			t.Fatalf("spec/mash.json has no %q case for prompt", name)
+		}
+		var stdout, stderr bytes.Buffer
+		code := cliframe.Report(&stdout, &stderr, promptFailure(errors.New(in)), false)
+		c.check(t, ran{code: code, out: stdout.String(), errs: stderr.String()})
+	}
+}

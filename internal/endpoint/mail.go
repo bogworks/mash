@@ -1033,6 +1033,9 @@ type InboxRead struct {
 	// acknowledged (#1399): the urgent count may include mail acknowledged out of order, so it is an upper bound. The
 	// waiting count is the server's own and stays exact. It is not Partial: nothing was cut short.
 	AckedOutOfOrder bool
+	// Refused is how many refused messages (malformed and not verified, one count each) the stream still holds; they are
+	// in State.Total and are listed as refused entries with no body (REQ-006).
+	Refused int
 
 	dropped      map[uint64]bool // sequences the pass read and left out (sender no longer verified, say)
 	shownWaiting int             // waiting messages the pass read and kept: what the counts are at least
@@ -1091,9 +1094,10 @@ func (e *Endpoint) readInbox(ctx context.Context, q InboxQuery) (InboxRead, erro
 	}
 	info := s.CachedInfo()
 	first, last := info.State.FirstSeq, info.State.LastSeq
-	// The stream keeps the refused mail it stored; the counts are of what the inbox shows.
-	shown := max(int(info.State.Msgs)-e.refusedStored(first, last, streamIdentity(info)), 0)
-	st := InboxState{Total: shown, Waiting: shown}
+	// The stream keeps the refused mail it stored: the total counts it, and it is not waiting (it is never delivered).
+	classes := e.refusedClasses(streamIdentity(info), first, last)
+	shown := int(info.State.Msgs)
+	st := InboxState{Total: shown, Waiting: max(shown-len(classes), 0)}
 	cons, err, ok := e.pre.takeConsumer()
 	if !ok {
 		cons, err = e.js.Consumer(ctx, e.ident.InboxStream(), store.Consumer)
@@ -1106,11 +1110,19 @@ func (e *Endpoint) readInbox(ctx context.Context, q InboxQuery) (InboxRead, erro
 		ci := cons.CachedInfo()
 		st.Waiting = int(ci.NumPending) + ci.NumAckPending
 		st.AckFloor = ci.AckFloor.Stream
+		// The consumer counts refused mail it has not yet delivered as pending, but a refused message is never shown
+		// as waiting. One at or below the delivered mark was handed to serve, which acknowledges it once recorded
+		// (possibly out of order, above the floor): the server no longer counts it, so it is not taken off again.
+		for seq := range classes {
+			if seq > ci.Delivered.Stream {
+				st.Waiting--
+			}
+		}
 	}
 	if st.Waiting < 0 {
 		st.Waiting = 0
 	}
-	out := InboxRead{State: st}
+	out := InboxRead{State: st, Refused: len(classes)}
 
 	// The sequences to read: what the query lists (in the order it takes them), the newest waiting ones, and the oldest.
 	var listSeqs seqRange
@@ -1167,7 +1179,9 @@ func (e *Endpoint) readInbox(ctx context.Context, q InboxQuery) (InboxRead, erro
 			for i, n := range batch {
 				switch {
 				case errs[i] == nil:
-					read = append(read, raws[i])
+					if _, isRefused := classes[n]; !isRefused { // a refused message's sender is never looked up
+						read = append(read, raws[i])
+					}
 					bytes += len(raws[i].Data)
 				case errors.Is(errs[i], jetstream.ErrMsgNotFound):
 				default:
@@ -1179,6 +1193,12 @@ func (e *Endpoint) readInbox(ctx context.Context, q InboxQuery) (InboxRead, erro
 			}
 			for i, n := range batch {
 				if raws[i] == nil {
+					continue
+				}
+				if class, isRefused := classes[n]; isRefused { // listed, never delivered, never new
+					if listed[n] && !q.OnlyNew { // a refused message is never new, so --new does not list it
+						mails[n] = refusedMail(raws[i], class)
+					}
 					continue
 				}
 				m, ok := e.toMailWith(raws[i], refused)
@@ -1257,7 +1277,7 @@ func (e *Endpoint) readInbox(ctx context.Context, q InboxQuery) (InboxRead, erro
 		}
 	}
 	if len(out.Mail) < q.Limit && listSeqs.remaining() > 0 { // gone or forged ones in the way: read on
-		more, gone, err := e.collectDropped(ctx, s.GetMsg, listSeqs, q.Limit-len(out.Mail))
+		more, gone, err := e.collectDropped(ctx, s.GetMsg, listSeqs, q.Limit-len(out.Mail), classes, q.OnlyNew)
 		if err != nil {
 			return InboxRead{}, err
 		}
@@ -1301,8 +1321,8 @@ func (e *Endpoint) ReadRef(ctx context.Context, r MsgRef) (render.Mail, error) {
 	if err != nil {
 		return render.Mail{}, err
 	}
-	if e.refusedSeq(r.Seq, streamIdentity(s.CachedInfo())) {
-		return render.Mail{}, &RefusedMessageError{Seq: r.Seq} // refused mail is not there to read
+	if class, ok := e.refusedClassOf(s.CachedInfo(), r.Seq); ok {
+		return render.Mail{}, &RefusedMessageError{Seq: r.Seq, Class: class} // refused mail is not there to read
 	}
 	raw, err := s.GetMsg(ctx, r.Seq)
 	if errors.Is(err, jetstream.ErrMsgNotFound) {
@@ -1385,12 +1405,13 @@ type getMsg func(ctx context.Context, seq uint64, opts ...jetstream.GetMsgOpt) (
 // forged mail; any other read error ends the listing and is returned, so a
 // broken connection is not mistaken for an empty inbox.
 func (e *Endpoint) collect(ctx context.Context, get getMsg, seqs seqRange, limit int) ([]render.Mail, error) {
-	out, _, err := e.collectDropped(ctx, get, seqs, limit)
+	out, _, err := e.collectDropped(ctx, get, seqs, limit, nil, false)
 	return out, err
 }
 
 // collectDropped is collect that also says which seqs it read and refused (toMail dropped them), for a caller that counts.
-func (e *Endpoint) collectDropped(ctx context.Context, get getMsg, seqs seqRange, limit int) ([]render.Mail, []uint64, error) {
+// With skipRefused a message recorded as refused is passed over, not listed (--new).
+func (e *Endpoint) collectDropped(ctx context.Context, get getMsg, seqs seqRange, limit int, classes map[uint64]string, skipRefused bool) ([]render.Mail, []uint64, error) {
 	var out []render.Mail
 	var dropped []uint64 // the seqs read that toMail refused
 	// Seqs are read a batch at a time, many requests in flight at once. A batch is no larger than what is still
@@ -1405,7 +1426,7 @@ func (e *Endpoint) collectDropped(ctx context.Context, get getMsg, seqs seqRange
 		parallel(n, fetchConcurrency, func(i int) { raws[i], errs[i] = get(ctx, batch[i]) })
 		var read []*jetstream.RawStreamMsg
 		for i, raw := range raws {
-			if errs[i] == nil {
+			if _, isRefused := classes[batch[i]]; errs[i] == nil && !isRefused {
 				read = append(read, raw)
 			}
 		}
@@ -1419,7 +1440,11 @@ func (e *Endpoint) collectDropped(ctx context.Context, get getMsg, seqs seqRange
 			if errs[i] != nil {
 				return out, dropped, fmt.Errorf("mash: inbox: read #%s: %w", FormatMsgRef(MsgRef{Seq: seq}), errs[i])
 			}
-			if m, ok := e.toMailWith(raws[i], refused); ok {
+			if class, isRefused := classes[seq]; isRefused {
+				if !skipRefused { // a refused message is never new: --new passes skipRefused
+					out = append(out, refusedMail(raws[i], class))
+				}
+			} else if m, ok := e.toMailWith(raws[i], refused); ok {
 				out = append(out, m)
 			} else {
 				dropped = append(dropped, seq)

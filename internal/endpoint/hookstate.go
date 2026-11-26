@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
+
+	"golang.org/x/sys/unix"
 
 	"github.com/bogworks/mash/internal/spool"
 )
@@ -244,6 +247,36 @@ func SessionOnDisk(sp spool.Spool) (hooks, storage string, ok bool) {
 func ScanOnDisk(sp spool.Spool) bool {
 	rec, ok := liveRecord(sp)
 	return ok && rec.Scanning
+}
+
+// DirAccessible is whether this process can write to dir, by asking the system without writing anything (the hook record
+// lives in the same directory, so an unwritable one cannot say so itself). Exported as a var so that a test sets it: a chmod does
+// not block a root test.
+var DirAccessible = func(dir string) bool { return unix.Access(dir, unix.W_OK) == nil }
+
+// writableDir is DirAccessible for the nearest existing directory at or above dir: the scan makes the directory, so one
+// that does not exist yet is as writable as the first ancestor that does.
+func writableDir(dir string) bool {
+	for {
+		if _, err := os.Stat(dir); err == nil {
+			return DirAccessible(dir)
+		}
+		up := filepath.Dir(dir)
+		if up == dir {
+			return false
+		}
+		dir = up
+	}
+}
+
+// ScanSkipOnDisk is, at a shell, the state directory the stored-mail scan skips ("" when it does not): the scan is not
+// done (the list has no "scanned" line) and this process cannot write the directory, which is what makes serve skip it.
+// It is derived, not read from a record, because the record is kept in the very directory that is not writable.
+func ScanSkipOnDisk(sp spool.Spool) string {
+	if sp.Dir == "" || readSeqList(filepath.Join(sp.Dir, malformedSeqsFile)).Done || writableDir(sp.Dir) {
+		return ""
+	}
+	return sp.Dir
 }
 
 // liveRecord is the record of a serve of this machine that still exists.
