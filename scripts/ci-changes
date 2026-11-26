@@ -17,15 +17,15 @@
 #   - an empty path list (nothing to compare);
 #   - any path not listed as documentation below (the default is code, so a new top-level path is code).
 # Documentation is every Markdown file (*.md, wherever it sits and whatever its name) and every path under docs/ (images and SVG
-# included): bogworks-dev-standards dev-process rules 20 and 21 ("markdown is not code"). A classifier does not call a
-# Markdown file code because of its name, its directory or because a build or a test reads it. One exception by kind (rule 20, 0.8.1): a non-Markdown file
+# included): Markdown is not code. A classifier does not call a
+# Markdown file code because of its name, its directory or because a build or a test reads it. One exception by kind: a non-Markdown file
 # under docs/ that the release tooling, a build or a test reads as data is code: docs/allowed_signers, docs/review/policy.json, docs/skipped-releases.txt
 # and docs/release-cutover. A non-Markdown file outside docs/ (a hook
 # script, a manifest, a template, a Go file) is code, wherever it sits.
 set -euo pipefail
 
 # is_docs succeeds for a path that is documentation: any *.md, or anything under docs/ except the data files the release tooling, a build or a
-# test reads (dev-process 0.8.1 rule 20: a non-Markdown file under docs/ read as data is code).
+# test reads (a non-Markdown file under docs/ read as data is code).
 is_docs() {
 	case "$1" in
 	docs/allowed_signers | docs/review/policy.json | docs/skipped-releases.txt | docs/release-cutover) return 1 ;;
