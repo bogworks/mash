@@ -142,7 +142,7 @@ is installed in your home folder, with no sudo.
    Claude Code asks whether to trust the folder; choose yes.
 
 4. In Bob's session, say: "Send alice a note: lunch at noon?"
-   In Alice's, say: "Do I have mail?" She sees Bob's note, marked verified, after the setup's own test note.
+   In Alice's, say: "Do I have mail?" She sees two notes from Bob, both verified: the setup's test note, then yours.
 
 Mail waits. Close Alice's session, send again from Bob's, reopen hers, and
 it is there.
