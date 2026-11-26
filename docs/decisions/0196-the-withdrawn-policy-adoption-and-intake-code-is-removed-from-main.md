@@ -37,8 +37,8 @@ Not changed here: the policy work is renaming `listset`, `policydoc`, `policyapp
 `NextSubmitter`, `adoptionUnchecked` in `policydoc`) and whether `policyserve` stays.
 
 ### Consequences
-* Good, because main carries no code for a design that was withdrawn, and lint is clean.
 
+* Good, because main carries no code for a design that was withdrawn, and lint is clean.
 * Good, because the merge-queue exception rule of ADR 0182 and the release check's list of policy packages
   (`scripts/releasecheck/unlinked.go`) name only packages that exist. This decides that change to the gate: the
   paths of the deleted packages are not kept as a guard, because bringing one back is a new reviewed pull request
