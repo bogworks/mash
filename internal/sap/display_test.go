@@ -27,8 +27,8 @@ func TestKeyOf(t *testing.T) {
 	for _, c := range []struct{ in, want string }{
 		{"acme.dev.build-bot", "acme_dev_build-bot"}, // canonical -> flat
 		{"acme_dev_build-bot", "acme_dev_build-bot"}, // flat stays
-		{"team-a", "team-a"}, // a bare name stays
-		{"a.b", "a.b"},       // anything else passes through for the caller's refusal
+		{"team-a", "team-a"},                         // a bare name stays
+		{"a.b", "a.b"},                               // anything else passes through for the caller's refusal
 		{"A.b.c", "A.b.c"},
 		{"", ""},
 	} {
