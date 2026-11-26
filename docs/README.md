@@ -53,7 +53,7 @@ Start with the [README](../README.md). What changed in each release: [CHANGELOG]
 These are working records of the project's own process. They are kept for the history and are not kept up to date.
 
 - [Original v0.1 design](specs/2026-10-21-mash-design.md)
-- [Policy engine design, not shipped](policy-enforcement.md)
+- [Who may mail whom, and the planned security policy](policy-enforcement.md)
 - Work contracts: [docs/contracts/](contracts/) and [contracts/](../contracts/)
 - Evidence and live-run receipts: [evidence/](evidence/), [receipts/](../receipts/), [scripts/liveat/README.md](../scripts/liveat/README.md)
 - Release-note drafts: [release-notes/](release-notes/)

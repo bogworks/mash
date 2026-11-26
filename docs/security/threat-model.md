@@ -310,7 +310,7 @@ Custody rule: the account signing key, and every key above it, stay with the min
 - If it leaks: every user it signed is as strong as the key. Replace the account (a new account key under the operator,
   re-issued users), and revoke the old account's users.
 
-**Owner group signing keys** and **requester keys**: not used in v0.5.0. The commands that made and used them are not part of this release ([ADR 0129](../decisions/0129-the-policy-commands-are-not-part-of-v0-5-0-and-the-engine-stays-internal-until-it-works-standalone.md)). A key store from an earlier build may hold a `groups/` directory or a `requesters.json` file; mash v0.5.0 does not read them.
+**Owner group signing keys**: not used in any release. The security policy that would use them is planned and is not reachable in a released binary ([policy page](../policy-enforcement.md), [ADR 0129](../decisions/0129-the-policy-commands-are-not-part-of-v0-5-0-and-the-engine-stays-internal-until-it-works-standalone.md)). A key store from an earlier build may hold a `groups/` directory or a `requesters.json` file; mash does not read them.
 
 **System account key** (`system.nk`) and **system creds** (`sys.creds`)
 - Lives: the key at `<config dir>/keys/system.nk` (0600 in 0700), only for a server `init --local` stood up. The creds
