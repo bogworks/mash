@@ -106,8 +106,8 @@ func Extract(spec Spec, args []string) (Global, []string, error) {
 
 // flagValue reads the value of the value-taking flag name at args[*i]. With the inline form (--flag=VALUE) the value is
 // taken as written. Otherwise the value is the next argument and *i moves onto it. The next argument may not start with
-// '-' (a bare "-" is allowed), so that a flag left without its value does not swallow the next flag. The rule and the
-// text match cmd/mash/flagvalue.go.
+// '-' (a bare "-" is allowed), so that a flag left without its value does not swallow the next flag. The rule is the same as in
+// cmd/mashctl/flagvalue.go.
 func flagValue(args []string, i *int, name, inline string, hasInline bool) (string, error) {
 	if hasInline {
 		if inline == "" {

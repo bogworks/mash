@@ -667,7 +667,6 @@ func schema(props map[string]any, required ...string) map[string]any {
 }
 
 func str(desc string) map[string]any  { return map[string]any{"type": "string", "description": desc} }
-func num(desc string) map[string]any  { return map[string]any{"type": "integer", "description": desc} }
 func flag(desc string) map[string]any { return map[string]any{"type": "boolean", "description": desc} }
 
 func tools(state *atomic.Pointer[sessionState], src *statusSource) []mcp.Tool {

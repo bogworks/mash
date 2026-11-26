@@ -781,6 +781,7 @@ func (e *Endpoint) SendDetailed(ctx context.Context, to, text string, o SendOpti
 	}
 	if size := len(data) + headerSize(msg.Header); size > sendLimit(e.nc) {
 		if limit := int(e.nc.MaxPayload()); limit > 0 && limit < store.MaxMsgSize {
+			//lint:ignore ST1005 the closing sentence is user-visible guidance (what to do next), and the wording is fixed
 			return SendResult{}, fmt.Errorf("mash: message is %d bytes with headers; this server accepts at most %d (its max_payload). "+
 				"Send a smaller message or put the content in a file and send the path.", size, limit)
 		}

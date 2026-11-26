@@ -31,7 +31,7 @@ type fullParams struct {
 }
 
 var fullCmd = cmdcore.Command[fullParams, fullResult]{Name: "full", Run: func(_ context.Context, _ *cmdcore.Env, p fullParams) (fullResult, error) {
-	return fullResult{Name: p.Name}, nil
+	return fullResult(p), nil
 }}
 
 func runFull(g cliframe.Global, args ...string) (int, string, string) {

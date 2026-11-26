@@ -47,10 +47,6 @@ func noEnv(keys ...string) func(t *testing.T, r *refEnv) {
 	}
 }
 
-func setEnv(k, v string) func(t *testing.T, r *refEnv) {
-	return func(t *testing.T, r *refEnv) { r.h.env[k] = v }
-}
-
 // seq runs the setups in order.
 func seq(fs ...func(t *testing.T, r *refEnv)) func(t *testing.T, r *refEnv) {
 	return func(t *testing.T, r *refEnv) {
@@ -163,12 +159,6 @@ func junkCreds(t *testing.T, r *refEnv) {
 	if err := os.WriteFile(r.h.creds(ad("a")), []byte("junk"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-}
-
-// revocationUnknown makes the check of whether a key is revoked fail.
-func revocationUnknown(t *testing.T, r *refEnv) {
-	r.h.seed(ad("a"))
-	fakeKeyRevoked(t, func(string) (bool, error) { return false, errors.New("no system account answered") })
 }
 
 var refusalCases = []refCase{

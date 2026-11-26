@@ -52,15 +52,6 @@ func reportText(t *testing.T, s *session, id int, name string) string {
 	return resultText(s.call(t, id, name, `{}`))
 }
 
-func wantAll(t *testing.T, what, out string, subs ...string) {
-	t.Helper()
-	for _, sub := range subs {
-		if !strings.Contains(out, sub) {
-			t.Errorf("%s: want %q in:\n%s", what, sub, out)
-		}
-	}
-}
-
 func spoolFor(w *world, name string) spool.Spool {
 	return spool.Spool{Dir: spool.Dir(filepath.Join(w.env[name]["HOME"], ".local", "state", "mash"), w.e.Owner, tAddr(name).Flat())}
 }

@@ -29,13 +29,6 @@ func (h *fleetEnv) recordOf(name string) store.Record {
 	return r
 }
 
-// recordLabels reads a directory record's labels from the server.
-func (h *fleetEnv) recordLabels(name string) (map[string]string, bool) {
-	h.t.Helper()
-	r := h.recordOf(name)
-	return r.Labels, true
-}
-
 // `set` takes several pairs at once and changes only those fields.
 func TestEndpointSetSeveralPairs(t *testing.T) {
 	h := newFleetEnv(t)

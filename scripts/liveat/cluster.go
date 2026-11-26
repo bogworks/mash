@@ -129,14 +129,6 @@ type At5 struct {
 
 func (s *At5) M(i int) Host { return s.Hosts[i-1] }
 
-func (s *At5) urlList() string {
-	var u []string
-	for _, h := range s.Hosts {
-		u = append(u, "tls://"+h.Addr()+":"+strconv.Itoa(h.Ports().Client))
-	}
-	return strings.Join(u, ",")
-}
-
 func (s *At5) urlOf(h Host) string { return "tls://" + h.Addr() + ":" + strconv.Itoa(h.Ports().Client) }
 
 // env is the whole environment of a command on h: scratch values only.
@@ -485,8 +477,6 @@ func (s *At5) AdoptM2() bool {
 	return ok
 }
 
-func files2(dir, name string) string { return filepath.Join(dir, name) }
-
 func errText(err error) string {
 	if err == nil {
 		return ""
@@ -576,14 +566,6 @@ func (s *At5) ClusterCheck(h Host, name string) bool {
 	ok, d = statusAllOK(st.Code, st.Stdout, len(s.Hosts))
 	b := s.check(name+": mashctl status --json shows every one of the three servers answering", ok, redact(d))
 	return a && b
-}
-
-func lastLine(s string) string {
-	s = strings.TrimSpace(s)
-	if i := strings.LastIndexByte(s, '\n'); i >= 0 {
-		return s[i+1:]
-	}
-	return s
 }
 
 // Setup is everything before the scenario: certificates, M1 by the setup script, the cluster, the buckets (init --config), M2 by init --config, and the

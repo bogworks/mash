@@ -196,9 +196,9 @@ func TestBatchOneEvent(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	got := ev.waitFor(t, 1, 5*time.Second)
+	ev.waitFor(t, 1, 5*time.Second)
 	time.Sleep(300 * time.Millisecond)
-	if got = ev.all(); len(got) != 1 || !strings.Contains(got[0], "5 messages from "+tdot("b")+" (task)\n") {
+	if got := ev.all(); len(got) != 1 || !strings.Contains(got[0], "5 messages from "+tdot("b")+" (task)\n") {
 		t.Fatalf("want one event of 5, got %d: %q", len(got), got)
 	}
 }
@@ -429,9 +429,9 @@ func TestReconnectResumes(t *testing.T) {
 	if _, err := b.Send(ctx, tdot("a"), "after restart", 0); err != nil {
 		t.Fatalf("send after restart: %v", err)
 	}
-	got := ev.waitFor(t, 2, 20*time.Second)
+	ev.waitFor(t, 2, 20*time.Second)
 	time.Sleep(500 * time.Millisecond)
-	got = ev.all()
+	got := ev.all()
 	joined := strings.Join(got, "\n")
 	if strings.Count(joined, "before restart") != 1 || strings.Count(joined, "after restart") != 1 {
 		t.Fatalf("want each message exactly once, got:\n%s", joined)
@@ -973,7 +973,7 @@ func leaseInstance(t *testing.T, f *fixture, name string) string {
 // sendFromClient has a client of "a" (cfg token tok, optionally adopting) send to b and returns the client, the
 // adopt error (nil when not adopting) and what b reads: the mail's trust and its verified instance. The send goes
 // out even after a failed adopt, to show which instance the client would have signed.
-func sendFromClient(t *testing.T, f *fixture, tok string, adopt bool) (*Endpoint, error, sap.Trust, string) {
+func sendFromClient(t *testing.T, f *fixture, tok string, adopt bool) (*Endpoint, sap.Trust, string, error) {
 	t.Helper()
 	b := f.client(t, "b")
 	cfg := f.cfg("a")
@@ -995,7 +995,7 @@ func sendFromClient(t *testing.T, f *fixture, tok string, adopt bool) (*Endpoint
 	if err != nil {
 		t.Fatal(err)
 	}
-	return c, aerr, m.Trust, m.Instance
+	return c, m.Trust, m.Instance, aerr
 }
 
 // A client in the launched session's shell (same launch token) signs the serve's lease instance, so a reader that
@@ -1013,7 +1013,7 @@ func TestAdoptLaunchInstanceSignsTheLeaseInstance(t *testing.T) {
 	if lease == "" {
 		t.Fatal("lease has no instance")
 	}
-	c, aerr, trust, inst := sendFromClient(t, f, "tok-1", true)
+	c, trust, inst, aerr := sendFromClient(t, f, "tok-1", true)
 	if aerr != nil {
 		t.Fatalf("matching token must adopt without error: %v", aerr)
 	}
@@ -1035,7 +1035,7 @@ func TestAdoptLaunchInstanceFailsOnAnotherLaunch(t *testing.T) {
 	}
 	defer serve.Close()
 	lease := leaseInstance(t, f, "a")
-	c, aerr, trust, inst := sendFromClient(t, f, "tok-2", true)
+	c, trust, inst, aerr := sendFromClient(t, f, "tok-2", true)
 	if aerr == nil || !strings.Contains(aerr.Error(), "does not match") {
 		t.Fatalf("a different launch's token must fail with a mismatch, got %v", aerr)
 	}
@@ -1054,7 +1054,7 @@ func TestAdoptLaunchInstanceNeedsAToken(t *testing.T) {
 	}
 	defer serve.Close()
 	lease := leaseInstance(t, f, "a")
-	c, aerr, trust, inst := sendFromClient(t, f, "", true)
+	c, trust, inst, aerr := sendFromClient(t, f, "", true)
 	if aerr != nil {
 		t.Fatalf("no token must be a no-op without error: %v", aerr)
 	}
@@ -1065,7 +1065,7 @@ func TestAdoptLaunchInstanceNeedsAToken(t *testing.T) {
 
 func TestAdoptLaunchInstanceWithoutALeaseFails(t *testing.T) {
 	f := newFixture(t, "a", "b")
-	c, aerr, trust, inst := sendFromClient(t, f, "tok-1", true)
+	c, trust, inst, aerr := sendFromClient(t, f, "tok-1", true)
 	if aerr == nil || !strings.Contains(aerr.Error(), "lease") {
 		t.Fatalf("a token with no serve must fail naming the lease, got %v", aerr)
 	}

@@ -140,7 +140,7 @@ func TestSetMetaRetriesAfterAConflict(t *testing.T) {
 				t.Error(err)
 			}
 		})
-		defer admin.SetAfterMetaGet(prev)
+		defer func() { admin.SetAfterMetaGet(prev) }()
 		_, err := a.SetMeta(ctx, ep(t, "alpha"), admin.MetaUpdate{Role: sp("mine")})
 		if n < 5 && err != nil {
 			t.Fatalf("n=%d: %v", n, err)

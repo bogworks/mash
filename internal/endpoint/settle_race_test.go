@@ -63,9 +63,9 @@ func TestSettleDoesNotRingAnUrgentMessageTheHookJustDrained(t *testing.T) {
 	}
 	urgentSeq, fyiSeq = seq, 1
 	until(t, "urgent spooled", func() bool { return len(waiting(t, sp)) == fyi+1 })
-	got := ev.waitFor(t, 1, 5*time.Second)
+	ev.waitFor(t, 1, 5*time.Second)
 	time.Sleep(time.Second)
-	if got = ev.all(); len(got) != 1 || !strings.HasPrefix(got[0], "urgent") {
+	if got := ev.all(); len(got) != 1 || !strings.HasPrefix(got[0], "urgent") {
 		t.Fatalf("want exactly one urgent ring, got %d: %q", len(got), got)
 	}
 
@@ -73,7 +73,7 @@ func TestSettleDoesNotRingAnUrgentMessageTheHookJustDrained(t *testing.T) {
 	until(t, "the seam drained both", func() bool { return stage.Load() == 3 })
 	until(t, "settled", func() bool { return len(waiting(t, sp)) == fyi-1 })
 	time.Sleep(time.Second)
-	if got = ev.all(); len(got) != 1 {
+	if got := ev.all(); len(got) != 1 {
 		t.Fatalf("%d wakes after the urgent message was drained, want still 1: %q", len(got), got)
 	}
 }

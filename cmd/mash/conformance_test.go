@@ -30,10 +30,6 @@ import (
 	"testing"
 )
 
-// confHelpFirst: rules.json says options go before or after the command, and help is also a command; the build takes a
-// help option before the command as the tool's own help (cmd/mash/main.go, cli.go).
-const confHelpFirst = "a help option before the command prints the tool's own help; rules.json: 'mash -h version' is 'mash version --help'"
-
 // confFail reports every problem of one check as a failure. There are no waivers: a mismatch fails.
 func confFail(t *testing.T, key string, problems []string) {
 	t.Helper()

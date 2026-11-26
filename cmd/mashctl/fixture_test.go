@@ -255,9 +255,6 @@ func issuedRecords(t *testing.T, adm *admin.Admin) ([]store.Issued, error) {
 	return recs, err
 }
 
-// extraTag makes a creds file that carries a tag the account key never gives.
-func extraTag(uc *jwt.UserClaims) { uc.Tags.Add("allow:gone.x") }
-
 type revokeCall struct {
 	users []string
 	at    time.Time // the revocation time the caller passed; zero when it passed none

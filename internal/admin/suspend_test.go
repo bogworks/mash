@@ -663,7 +663,7 @@ func TestDeprovisionDrainedRefusesRecordChangedBeforePurge(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	defer admin.SetAfterDeprovisionGet(prev)
+	defer func() { admin.SetAfterDeprovisionGet(prev) }()
 	if err := a.DeprovisionDrained(ctx, ep(t, "c"), st.ID, st.LastSeq); err == nil || !strings.Contains(err.Error(), "the record changed; left in place") {
 		t.Fatalf("changed record: %v", err)
 	}

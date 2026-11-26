@@ -54,9 +54,9 @@ func TestSendIDRepeatedAfterTheWindowIsShownAgain(t *testing.T) {
 	if err != nil || later.Duplicate || later.Seq == first.Seq {
 		t.Fatalf("send after the window: %+v %v, want a new message", later, err)
 	}
-	got := ev.waitFor(t, 2, 10*time.Second)
+	ev.waitFor(t, 2, 10*time.Second)
 	time.Sleep(500 * time.Millisecond)
-	if got = ev.all(); len(got) != 2 {
+	if got := ev.all(); len(got) != 2 {
 		t.Fatalf("session showed %d events, want 2 (one per stored message): %q", len(got), got)
 	}
 	if got := inboxBodies(t, b); len(got) != 0 {

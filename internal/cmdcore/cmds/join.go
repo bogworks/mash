@@ -97,7 +97,7 @@ var Join = cmdcore.Command[JoinParams, JoinResult]{
 		if !ok || svc == nil {
 			return JoinResult{}, cliframe.Failf("internal: mash join has no configuration folder to install into")
 		}
-		o, err := svc.Join(ctx, JoinRequest{File: p.File, Key: p.Key, Replace: p.Replace, DryRun: p.DryRun})
+		o, err := svc.Join(ctx, JoinRequest(p))
 		if err != nil {
 			return JoinResult{}, err
 		}

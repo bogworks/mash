@@ -242,9 +242,10 @@ func TestAddressesDifferingInGroupCoexist(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	xg, yg := xev.waitFor(t, 1, 5*time.Second), yev.waitFor(t, 1, 5*time.Second)
+	xev.waitFor(t, 1, 5*time.Second)
+	yev.waitFor(t, 1, 5*time.Second)
 	time.Sleep(300 * time.Millisecond)
-	xg, yg = xev.all(), yev.all()
+	xg, yg := xev.all(), yev.all()
 	// The delivery text is the full batch, body included: the endpoint has no spool, so it is not hooked and deliverBatch
 	// renders render.Batch, which shows every message in full while there are at most BatchMsgs (10) and BatchBytes
 	// (16384) of them. So each text starts with its count line naming its own peer and carries only its own body.

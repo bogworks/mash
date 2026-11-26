@@ -253,7 +253,7 @@ func TestHolderGone(t *testing.T) {
 	}
 }
 
-func openOver(t *testing.T, lv leaseValue) (error, jetstream.KeyValue) {
+func openOver(t *testing.T, lv leaseValue) (jetstream.KeyValue, error) {
 	f := newFixture(t, "a")
 	host, _ := os.Hostname()
 	lv.Host = host
@@ -263,12 +263,12 @@ func openOver(t *testing.T, lv leaseValue) (error, jetstream.KeyValue) {
 	if err == nil {
 		ep.Close()
 	}
-	return err, kv
+	return kv, err
 }
 
 func TestLeaseLiveNonMashHolderKept(t *testing.T) {
 	pid, start := liveChild(t)
-	err, kv := openOver(t, leaseValue{Instance: "live", PID: pid, Start: start, Since: "x"})
+	kv, err := openOver(t, leaseValue{Instance: "live", PID: pid, Start: start, Since: "x"})
 	var held *LeaseHeldError
 	if !errors.As(err, &held) {
 		t.Fatalf("got %v, want held", err)
@@ -280,14 +280,14 @@ func TestLeaseLiveNonMashHolderKept(t *testing.T) {
 
 func TestLeaseReusedPIDTakenOver(t *testing.T) {
 	pid, start := liveChild(t)
-	if err, _ := openOver(t, leaseValue{Instance: "old", PID: pid, Start: start + "1", Since: "x"}); err != nil {
+	if _, err := openOver(t, leaseValue{Instance: "old", PID: pid, Start: start + "1", Since: "x"}); err != nil {
 		t.Fatalf("open over a reused pid: %v", err)
 	}
 }
 
 func TestLeaseNoStartLivePIDKept(t *testing.T) {
 	pid, _ := liveChild(t)
-	err, _ := openOver(t, leaseValue{Instance: "live", PID: pid, Since: "x"})
+	_, err := openOver(t, leaseValue{Instance: "live", PID: pid, Since: "x"})
 	var held *LeaseHeldError
 	if !errors.As(err, &held) {
 		t.Fatalf("got %v, want held", err)

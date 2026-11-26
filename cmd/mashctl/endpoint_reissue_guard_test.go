@@ -135,8 +135,8 @@ func TestEndpointReissueMakeKeyChecksCreds(t *testing.T) {
 	}
 	n = len(*calls)
 	so, se, code = h.run("endpoint", "reissue", c.String())
-	if code != 1 || !strings.Contains(se, "is not this endpoint's current creds") || len(*calls) != n {
-		t.Fatalf("stale key: %d %q", code, se)
+	if code != 1 || so != "" || !strings.Contains(se, "is not this endpoint's current creds") || len(*calls) != n {
+		t.Fatalf("stale key: %d %q %q", code, so, se)
 	}
 	// an unparsable file
 	if err := os.WriteFile(h.creds(d), []byte("junk"), 0o600); err != nil {
