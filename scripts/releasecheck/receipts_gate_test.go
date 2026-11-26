@@ -290,6 +290,9 @@ func TestReceiptsGate_realExpected(t *testing.T) {
 	f := newFixture(t)
 	gitT(t, f.repo, "tag", "v0.0.9", f.x)
 	gitT(t, f.repo, "push", "-q", "origin", "v0.0.9")
+	// M1: a higher tag that is a draft, and one recorded as skipped (a tag with no release), are passed over.
+	withEarlierTags(t, f, "v0.0.10", "v0.0.11")
+	f.setReleases(map[string]bool{"v0.0.9": false, "v0.0.10": true})
 	var assets []map[string]string
 	for _, b := range release.Binaries() {
 		assets = append(assets, map[string]string{"name": b.AssetName(), "digest": "sha256:" + rsha("old "+b.AssetName())})

@@ -121,11 +121,14 @@ func realExpected(ctx context.Context, o Options, x string) (Expected, error) {
 	exp.SumsSHA = sha256hex([]byte(release.ExpectedSums(o.Version, hashes, ci, kl)))
 
 	// The previous published release and the digest of each of its binaries.
-	tags, err := remoteTags(o)
+	// The previous release is the highest earlier non-draft published one, so a draft or a recorded skipped release is
+	// passed over (the rest of the gate allows recorded skips).
+	releases, err := listReleases(o)
 	if err != nil {
 		return Expected{}, err
 	}
-	if prev, ok := release.PreviousTag(tags, o.Version); ok {
+	if pv := previousRelease("v"+o.Version, releases); pv != "" {
+		prev := "v" + pv
 		exp.PrevVersion = strings.TrimPrefix(prev, "v")
 		exp.OlderVersion = exp.PrevVersion
 		have, err := releaseDigests(o, prev)

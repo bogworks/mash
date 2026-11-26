@@ -25,7 +25,7 @@ import (
 	"github.com/bogworks/mash/internal/testenv"
 )
 
-// release-check --compat [--candidate <mash>] [--evidence <file>] <older> <newer> (REQ-014, AT-012, TO-13) runs the
+// release-check --compat [--candidate <mash>] [--evidence <file>] [--commit <sha>] [--environment <text>] <older> <newer> (REQ-014, AT-012, TO-13) runs the
 // published mash binary of each version for this host against a fixed corpus of mail written by the other. Every
 // downloaded binary is checked against the SHA256SUMS of its release before it runs. --candidate runs the given binary
 // as the newer side (an unpublished switch-on candidate); --evidence writes what was run and the result as JSON. Its
@@ -125,7 +125,7 @@ func compatMain(args []string, o CompatOptions) (code int) {
 			code = 1
 		}
 	}()
-	ev := &compatEvidence{Platform: compatPlatform{GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}, CorpusSHA256: compatCorpusDigest()}
+	ev := &compatEvidence{Receipt: Receipt{Kind: kindAT012, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH, CorpusSHA256: compatCorpusDigest()}}
 	refused, err := compatRun(context.Background(), args, o, ev)
 	var u compatUsage
 	var d compatUndecided
@@ -135,18 +135,18 @@ func compatMain(args []string, o CompatOptions) (code int) {
 		return 2 // a usage error ran nothing: no evidence is written
 	case errors.As(err, &d):
 		fmt.Fprintf(o.ErrOut, "compat: could not decide: %s\n", d.msg)
-		ev.Result, code = "could not decide", 4
+		ev.Result, code = resultFailed, 4
 	case err != nil:
 		fmt.Fprintf(o.ErrOut, "error: %v\n", err)
-		ev.Result, code = "error", 1
+		ev.Result, code = resultFailed, 1
 	case refused:
-		ev.Result, code = "refused", 3
+		ev.Result, code = resultFailed, 3
 	default:
-		ev.Result, code = "passed", 0
+		ev.Result, code = resultPassed, 0
 	}
-	if ev.path != "" {
+	if ev.path != "" { // the exit status says which failure: 3 refused, 4 could not decide, 1 error
 		ev.ExitStatus = code
-		b, _ := json.MarshalIndent(ev, "", "  ")
+		b, _ := json.MarshalIndent(ev.Receipt, "", "  ")
 		if werr := os.WriteFile(ev.path, append(b, '\n'), 0o644); werr != nil {
 			fmt.Fprintf(o.ErrOut, "error: writing the evidence: %v\n", werr)
 			if code == 0 {
@@ -157,53 +157,51 @@ func compatMain(args []string, o CompatOptions) (code int) {
 	return code
 }
 
-// compatPlatform is the host a run was made on.
-type compatPlatform struct {
-	GOOS   string `json:"goos"`
-	GOARCH string `json:"goarch"`
-}
-
-// compatEvidence is what --evidence writes: the binaries that were run (by digest), the corpus and the outcome.
+// compatEvidence is what --evidence writes: an AT-012 Receipt (the gate's own schema, so it cannot drift) filled in as
+// far as the run knows. The run drives `mash` only, so the mashctl digests stay empty; the commit and the environment
+// are filled from --commit and --environment when given. The proof wrapper fills whatever is empty (the mashctl
+// digests, the commit, the environment) before the file is given to the gate, which refuses a receipt with any empty
+// field.
 type compatEvidence struct {
-	Older        string         `json:"older"`
-	Newer        string         `json:"newer"`
-	OlderSHA256  string         `json:"older_mash_sha256"`
-	NewerSHA256  string         `json:"newer_mash_sha256"`
-	CorpusSHA256 string         `json:"corpus_sha256"`
-	Platform     compatPlatform `json:"platform"`
-	Result       string         `json:"result"` // passed, refused, could not decide or error
-	ExitStatus   int            `json:"exit_status"`
-	path         string
+	Receipt
+	path string
 }
 
-// parseCompatArgs reads the two versions and the flags, which may stand anywhere: --candidate <path> and --evidence <file>
-// (each also as --flag=value).
-func parseCompatArgs(args []string) (pos []string, candidate, evidence string, err error) {
+// parseCompatArgs reads the two versions and the flags, which may stand anywhere: --candidate <path>, --evidence <file>,
+// --commit <sha> and --environment <text> (each also as --flag=value).
+func parseCompatArgs(args []string) (pos []string, f compatFlags, err error) {
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		var dst *string
-		var name string
+		var name, what string
 		switch {
 		case a == "--candidate" || strings.HasPrefix(a, "--candidate="):
-			dst, name = &candidate, "--candidate"
+			dst, name, what = &f.candidate, "--candidate", "a path"
 		case a == "--evidence" || strings.HasPrefix(a, "--evidence="):
-			dst, name = &evidence, "--evidence"
+			dst, name, what = &f.evidence, "--evidence", "a path"
+		case a == "--commit" || strings.HasPrefix(a, "--commit="):
+			dst, name, what = &f.commit, "--commit", "a commit"
+		case a == "--environment" || strings.HasPrefix(a, "--environment="):
+			dst, name, what = &f.environment, "--environment", "a description"
 		default:
 			pos = append(pos, a)
 			continue
 		}
 		if a == name {
 			if i+1 >= len(args) || args[i+1] == "" {
-				return nil, "", "", compatUsage{name + " needs a path"}
+				return nil, f, compatUsage{name + " needs " + what}
 			}
 			i++
 			*dst = args[i]
 		} else if *dst = strings.TrimPrefix(a, name+"="); *dst == "" {
-			return nil, "", "", compatUsage{name + " needs a path"}
+			return nil, f, compatUsage{name + " needs " + what}
 		}
 	}
-	return pos, candidate, evidence, nil
+	return pos, f, nil
 }
+
+// compatFlags are the optional flags of --compat.
+type compatFlags struct{ candidate, evidence, commit, environment string }
 
 // fileSHA256 is the sha256 (hex) of a file.
 func fileSHA256(p string) (string, error) {
@@ -250,7 +248,8 @@ func verifyDownloaded(ctx context.Context, sums func(context.Context, string) ([
 }
 
 func compatRun(ctx context.Context, args []string, o CompatOptions, ev *compatEvidence) (refused bool, err error) {
-	pos, candidate, evidence, err := parseCompatArgs(args)
+	pos, fl, err := parseCompatArgs(args)
+	candidate := fl.candidate
 	if err != nil {
 		return false, err
 	}
@@ -271,7 +270,8 @@ func compatRun(ctx context.Context, args []string, o CompatOptions, ev *compatEv
 			return false, compatUsage{fmt.Sprintf("--candidate %s is not a file", candidate)}
 		}
 	}
-	ev.path, ev.Older, ev.Newer = evidence, older, newer
+	ev.path, ev.OlderVersion, ev.NewerVersion = fl.evidence, older, newer
+	ev.Commit, ev.Environment = fl.commit, fl.environment
 	if o.Panic {
 		panic("forced by the test")
 	}
@@ -312,10 +312,10 @@ func compatRun(ctx context.Context, args []string, o CompatOptions, ev *compatEv
 	}
 	nb, ob := bins[0], bins[1]
 	var herr error
-	if ev.NewerSHA256, herr = fileSHA256(nb.Path); herr != nil {
+	if ev.NewerMashSHA256, herr = fileSHA256(nb.Path); herr != nil {
 		return false, herr
 	}
-	if ev.OlderSHA256, herr = fileSHA256(ob.Path); herr != nil {
+	if ev.OlderMashSHA256, herr = fileSHA256(ob.Path); herr != nil {
 		return false, herr
 	}
 	drive := o.Drive

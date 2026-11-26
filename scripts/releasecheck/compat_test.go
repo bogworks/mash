@@ -291,19 +291,12 @@ func TestCompatCandidateAndEvidence(t *testing.T) {
 		if len(ran) != 2 || ran[0][0] != "0.6.0=cand-mash" || ran[1][1] != "0.6.0=cand-mash" || ran[0][1] != "0.5.10=mash" {
 			t.Errorf("ran %v", ran)
 		}
-		b, err := os.ReadFile(ev)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var got map[string]any
-		if err := json.Unmarshal(b, &got); err != nil {
-			t.Fatal(err)
-		}
-		plat, _ := got["platform"].(map[string]any)
-		if got["older"] != "0.5.10" || got["newer"] != "0.6.0" || got["older_mash_sha256"] != hexSum(fakeBinary("v0.5.10")) ||
-			got["newer_mash_sha256"] != hexSum("the candidate") || got["corpus_sha256"] != compatCorpusDigest() ||
-			plat["goos"] != runtime.GOOS || plat["goarch"] != runtime.GOARCH || got["result"] != "passed" || got["exit_status"] != float64(0) || len(got) != 8 {
-			t.Errorf("evidence %s", b)
+		got := loadEvidence(t, ev)
+		if got.Kind != kindAT012 || got.OlderVersion != "0.5.10" || got.NewerVersion != "0.6.0" || got.OlderMashSHA256 != hexSum(fakeBinary("v0.5.10")) ||
+			got.NewerMashSHA256 != hexSum("the candidate") || got.CorpusSHA256 != compatCorpusDigest() ||
+			got.GOOS != runtime.GOOS || got.GOARCH != runtime.GOARCH || got.Result != resultPassed || got.ExitStatus != 0 ||
+			got.Commit != "" || got.Environment != "" || got.OlderMashctlSHA != "" || got.NewerMashctlSHA != "" {
+			t.Errorf("evidence %+v", got)
 		}
 	}
 	// a refusal is recorded too
@@ -312,7 +305,7 @@ func TestCompatCandidateAndEvidence(t *testing.T) {
 		t.Fatalf("exit %d", code)
 	}
 	b, _ := os.ReadFile(ev)
-	if !strings.Contains(string(b), `"result": "refused"`) || !strings.Contains(string(b), `"exit_status": 3`) {
+	if !strings.Contains(string(b), `"result": "failed"`) || !strings.Contains(string(b), `"exit_status": 3`) {
 		t.Errorf("evidence %s", b)
 	}
 	// a checksum failure of the older is recorded as could not decide
@@ -321,7 +314,7 @@ func TestCompatCandidateAndEvidence(t *testing.T) {
 		t.Fatalf("exit %d", code)
 	}
 	b, _ = os.ReadFile(ev)
-	if !strings.Contains(string(b), `"result": "could not decide"`) || !strings.Contains(string(b), `"exit_status": 4`) {
+	if !strings.Contains(string(b), `"result": "failed"`) || !strings.Contains(string(b), `"exit_status": 4`) {
 		t.Errorf("evidence %s", b)
 	}
 }
@@ -599,5 +592,69 @@ func TestCompatObserveHooksExit(t *testing.T) {
 	}
 	if !obs[4].Corrupted || obs[0].Corrupted {
 		t.Errorf("corrupted flags: %+v", obs)
+	}
+}
+
+// loadEvidence reads an evidence file through the gate's own loader.
+func loadEvidence(t *testing.T, file string) Receipt {
+	t.Helper()
+	dir := t.TempDir()
+	b, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "r.json"), b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rs, err := loadReceipts(dir)
+	if err != nil || len(rs) != 1 {
+		t.Fatalf("the loader refused the evidence: %v %d\n%s", err, len(rs), b)
+	}
+	return rs[0]
+}
+
+// H2: the evidence is an AT-012 Receipt the gate's loader accepts; once the wrapper fills what the run does not know
+// (the mashctl digests, and here the commit and environment) it passes checkReceipts on the switch-on line.
+func TestCompatEvidenceSatisfiesTheGate(t *testing.T) {
+	dir := t.TempDir()
+	cand := filepath.Join(dir, "cand-mash")
+	if err := os.WriteFile(cand, []byte("the candidate"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ev := filepath.Join(dir, "evidence.json")
+	_, stderr, code := runCompat([]string{"--candidate", cand, "--evidence", ev, "--commit", "c0ffee", "--environment=vm12-x", "0.5.9", "0.6.0"},
+		CompatOptions{Download: fakeDownload(""), Drive: fakeDrive(nil)})
+	if code != 0 || stderr != "" {
+		t.Fatalf("exit %d stderr %q", code, stderr)
+	}
+	r := loadEvidence(t, ev)
+	if r.Commit != "c0ffee" || r.Environment != "vm12-x" {
+		t.Fatalf("commit/environment: %+v", r)
+	}
+	if r.OlderMashctlSHA != "" || r.NewerMashctlSHA != "" {
+		t.Fatalf("the run does not know the mashctl digests: %+v", r)
+	}
+	// Alone the evidence is refused (empty fields); filled in by the wrapper it is accepted.
+	exp := receiptExpected()
+	p := Platform{runtime.GOOS, runtime.GOARCH}
+	exp.Platforms = []Platform{p}
+	exp.Commit, exp.OlderVersion, exp.NewerVersion, exp.CorpusSHA = "c0ffee", "0.5.9", "0.6.0", compatCorpusDigest()
+	if ps := checkReceipts(exp, []Receipt{r}, lineSwitchOn); len(ps) == 0 {
+		t.Fatal("the unfilled evidence passed the gate")
+	}
+	oc, _ := findPrior(exp.Prior, "mashctl", p)
+	nc, _ := findExec(exp.Executables, "mashctl", p)
+	om, _ := findPrior(exp.Prior, "mash", p)
+	nm, _ := findExec(exp.Executables, "mash", p)
+	r.OlderMashctlSHA, r.NewerMashctlSHA, r.OlderMashSHA256, r.NewerMashSHA256 = oc.SHA256, nc.SHA256, om.SHA256, nm.SHA256
+	full := validReceipts(exp, lineSwitchOn)
+	rs := []Receipt{r}
+	for _, f := range full {
+		if f.Kind == kindAT011 {
+			rs = append(rs, f)
+		}
+	}
+	if ps := checkReceipts(exp, rs, lineSwitchOn); len(ps) != 0 {
+		t.Fatalf("the filled-in evidence is refused: %v", ps)
 	}
 }
