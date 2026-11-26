@@ -123,9 +123,10 @@ its reason. DELIVERED is yes or no, and means only that the endpoint took the
 message off the server. Whether the endpoint then showed it or refused it is
 decided on the endpoint's own machine and is not something mashctl can see: by
 default an endpoint refuses everything that is not verified, so a 'yes' beside
-any other trust label most likely means it was refused. In --json, `when` is the time the message was
-stored, in RFC 3339 and UTC, with a fraction of a second when the server
-stored one (for example 2026-11-26T15:04:05Z or 2026-11-26T15:04:05.12Z).
+any other trust label most likely means it was refused. In --json, `when` is
+the time the message was stored, in RFC 3339 and UTC, with a fraction of a
+second when the server stored one (for example 2026-11-26T15:04:05Z or
+2026-11-26T15:04:05.12Z).
 
 ## What it replaces
 

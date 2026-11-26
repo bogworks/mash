@@ -10,7 +10,8 @@
       "trust": "verified",
       "delivered": true,
       "kind": "message",
-      "size": 10
+      "size": 10,
+      "when": "2026-11-12T10:00:00Z"
     },
     {
       "number": 2,
@@ -19,6 +20,7 @@
       "delivered": true,
       "kind": "message",
       "size": 20,
+      "when": "2026-11-12T10:01:00Z",
       "reason": "not verified"
     },
     {
@@ -28,6 +30,7 @@
       "delivered": true,
       "kind": "message",
       "size": 30,
+      "when": "2026-11-12T10:02:00Z",
       "reason": "not verified"
     },
     {
@@ -37,6 +40,7 @@
       "delivered": false,
       "kind": "message",
       "size": 40,
+      "when": "2026-11-12T10:03:00Z",
       "reason": "not verified"
     },
     {
@@ -46,6 +50,7 @@
       "delivered": false,
       "kind": "message",
       "size": 50,
+      "when": "2026-11-12T10:04:00Z",
       "reason": "control character in name"
     }
   ]
