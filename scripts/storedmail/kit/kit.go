@@ -239,6 +239,7 @@ func (k *Kit) BasicErr() error { return k.basicErr }
 func (k *Kit) SendAll(a, b string) {
 	long := strings.Repeat("long line of text, with unicode é世界\U0001F600 and tabs\t\n", 150)
 	k.Send(true, Sent{From: a, To: b, Body: "hello bob"})
+	//lint:ignore ST1018 deliberate bidi-override (U+202E) test input, written as the literal character
 	k.Send(false, Sent{From: a, To: b, Body: "unicode é世界 \U0001F600 ‮ rtl", Kind: "fyi"})
 	k.Send(false, Sent{From: a, To: b, Body: "."})
 	k.Send(false, Sent{From: a, To: b, Body: long, Kind: "result"})

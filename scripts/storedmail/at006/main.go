@@ -430,6 +430,7 @@ func sendSet(k *kit.Kit) {
 	k.Send(false, kit.Sent{From: "carol", To: "bob", Body: "carol, every mark", Kind: "task", Urgent: true, ReplyTo: 1, Relay: 1})
 	k.Send(false, kit.Sent{From: "carol", To: "alice", Body: "carol, urgent", Urgent: true, Kind: "blocker"})
 	// non-ASCII where mash carries it: the body (a send id is ASCII only, so it is not a non-ASCII case)
+	//lint:ignore ST1018 deliberate zero-width and joiner characters as test input, written literally
 	k.Send(false, kit.Sent{From: "alice", To: "bob", Body: "é ​‍ zero-width, combining, CJK 日本語, Arabic مرحبا, emoji 👩‍💻"})
 	k.Send(false, kit.Sent{From: "bob", To: "alice", Body: "multi-line\nпривет\n世界\n\ttabbed\n"})
 	// names at the length limits, as sender and as recipient
