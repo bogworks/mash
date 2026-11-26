@@ -27,8 +27,6 @@ const (
 	owner  = "acme"
 	group  = "demo"
 	oldTag = "v0.5.10"
-	// defaultRepo is the repository the previous release is read from unless -release-repo names another.
-	defaultRepo = "bogworks/mash"
 )
 
 // The longest a command of the run may take, by kind.

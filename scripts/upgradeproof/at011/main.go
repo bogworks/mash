@@ -3,7 +3,7 @@
 // evidence behind each verdict.
 //
 //	at011 run -commit <full sha> -version 0.6.0 -prev 0.5.10 -out <dir> -work <new absolute dir> -pack <objects.pack>
-//	          -prev-sums-sha256 <hex> [-release-repo owner/name] [-repo <url|path>] [-venue <text>]
+//	          -prev-sums-sha256 <hex> -release-repo owner/name [-repo <url|path>] [-venue <text>]
 //	at011 finalize -out <dir> -statement <text> -container-removed=true|false
 //
 // run does everything inside the machine it runs on and must run in a throwaway one: a container (at011.sh starts it)
@@ -54,7 +54,7 @@ func cmdRun(args []string) int {
 	fs.StringVar(&c.pack, "pack", "", "a git pack of the candidate commit's objects (git pack-objects --revs)")
 	fs.StringVar(&c.repo, "repo", "", "a repository to clone the candidate from, when there is no pack")
 	fs.StringVar(&c.work, "work", "", "the working directory the run makes, an absolute path; it must not exist")
-	fs.StringVar(&c.releaseRepo, "release-repo", defaultRepo, "the GitHub repository (owner/name) the previous release is read from")
+	fs.StringVar(&c.releaseRepo, "release-repo", "", "the GitHub repository (owner/name) the previous release is read from; required, there is no default")
 	fs.StringVar(&c.prevSumsSHA, "prev-sums-sha256", "", "the sha256 of the previous release's SHA256SUMS, as verified by `gh attestation verify` on the launching host")
 	fs.StringVar(&c.venue, "venue", "", "where the run happens, in words, for the receipt")
 	if err := fs.Parse(args); err != nil {
@@ -69,7 +69,7 @@ func cmdRun(args []string) int {
 		return 2
 	}
 	if !repoRE.MatchString(c.releaseRepo) {
-		fmt.Fprintf(os.Stderr, "at011 run: -release-repo %q is not owner/name\n", c.releaseRepo)
+		fmt.Fprintf(os.Stderr, "at011 run: -release-repo is required and must be owner/name (got %q)\n", c.releaseRepo)
 		return 2
 	}
 	if _, err := os.Stat(c.work); err == nil {

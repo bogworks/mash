@@ -57,7 +57,7 @@ case $GHREPO in */*) ;; *) die "AT011_GH_REPO must be owner/name" ;; esac
 mkdir -p "$OUT/stage" "$OUT/home" || exit 2
 STAGE=$OUT/stage
 # The runner, built here for the guest's platform; and a pack of the candidate commit's objects (a read of the repository).
-(cd "$HERE/.." && CGO_ENABLED=0 GOOS=linux GOARCH=$ARCH go build -trimpath -o "$STAGE/at011" ./upgradeproof/at011) || die "could not build the runner"
+(cd "$HERE/.." && GOCACHE="$STAGE/go/cache" GOPATH="$STAGE/go/path" GOMODCACHE="$STAGE/go/path/pkg/mod" CGO_ENABLED=0 GOOS=linux GOARCH=$ARCH go build -trimpath -o "$STAGE/at011" ./upgradeproof/at011) || die "could not build the runner"
 # The previous release's SHA256SUMS, verified on this host. The tag's commit is read from the GitHub API, then the
 # attestation is checked against four facts: the repository, the release workflow, the tag and that commit.
 PREVSHA=$(gh api "repos/$GHREPO/commits/v$PREV" --jq .sha 2>/dev/null)
