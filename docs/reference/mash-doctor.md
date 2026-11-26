@@ -514,7 +514,10 @@ refused count is kept on this machine, so its row shows even when the server
 is down. The 'refused' row counts unverified mail that was refused on arrival
 (see mash serve). Mail that was verified on arrival and whose sender was
 deleted afterwards is not counted: mash read shows it as refused, and that is
-where it is seen.
+where it is seen. The launcher row, which says which mash the plugin's
+launcher started, reports how the mash it runs in was launched: it shows in a
+session's own doctor (the MCP tool), and a mash doctor typed in a shell has no
+launcher row.
 
 ## What it replaces
 
