@@ -430,6 +430,9 @@ func TestDoctorMatchesSpec(t *testing.T) {
 		case "Claude Code is recent enough", "Claude Code is too old", "Claude Code is newer than tested", "No claude command", "The version of claude is unreadable":
 			// the claude row is made by the command (cmd/mash/claudecheck_test.go), not by the report this package renders
 			continue
+		case "Started by the plugin's launcher, running the pinned mash", "Started by the plugin's launcher, running a mash from PATH":
+			// the launcher row is made by the command (cmd/mash/launchercheck_test.go), not by the report this package renders
+			continue
 		default:
 			t.Errorf("unknown spec case %v", oc["case"])
 			continue

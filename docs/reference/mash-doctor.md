@@ -127,6 +127,22 @@ Stream: stdout. Exit code: 0.
 claude    warn  the version of claude could not be read
 ```
 
+### Started by the plugin's launcher, running the pinned mash
+
+Stream: stdout. Exit code: 0.
+
+```text
+launcher  ok    pinned mash
+```
+
+### Started by the plugin's launcher, running a mash from PATH
+
+Stream: stdout. Exit code: 0.
+
+```text
+launcher  warn  mash from PATH, not the pinned one
+```
+
 ### Arriving mail cannot be stored here
 
 Stream: stdout. Exit code: 1.
@@ -498,7 +514,10 @@ refused count is kept on this machine, so its row shows even when the server
 is down. The 'refused' row counts unverified mail that was refused on arrival
 (see mash serve). Mail that was verified on arrival and whose sender was
 deleted afterwards is not counted: mash read shows it as refused, and that is
-where it is seen.
+where it is seen. The launcher row, which says which mash the plugin's
+launcher started, reports how the mash it runs in was launched: it shows in a
+session's own doctor (the MCP tool), and a mash doctor typed in a shell has no
+launcher row.
 
 ## What it replaces
 

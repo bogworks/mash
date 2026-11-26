@@ -14,7 +14,10 @@
 # when the cached managed binary's sha256 does not match mash.pins (re-checked on every run, no re-fetch) and when the
 # pinned binary cannot be fetched or verified. OFF (the default), it warns and uses PATH mash for an unpinned plugin or
 # a failed pinned download, and does not re-hash the cached binary. MASH_BIN is an
-# explicit operator choice, trusted as given and never verified, ON or OFF. Hook invocations (first argument `hook`) have a 10 s timeout, so their download gets a hard 5 s budget; a
+# explicit operator choice, trusted as given and never verified, ON or OFF. OFF still re-hashes the cached managed
+# binary once per session: at `__prefetch` and at `serve` (serve's start is the session boundary), never in hook mode
+# (see recheck_cache). A mismatch moves the file aside to $BIN.bad-<epoch> and fetches a fresh one. Before it execs, the
+# launcher exports MASH_LAUNCHED_FROM (managed, path or override) so `mash doctor` can say which mash is running. Hook invocations (first argument `hook`) have a 10 s timeout, so their download gets a hard 5 s budget; a
 # failed one leaves $BIN_DIR/.dl-failed-<version> and hooks skip the download for 300 s, going straight to PATH. Serve
 # keeps its 60 s fetch and prefetch 20 s, and neither honours the marker. A missing or empty mash.pins, or one without a version line, means unpinned: the launcher never downloads.
 case "$0" in
@@ -86,7 +89,7 @@ dl_recently_failed() {
 
 # True when the managed binary for the pinned version exists (not yet verified; see cached_verified).
 managed_ok() {
-  [ -n "$MASH_VERSION" ] && [ -x "$BIN" ]
+  [ -z "${CACHE_BAD:-}" ] && [ -n "$MASH_VERSION" ] && [ -x "$BIN" ]
 }
 
 # `mash` on PATH that is not this script.
@@ -144,9 +147,33 @@ cached_verified() {
     *) CACHEWHY="no pinned sha256 for $_asset in mash.pins"; return 1 ;;
   esac
   _got=$(sha256_of "$BIN") || { CACHEWHY="no sha256sum or shasum available to verify it"; return 1; }
+  [ -n "$_got" ] || { CACHEWHY="the hashing tool gave no sha256 for it"; return 1; }
   [ "$_got" = "$_want" ] && return 0
   CACHEWHY="sha256 does not match mash.pins"
   return 1
+}
+
+# OFF only, pinned, no MASH_BIN, `__prefetch` or `serve`, cached copy present: hash it once. On a mismatch log one line,
+# move the file aside (never delete it) and return; the normal download path then fetches and verifies a fresh copy.
+recheck_cache() {
+  [ -n "$MASH_VERSION" ] && [ -z "${MASH_BIN:-}" ] || return 0
+  case "${1:-}" in __prefetch|serve) ;; *) return 0 ;; esac
+  managed_ok || return 0
+  [ "$(require_verified)" = 0 ] || return 0   # ON re-hashes on every run in resolve
+  cached_verified && return 0
+  if [ "$CACHEWHY" != "sha256 does not match mash.pins" ]; then
+    # no hash was computed (no hashing tool, no pin for this platform): nothing shows the copy is bad, leave it alone
+    log "warning: could not check the cached mash $BIN against mash.pins ($CACHEWHY); using it as is"
+    return 0
+  fi
+  _bad="$BIN.bad-$(date +%s)-$$"
+  log "the cached mash $BIN did not match mash.pins ($CACHEWHY) and is being replaced; the old file is kept as $_bad"
+  if [ -e "$_bad" ] || ! mv "$BIN" "$_bad" 2>/dev/null; then
+    # never run a copy that did not match: treat the cache as absent so resolve downloads or falls back
+    log "could not move $BIN aside; not using it"
+    CACHE_BAD=1
+  fi
+  return 0
 }
 
 fetch() { # url dest
@@ -220,7 +247,7 @@ download() {
 # Print the resolved binary path; logs go to stderr.
 resolve() {
   if [ -n "${MASH_BIN:-}" ]; then
-    printf '%s\n' "$MASH_BIN"
+    printf 'override %s\n' "$MASH_BIN"
     return 0
   fi
   if [ -z "$MASH_VERSION" ]; then
@@ -233,7 +260,7 @@ resolve() {
     fi
     log "warning: this plugin is unpinned ($_why); using mash from PATH unverified"
     if _p=$(path_mash); then
-      printf '%s\n' "$_p"
+      printf 'path %s\n' "$_p"
       return 0
     fi
     return 1
@@ -242,13 +269,13 @@ resolve() {
     # Re-hashed on every run only when MASH_PLUGIN_REQUIRE_VERIFIED is on; off, the cached copy is used as is.
     if [ "$(require_verified)" = 1 ]; then
       if cached_verified; then
-        printf '%s\n' "$BIN"
+        printf 'managed %s\n' "$BIN"
         return 0
       fi
       log "refusing to run the cached mash $BIN: $CACHEWHY and MASH_PLUGIN_REQUIRE_VERIFIED is on; to run it anyway set MASH_PLUGIN_REQUIRE_VERIFIED=0"
       return 2
     fi
-    printf '%s\n' "$BIN"
+    printf 'managed %s\n' "$BIN"
     return 0
   fi
   if [ -n "$MASH_VERSION" ]; then
@@ -256,7 +283,7 @@ resolve() {
       FAILWHY="hook download skipped (failed recently)"
       log "hook: skipping download (failed recently)"
     elif download; then
-      printf '%s\n' "$BIN"
+      printf 'managed %s\n' "$BIN"
       return 0
     elif [ "$HOOK" = 1 ]; then
       mkdir -p "$BIN_DIR" 2>/dev/null && date +%s > "$MARKER" 2>/dev/null
@@ -268,17 +295,19 @@ resolve() {
     if _p=$(path_mash); then
       log "pinned download failed; falling back to $_p"
       log "warning: pinned mash $MASH_VERSION unavailable ($FAILWHY); using $_p instead (MASH_PLUGIN_REQUIRE_VERIFIED is off)"
-      printf '%s\n' "$_p"
+      printf 'path %s\n' "$_p"
       return 0
     fi
     return 1
   fi
   if _p=$(path_mash); then
-    printf '%s\n' "$_p"
+    printf 'path %s\n' "$_p"
     return 0
   fi
   return 1
 }
+
+recheck_cache "$@"
 
 if [ "$PREFETCH" = 1 ]; then
   # Warm the managed copy only; an override needs no prefetch. Never fails. The one thing it may write to stdout (the
@@ -292,9 +321,12 @@ if [ "$PREFETCH" = 1 ]; then
   exit 0
 fi
 
-TARGET=$(resolve); _rc=$?
+_res=$(resolve); _rc=$?
 if [ "$_rc" != 0 ]; then
   [ "$_rc" = 2 ] || log "$HINT"   # 2: MASH_PLUGIN_REQUIRE_VERIFIED already said why
   exit 127
 fi
+MASH_LAUNCHED_FROM=${_res%% *}
+TARGET=${_res#* }
+export MASH_LAUNCHED_FROM
 exec "$TARGET" "$@"
