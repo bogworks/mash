@@ -676,6 +676,18 @@ MASH_RELEASE_BASE="$NOREL" rc_run "$T/rc6" serve
 chmod 755 "$T/rc6/bin"
 check "off, tampered cache, cannot move aside: the mismatched copy is not run" eq "$(grep -c TAMPERED "$T/out")" 0
 check "off, tampered cache, cannot move aside: says so" eq "$(grep -c 'not using it' "$T/err")" 1
+tamper "$T/rc7"
+NOHASH="$T/nohash"; mkdir -p "$NOHASH"
+for _h in sha256sum shasum; do printf '#!/bin/sh\nexit 1\n' > "$NOHASH/$_h"; chmod +x "$NOHASH/$_h"; done
+rc_run_nohash() { # data-dir, args...: as rc_run, but the hashing tools fail
+  _rd=$1; shift
+  env -u MASH_PLUGIN_REQUIRE_VERIFIED CLAUDE_PLUGIN_DATA="$_rd" PATH="$NOHASH:$PB:$BASEPATH" sh "$P/scripts/mash" "$@" > "$T/out" 2> "$T/err"
+  RC=$?
+}
+rc_run_nohash "$T/rc7" serve
+check "off, cache cannot be hashed, serve: left alone and run as before" eq "$(cat "$T/out")" "TAMPERED ran"
+check "off, cache cannot be hashed, serve: nothing moved aside" eq "$(ls "$T/rc7/bin" | grep -c bad)" 0
+check "off, cache cannot be hashed, serve: warns" eq "$(grep -c 'could not check the cached mash' "$T/err")" 1
 
 # --- MASH_LAUNCHED_FROM names the kind of mash that was exec'd
 printf '#!/bin/sh\necho "from=$MASH_LAUNCHED_FROM"\n' > "$PB/mash"; chmod +x "$PB/mash"

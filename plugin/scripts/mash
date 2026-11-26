@@ -147,6 +147,7 @@ cached_verified() {
     *) CACHEWHY="no pinned sha256 for $_asset in mash.pins"; return 1 ;;
   esac
   _got=$(sha256_of "$BIN") || { CACHEWHY="no sha256sum or shasum available to verify it"; return 1; }
+  [ -n "$_got" ] || { CACHEWHY="the hashing tool gave no sha256 for it"; return 1; }
   [ "$_got" = "$_want" ] && return 0
   CACHEWHY="sha256 does not match mash.pins"
   return 1
@@ -160,9 +161,14 @@ recheck_cache() {
   managed_ok || return 0
   [ "$(require_verified)" = 0 ] || return 0   # ON re-hashes on every run in resolve
   cached_verified && return 0
-  _bad="$BIN.bad-$(date +%s)"
+  if [ "$CACHEWHY" != "sha256 does not match mash.pins" ]; then
+    # no hash was computed (no hashing tool, no pin for this platform): nothing shows the copy is bad, leave it alone
+    log "warning: could not check the cached mash $BIN against mash.pins ($CACHEWHY); using it as is"
+    return 0
+  fi
+  _bad="$BIN.bad-$(date +%s)-$$"
   log "the cached mash $BIN did not match mash.pins ($CACHEWHY) and is being replaced; the old file is kept as $_bad"
-  if ! mv -f "$BIN" "$_bad" 2>/dev/null; then
+  if [ -e "$_bad" ] || ! mv "$BIN" "$_bad" 2>/dev/null; then
     # never run a copy that did not match: treat the cache as absent so resolve downloads or falls back
     log "could not move $BIN aside; not using it"
     CACHE_BAD=1
