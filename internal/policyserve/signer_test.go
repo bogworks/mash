@@ -11,7 +11,6 @@ import (
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nkeys"
 
-	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/apply"
 	"github.com/bogworks/mash/internal/ctlkeys"
 	"github.com/bogworks/mash/internal/listset"
@@ -236,42 +235,22 @@ func newDropWorld(t *testing.T) *dropWorld {
 	return w
 }
 
-// enable sets the drop fields: the admin user signed by adminIssuer, and the connected exempt users' issuers.
-func (w *dropWorld) enable(adminIssuer string, exempt map[string][]string) {
-	w.iss.AdminUser, w.iss.AdminIssuer = "UADMIN", adminIssuer
-	w.iss.ExemptIssuers = func(context.Context) (map[string][]string, error) { return exempt, nil }
-}
-
-func TestSignRefusesANonMashKeyWithoutTheDropFields(t *testing.T) {
+func TestSignRefusesANonMashKeyOnEveryGeneration(t *testing.T) {
 	w := newDropWorld(t)
-	for name, set := range map[string]func(){
-		"none":             func() {},
-		"no exempt source": func() { w.iss.AdminUser, w.iss.AdminIssuer = "UADMIN", w.acct },
-		"no admin issuer": func() {
-			w.iss.AdminIssuer = ""
-			w.iss.ExemptIssuers = func(context.Context) (map[string][]string, error) { return nil, nil }
-		},
-	} {
-		w.iss.AdminUser, w.iss.AdminIssuer, w.iss.ExemptIssuers = "", "", nil
-		set()
-		_, err := w.iss.Sign(listset.Record{Generation: 1}, w.compiled)
+	for _, gen := range []uint64{1, 2} {
+		_, err := w.iss.Sign(listset.Record{Generation: gen}, w.compiled)
 		if err == nil || !strings.Contains(err.Error(), "not an owner group key of the key store") || !strings.Contains(err.Error(), w.plain[:8]) {
-			t.Errorf("%s: err %v", name, err)
+			t.Errorf("generation %d: err %v", gen, err)
 		}
-		if _, err := w.iss.Kept(context.Background(), 1); err == nil {
-			t.Errorf("%s: Kept accepted a non-mash key", name)
+		if _, err := w.iss.Kept(context.Background(), gen); err == nil {
+			t.Errorf("generation %d: Kept accepted a non-mash key", gen)
 		}
 	}
 }
 
-func TestSignDropsANonMashKeyAfterTheIssuerCheckAndKeepsOtherRanges(t *testing.T) {
+func TestSignWithOnlyMashKeysSucceedsAndKeepsOtherRanges(t *testing.T) {
 	w := newDropWorld(t)
-	other := newGroupKey()
-	w.enable(w.acct, map[string][]string{"UEXEMPT": {w.acct, w.otherRange}, "USYS": {pubOf(other)}}) // USYS is under a key that is neither kept nor in the JWT
-	if _, err := w.iss.Sign(listset.Record{Generation: 1}, w.compiled); err == nil {
-		t.Fatal("an exempt user under an unknown key passed the check")
-	}
-	w.enable(w.acct, map[string][]string{"UEXEMPT": {w.acct, w.otherRange}})
+	w.iss.Resolver = oneJWT{tokOf(t, w, false)}
 	out, err := w.iss.Sign(listset.Record{Generation: 1}, w.compiled)
 	if err != nil {
 		t.Fatal(err)
@@ -280,51 +259,12 @@ func TestSignDropsANonMashKeyAfterTheIssuerCheckAndKeepsOtherRanges(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := got.SigningKeys.GetScope(w.plain); ok {
-		t.Error("the non-mash key stays")
-	}
 	if us := scopeOf(t, got, w.otherRange); us.Role != "bar.d" {
 		t.Errorf("the other range's key changed: %+v", us)
 	}
 	scopeOf(t, got, pubOf(w.keys.groups["foo.c"]))
-	if len(got.SigningKeys) != 2 {
-		t.Errorf("signing keys: %d", len(got.SigningKeys))
-	}
 	if k, err := w.iss.Kept(context.Background(), 1); err != nil || k["bar.d"] != w.otherRange || len(k) != 1 {
 		t.Errorf("Kept: %v %v", k, err)
-	}
-}
-
-func TestSignRefusesWhenTheAdminIssuerIsANonMashKey(t *testing.T) {
-	w := newDropWorld(t)
-	w.enable(w.plain, nil)
-	_, err := w.iss.Sign(listset.Record{Generation: 1}, w.compiled)
-	var nk *admin.IssuersNotKeptError
-	if !errors.As(err, &nk) || len(nk.Problems) != 1 || nk.Problems[0].Role != "admin" || nk.Problems[0].Issuer != w.plain {
-		t.Fatalf("err %v", err)
-	}
-}
-
-func TestSignRefusesWhenAConnectedExemptUserIsUnderANonMashKey(t *testing.T) {
-	w := newDropWorld(t)
-	w.enable(w.acct, map[string][]string{"UEXEMPT": {w.acct, w.plain}})
-	_, err := w.iss.Sign(listset.Record{Generation: 1}, w.compiled)
-	var nk *admin.IssuersNotKeptError
-	if !errors.As(err, &nk) || len(nk.Problems) != 1 || nk.Problems[0].Role != "exempt" || nk.Problems[0].User != "UEXEMPT" {
-		t.Fatalf("err %v", err)
-	}
-	// an unreadable scan refuses too
-	w.iss.ExemptIssuers = func(context.Context) (map[string][]string, error) { return nil, errors.New("scan incomplete") }
-	if _, err := w.iss.Sign(listset.Record{Generation: 1}, w.compiled); err == nil || !strings.Contains(err.Error(), "scan incomplete") {
-		t.Errorf("err %v", err)
-	}
-}
-
-func TestSignWithOnlyMashKeysNeedsNoDropFields(t *testing.T) {
-	w := newDropWorld(t)
-	w.iss.Resolver = oneJWT{tokOf(t, w, false)}
-	if _, err := w.iss.Sign(listset.Record{Generation: 1}, w.compiled); err != nil {
-		t.Fatal(err)
 	}
 }
 
@@ -345,26 +285,6 @@ func tokOf(t *testing.T, w *dropWorld, plain bool) string {
 	return tok
 }
 
-func TestSignDropsANonMashKeyOnlyOnTheFirstGeneration(t *testing.T) {
-	w := newDropWorld(t)
-	w.enable(w.acct, map[string][]string{"UEXEMPT": {w.acct, w.otherRange}})
-	if _, err := w.iss.Sign(listset.Record{Generation: 1}, w.compiled); err != nil {
-		t.Fatalf("generation 1: %v", err)
-	}
-	if _, err := w.iss.Kept(context.Background(), 1); err != nil {
-		t.Fatalf("Kept generation 1: %v", err)
-	}
-	for _, g := range []uint64{0, 2, 7} {
-		_, err := w.iss.Sign(listset.Record{Generation: g}, w.compiled)
-		if err == nil || !strings.Contains(err.Error(), "remove it before a list set can be applied") || !strings.Contains(err.Error(), w.plain[:8]) {
-			t.Errorf("generation %d: err %v", g, err)
-		}
-		if _, err := w.iss.Kept(context.Background(), g); err == nil {
-			t.Errorf("generation %d: Kept accepted a non-mash key", g)
-		}
-	}
-}
-
 // addForeignScoped adds a scoped signing key that is not an owner group key of any key store (another issuer's).
 func addForeignScoped(ac *jwt.AccountClaims, key string) {
 	sc := jwt.NewUserScope()
@@ -374,7 +294,7 @@ func addForeignScoped(ac *jwt.AccountClaims, key string) {
 }
 
 // Foreign plain signing keys (the admin's and exempt users' other issuers) are carried: never non-mash, never dropped,
-// and a first-generation Sign with no drop fields does not refuse them.
+// and a first-generation Sign does not refuse them.
 func TestSignCarriesEveryPlainSigningKey(t *testing.T) {
 	op, _ := nkeys.CreateOperator()
 	acct, _ := nkeys.CreateAccount()
@@ -447,38 +367,14 @@ func foreignScopedWorld(t *testing.T) (*dropWorld, string) {
 		t.Fatal(err)
 	}
 	w.iss.Resolver = oneJWT{tok}
-	w.enable(w.acct, map[string][]string{"UEXEMPT": {w.acct}})
 	return w, pubOf(signing)
 }
 
-// ADR 0124 / ADR 0158: the first generation, with the drop fields set, drops a foreign scoped signing key and keeps the
-// configured plain account signing key.
-func TestSigningKeySet_FirstGenerationDropsAForeignScopedKeyAndKeepsTheConfiguredKey(t *testing.T) {
-	w, cfg := foreignScopedWorld(t)
-	out, err := w.iss.Sign(listset.Record{Generation: 1}, w.compiled)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got, err := jwt.DecodeAccountClaims(out)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.SigningKeys.Contains(w.plain) {
-		t.Error("the foreign scoped key stays")
-	}
-	if !got.SigningKeys.Contains(cfg) {
-		t.Fatal("the configured plain signing key was dropped")
-	}
-	if sc, _ := got.SigningKeys.GetScope(cfg); sc != nil {
-		t.Error("the configured signing key became scoped")
-	}
-}
-
-// ADR 0124 / ADR 0158: a later generation does not drop; it refuses the foreign scoped signing key, and the configured
+// ADR 0131: no generation drops; every one refuses the foreign scoped signing key, and the configured
 // plain account signing key is still in the account JWT.
-func TestSigningKeySet_LaterGenerationRefusesAForeignScopedKey(t *testing.T) {
+func TestSigningKeySet_EveryGenerationRefusesAForeignScopedKey(t *testing.T) {
 	w, cfg := foreignScopedWorld(t)
-	for _, g := range []uint64{2, 7} {
+	for _, g := range []uint64{1, 2, 7} {
 		out, err := w.iss.Sign(listset.Record{Generation: g}, w.compiled)
 		if err == nil || out != "" {
 			t.Fatalf("generation %d: the foreign scoped key was accepted (err %v)", g, err)

@@ -11,7 +11,6 @@ import (
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nkeys"
 
-	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/apply"
 	"github.com/bogworks/mash/internal/ctlkeys"
 	"github.com/bogworks/mash/internal/listset"
@@ -50,15 +49,6 @@ type Issuer struct {
 	Servers int
 	// Now gives the time; nil means time.Now.
 	Now func() time.Time
-	// AdminUser and AdminIssuer are the public key and the `iss` of the admin credentials' user JWT, and ExemptIssuers
-	// reads the issuer of every connection of every connected exempt user (the adoption marker's exempt set, CONNZ's
-	// issuer keys): user public key -> issuers. All optional, and only together: when AdminIssuer is "" or ExemptIssuers
-	// is nil, Sign refuses an account JWT that carries a signing key that is not an owner group key of the key store. When
-	// they are set, Sign drops such a key instead, provided admin.CheckIssuersKept shows that the admin user and every
-	// connected exempt user stay signed by a key that is kept; ExemptIssuers returns an error when it cannot say (an
-	// incomplete scan), and that refuses too.
-	AdminUser, AdminIssuer string
-	ExemptIssuers          func(ctx context.Context) (map[string][]string, error)
 
 	mu   sync.Mutex
 	last int64 // the issue time of the JWT this Issuer made last
@@ -113,14 +103,7 @@ func (s *Issuer) current(ctx context.Context) (*jwt.AccountClaims, error) {
 	return apply.CurrentAccountClaims(ctx, s.Resolver, s.Account, s.Trust, s.Servers)
 }
 
-// canDrop is true when the issuer may drop the non-mash signing keys of an account JWT (after the issuer check): the
-// admin issuer and the source of the exempt users' issuers are set, and generation, the one being signed, is the
-// first (ADR 0124): a non-mash key that appears later is refused, not dropped by a routine update.
-func (s *Issuer) canDrop(generation uint64) bool {
-	return generation == 1 && s.AdminIssuer != "" && s.ExemptIssuers != nil
-}
-
-// errNonMashKey is the refusal of a non-mash signing key by an Issuer that may not drop it.
+// errNonMashKey is the refusal of a non-mash signing key: the Issuer never drops one.
 func errNonMashKey(k string) error {
 	return fmt.Errorf("the account JWT carries a signing key that is not an owner group key of the key store (%.8s...): remove it before a list set can be applied", k)
 }
@@ -148,7 +131,7 @@ func SigningPub(ks any) (string, error) {
 // key) that base also carries: the ones the next account JWT retains, and the ones the generation read must find. A
 // key store key of another range that base does not carry is in neither. mine are this range's keys in base, which are
 // rebuilt from the list set. nonMash are the signing keys of base that are not a scoped owner group key of the key
-// store: Sign drops them after the issuer check, or refuses when it may not.
+// store: Kept and Sign refuse them.
 func (s *Issuer) keptFrom(base *jwt.AccountClaims) (kept map[string]string, mine, nonMash []string, err error) {
 	kept, mine, nonMash, _, err = s.splitKeys(base)
 	return
@@ -203,8 +186,8 @@ func (s *Issuer) Plain(ctx context.Context) ([]string, error) {
 
 // Kept is the scoped signing keys the next account JWT keeps beside this range's, as Sign retains them: the owner
 // group keys of other ranges that the account JWT the servers hold now carries. It maps group to public key and is
-// never nil. A non-mash signing key is an error unless the issuer may drop it (see AdminIssuer): only when generation,
-// the one about to be signed, is the first.
+// never nil. A non-mash signing key is an error: remove it before a list set can be applied. generation is the one about
+// to be signed; it does not change that.
 func (s *Issuer) Kept(ctx context.Context, generation uint64) (map[string]string, error) {
 	base, err := s.current(ctx)
 	if err != nil {
@@ -214,7 +197,7 @@ func (s *Issuer) Kept(ctx context.Context, generation uint64) (map[string]string
 	if err != nil {
 		return nil, err
 	}
-	if len(nonMash) > 0 && !s.canDrop(generation) {
+	if len(nonMash) > 0 {
 		return nil, errNonMashKey(nonMash[0])
 	}
 	return kept, nil
@@ -224,21 +207,18 @@ func (s *Issuer) Kept(ctx context.Context, generation uint64) (map[string]string
 // replaced by one per owner group of c (the group's key from the key store, role = group, the template compiled from c).
 // The other ranges' signing keys it carries are kept (see Kept). Everything else in it (limits, exports, revocations,
 // the account's own settings) is kept. A signing key that is not an owner group key of the key store is not dropped
-// silently: without AdminIssuer and ExemptIssuers the apply is refused; with them it is dropped once admin.CheckIssuersKept
-// shows that the admin user and the connected exempt users stay signed by a kept key (the account key, an owner group
-// key of another range that the JWT carries, or a key of the list set), and refused with that check's error otherwise.
-// Only the first generation's apply drops (ADR 0124): from the second on, a non-mash key is refused as without the
-// fields. It implements policyapply.Signer.
+// silently: it is refused (a non-mash signing key is refused: remove it before a list set can be applied), on every
+// generation. It implements policyapply.Signer.
 func (s *Issuer) Sign(rec listset.Record, c *listset.Compiled) (string, error) {
 	base, err := s.current(s.Ctx)
 	if err != nil {
 		return "", fmt.Errorf("read the account JWT: %w", err)
 	}
-	kept, mine, nonMash, plain, err := s.splitKeys(base)
+	_, mine, nonMash, _, err := s.splitKeys(base)
 	if err != nil {
 		return "", err
 	}
-	if len(nonMash) > 0 && !s.canDrop(rec.Generation) {
+	if len(nonMash) > 0 {
 		return "", errNonMashKey(nonMash[0])
 	}
 	pubs := make([]string, len(c.Templates))
@@ -251,30 +231,6 @@ func (s *Issuer) Sign(rec listset.Record, c *listset.Compiled) (string, error) {
 		kp.Wipe()
 		if err != nil {
 			return "", fmt.Errorf("owner group %s: %w", tpl.Group, err)
-		}
-	}
-	if len(nonMash) > 0 {
-		// The keys that stay: the account's own key (CheckIssuersKept counts it), the other ranges' keys the JWT
-		// carries and the target's. This range's keys that the list set no longer names go, so a user under one is not kept.
-		stay := map[string]bool{}
-		for _, k := range kept {
-			stay[k] = true
-		}
-		for _, p := range pubs {
-			stay[p] = true
-		}
-		for _, p := range plain {
-			stay[p] = true // a plain key is carried
-		}
-		exempt, err := s.ExemptIssuers(s.Ctx)
-		if err != nil {
-			return "", fmt.Errorf("the non-mash signing key is not dropped: the connected exempt users' issuers: %w", err)
-		}
-		if err := admin.CheckIssuersKept(s.Account, s.AdminUser, s.AdminIssuer, exempt, stay); err != nil {
-			return "", fmt.Errorf("the non-mash signing key is not dropped: %w", err)
-		}
-		for _, k := range nonMash {
-			delete(base.SigningKeys, k)
 		}
 	}
 	for _, k := range mine {
