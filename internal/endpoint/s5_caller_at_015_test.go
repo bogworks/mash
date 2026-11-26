@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bogworks/mash/internal/sap"
 	"github.com/nats-io/nats.go"
 )
 
@@ -147,9 +148,38 @@ func TestS5AT015_PromptWorksThroughTheRace(t *testing.T) {
 	}
 }
 
-// TestS5AT015_AnswerNamingOfflineEndpointDoesNotStopMail: a forged answer that names an endpoint that is offline
-// (mallory's address, signed by carol) is rejected and counted, and the endpoint stays unfound (so a send that main
-// would store is stored: the send path is W's; here the caller must report no registration and no error).
+// s5SendToOfflineBobAndAssertStored sends one mail from alice to bob, who is offline (nothing serves him), by main's
+// production send path (Endpoint.Send), then reads bob's inbox with his own client and requires exactly one copy:
+// from alice, verified, with the body sent.
+func s5SendToOfflineBobAndAssertStored(t *testing.T, z *s5Fix, body string) {
+	t.Helper()
+	ctx := s5Ctx(t)
+	seq, err := z.clientAt(t, z.alice).Send(ctx, z.bob.Flat(), body, 0)
+	if err != nil {
+		t.Fatalf("a send to the offline endpoint was refused: %v", err)
+	}
+	ms, err := z.clientAt(t, z.bob).Inbox(ctx, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ms) != 1 {
+		t.Fatalf("bob's inbox holds %d messages, want exactly the one sent: %+v", len(ms), ms)
+	}
+	if m := ms[0]; m.Seq != seq || m.From != z.alice.Flat() || m.Trust != sap.TrustVerified || string(m.Body) != body {
+		t.Fatalf("stored %+v, want #%d from %s [verified] with body %q", m, seq, z.alice.Flat(), body)
+	}
+}
+
+// TestS5Today_MailToOfflineEndpointIsStored runs now: with no forged answer at all, mail to an offline endpoint is
+// stored. It proves the send-and-assert half of the AT-015 offline test below works today.
+func TestS5Today_MailToOfflineEndpointIsStored(t *testing.T) {
+	z := newS5Fix(t)
+	s5SendToOfflineBobAndAssertStored(t, z, "hello offline bob")
+}
+
+// TestS5AT015_AnswerNamingOfflineEndpointDoesNotStopMail: forged answers that name an endpoint that is offline (bob;
+// signed by others) are published and rejected through the constructor's Discover, which finds no registration and
+// returns no error; then a send to bob, which main would store, is stored: one copy, from alice, with the body.
 func TestS5AT015_AnswerNamingOfflineEndpointDoesNotStopMail(t *testing.T) {
 	needS5Caller(t, "AT-015 forged answer naming an offline endpoint")
 	z := newS5Fix(t)
@@ -160,6 +190,7 @@ func TestS5AT015_AnswerNamingOfflineEndpointDoesNotStopMail(t *testing.T) {
 	if err != nil || len(got.Accepted) != 0 {
 		t.Fatalf("discover of the offline endpoint: %+v, %v (want no registration, no error)", got, err)
 	}
+	s5SendToOfflineBobAndAssertStored(t, z, "hello offline bob, after forged answers")
 }
 
 // TestS5Today_PresenceVerdictOnTheNegativeList pins what main's presence check (applyPresence) does with each answer
