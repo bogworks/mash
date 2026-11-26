@@ -25,7 +25,7 @@ var noEndpointCommands = [][]string{
 func TestEveryCommandWordsNoEndpointInstalledTheSame(t *testing.T) {
 	for _, args := range noEndpointCommands {
 		r := runMash(map[string]string{"HOME": t.TempDir()}, args...)
-		if r.code != 1 || r.out != "" || r.errs != "error: no endpoint is installed here\n" {
+		if r.code != 1 || r.out != "" || r.errs != "error: no endpoint is installed here\nhint: set mash up with the setup skill (see the quick start), or install a join file with mash join <file>\n" {
 			t.Errorf("%v: %+v", args, r)
 		}
 		if strings.Contains(r.errs, "MASH_ENDPOINT") {
@@ -34,7 +34,7 @@ func TestEveryCommandWordsNoEndpointInstalledTheSame(t *testing.T) {
 	}
 	for _, args := range [][]string{{"send", "acme.demo.bob", "hi"}, {"who"}, {"status"}, {"doctor"}} {
 		j := runMash(map[string]string{"HOME": t.TempDir()}, append(args, "--json")...)
-		if j.code != 1 || j.errs != "" || j.out != `{"error":"no endpoint is installed here"}`+"\n" {
+		if j.code != 1 || j.errs != "" || j.out != `{"error":"no endpoint is installed here","hint":"set mash up with the setup skill (see the quick start), or install a join file with mash join <file>"}`+"\n" {
 			t.Errorf("%v --json: %+v", args, j)
 		}
 	}

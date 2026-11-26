@@ -116,7 +116,7 @@ func leaseReason(lease, cause string) string {
 }
 
 // ErrNoEndpointInstalled is what Health returns at a shell where no endpoint is chosen and none is installed. The
-// command turns it into the failure "no endpoint is installed here" (no hint), exit 1.
+// command turns it into the failure "no endpoint is installed here" with a hint, exit 1.
 var ErrNoEndpointInstalled = errors.New(cmdcore.NoEndpoint(cmdcore.NoneInstalled, "", nil).Msg)
 
 // The checks of doctor, in the order it reports them.
