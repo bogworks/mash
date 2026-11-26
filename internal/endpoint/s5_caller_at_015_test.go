@@ -175,7 +175,18 @@ func TestS5AT015_PromptWorksThroughTheRace(t *testing.T) {
 	}
 	// The prompt does not wait for the rest of the window once bob has answered; the invalid answers that follow are
 	// counted as they arrive, so the count is read when they have.
-	s5Wait(t, "carol's invalid answers to be counted", 10*time.Second, func() bool { return cl.NotVerified() >= len(forged) })
+	// Only the answers for the requested subject are counted (codex M1): the forgery that names another subject is
+	// not this discovery's business.
+	want, atWant := mustSubj(z.bob).Prompt, 0
+	for _, f := range forged {
+		if s5PromptSubjectOf(t, f.Data) == want {
+			atWant++
+		}
+	}
+	if atWant == 0 || atWant == len(forged) {
+		t.Fatalf("%d of %d forged answers name bob's subject: the list must hold one that names another", atWant, len(forged))
+	}
+	s5Wait(t, "carol's invalid answers to be counted", 10*time.Second, func() bool { return cl.NotVerified() >= atWant })
 }
 
 // s5SendToOfflineBobAndAssertStored sends one mail from alice to bob, who is offline (nothing serves him), by main's

@@ -73,14 +73,14 @@ func TestVerify(t *testing.T) {
 	}
 }
 
-// A record with no account is not compared on the account; the owner is always compared.
+// A record with no account verifies nothing: it is not read as accepting any account.
 func TestVerifyRecordWithoutAccount(t *testing.T) {
 	bob := identity(t, "ACCT")
 	dir := Directory{Holder: "acme_ops_bob", HasRecord: true, Owner: "acme"}
-	if _, ok := Verify(reg(t, bob, "acme", subject), dir); !ok {
-		t.Error("a record with no account refused a registration whose owner matches")
+	if _, ok := Verify(reg(t, bob, "acme", subject), dir); ok {
+		t.Error("a record with no account accepted a registration that claims an account")
 	}
-	if _, ok := Verify(reg(t, bob, "other", subject), dir); ok {
-		t.Error("the owner difference was not refused when the record has no account")
+	if _, ok := Verify(reg(t, identity(t, ""), "acme", subject), dir); ok {
+		t.Error("a record with no account accepted a registration that claims none")
 	}
 }

@@ -124,10 +124,15 @@ func (e *Endpoint) applyPresenceS5(h *s5Hooks, m *nats.Msg) (counted int) {
 }
 
 // judgeAnswerS5 reports whether an answer carries a verified registration at the prompt subject want, and counts once
-// an answer that carries a registration that fails verification. An invalid answer never ends the discovery.
+// an answer whose registration at want fails verification. A registration at any other subject is another endpoint's
+// and not this discovery's business: it is neither verified nor counted (a one-shot client holds only its own record
+// and the target's). An invalid answer never ends the discovery.
 func (e *Endpoint) judgeAnswerS5(h *s5Hooks, data []byte, want string) (vouched bool) {
 	failed := false
 	for _, reg := range parseAnswer(data) {
+		if reg.Subject != want {
+			continue
+		}
 		e.mu.RLock()
 		d := e.viewOfLocked(reg)
 		e.mu.RUnlock()
@@ -135,9 +140,7 @@ func (e *Endpoint) judgeAnswerS5(h *s5Hooks, data []byte, want string) (vouched 
 			failed = true
 			continue
 		}
-		if reg.Subject == want {
-			vouched = true
-		}
+		vouched = true
 	}
 	if failed {
 		e.notVerified.Add(1)
