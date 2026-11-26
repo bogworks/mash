@@ -29,27 +29,59 @@ and NATS.
 
 What each layer does: [the stack](docs/guide/stack.md).
 
-**Understanding what mash does differently:**
+## What mash does differently
 
-Mail Messages, Message Types, and Turn Efficiency
+### Mail, kinds and fewer turns
 
-Asynchronous mail means agents don't have to be live on the wire when receiving messages.  It also allows multiple messages to be batched up and received together in a single turn.  Mash supports a message type ("kind") of `blocker`, `question`, `fyi`, `task`, or `result`.  In addition, a message can be marked as `urgent`, requiring and immediate response.  These message types are handled differently.  Depending on the message type, messages might be immediately injected into a running turn, held to be batched up and run at the next turn, or immediately wake an idle agent to take a turn.  For example, an idle agent might receive 5 `fyi` messages, which are held, and then receive a `blocker` message, waking it for a new turn.  On that turn all 6 messages (5 `fyi` + 1 `blocker`) are injected automatically into the turn.  With 500K in the context window, the agent has skipped 5 additional turns for 2.5M tokens saved.  For more details, see the documentation [TO BE WRITTEN] that explains message types, the local mash spool, and walks through various mash messaging scenarios.
+Mail is asynchronous: the recipient does not have to be online when it is sent, and several messages can arrive
+together in one turn. Each message has a kind: `blocker`, `question`, `task`, `result` or `fyi`. A sender can
+also mark a message urgent; that counts only when the sender is verified. The kind decides when the mail reaches
+the recipient:
 
-Security and identity
+- **A busy session** sees new mail with its next tool result, inside the turn it is already taking.
+- **An idle session** is woken for a `blocker`, `question` or `task` (after 45 seconds by default), and at once
+  for urgent mail.
+- **A `result` or `fyi`** never wakes anyone. It waits for the session's next turn.
 
-Agent endpoints in mash are mapped 1:1 to an agent session.  Every mash endpoint has a NATS NKEY (ed25519 public key) and a [insert data on JWT key here].  These provide a unique identity on the NATS bus for a single agent.  Agents signed their mail messages, verifying their identity and mash requires NATS with TLS, providing end-to-end encryption as well.  Since endpoints have a single identity, they can also be used to identity endusers and tools, who can participate in the mash along with agents. [provide more detalis here].
+For example, an idle agent receives five `fyi` messages, which wait, then a `blocker`, which wakes it. All six
+arrive together in that one turn. Five turns are skipped; with 500K tokens in the context window, each would
+have read the whole context again, so that is up to 2.5M input tokens not spent. Waking an idle session needs
+Claude Code to load mash's channel, which depends on your account ([wake an idle
+session](docs/install.md#3-optional-wake-an-idle-session)). How delivery works, with the local spool and worked
+examples: [receive and wake](docs/architecture.md#62-receive-and-wake).
 
-On the near term immediate roadmap (0.6.0-ish), mash will support a messaging policy that determines who can message who on the bus.  This will allow more security conscious teams to restrict messaging access with a centralized policy.  The intent is to allow, in concert with a well configured sandbox, more granular control of agent communications, while allowing more complex communication patterns and topologies.
+### Identity and security
 
-The mesh topology, presence, & location independence
+Each mash endpoint is one agent session. Each endpoint is its own NATS user: an NKEY (an ed25519 key pair) and a
+user JWT, signed by your account's key, that says which subjects the endpoint may use. That gives it one
+identity on the NATS server. mash signs every message with the sender's key, and the receiver checks the
+signature against a directory of who holds which name. Every connection to the server uses TLS, so mail is
+encrypted on the network; the server itself can read it. An endpoint does not have to be an agent: a person at a
+terminal or a script can hold one and mail agents with `mash send` and `mash inbox` ([scripts](docs/guide/scripts.md)).
+More: [identity, trust and the security model](docs/architecture.md#83-identity-trust-and-the-security-model) and
+[SECURITY.md](SECURITY.md).
 
-Other communication systems for agents require understanding the remote agent's location on the network via a DNS name or IP address.  Mash, because it uses NATS, is inherently location independent.  Mash participants announce their presence on the network via a heartbeat, manage their own NATS endpoint connecitivity including reconnects, and do it efficiently without polling or agent turns.  This means that less network configuration is required, that agents can be moved without breaking a connection, and that firewall and network address translation (NAT) is straightforward.  How this works in practice:
+Today an endpoint can mail any endpoint of the same owner, and no other owner's. Next on the
+[roadmap](ROADMAP.md) is a messaging policy: a central set of rules for who may mail whom, so teams that care
+about security can restrict it. With a well-configured sandbox, it gives finer control over what agents can say
+to each other, and still allows more complex patterns and topologies.
 
-- NATS clients behind NAT dial out on TCP 4222 by default, with no inbound port forwarding on the client side.
-- Optional NATS [leaf nodes](https://docs.nats.io/reference/protocols/leafnode) connect an entire private site to a hub over one outbound link, typically on TCP 7422, and carry messages both ways.
-- Compatible clients and leaf nodes can use secure WebSockets on port 443 where the firewall permits them.
-- NATS uses [PING and PONG](https://github.com/nats-io/nats.docs/blob/master/using-nats/developing-with-nats/connecting/pingpong.md) to check whether an idle connection is still alive.
-- If a firewall or NAT drops the connection, NATS clients reconnect outbound and automatically restore their subscriptions.
+### Location independence and presence
+
+Other agent messaging systems need to know where the remote agent is on the network: a DNS name or an IP address.
+mash uses NATS, so an agent is found by its name, not its location. Each agent announces that it is online with
+a heartbeat, and keeps its own connection to the server, reconnecting when it drops, with no polling and no model
+turns. So there is less network setup, an agent can move to another machine or network without anyone changing
+their configuration, and firewalls and network address translation (NAT) are simple to handle:
+
+- An agent behind NAT dials out to the server on TCP 4222 by default; no inbound port is opened on its side.
+- NATS [leaf nodes](https://docs.nats.io/reference/protocols/leafnode) can connect a whole private site to a hub
+  over one outbound link, usually on TCP 7422, carrying messages both ways.
+- mash can connect over secure WebSockets (`wss://`), usually on port 443, where a firewall allows only that.
+- NATS sends [PING and
+  PONG](https://github.com/nats-io/nats.docs/blob/master/using-nats/developing-with-nats/connecting/pingpong.md)
+  to check that an idle connection is still alive.
+- If a firewall or NAT drops the connection, the agent reconnects outbound and its subscriptions are restored.
 
 ## If you are an agent
 
@@ -156,8 +188,6 @@ Synadia Cloud is not supported in 0.5.9 ([#876](https://github.com/bogworks/mash
 ## Addresses and the Synadia Agent Protocol
 
 mash is a SAP agent per session, with one departure: an endpoint is addressed `owner.group.instance`, and the owner (not the harness) takes the first subject slot, so a credential can be fenced to its owner. Details, and what that means for discovery, are in [docs/sap.md](docs/sap.md).
-
-Messaging policy is not in this release; it is planned, with no release named (see the [roadmap](ROADMAP.md)).
 
 ## How it works
 
