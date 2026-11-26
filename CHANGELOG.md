@@ -4,6 +4,39 @@ All notable user-facing changes to mash are recorded here. The format follows [K
 
 ## [Unreleased]
 
+## [0.6.0] - YYYY-MM-DD
+
+### Summary
+
+0.6.0 reads the sender of every message the way the SAP Go SDK does, which is strict: ten kinds of sender header that older mash accepted are now refused, on live prompts and on mail already stored. Mail mash writes is not affected. Mail that mash refuses is now listed with its reason, never its body, and `mash doctor` checks every endpoint when you have several. Every download has a build attestation; verify it.
+
+### Upgrading
+
+One-way. On each machine, then on the administrator's machine:
+1. Check: `mash doctor` (and `mashctl doctor`) end clean; if not, see docs/troubleshooting.md.
+2. Install `mash` and `mashctl` 0.6.0; endpoints, keys and mail stay.
+3. Update the `mash` and `mash-setup` plugins; a session asked for mash's version says `mash v0.6.0`.
+4. Restart each Claude Code session, then check again.
+Scripts and anything that sends mail without mash: see the
+[release notes](https://github.com/bogworks/mash/blob/v0.6.0/docs/release-notes/0.6.0.md).
+
+### Added
+
+- **`mashctl endpoint inbox --json` shows when each message arrived.** Each message has a `when` field: the time the server stored it, in RFC 3339 and UTC, with a fraction of a second when there is one, for example `2026-11-26T15:04:05Z` or `2026-11-26T15:04:05.12Z`. The text table is unchanged.
+- **Mail that mash refuses is now listed, not hidden.** A message with a faulty header, or one that could not be verified, shows in `mash inbox` and `mash read` as a `refused` row with its reason, and never with its body. `mash status --detail` and `mash doctor` count them, and `mashctl endpoint inbox` adds a `reason` to each refused message. A refused message is not counted as waiting.
+
+### Changed
+
+- **`mash doctor` checks every endpoint when you have several.** It used to stop and ask for `--endpoint`. Now it checks each installed endpoint and prints one row for each, with the number of problems and warnings and the first problem, then names the command that shows the first endpoint with a problem. It exits 1 if any endpoint has a problem. `--json` prints each endpoint's report and the totals. With one endpoint, or `--endpoint`, nothing changes, and `mash status` and the other commands still ask you to choose one
+  ([ADR 0192](https://github.com/bogworks/mash/blob/main/docs/decisions/0192-doctor-checks-every-installed-endpoint-when-none-is-chosen.md)).
+- **The plugin re-checks its downloaded mash once per session, and `mash doctor` says which mash runs.** When the plugin
+  starts a session it now confirms its cached copy of mash still matches the release it pins, and replaces a copy that
+  does not (the old file is kept beside it). In a session the plugin started, `mash doctor` shows a `launcher` row: `ok`
+  for the pinned mash, and a warning when the plugin fell back to the mash on your PATH instead
+  ([issue 1290](https://github.com/bogworks/mash/issues/1290)).
+- **mash reads the sender of every message the way the SAP Go SDK does, and ten kinds of sender header that older mash accepted are now refused.** The header is refused when it is over 2,048 bytes; when its `ts` is not in UTC; when its `name` has a control character, is over 64 characters or has a broken character escape; when a field appears twice; when its `sub` has a space; when its `sig` is not 64 bytes of base64url text; when it is empty; or when a message carries two. This holds on live prompts and on mail already stored, and a validly signed message with such a header is no longer delivered; headers mash writes are not affected. A live prompt with a malformed header is refused with status 400, and one past the limit on recent prompts with status 401 and `too many recent prompts: try again shortly`
+  ([ADR 0173](https://github.com/bogworks/mash/blob/main/docs/decisions/0173-mash-adopts-the-sap-sdks-strict-agent-sender-parser-outright-and-ten-shapes-it-read-before-are-now-malformed.md)).
+
 ## [0.5.10] - 2026-11-26
 
 ### Summary
