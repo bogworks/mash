@@ -403,6 +403,9 @@ func (e *Endpoint) learn(got map[string]recordResult) {
 	for name, r := range got {
 		e.warnBad(name, r)
 		if r.err == nil {
+			if old, ok := e.dir[name]; ok && old.User != r.rec.User && e.byUser[old.User] == name {
+				delete(e.byUser, old.User) // a replaced key no longer names this record
+			}
 			e.dir[name] = r.rec
 			e.byUser[r.rec.User] = name
 		}
