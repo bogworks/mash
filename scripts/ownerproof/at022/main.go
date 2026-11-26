@@ -1215,7 +1215,7 @@ func item3(w *world, it *Item) {
 	}
 	// discovery: bob is offline; carol replays his genuine registration on every guess, so a guess that hit alice's
 	// reply subject would make him look online.
-	attacks, seen, stopObs, err := w.observe(genuine, nil)
+	attacks, seen, floodErr, stopObs, err := w.observe(genuine, nil)
 	if err != nil {
 		it.Error = err.Error()
 		return
@@ -1229,6 +1229,7 @@ func item3(w *world, it *Item) {
 	listed, online := doc.Online(w.to("bob"))
 	it.check("discovery: no guessed reply subject was accepted (bob stays offline)", listed && !online, fmt.Sprintf("bob listed=%v online=%v, answers_not_verified %s, stderr %q", listed, online, doc.Count(), NormalStderr(errOut)))
 	it.check("discovery: the observer saw alice's discovery request and attacked", attacks() > 0, fmt.Sprintf("%d attacked request(s)", attacks()))
+	it.check("discovery: the observer's flood had no publish or flush error", floodErr() == nil, errOrNone(floodErr()))
 
 	discovery := seen()
 	// prompt: bob serves and holds the answer 3.5 s; carol floods the guesses, and the discovery reply subjects
@@ -1238,7 +1239,7 @@ func item3(w *world, it *Item) {
 		it.Error = err.Error()
 		return
 	}
-	attacks, seen, stopObs, err = w.observe(nil, discovery)
+	attacks, seen, floodErr, stopObs, err = w.observe(nil, discovery)
 	if err != nil {
 		it.Error = err.Error()
 		return
@@ -1276,6 +1277,7 @@ func item3(w *world, it *Item) {
 	it.check("prompt: the genuine answer arrived and nothing the observer sent was accepted", code == 0 && strings.TrimSpace(out) == "genuine" && !strings.Contains(out, "EVIL"),
 		fmt.Sprintf("exit %d, stdout %q, stderr %q", code, out, NormalStderr(errOut)))
 	it.check("prompt: the observer saw a discovery request and attacked", attacks() > 0, fmt.Sprintf("%d attacked request(s)", attacks()))
+	it.check("prompt: the observer's flood had no publish or flush error", floodErr() == nil, errOrNone(floodErr()))
 	_, promptReqs := tp.requestsFrom(w.addr["alice"])
 	var promptSubjects []string
 	for _, m := range promptReqs {
@@ -1292,29 +1294,48 @@ func item3(w *world, it *Item) {
 	it.check("reply subjects: every discovery and prompt reply subject has the inbox layout and none was reused", rerr == nil, detail)
 }
 
+// errOrNone renders an error for a check's detail.
+func errOrNone(err error) string {
+	if err == nil {
+		return "none"
+	}
+	return err.Error()
+}
+
 // observe starts carol, who watches $SRV.> and, for each discovery request from alice, floods the guesses of Guesses
 // for up to 3 s with the evil chunk and an empty message, and with a replay of replay when it is not nil. On each
 // attacked request it floods the subjects in also the same way, which are reply subjects from an earlier phase: the
 // observed subject itself is never attacked, but an earlier one a candidate reuses is. It records every reply
 // subject it sees from alice, in order. It returns the number of attacked requests, the recorded subjects and a
-// function that stops it.
-func (w *world) observe(replay []byte, also []string) (attacks func() int, seen func() []string, stop func(), err error) {
+// function that stops it. A request counts as attacked only after one full round of the flood (every guess and also
+// subject published, then flushed) succeeded; the first publish or flush error is returned by floodErr.
+func (w *world) observe(replay []byte, also []string) (attacks func() int, seen func() []string, floodErr func() error, stop func(), err error) {
 	c, err := w.connect("carol")
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	spy, err := c.nc.SubscribeSync("$SRV.>")
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	if err := c.nc.Flush(); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	quit := make(chan struct{})
 	done := make(chan struct{})
 	var mu sync.Mutex
 	attacked := 0
 	var subjects []string
+	var firstErr error
+	fail := func(err error) {
+		if err != nil {
+			mu.Lock()
+			if firstErr == nil {
+				firstErr = err
+			}
+			mu.Unlock()
+		}
+	}
 	prefix := w.addr["alice"].InboxPrefix() + "."
 	go func() {
 		defer close(done)
@@ -1329,29 +1350,45 @@ func (w *world) observe(replay []byte, also []string) (attacks func() int, seen 
 				continue
 			}
 			mu.Lock()
-			attacked++
 			subjects = append(subjects, m.Reply)
 			mu.Unlock()
 			guesses := append(Guesses(m.Reply), also...)
+			counted := false
 			for end := time.Now().Add(3 * time.Second); time.Now().Before(end); {
 				select {
 				case <-quit:
 					return
 				default:
 				}
-				for _, g := range guesses {
-					_ = c.nc.Publish(g, []byte(evil))
-					_ = c.nc.Publish(g, nil)
-					if replay != nil {
-						_ = c.nc.Publish(g, replay)
+				var roundErr error
+				pub := func(g string, b []byte) {
+					if err := c.nc.Publish(g, b); err != nil && roundErr == nil {
+						roundErr = err
 					}
 				}
-				_ = c.nc.Flush()
+				for _, g := range guesses {
+					pub(g, []byte(evil))
+					pub(g, nil)
+					if replay != nil {
+						pub(g, replay)
+					}
+				}
+				if err := c.nc.Flush(); err != nil && roundErr == nil {
+					roundErr = err
+				}
+				fail(roundErr)
+				if roundErr == nil && !counted {
+					counted = true
+					mu.Lock()
+					attacked++
+					mu.Unlock()
+				}
 			}
 		}
 	}()
 	return func() int { mu.Lock(); defer mu.Unlock(); return attacked },
 		func() []string { mu.Lock(); defer mu.Unlock(); return append([]string(nil), subjects...) },
+		func() error { mu.Lock(); defer mu.Unlock(); return firstErr },
 		func() { close(quit); <-done; _ = spy.Unsubscribe() }, nil
 }
 
@@ -1397,8 +1434,14 @@ func item4(w *world, it *Item, build string) Item4 {
 		it.Error = err.Error()
 		return r
 	}
-	_ = carol.nc.Publish(live, []byte(`{"type":"response","data":"CAROL"}`))
-	_ = carol.nc.Flush()
+	if err := carol.nc.Publish(live, []byte(`{"type":"response","data":"CAROL"}`)); err != nil {
+		it.Error = "carol's chunk was not published: " + err.Error()
+		return r
+	}
+	if err := carol.nc.Flush(); err != nil {
+		it.Error = "carol's chunk was not flushed: " + err.Error()
+		return r
+	}
 	time.Sleep(300 * time.Millisecond)
 	if err := bob.reply(reqID, "genuine"); err != nil {
 		it.Error = err.Error()
