@@ -104,6 +104,25 @@ func TestEndpointInboxJSONGolden(t *testing.T) {
 	if got != string(want) {
 		t.Fatalf("endpoint inbox --json differs from %s (run with -update-inspect after checking the diff)\n got: %s\nwant: %s", golden, got, want)
 	}
+	// when is the stored time in RFC 3339 and UTC
+	var parsed inboxJSON
+	if err := json.Unmarshal([]byte(got), &parsed); err != nil {
+		t.Fatal(err)
+	}
+	for i, m := range parsed.Messages {
+		w, err := time.Parse(time.RFC3339Nano, m.When)
+		if err != nil || !strings.HasSuffix(m.When, "Z") || !w.Equal(ts.Add(time.Duration(i)*time.Minute)) {
+			t.Errorf("message %d when %q, want RFC 3339 UTC %s", m.Number, m.When, ts.Add(time.Duration(i)*time.Minute).Format(time.RFC3339))
+		}
+	}
+	// a stored time with a fraction keeps it (RFC 3339 with nanoseconds, trailing zeros dropped)
+	frac := &admin.InboxInspection{Stream: admin.InspectedStream{Name: "inbox-o_g_a"}, Messages: []admin.InspectedMessage{
+		{Seq: 1, StoredAt: time.Date(2026, 11, 26, 15, 4, 5, 120000000, time.UTC)},
+		{Seq: 2, StoredAt: time.Date(2026, 11, 26, 15, 4, 5, 0, time.UTC)}}}
+	fm := buildInboxJSON(sap.Address{Owner: "o", Group: "g", Instance: "a"}, frac).Messages
+	if fm[0].When != "2026-11-26T15:04:05.12Z" || fm[1].When != "2026-11-26T15:04:05Z" {
+		t.Errorf("fractional when = %q, whole-second when = %q", fm[0].When, fm[1].When)
+	}
 	// no consumer: every message is not delivered; the messages array is never null
 	empty := buildInboxJSON(sap.Address{Owner: "o", Group: "g", Instance: "a"}, &admin.InboxInspection{Stream: admin.InspectedStream{Name: "inbox-o_g_a"}})
 	eb, _ := json.Marshal(empty)
