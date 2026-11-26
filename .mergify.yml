@@ -136,6 +136,9 @@ queue_rules:
     # combined code can break what each pull request passed alone. It needs test (both OSes) and reproducible.
     merge_conditions:
       - check-success = @github-actions/pr-check
+      # lint on the queue branch's combined commit too (codex H1, round 2). A code batch always runs lint; the docs queue's
+      # merge_conditions stay pr-check alone, since a docs-only batch skips lint.
+      - check-success = @github-actions/lint
     # mash sees a few pull requests a day: a batch is whatever is queued, up to 5, with no wait for company. The
     # macOS leg is the slowest job, so fewer, larger runs are cheaper than many.
     batch_size:

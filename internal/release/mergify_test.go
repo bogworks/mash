@@ -151,8 +151,8 @@ func TestMergify_waitsOnlyForChecksThatExist(t *testing.T) {
 			t.Errorf("queue_conditions lack %q", want)
 		}
 	}
-	if strings.Join(q.MergeConditions, "|") != "check-success = "+actionsApp+"pr-check" {
-		t.Errorf("merge_conditions = %v, want @github-actions/pr-check on the queue branch's run", q.MergeConditions)
+	if strings.Join(q.MergeConditions, "|") != "check-success = "+actionsApp+"pr-check|check-success = "+actionsApp+"lint" {
+		t.Errorf("merge_conditions = %v, want @github-actions/pr-check and @github-actions/lint on the queue branch's run", q.MergeConditions)
 	}
 	if q.MergeMethod != "fast-forward" || m.MergeQueue.Mode != "serial" || m.MergeQueue.MaxParallelChecks != 1 {
 		t.Errorf("main must only move to a tested commit: merge_method %q, mode %q, max_parallel_checks %d",
@@ -564,8 +564,9 @@ func TestMergify_docsQueue(t *testing.T) {
 		}
 	}
 	def := queueRule(t, m, "default")
-	if strings.Join(d.MergeConditions, "|") != strings.Join(def.MergeConditions, "|") || d.MergeMethod != "fast-forward" {
-		t.Errorf("docs queue merge: conditions %v method %q, want the default queue's (%v) and fast-forward", d.MergeConditions, d.MergeMethod, def.MergeConditions)
+	// the docs queue merges on pr-check alone: a docs-only batch skips lint, which the default queue also requires on the combined commit
+	if strings.Join(d.MergeConditions, "|") != "check-success = "+actionsApp+"pr-check" || d.MergeMethod != "fast-forward" {
+		t.Errorf("docs queue merge: conditions %v method %q, want pr-check alone and fast-forward (the default queue has %v)", d.MergeConditions, d.MergeMethod, def.MergeConditions)
 	}
 	// One source: the merge_protections rule's `if` carries the same regex text as the docs queue.
 	var found bool
