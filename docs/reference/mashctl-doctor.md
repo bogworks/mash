@@ -34,8 +34,8 @@ mashctl doctor
 | Code | Meaning |
 | --- | --- |
 | 0 | It worked. |
-| 1 | A problem was found; the report on stdout says which. |
-| 2 | The command line was wrong, or the server URL is a plain nats:// one that is refused for TLS; nothing was attempted. The row that reaches that URL says so (the server row, or sign-in when a TLS server is listed first); rows after it are skipped, and the report is still printed on stdout. |
+| 1 | A problem was found; the report on stdout says which. A server URL that is a plain nats:// one is refused for TLS and is such a problem: the row that reaches it says so (the server row, or sign-in when a TLS server is listed first), rows after it are skipped, and the report is still printed on stdout. |
+| 2 | The command line was wrong; nothing was attempted. |
 
 ## Output
 

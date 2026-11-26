@@ -29,10 +29,10 @@ An example of the output (your versions may differ):
 
 ```
 install.sh: OK
-Fetching mash and mashctl from the v0.5.9 release: https://github.com/bogworks/mash/releases/download/v0.5.9
+Fetching mash and mashctl from the v0.5.10 release: https://github.com/bogworks/mash/releases/download/v0.5.10
 warning: gh not found: checked checksums only, not verified
-Installed mash v0.5.9 (<commit>) in ~/.local/bin
-Installed mashctl v0.5.9 (<commit>) in ~/.local/bin
+Installed mash v0.5.10 (<commit>) in ~/.local/bin
+Installed mashctl v0.5.10 (<commit>) in ~/.local/bin
 ~/.local/bin is not on your PATH; add it to use mash
 ```
 

@@ -1,1 +1,0 @@
-mashctl endpoint reissue now reads the staged seed and the creds file through one open that refuses symlinks and files other users can read or own, so a file cannot be swapped between the check and the read. https://github.com/bogworks/mash/issues/177

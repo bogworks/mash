@@ -1,1 +1,0 @@
-Troubleshooting now explains each answer of the `claude` row in `mash doctor`: below the tested Claude Code version (a failure), above the tested series, unreadable, and not found ([#1598](https://github.com/bogworks/mash/issues/1598)).

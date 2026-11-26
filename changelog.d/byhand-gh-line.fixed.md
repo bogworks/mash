@@ -1,1 +1,0 @@
-**The by-hand guide shows the installer's current gh warning.** The sample output has `warning: gh not found: checked checksums only, not verified`, and the guide names the other gh warnings ([#1587](https://github.com/bogworks/mash/issues/1587)).

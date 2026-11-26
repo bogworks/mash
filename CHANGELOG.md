@@ -4,6 +4,59 @@ All notable user-facing changes to mash are recorded here. The format follows [K
 
 ## [Unreleased]
 
+## [0.5.10] - 2026-11-26
+
+### Summary
+
+0.5.10 changes what scripts read: some `--json` names, exit codes and wording. For people, `mash` and `mashctl`
+now read alike, and mail signed with a replaced key is no longer labelled verified. A 0.5.5 configuration folder is no longer migrated: upgrade through 0.5.9 first.
+
+### Upgrading
+
+One-way. Still on 0.5.5's configuration folder? Upgrade through 0.5.9 first.
+1. Check: `mash doctor` (and `mashctl doctor`) end clean; if not, see docs/troubleshooting.md.
+2. Install `mash` and `mashctl` 0.5.10; endpoints, keys and mail stay.
+3. Update the `mash` and `mash-setup` plugins; a session asked for mash's version says `mash v0.5.10`.
+4. Restart each Claude Code session, then check again.
+Session-only users need nothing more. Scripts: see the
+[release notes](https://github.com/bogworks/mash/blob/v0.5.10/docs/release-notes/0.5.10.md).
+
+### Added
+
+- **`mashctl doctor`'s keys row now fails when the signing key in `config.json` is not in the key folder or not listed in the account.** Before, a lost or unlisted signing key showed only when `mashctl endpoint create` was refused. ([#1288](https://github.com/bogworks/mash/issues/1288))
+
+### Changed
+
+- **`mash` and `mashctl` now read the same way.** Help starts with `Usage:` and explains SAP, NATS and creds, success lines and errors share one wording, `mashctl` takes global options before the verb, and a missing endpoint names the setup skill. ([#1046](https://github.com/bogworks/mash/issues/1046))
+- **Exit codes follow one rule in both tools: 0 worked, 1 failed, 2 the command line was wrong.** Five cases change from 2 to 1 (no endpoint installed, a join file that needs your seed, `endpoint delete` with no terminal, a refused `http://` URL, a refused encryption override), and `mash hook` exits 0 for a host it does not know. ([#1100](https://github.com/bogworks/mash/issues/1100))
+- **`--json` output is more regular.** An unset field is `null`, lists are plural, `mashctl status` and `endpoint list` use `ready`, `endpoint_count`, `online_count`, `online` and `suspended`, and output is indented on a terminal and compact when piped. ([#1042](https://github.com/bogworks/mash/issues/1042))
+- **Tables and detail blocks are easier to read.** `mash inbox` prints the sender's full address and a SENT column, `mashctl endpoint list` adds owner, group and an ADDRESS column, and `--detail` values line up. ([#1045](https://github.com/bogworks/mash/issues/1045))
+- **`mashctl endpoint create` prints the credentials path, and `endpoint delete` warns that mail arriving during the delete is lost too.** ([#1044](https://github.com/bogworks/mash/issues/1044))
+
+### Removed
+
+- **A 0.5.5 configuration folder is no longer migrated.** `mash-migrate-0.5.5.sh` is no longer a release asset; upgrade through 0.5.9 first if you still have such a folder. ([#1446](https://github.com/bogworks/mash/issues/1446))
+
+### Fixed
+
+- **Held mail from senders it cannot verify is handled correctly.** An idle session no longer re-reads its whole inbox every minute, a failed write no longer shows mail as delivered, and the refusal count stays exact. ([#1350](https://github.com/bogworks/mash/issues/1350))
+- **`mashctl doctor` is more accurate.** It no longer prints a key that is not a user key, handles slow reads and server churn correctly, keeps lines within 80 columns, and troubleshooting explains each `claude` row answer. ([#1376](https://github.com/bogworks/mash/issues/1376))
+- **`mashctl init` is more reliable.** It reports a lost connection as unreachable rather than a missing account, refuses any NATS seed written where a path belongs, and counts live bucket sizes in its disk warning. ([#1342](https://github.com/bogworks/mash/issues/1342))
+- **The installer and the local NATS setup script are less strict about the wrong things.** The installer names every writable folder at once, and the script accepts a sticky folder like `/tmp` on macOS. ([#1372](https://github.com/bogworks/mash/issues/1372))
+- **`mash serve` exits promptly and keeps its endpoint name free.** It no longer waits after its session ends, even if the endpoint was deleted or a hook holds a lock, and a cancelled start or quick restart no longer blocks the next one. ([#1477](https://github.com/bogworks/mash/issues/1477))
+- **Smaller command fixes.** `--version` prints the version, a relative `MASH_CONFIG_DIR` is refused without echoing it, `mashctl status` says when admin credentials are missing, and `mashctl revoke` waits 5 seconds for each server. ([#1374](https://github.com/bogworks/mash/issues/1374))
+- **`mashctl endpoint delete` no longer removes a creds file that was replaced while it was archived.** ([#1555](https://github.com/bogworks/mash/pull/1555))
+- **After an endpoint's key is replaced, mail signed with the old key no longer shows as from that endpoint.** ([#1758](https://github.com/bogworks/mash/pull/1758))
+- **The prompt endpoint now advertises the 32 KiB it accepts, not 1 MB.** SAP callers are no longer refused with a 413 for a larger prompt. ([#1543](https://github.com/bogworks/mash/pull/1543))
+- **The guides and README match the product.** They cover the installer's gh warning, unverified mail being dropped and counted, join output, when mail wakes a session, and where `bob` and `alice` live. ([#1587](https://github.com/bogworks/mash/issues/1587))
+
+### Security
+
+- **`mashctl endpoint reissue` reads the staged seed and creds file through one open that refuses symlinks and files others can read or own.** A file cannot be swapped between the check and the read. ([#177](https://github.com/bogworks/mash/issues/177))
+
+Known issues: 3 known issues, listed in the [release notes](https://github.com/bogworks/mash/blob/v0.5.10/docs/release-notes/0.5.10.md#known-issues)
+Links: [Release notes](https://github.com/bogworks/mash/blob/v0.5.10/docs/release-notes/0.5.10.md), [full changes](https://github.com/bogworks/mash/compare/v0.5.9...v0.5.10), [verify your download](https://github.com/bogworks/mash/blob/v0.5.10/docs/install.md#verify-what-you-download)
+
 ## [0.5.9] - 2026-11-25
 
 ### Summary

@@ -1,1 +1,0 @@
-Both `--json` outputs name one fact one way: `mashctl status` says `ready`, `endpoint_count` and `online_count` (were `ok`, `endpoints` and `online`), and `mashctl endpoint list` and `show` give `online` and `suspended` as two booleans in place of the `state` word. [#1041](https://github.com/bogworks/mash/issues/1041)

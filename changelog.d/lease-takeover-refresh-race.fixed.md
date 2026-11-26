@@ -1,1 +1,0 @@
-**A session that restarts its serve quickly no longer gets "already in use by another session" when the earlier serve refreshed its lease at the wrong moment.** The takeover now reads the lease once more and decides again ([#621](https://github.com/bogworks/mash/issues/621)).

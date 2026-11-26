@@ -1,1 +1,0 @@
-**`mashctl endpoint delete` now says in its confirmation that mail arriving while the delete runs is lost too.** The question is otherwise unchanged ([#912](https://github.com/bogworks/mash/issues/912)).

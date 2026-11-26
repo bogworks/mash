@@ -1,1 +1,0 @@
-**The send kind's help says when it wakes.** blocker, question and task wake an idle session only when it has mash's wake channel on; otherwise the message arrives with its next turn ([#1179](https://github.com/bogworks/mash/issues/1179)).

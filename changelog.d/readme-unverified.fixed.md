@@ -1,1 +1,0 @@
-**The README says what happens to unproven mail.** By default it is dropped and counted (`mash doctor` shows the count), not delivered with a label; `accept_unverified` delivers it with its label ([#1586](https://github.com/bogworks/mash/issues/1586)).

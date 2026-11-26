@@ -1,1 +1,0 @@
-**mash --help and mashctl --help now say in one sentence what SAP, NATS and creds are, and mashctl --help lists its global options and --json for every verb that has it.** [#1048](https://github.com/bogworks/mash/issues/1048), [#1100](https://github.com/bogworks/mash/issues/1100)

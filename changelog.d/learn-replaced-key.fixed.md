@@ -1,1 +1,0 @@
-**After an endpoint's key is replaced, mail or a prompt signed with the old key no longer shows as from that endpoint, and the old key no longer counts it as online.** Before, a session that had already read the endpoint's record kept taking the old key as that endpoint's.

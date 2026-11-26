@@ -1,1 +1,0 @@
-**`mashctl status` now says when the admin credentials are not set.** It used to name the server setting as missing when it was set, report "not ok" as if the server had failed, and point to `mashctl doctor`, which could not help. It now says which setting to give.

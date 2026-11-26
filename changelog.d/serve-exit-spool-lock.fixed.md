@@ -1,1 +1,0 @@
-**`mash serve` now exits promptly when its session ends, even if a hook is stalled while holding the spool lock.** It no longer waits on that lock after stdin closes ([#1651](https://github.com/bogworks/mash/issues/1651)).
