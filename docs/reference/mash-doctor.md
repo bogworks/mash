@@ -581,10 +581,10 @@ refused_by_class only, and the refused entry of checks has no more than the
 usual four keys. While the first start's check of the stored mail is skipped
 because the state directory cannot be written, and only then, a row named
 `stored mail` with state skip follows the delivery row; it changes neither the
-problem count nor the exit status.
-The launcher row, which says which mash the plugin's launcher started, reports
-how the mash it runs in was launched: it shows in a session's own doctor (the
-MCP tool), and a mash doctor typed in a shell has no launcher row.
+problem count nor the exit status. The launcher row, which says which mash the
+plugin's launcher started, reports how the mash it runs in was launched: it
+shows in a session's own doctor (the MCP tool), and a mash doctor typed in a
+shell has no launcher row.
 
 ## What it replaces
 
