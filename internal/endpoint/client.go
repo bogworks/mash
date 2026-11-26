@@ -486,6 +486,8 @@ type presenceProbe struct {
 
 	err     error // the request could not be sent
 	counted int   // registrations awaitPresence counted (verified, the directory's key)
+	// rejected is the answers of this probe that failed verification, each counted once (TO-12).
+	rejected int
 
 	mu   sync.Mutex
 	msgs []*nats.Msg
@@ -496,7 +498,7 @@ type presenceProbe struct {
 // next, and the answers are held until awaitPresence.
 func (e *Endpoint) startPresence() *presenceProbe {
 	p := &presenceProbe{start: time.Now(), kick: make(chan struct{}, 1)}
-	inbox := e.nc.NewInbox()
+	inbox := secretInbox(e.nc) // 128 random bits, as every other reply subject mash sends (REQ-015)
 	sub, err := e.nc.Subscribe(inbox, func(m *nats.Msg) {
 		p.mu.Lock()
 		p.msgs = append(p.msgs, m)
@@ -556,7 +558,9 @@ func (e *Endpoint) awaitPresence(ctx context.Context, p *presenceProbe) error {
 	msgs := p.msgs
 	p.mu.Unlock()
 	for _, m := range msgs {
-		p.counted += e.applyPresence(m)
+		c, r := e.applyPresence(m)
+		p.counted += c
+		p.rejected += r
 	}
 	e.mu.Lock()
 	if p.start.After(e.probeAt) {

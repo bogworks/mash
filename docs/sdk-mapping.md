@@ -2,7 +2,7 @@
 
 This page names each mash package and API against its equivalent in the SAP Go SDK (`github.com/bogworks/synadia-agents.go`, v0.1.1 is the version checked here), says what mash does about it, and says where mash differs from plain SAP and why. It implements REQ-002 of the SDK adoption contract and is checked by inspection.
 
-Every row's status is one of three forms: `adopted`, `kept in mash (why)` or `waits (on what)`.
+Every row's status is one of four forms: `adopted`, `kept in mash (why)`, `kept in mash: SAP departure` (mash differs from the SDK on purpose, and the row names its exit) or `waits (on what)`.
 
 ## Reading this page
 
@@ -15,7 +15,7 @@ Nothing here is shipped in a 0.5.x release, and `main` has no SDK import yet. Wh
 | S3 | Constants and subjects built through the SDK's subject constructor. |
 | S4 | The identity adapter in `internal/sapsdk`: signing, id signatures, stored and live verification, sender classification, the nonce set. |
 | C | `release-check --compat`. |
-| S5 | One caller constructor on the SDK's caller, with the verified-identity option. SDK #81 is in v0.1.1, and go.mod pins v0.1.1. |
+| S5 | Under amendment 5 of the SDK adoption contract, REQ-016's checks and the count of answers that fail them (TO-12) in mash's own discovery, presence and prompt sender. No SDK caller is built, and the reply subject stays mash's own. The four rows marked `kept in mash: SAP departure` below say what would have to change for the SDK caller to replace them. |
 | W | Wiring and views: the refused-malformed record, the scan, and the inbox, read, status, doctor, mashctl and MCP views. |
 | S6 | The SDK host. Waits on Synadia. mash will not wrap, patch or copy it. |
 | M | Mash-only. No stage; there is nothing to adopt. |
@@ -70,17 +70,21 @@ A symbol or behaviour that could not be confirmed in the source is written `unve
 | --- | --- | --- | --- |
 | `internal/endpoint/directory.go` directory KV and its `id_sig` check | the SDK's `AgentID` record and `VerifyAgentID`; the SDK has no directory KV | adopted for the signature; kept in mash for the KV (the SDK discovers by `$SRV` probe, not a stored directory) | Signature check lands in S4. The directory bucket, its poll and its jitter (ADR 0065) stay in mash. |
 | `internal/store` records (`store.Record`) | none | kept in mash (the inbox is mash's feature) | |
-| Presence by `$SRV.INFO` probe (`presence.go`, ADR 0066) | the SDK's discovery probe in `caller` | kept in mash (mash probes on demand, to answer `who`) | The SDK's probe pieces are unexported; the public route is `ListAgents`, which starts a heartbeat tracker (a standing subscription until the client closes). `who` could use it and accept that, or mash keeps its probe: an S5 choice. |
+| Presence by `$SRV.INFO` probe (`presence.go`, ADR 0066) | the SDK's discovery probe in `caller` | kept in mash: SAP departure | mash probes on demand, to answer `who`, and checks each answer in `applyPresence` (REQ-016: the `id_sig` verifies, and the user key and account are the directory's for the address in the prompt subject), counting each answer that fails. The SDK's probe pieces are unexported; the public route is `ListAgents`, which starts a heartbeat tracker (a standing subscription until the client closes) on `agents.hb.*.*.*`, a subject mash does not grant (see the heartbeat scope row). Exit: the heartbeat scope row. |
 | Endpoint metadata fields `instance`, `session`, heartbeat `instance_id` | the SDK's `AgentInfo` | kept in mash (mash's names) | See the endpoint fields note below. |
 
 ## Caller and prompt
 
 | mash package or API | SDK equivalent | status | note |
 | --- | --- | --- | --- |
-| `internal/endpoint/client.go` live prompt caller | `caller` (package `caller`: discover, prompt) | waits (S5, the pin bump to v0.1.1) | S5 builds one caller constructor on the SDK's caller. Until then mash keeps its own caller. Switched off until W. |
-| Verified-identity requirement on the target | `caller.WithRequireVerifiedIdentityFunc` or `caller.TrustPolicy.Accept` | waits (S5) | The first receives only the agent id; the second receives the agent id and `AgentInfo`, which carries the prompt subject. The contract needs the subject and the directory record to agree, so S5 uses `TrustPolicy.Accept` (the only one that sees the prompt subject) with the per-call function pinning the target's id. The SDK drops a record whose status subject is not the prompt subject with the verb swapped; mash's subjects pass that. |
-| Reply inbox layout `_INBOX.<owner>.<flat>.<client-id>.<route>` | `caller.WithInboxPrefix` | waits (S5, the pin bump to v0.1.1) | SDK v0.1.1 emits it: the client id is 16 characters and the route token 26 (130 bits), one subscription on `prefix.>`, and a reply with no route is dropped and counted. v0.1.0 had a 16-character route, short of the 128 bits the contract asks. Adopted in S5 on the v0.1.1 pin. |
-| `reply` MCP tool and the 10-minute prompt timeout, 30-second keepalive (`service.go`) | the SDK caller's prompt stream | adopted at S5 for the caller side; kept in mash for the endpoint side | The endpoint side is the host: see below. |
+| `internal/endpoint/client.go` live prompt caller (discovery in `service.go`, the prompt sender) | `caller` (package `caller`: discover, prompt) | kept in mash: SAP departure | Amendment 5 (A): discovery, presence and the prompt sender stay in mash. S5 adds REQ-016's checks and the TO-12 count to them; no second caller is built. The four rows below are the gaps that keep the SDK caller out, each with its exit. |
+| Verified-identity requirement on the target (`verifyRegistration`, `directory.go`) | `caller.WithRequireVerifiedIdentityFunc` or `caller.TrustPolicy.Accept` | kept in mash (one verify step, called by presence and by the recipient discovery of `prompt`) | The `id_sig` verifies, and the prompt subject's address, the user key and the account match the directory record. Not yet compared: `metadata.owner` with the record's owner, because an SDK host registers under another token and main has always accepted that; it waits for a ruling. An answer that fails is counted once (`Endpoint.AnswersNotVerified`) and never attributed to the endpoint it names. Nothing is printed until W. |
+| Reply inbox `_INBOX.<owner>.<flat>.<token>` (`secretInbox`, `service.go`) | `caller.WithInboxPrefix` (`_INBOX.<owner>.<flat>.<client-id>.<route>`) | kept in mash (no change) | One token of 128 bits (16 bytes, 32 hex characters) from `crypto/rand`, fresh for each request, under the owner-scoped prefix the permissions allow. The presence probe uses it too. The SDK layout is not adopted, so the reply-subject change of the contract fell away. |
+| The owner slot: mash puts the owner in the third subject token | `CheckSubjectConsistency`, which drops a record whose fourth token is not `metadata.owner` | kept in mash: SAP departure | Every mash registration would be dropped by the SDK caller. SAP 0.3 says the token should match the owner (line 58) and also that it matches the fourth token (line 165). Exit: Synadia's answer on whether a caller may drop a record whose subject tokens differ from its metadata. |
+| The heartbeat scope: mash grants an endpoint its own owner's heartbeats only | the SDK's discovery subscribes to `agents.hb.*.*.*` | kept in mash: SAP departure | The `admin/permissions` golden cannot change here. Exit: an SDK way to subscribe to a narrower heartbeat subject. |
+| The prompt body: mash sends the bare text | the SDK sends `{"prompt":"..."}` | kept in mash: SAP departure | Both are valid SAP (0.3 section 5.1 allows the text as shorthand), and mash's bytes stay as they are. Exit: plain text or JSON is a wire choice for Randy. |
+| The 32768-byte prompt boundary (`MaxPromptBytes`) | the SDK counts the headers toward `max_payload`, as SAP does (section 5.4) | kept in mash: SAP departure | The SDK refuses a prompt of exactly 32768 bytes that mash accepts (#1536). Exit: the boundary, listed as a difference in AT-008. |
+| `reply` MCP tool and the 10-minute prompt timeout, 30-second keepalive (`service.go`) | the SDK caller's prompt stream | kept in mash (the caller side stays mash's own under amendment 5; the endpoint side is the host) | The endpoint side is the host: see below. |
 
 ## Host and serve
 
@@ -100,15 +104,13 @@ A symbol or behaviour that could not be confirmed in the source is written `unve
 | `mashctl` administration | none | kept in mash | Standalone, no NATS client in the display path. |
 | `internal/natsauth` and the permission templates (`admin/permissions.go`, ADR 0102) | none | kept in mash | The SDK does not model accounts or permissions. |
 | Policy packages (`internal/policy*`) | none | kept in mash | The 0.6.0 policy engine. Switched off, and a release candidate that links one is refused by `releasecheck`. |
-| SDK `tools`, `connect`, `agentstest`, `conformance` | n/a | not used by shipped mash | `conformance` and `agentstest` serve stage C and the tests only. `tools` and `connect` are not used (S5 does not need `connect`: `caller.New` takes a `*nats.Conn`, and `caller` and `identity` do not import `connect`). |
+| SDK `tools`, `connect`, `agentstest`, `conformance` | n/a | not used by shipped mash | `conformance` and `agentstest` serve stage C and the tests only. `tools` and `connect` are not used (S5 builds no SDK caller). |
 
 ## Where mash differs from plain SAP, and why
 
 ### The address layout
 
 A SAP agent subject is `agents.<verb>.<owner>.<agent-type>.<name>` in the SDK's spelling, with the agent type in the metadata as well. mash uses three tokens, `owner.group.instance`, and puts them where SAP puts its owner and name tokens: the wire subject is `agents.<verb>.<owner>.<group>.<instance>`. The metadata field `agent` carries `claude-code`. This follows ADR 0145 and ADR 0074. The reason is that mash names a person's session by who owns it, which fleet it is in and which session it is, and SAP's single name slot cannot hold that. At S3 mash builds the subject with `NewAgentSubject("claude-code", group, instance, WithSubjectToken(owner))`, so the SDK's owner argument holds mash's group and the subject-token option carries mash's owner. This is an adapter detail, not a protocol change.
-
-The reply suffix is a 16-character client id and a 26-character route token, both base32; it is the only two-token part of the layout.
 
 ### The token rule and the flat key
 
@@ -128,7 +130,7 @@ SAP has live prompts: the caller sends, the agent answers or does not. mash adds
 
 ### The reply inbox prefix and the nonce oracle
 
-mash's reply inbox prefix is `_INBOX.<owner>.<flat>`, followed by a 128-bit random token from the system's random source, so that account permissions can limit what each endpoint may subscribe to. S5 changes the layout to `_INBOX.<owner>.<flat>.<client-id>.<route>`, which needs SDK #81. `natsauth` guards against the nonce oracle, a way to get an endpoint to sign a server-chosen nonce. That guard stays in mash.
+mash's reply inbox prefix is `_INBOX.<owner>.<flat>`, followed by a 128-bit random token from the system's random source, so that account permissions can limit what each endpoint may subscribe to. The layout does not change at S5. `natsauth` guards against the nonce oracle, a way to get an endpoint to sign a server-chosen nonce. That guard stays in mash.
 
 ### The ten refused shapes and X1 to X3
 

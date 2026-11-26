@@ -136,7 +136,9 @@ type Endpoint struct {
 	pre prefetched
 
 	dropped atomic.Int64
-	service *service
+	// notVerified is the discovery answers that failed verification, over the endpoint's life (AnswersNotVerified).
+	notVerified atomic.Int64
+	service     *service
 
 	// The hook hand-over (hook.go): nil until SetSpool; since is when this session began, so only a hook run in this
 	// session switches delivery to the spool.

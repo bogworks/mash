@@ -28,9 +28,24 @@ func TestPromptRefusalReachesStderrUnchanged(t *testing.T) {
 			w := newWorld(t, "alpha", "beta")
 			target := w.e.ConnAs(t, w.env["beta"]["MASH_CREDS"], "beta")
 			subj := mustSubj(tAddr("beta")).Prompt
+			// Discovery verifies a registration (REQ-016), so the target registers as a real endpoint does: its own
+			// user, account, agent and owner, and an id_sig over them and the prompt subject.
+			credsData, err := os.ReadFile(w.env["beta"]["MASH_CREDS"])
+			if err != nil {
+				t.Fatal(err)
+			}
+			id, err := sap.IdentityFromCreds(credsData)
+			if err != nil {
+				t.Fatal(err)
+			}
+			idSig, err := id.IDSig(sap.AgentName, w.e.Owner, subj)
+			if err != nil {
+				t.Fatal(err)
+			}
 			svc, err := micro.AddService(target, micro.Config{
 				Name: sap.ServiceName, Version: "0.0.1",
-				Metadata: map[string]string{"owner": w.e.Owner},
+				Metadata: map[string]string{"owner": w.e.Owner, "agent": sap.AgentName, "user_nkey": id.User,
+					"account": id.Account, "id_sig": idSig},
 			})
 			if err != nil {
 				t.Fatal(err)

@@ -465,17 +465,22 @@ func Discover(ctx context.Context, nc *nats.Conn, a sap.Address) (string, error)
 	if err != nil {
 		return "", err
 	}
-	return discoverSubject(ctx, nc, s.Prompt, a.Flat())
+	return discoverSubject(ctx, nc, s.Prompt, a.Flat(), nil)
 }
 
-func discoverSubject(ctx context.Context, nc *nats.Conn, want, name string) (string, error) {
+// discoverSubject sends one discovery request and returns want when an answer carries a verified registration at that
+// prompt subject (judgeAnswer, REQ-016). e is the endpoint whose directory the answers are checked against, and which
+// counts the answers that fail (TO-12); nil means the package-level Discover, which has no directory. An invalid answer
+// is skipped and never ends the discovery. On a valid answer the caller is not kept waiting: the rest of the window is
+// read in the background, so a late invalid answer is still counted.
+func discoverSubject(ctx context.Context, nc *nats.Conn, want, name string, e *Endpoint) (string, error) {
 	inbox := secretInbox(nc)
 	sub, err := nc.SubscribeSync(inbox)
 	if err != nil {
 		return "", err
 	}
-	defer sub.Unsubscribe()
 	if err := nc.PublishRequest("$SRV.INFO."+sap.ServiceName, inbox, nil); err != nil {
+		_ = sub.Unsubscribe()
 		return "", err
 	}
 	deadline := time.Now().Add(2 * time.Second)
@@ -484,20 +489,26 @@ func discoverSubject(ctx context.Context, nc *nats.Conn, want, name string) (str
 		if err != nil {
 			break
 		}
-		var info micro.Info
-		if json.Unmarshal(m.Data, &info) != nil {
+		if !e.judgeAnswer(m.Data, want) {
 			continue
 		}
-		for _, ep := range info.Endpoints {
-			if ep.Name == "prompt" {
-				// Any peer can answer the broadcast: accept only the subject SAP derives from the target's name, so
-				// a forged answer can neither redirect the prompt nor name a subject its sender could read.
-				if ep.Subject == want {
-					return want, nil
-				}
-			}
+		if e == nil {
+			_ = sub.Unsubscribe()
+			return want, nil
 		}
+		go func() {
+			defer sub.Unsubscribe()
+			for time.Now().Before(deadline) {
+				m, err := sub.NextMsg(time.Until(deadline))
+				if err != nil {
+					return
+				}
+				e.judgeAnswer(m.Data, want)
+			}
+		}()
+		return want, nil
 	}
+	_ = sub.Unsubscribe()
 	return "", fmt.Errorf("mash: %s is not online (no SAP registration answered)", sap.Display(name))
 }
 

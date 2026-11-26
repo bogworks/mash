@@ -1,15 +1,14 @@
 package endpoint
 
-// AT-016 (REQ-015): reply subjects. The layout ruled in #3593 (OPEN-05 (a), CHG-15) is
-// _INBOX.<owner>.<flat>.<client-id>.<route>, the route token fresh for each request with at least 128 bits from
-// crypto/rand (the pinned SDK's randToken, caller/mux.go in v0.1.1, 26 base32 characters, 130 bits). The golden is
+// AT-016 (REQ-015): reply subjects. Under amendment 5 (i) the layout is main's own, secretInbox
+// (internal/endpoint/service.go): the owner-scoped prefix _INBOX.<owner>.<flat>. and one token of 128 random bits from
+// crypto/rand, 32 hex characters, fresh for each request (CHG-15's client-id and route tokens fell away). The golden is
 // admin.Permissions: the subjects must be inside what the owner's connection may subscribe to, and no other owner may
 // subscribe to or publish on them.
 
 import (
 	"bytes"
 	"encoding/hex"
-	"regexp"
 	"strings"
 	"testing"
 	"testing/cryptotest"
@@ -18,9 +17,8 @@ import (
 	"github.com/bogworks/mash/internal/admin"
 )
 
-// TestS5AT016_ReplyLayout: every discovery and prompt reply subject the caller used, captured on the server, has the
-// prefix and the two tokens; the client-id token is shared by all of the caller's requests; each route token is
-// fresh and at least 26 base32 characters; and the caller's own report of its reply subjects is the captured set.
+// TestS5AT016_ReplyLayout: every discovery and prompt reply subject main used, captured on the server, has the
+// owner-scoped prefix and one token of 32 hex characters (128 bits), and each request has a fresh token.
 func TestS5AT016_ReplyLayout(t *testing.T) {
 	needS5Caller(t, "AT-016 layout")
 	z := newS5Fix(t)
@@ -36,55 +34,66 @@ func TestS5AT016_ReplyLayout(t *testing.T) {
 		t.Fatalf("prompt: %q, %v", chunks, err)
 	}
 	seen := tp.replySubjectsFrom(z.alice)
-	if len(seen) < 4 { // two discoveries, the prompt's discovery, the prompt
+	if len(seen) < 4 { // two presence probes, the prompt's discovery, the prompt
 		t.Fatalf("captured %d reply subjects, want at least 4: %q", len(seen), seen)
 	}
-	cid, routes := "", map[string]bool{}
+	tokens := map[string]bool{}
 	for _, s := range seen {
-		id, route, problem := s5Layout(z.alice, s)
+		tok, problem := s5Layout(z.alice, s)
 		if problem != "" {
 			t.Fatal(problem)
 		}
-		if cid == "" {
-			cid = id
+		if tokens[tok] {
+			t.Fatalf("token %q used by two requests", tok)
 		}
-		if id != cid {
-			t.Fatalf("client-id token changed between requests: %q then %q", cid, id)
-		}
-		if routes[route] {
-			t.Fatalf("route token %q used by two requests", route)
-		}
-		routes[route] = true
-	}
-	// whatever the caller reports of its own use is part of what the server saw; it may report none (the SDK may not
-	// expose a reply subject), and the server's view above is the evidence
-	reported := cl.ReplySubjects()
-	for _, r := range reported {
-		found := false
-		for _, s := range seen {
-			found = found || s == r
-		}
-		if !found {
-			t.Fatalf("the caller reports reply subject %q that the server never saw", r)
-		}
+		tokens[tok] = true
 	}
 	if v := c.violations(); len(v) != 0 {
 		t.Fatalf("the golden refused the caller's own subjects: %q", v)
 	}
 }
 
-// TestS5AT016_RouteTokenComesFromCryptoRand replaces the entropy source in the caller's real path: with
+// TestS5AT016_SecretInboxBits: secretInbox (service.go) carries 128 bits (16 bytes, 32 hex characters) after the
+// owner-scoped prefix, REQ-015's floor, and the bits are drawn from crypto/rand (the token repeats under one
+// cryptotest seed and changes with another, which a NUID, math/rand or a clock would not do).
+func TestS5AT016_SecretInboxBits(t *testing.T) {
+	z := newS5Fix(t)
+	nc := z.connect(t, z.alice).nc
+	token := func(subject string) string {
+		tok, problem := s5Layout(z.alice, subject)
+		if problem != "" {
+			t.Fatal(problem)
+		}
+		return tok
+	}
+	cryptotest.SetGlobalRandom(t, 1)
+	a1 := token(secretInbox(nc))
+	cryptotest.SetGlobalRandom(t, 1)
+	a2 := token(secretInbox(nc))
+	cryptotest.SetGlobalRandom(t, 2)
+	b1 := token(secretInbox(nc))
+	if raw, err := hex.DecodeString(a1); err != nil || len(raw)*8 < 128 {
+		t.Fatalf("token %q carries %d bits (%v), want at least 128", a1, len(raw)*8, err)
+	}
+	if a1 != a2 || a1 == b1 {
+		t.Fatalf("tokens %q, %q under seed 1 and %q under seed 2: not drawn from crypto/rand", a1, a2, b1)
+	}
+	a3, a4 := token(secretInbox(nc)), token(secretInbox(nc))
+	if a3 == a4 {
+		t.Fatalf("two inboxes in a row have the same token %q", a3)
+	}
+}
+
+// TestS5AT016_TokenComesFromCryptoRand replaces the entropy source in main's real path: with
 // cryptotest.SetGlobalRandom (which replaces crypto/rand process-wide) fixed to one seed, two callers built on two
-// fresh connections emit the same client-id and route token for their first request; a different seed gives different
-// ones. Within one run the routes differ request to request. A token drawn from anywhere but crypto/rand (math/rand,
-// a NUID, a clock) would not repeat under the seed, or would not change with it. This is the "counter" check of
-// AT-016 in the form the SDK allows: v0.1.1 has no entropy-source option, so the replacement is crypto/rand itself.
-func TestS5AT016_RouteTokenComesFromCryptoRand(t *testing.T) {
+// fresh connections emit the same token for their first request; a different seed gives different ones. A token drawn
+// from anywhere but crypto/rand (math/rand, a NUID, a clock) would not repeat under the seed, or would not change with it.
+func TestS5AT016_TokenComesFromCryptoRand(t *testing.T) {
 	needS5Caller(t, "AT-016 entropy source")
 	z := newS5Fix(t)
 	z.serveEcho(t, z.bob, nil)
 	tp := z.tap(t, "$SRV.INFO.>")
-	first := func(seed uint64) (cid, route string) {
+	first := func(seed uint64) string {
 		env, _ := z.env(t, z.alice, s5Inputs{})
 		before := len(tp.replySubjectsFrom(z.alice))
 		cryptotest.SetGlobalRandom(t, seed) // after every connect: the server draws from crypto/rand when one is accepted
@@ -97,34 +106,32 @@ func TestS5AT016_RouteTokenComesFromCryptoRand(t *testing.T) {
 		if len(subs) <= before {
 			t.Fatalf("no discovery request captured under seed %d", seed)
 		}
-		id, route, problem := s5Layout(z.alice, subs[before])
+		tok, problem := s5Layout(z.alice, subs[before])
 		if problem != "" {
 			t.Fatal(problem)
 		}
-		return id, route
+		return tok
 	}
-	c1, r1 := first(1)
-	c2, r2 := first(1)
-	c3, r3 := first(2)
-	if c1 != c2 || r1 != r2 {
-		t.Fatalf("the same crypto/rand seed gave different tokens (%s.%s, %s.%s): the tokens do not come from crypto/rand", c1, r1, c2, r2)
+	t1, t2, t3 := first(1), first(1), first(2)
+	if t1 != t2 {
+		t.Fatalf("the same crypto/rand seed gave different tokens (%s, %s): the token does not come from crypto/rand", t1, t2)
 	}
-	if c1 == c3 || r1 == r3 {
-		t.Fatalf("a different crypto/rand seed gave the same token (%s.%s, %s.%s): the tokens do not come from crypto/rand", c1, r1, c3, r3)
+	if t1 == t3 {
+		t.Fatalf("a different crypto/rand seed gave the same token (%s, %s): the token does not come from crypto/rand", t1, t3)
 	}
 }
 
 // s5ObserverCases is AT-016's observer test and AT-022 item 3 (the caller must already be needed by the caller of
 // this function). A same-owner observer (carol) sees the reply subject of the requester's discovery on $SRV.>, then
-// publishes to the NUID successors and the simple increments of the per-request token, and to the client-id token it
-// saw with guessed route tokens (also one token under the flat prefix, main's layout). The requester accepts none.
+// publishes to the NUID successors and the simple increments of the per-request token, and to random tokens of its
+// form, all under the prefix main uses. The requester accepts none.
 func s5ObserverCases(t *testing.T) {
 	z := newS5Fix(t)
 	genuine := z.genuineRegistration(t, z.bob)
 
 	t.Run("discovery", func(t *testing.T) {
 		// Bob is offline. Carol replays bob's genuine (valid) registration on every guess, so a guess that hit the
-		// requester's route would make bob look online.
+		// requester's reply subject would make bob look online.
 		attacks := z.observe(t, genuine)
 		cl, _ := z.caller(t, z.alice, s5Inputs{})
 		got, err := cl.Discover(s5Ctx(t), z.bob)
@@ -169,15 +176,15 @@ func TestS5AT016_ObserverGuessesAreNotAccepted(t *testing.T) {
 	s5ObserverCases(t)
 }
 
-// TestS5AT016_PermissionsAllowTheNewReplyLayout runs now, against the real server's permissions (admin.Permissions is
-// what every JWT carries, checked when the fixture is built). The subjects of the ruled layout, and main's one-token
-// layout, are inside the owner's grant; another owner can neither subscribe to nor publish on them; a same-owner peer
-// cannot subscribe to them but, as REQ-021 records, can publish on them.
-func TestS5AT016_PermissionsAllowTheNewReplyLayout(t *testing.T) {
+// TestS5AT016_PermissionsAllowMainsReplyLayout runs against the real server's permissions (admin.Permissions is what
+// every JWT carries, checked when the fixture is built). Main's reply subject, the owner-scoped prefix and one token,
+// and a deeper one (the grant allows any depth), are inside the owner's grant; another owner can neither subscribe to
+// nor publish on them; a same-owner peer cannot subscribe to them but, as REQ-021 records, can publish on them.
+func TestS5AT016_PermissionsAllowMainsReplyLayout(t *testing.T) {
 	z := newS5Fix(t)
 	subjects := map[string]string{
-		"ruled layout":  z.alice.InboxPrefix() + ".abcdefghijklmnop." + "abcdefghijklmnopqrstuvwxyz",
 		"main's layout": z.alice.InboxPrefix() + "." + hex.EncodeToString(bytes.Repeat([]byte{0xa5}, 16)),
+		"deeper":        z.alice.InboxPrefix() + ".abcdefghijklmnop.abcdefghijklmnopqrstuvwxyz",
 	}
 	perms := admin.Permissions(z.alice)
 	if !strings.Contains(strings.Join(perms.Sub.Allow, " "), z.alice.InboxPrefix()+".>") || !strings.Contains(strings.Join(perms.Pub.Allow, " "), "_INBOX.acme.>") {
@@ -240,8 +247,6 @@ func TestS5AT016_PermissionsAllowTheNewReplyLayout(t *testing.T) {
 		})
 	}
 }
-
-var s5Hex32 = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
 // TestS5Today_ReplyInboxIsOneToken records what main sends, the oracle of AT-008 for reply subjects: both the
 // discovery and the prompt reply subject are the connection's owner-scoped prefix and one token of 32 hex

@@ -1,14 +1,15 @@
 package endpoint
 
 // AT-008 (REQ-008, REQ-015): S5 on the wire. The request subjects and headers of discovery and prompt are captured on
-// main's code path and on the constructor with the deterministic inputs of REQ-015 (fixed clock, nonce and random
-// source) and compared; reply subjects are not compared byte for byte (AT-016 checks them).
+// the reference (the same steps with the clock and nonce fixed, s5TodayPrompt) and on main's own discovery and prompt
+// sender through the S5 seam, and compared; reply subjects are not compared byte for byte (AT-016 checks them).
 //
-// "Main's path" here is this package's own client code (Discover, Prompt). Its signing clock and nonce are hard-wired
-// inside promptMsg, so the byte comparison drives the same steps with the inputs fixed (s5TodayPrompt, a test driver),
-// and a drift guard checks the driver's header against the real Prompt's. The mixed-version cases (old asker, new
-// responder and the reverse) use today's code as the old side. The real-binary variants (the last released 0.5.x mash
-// downloaded in a guest, and W's binary) are W's; the endpoint service of S5's commit is this package's service.go.
+// Main's promptMsg draws its clock and nonce inside, so the two differ by ts, nonce and sig. Amendment 5 (N8) masks
+// those three values from byte equality only on three conditions, all asserted: ts and the nonce are checked for form,
+// the signature verifies over the captured bytes, and everything else is byte-equal. A drift guard checks the fixed
+// reference's header against the real Prompt's. The mixed-version cases (old asker, new responder and the reverse) use
+// today's code as the old side. The real-binary variants (the last released 0.5.x mash downloaded in a guest, and W's
+// binary) are W's; the endpoint service of this commit is this package's service.go.
 
 import (
 	"bytes"
@@ -199,9 +200,9 @@ func TestS5Today_WireOracle(t *testing.T) {
 	}
 }
 
-// TestS5AT008_WireEqualsToday: the constructor, with the same fixed clock and nonce and crypto/rand fixed, puts the
-// same request subjects and headers (and payloads) on the wire as main. Any difference is listed and ruled by Randy
-// (REQ-008), so the test fails on it rather than hiding it.
+// TestS5AT008_WireEqualsToday: main's own discovery and prompt sender, through the S5 seam, put the same request
+// subjects, headers (ts, nonce and sig masked as N8 says) and payloads on the wire as the reference with the clock and
+// nonce fixed. Any difference is listed and ruled by Randy (REQ-008), so the test fails on it rather than hiding it.
 func TestS5AT008_WireEqualsToday(t *testing.T) {
 	needS5Caller(t, "AT-008 wire equality")
 	z := newS5Fix(t)
@@ -229,7 +230,7 @@ func TestS5AT008_WireEqualsToday(t *testing.T) {
 			t.Errorf("%s payload: %q, main %q", what, got.Data, exp.Data)
 		}
 		// Headers: byte-equal once the three values that depend on the clock, the nonce and the signature are masked
-		// (the constructor may have no clock or nonce option, see the s5Env note), and ts and nonce are format-checked and the new signature must verify over the captured bytes.
+		// (N8), on the conditions that ts and nonce are format-checked and the signature verifies over the captured bytes.
 		gh, eh := s5MaskSender(got.Header), s5MaskSender(exp.Header)
 		if !reflect.DeepEqual(gh, eh) {
 			t.Errorf("%s headers: %v, main %v", what, gh, eh)
@@ -288,7 +289,7 @@ func TestS5AT008_Mixed2_NewAskerDiscoversOldResponder(t *testing.T) {
 	if len(d) != 1 {
 		t.Fatalf("captured %d discovery requests", len(d))
 	}
-	if _, _, problem := s5Layout(z.alice, d[0].Reply); problem != "" {
+	if _, problem := s5Layout(z.alice, d[0].Reply); problem != "" {
 		t.Fatal(problem)
 	}
 	if v := c.violations(); len(v) != 0 {
@@ -340,7 +341,7 @@ func TestS5AT008_Mixed4_NewAskerPromptsOldResponder(t *testing.T) {
 	if len(p) != 1 {
 		t.Fatalf("captured %d prompt requests", len(p))
 	}
-	if _, _, problem := s5Layout(z.alice, p[0].Reply); problem != "" {
+	if _, problem := s5Layout(z.alice, p[0].Reply); problem != "" {
 		t.Fatal(problem)
 	}
 	if v := c.violations(); len(v) != 0 {
@@ -366,6 +367,7 @@ func s5OverLimit(t *testing.T, z *s5Fix, prompt func(text string) (string, error
 	if got, err := prompt(at); err != nil || got != "ok" {
 		t.Fatalf("a prompt of exactly %d bytes: %q, %v", MaxPromptBytes, got, err)
 	}
+	s5Wait(t, "the tap to see the exact-size prompt", 5*time.Second, func() bool { return len(tp.all()) >= 1 })
 	before := len(tp.all())
 	_, err := prompt(at + "x")
 	if err == nil || !strings.Contains(err.Error(), PromptTooLargeCode) {

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"sync/atomic"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -51,10 +52,15 @@ func (e *Endpoint) pollDirectory(ctx context.Context, every time.Duration) {
 	}
 }
 
-// applyPresence records the agents a $SRV.INFO answer vouches for as seen now, when its id_sig verifies and its key
-// is the directory's key for the address in the prompt subject. The address comes from the subject alone; metadata
-// owner is not a filter (an SDK host registers under another token) and never names the address.
-func (e *Endpoint) applyPresence(m *nats.Msg) (counted int) {
+// registration is one prompt endpoint of a $SRV.INFO answer, with the metadata that vouches for it.
+type registration struct {
+	Subject  string
+	Metadata map[string]string
+}
+
+// parseAnswer is the prompt registrations a $SRV.INFO answer carries. An answer that is not JSON, or names no prompt
+// endpoint, carries none: it is not a registration to verify, and is not counted (TO-12).
+func parseAnswer(data []byte) []registration {
 	var info struct {
 		Metadata  map[string]string `json:"metadata"`
 		Endpoints []struct {
@@ -62,27 +68,137 @@ func (e *Endpoint) applyPresence(m *nats.Msg) (counted int) {
 			Subject string `json:"subject"`
 		} `json:"endpoints"`
 	}
-	if json.Unmarshal(m.Data, &info) != nil {
-		return 0
+	if json.Unmarshal(data, &info) != nil {
+		return nil
 	}
-	md := info.Metadata
+	var regs []registration
 	for _, ep := range info.Endpoints {
-		if ep.Name != "prompt" {
-			continue
+		if ep.Name == "prompt" {
+			regs = append(regs, registration{Subject: ep.Subject, Metadata: info.Metadata})
 		}
-		a, _, ok := sap.AddressFromSubject(ep.Subject)
-		name := a.Flat()
-		if !ok || !sap.VerifyIDSig(md["user_nkey"], md["account"], md["agent"], md["owner"], ep.Subject, md["id_sig"]) {
-			continue
-		}
+	}
+	return regs
+}
+
+// dirView is what the directory says about one registration: the endpoint that holds its user_nkey, and the record of
+// the address its prompt subject names.
+type dirView struct {
+	holder string
+	rec    store.Record
+	hasRec bool
+}
+
+// viewOfLocked reads the directory for reg. The caller holds e.mu.
+func (e *Endpoint) viewOfLocked(reg registration) *dirView {
+	d := &dirView{holder: e.byUser[reg.Metadata["user_nkey"]]}
+	if a, _, ok := sap.AddressFromSubject(reg.Subject); ok {
+		d.rec, d.hasRec = e.dir[a.Flat()]
+	}
+	return d
+}
+
+// verifyRegistration is mash's one verify step for a discovery answer (REQ-016); both discoveries (presence and the
+// recipient discovery of prompt) call it, through verifyStep, so that the mutation test of AT-010 can take the step out
+// (replace it with one that accepts) and show AT-015's negative cases fail. verifyStep is atomic because a discovery
+// that has returned still reads the rest of its window in the background. It returns the address name the registration vouches for and whether it
+// is verified: the id_sig verifies over the user_nkey, account, agent, owner and prompt subject, and, when d is not
+// nil, the user_nkey is the directory's key for the address in the prompt subject and the account is the record's.
+// A nil d is a caller with no directory: only the id_sig is checked.
+//
+// metadata.owner is not compared with the record's owner: an SDK host registers under another token, and main has
+// always accepted that (TestApplyPresenceIgnoresMetadataOwner). REQ-016 asks for the comparison; it waits for a ruling.
+func verifyRegistration(reg registration, d *dirView) (name string, ok bool) {
+	a, _, ok := sap.AddressFromSubject(reg.Subject)
+	if !ok {
+		return "", false
+	}
+	name = a.Flat()
+	md := reg.Metadata
+	if !sap.VerifyIDSig(md["user_nkey"], md["account"], md["agent"], md["owner"], reg.Subject, md["id_sig"]) {
+		return name, false
+	}
+	if d == nil {
+		return name, true
+	}
+	if !d.hasRec || d.holder != name {
+		return name, false
+	}
+	if d.rec.Account != "" && md["account"] != d.rec.Account {
+		return name, false
+	}
+	return name, true
+}
+
+// verifyFunc is the type of the verify step.
+type verifyFunc func(reg registration, d *dirView) (name string, ok bool)
+
+// verifyStep holds the verify step in use: verifyRegistration, except in the mutation test of AT-010.
+var verifyStep = func() *atomic.Pointer[verifyFunc] {
+	var p atomic.Pointer[verifyFunc]
+	f := verifyFunc(verifyRegistration)
+	p.Store(&f)
+	return &p
+}()
+
+// verify runs the verify step in use.
+func verify(reg registration, d *dirView) (string, bool) { return (*verifyStep.Load())(reg, d) }
+
+// AnswersNotVerified is how many discovery answers failed verification over this endpoint's life, each counted once
+// per discovery (TO-12, REQ-016). It is kept and not printed: no view shows it until W.
+func (e *Endpoint) AnswersNotVerified() int { return int(e.notVerified.Load()) }
+
+// applyPresence records the agents a $SRV.INFO answer vouches for as seen now, when the verify step accepts them.
+// The address comes from the subject alone; metadata owner is not a filter and never names the address. It returns
+// how many registrations it counted, and 1 when the answer carried a registration that failed verification: that is
+// counted once, in AnswersNotVerified, and attributed to no endpoint. An invalid answer changes nothing else.
+func (e *Endpoint) applyPresence(m *nats.Msg) (counted, rejected int) {
+	failed := false
+	for _, reg := range parseAnswer(m.Data) {
 		e.mu.Lock()
-		if e.byUser[md["user_nkey"]] == name {
+		name, ok := verify(reg, e.viewOfLocked(reg))
+		if ok {
 			e.lastSeen[name] = time.Now()
 			counted++
 		}
 		e.mu.Unlock()
+		if !ok {
+			failed = true
+		}
 	}
-	return counted
+	if failed {
+		rejected = 1
+		e.notVerified.Add(1)
+	}
+	return counted, rejected
+}
+
+// judgeAnswer is the recipient discovery's reading of one answer: it reports whether the answer carries a verified
+// registration at the prompt subject want, and counts once an answer that carries a registration that fails
+// verification. An invalid answer never ends the discovery. A nil e is the package-level Discover, which has no
+// directory and, as it always has, matches the prompt subject alone (TestDiscoverMatchesSubjectNotMetadata): nothing in
+// production calls it, `mash prompt` goes through Endpoint.DiscoverRecipient.
+func (e *Endpoint) judgeAnswer(data []byte, want string) (vouched bool) {
+	failed := false
+	for _, reg := range parseAnswer(data) {
+		if e != nil {
+			e.mu.RLock()
+			d := e.viewOfLocked(reg)
+			e.mu.RUnlock()
+			if _, ok := verify(reg, d); !ok {
+				failed = true
+				continue
+			}
+		}
+		// Any peer can answer the broadcast: accept only the subject SAP derives from the target's name, so a
+		// forged answer can neither redirect the prompt nor name a subject its sender could read.
+		if reg.Subject == want {
+			vouched = true
+		}
+	}
+	if failed {
+		e.notVerified.Add(1)
+	}
+	return vouched
 }
 
 // flatOf is a record's flat directory key, owner_group_instance.
