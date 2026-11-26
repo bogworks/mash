@@ -2,7 +2,7 @@
 // anything the NATS server would not enforce exactly as the lists say.
 //
 // The contract is mash-messaging-policy draft-2 (REQ-001 to REQ-006, AT-002, AT-004; ADR 0102). A list set is, for one
-// NATS account (one range), a shared or closed switch per owner group and verb, and per sending address an allow list
+// NATS account (one owner), a shared or closed switch per group and verb, and per sending address an allow list
 // and a deny list of exact three-part addresses. This package has no file format (DEC-004 is open): ListSet is the
 // shape a decoded list set would have, so that bad shapes can be refused.
 //
@@ -20,7 +20,7 @@ import (
 // watches the heartbeats it is allowed, and publishes only its own).
 type Verb string
 
-// The four verbs. Every owner group with a sender states a switch for each of them.
+// The four verbs. Every group with a sender states a switch for each of them.
 const (
 	Mail      Verb = "mail"
 	Prompt    Verb = "prompt"
@@ -31,7 +31,7 @@ const (
 // Verbs lists the four verbs in the order the package reports them.
 var Verbs = []Verb{Mail, Prompt, Status, Heartbeat}
 
-// subject is the subject word of v: agents.<subject>.<range>.<owner>.<name>. Heartbeat is "hb" (SAP).
+// subject is the subject word of v: agents.<subject>.<owner>.<group>.<instance>. Heartbeat is "hb" (SAP).
 func (v Verb) subject() string {
 	if v == Heartbeat {
 		return "hb"
@@ -48,7 +48,7 @@ func (v Verb) valid() bool {
 	return false
 }
 
-// Switch is the setting of one owner group for one verb. Shared turns the owner line on: every sender of the group
+// Switch is the setting of one group for one verb. Shared turns the owner line on: every sender of the group
 // reaches every address of the group. Closed leaves a sender only the addresses on its allow list.
 type Switch string
 
@@ -60,19 +60,19 @@ const (
 
 // ListSet is the switches and lists for one account.
 type ListSet struct {
-	// Range is the account's range part. Every address and group must carry it.
-	Range string
+	// Owner is the account's owner part. Every address and group must carry it.
+	Owner string
 	// Base is the generation the submitter based this list set on: the one in force when it was written, 0 when
 	// nothing was in force. Accept refuses a list set whose Base is not the generation in force (REQ-017).
 	Base uint64
-	// Switches holds the group-wide switches. A sender's owner group must state all four verbs, each once.
+	// Switches holds the group-wide switches. A sender's group must state all four verbs, each once.
 	Switches []SwitchEntry
 	// Senders holds one entry per sending address. A sender with empty lists is still listed: it gets a credential
 	// that reaches only what its group's shared verbs give.
 	Senders []SenderLists
 }
 
-// SwitchEntry sets one verb for one owner group. Group is "range.owner". A three-part address in Group is a switch
+// SwitchEntry sets one verb for one group. Group is "owner.group". A three-part address in Group is a switch
 // for a single sender, which is refused.
 type SwitchEntry struct {
 	Group  string
@@ -80,11 +80,11 @@ type SwitchEntry struct {
 	Switch Switch
 }
 
-// SenderLists are the exceptions of one sending address, all three-part addresses "range.owner.name".
+// SenderLists are the exceptions of one sending address, all three-part addresses "owner.group.instance".
 //
-// Allow names the addresses reachable beyond the owner line. Deny names addresses of the sender's own owner group
+// Allow names the addresses reachable beyond the owner line. Deny names addresses of the sender's own group
 // taken away from a shared verb; it is refused when the group has no shared verb, when the target is outside the
-// sender's owner group, or when the same address is also allowed. An empty list means nobody, never everyone.
+// sender's group, or when the same address is also allowed. An empty list means nobody, never everyone.
 type SenderLists struct {
 	Sender string
 	Allow  []string

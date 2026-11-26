@@ -6,7 +6,7 @@ server nats-b: generation 6
 server nats-c: generation unknown
 notice: partial application: servers hold different generations (nats-a: 7, nats-b: 6, nats-c: unknown)
 generation: 7
-range: foo
+owner: foo
 
 switches:
   foo.c mail shared

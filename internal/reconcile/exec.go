@@ -178,7 +178,7 @@ func Execute(ctx context.Context, in ExecInput) (Result, error) {
 	if err != nil {
 		return res0, fmt.Errorf("reconcile: the JWT in force does not decode: %w", err)
 	}
-	kept, err := OtherRangesKept(prevClaims, in.Held, ls.Range)
+	kept, err := OtherRangesKept(prevClaims, in.Held, ls.Owner)
 	if err != nil {
 		return res0, fmt.Errorf("reconcile: %w", err)
 	}

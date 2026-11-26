@@ -14,7 +14,7 @@
 // generation, by finishing the push or pushing the previous generation again, before any policy is reported in force.
 //
 // Probe credentials. mash never holds a sender's seed, so it cannot replay the sender's own credential. A probe is
-// minted by mash under the same owner-group scoped key with the sender's OLD name and OLD tags; under the template
+// minted by mash under the same group scoped key with the sender's OLD name and OLD tags; under the template
 // that is exactly the old credential's permissions. ProbeCred carries those three facts and the transport mints the
 // user JWT.
 //
@@ -37,7 +37,7 @@
 // each new address whose senders have all passed (SenderPassed), calls the Provisioner to create its inbox stream and
 // consumer and to issue its credential; any other address is held. A change that newly denies an existing address to
 // a sender is reported applied only after that sender's gate passes (Applied). Cost: each push that finishes a
-// sender's gate disconnects every sender under that owner group's key (ADR 0097). AT-014 (at014_live_test.go) runs
+// sender's gate disconnects every sender under that group's key (ADR 0097). AT-014 (at014_live_test.go) runs
 // this on the live cluster.
 //
 // Rotation and removal (REQ-014, AT-013; rotate.go, connz.go). When a sender's tags narrow, Rotate issues the new
@@ -53,7 +53,7 @@
 // them into the old-key inventory (RunInput.OldKeys), so the gate checks each is in every server's revocation list
 // (old_key_not_revoked) without the caller listing them twice. A rollback must keep them revoked: Converge calls
 // RunInput.SignPrevious with every revoked key and refuses to push a rollback JWT that lacks any. Cost: a narrowing
-// template push briefly disconnects every sender under that owner group's key (ADR 0097). AT-013 (at013_live_test.go)
+// template push briefly disconnects every sender under that group's key (ADR 0097). AT-013 (at013_live_test.go)
 // runs this on the live cluster.
 //
 // Ledger caveat. MemLedger is process-local. The Ledger's Lock is mandatory and a persistent implementation MUST make it
@@ -98,7 +98,7 @@ func OpOf(v listset.Verb) Op {
 }
 
 // ProbeCred is the old credential of a sender: its address, name claim and tags. The transport mints a user JWT with
-// them under the sender's owner-group scoped key.
+// them under the sender's group scoped key.
 type ProbeCred struct {
 	Sender string   `json:"sender"`
 	Name   string   `json:"name"`

@@ -38,7 +38,7 @@ func must[T any](v T, err error) T {
 
 func (e *pushEnv) accountJWT(c *Compiled) string {
 	ac := jwt.NewAccountClaims(e.accPub)
-	ac.Name = c.Range
+	ac.Name = c.Owner
 	for _, tpl := range c.Templates {
 		sk, ok := e.scoped[tpl.Group]
 		if !ok {
@@ -121,12 +121,12 @@ func (e *liveEnv) observer() (*conn, *nats.Subscription) {
 	return admin, obs
 }
 
-// user connects the sender u with the creds of the compile c: its tags, signed by its owner group's key.
+// user connects the sender u with the creds of the compile c: its tags, signed by its group's key.
 func (e *liveEnv) user(c *Compiled, sender string) (*conn, User, error) {
 	for _, u := range c.Users {
 		if u.Sender == sender {
 			a, _ := parseAddress(u.Sender)
-			sc, err := e.connect(e.scoped[a.group()], u.Name, u.Tags, true)
+			sc, err := e.connect(e.scoped[a.groupKey()], u.Name, u.Tags, true)
 			if err == nil {
 				e.t.Cleanup(sc.nc.Close)
 			}
@@ -166,7 +166,7 @@ func subscribeReaches(t *testing.T, c *conn, obs *nats.Conn, filter, subject str
 
 func flat(addr string) string { return strings.ReplaceAll(addr, ".", "_") }
 
-// inbox is the reply prefix of addr: _INBOX.<range>.<flat>, as internal/sap InboxPrefix.
+// inbox is the reply prefix of addr: _INBOX.<owner>.<flat>, as internal/sap InboxPrefix.
 func inbox(addr string) string { return "_INBOX." + strings.SplitN(addr, ".", 2)[0] + "." + flat(addr) }
 
 // ownSubjects is what every sender keeps whatever its lists say: the fixed lines of the template for its own address.
@@ -196,7 +196,7 @@ func assertOwnSubjectsReach(t *testing.T, c *conn, admin *conn, obs *nats.Subscr
 }
 
 // assertDenyAll: sender publishes mail, prompt and status to every address of the set (itself, a receiver in its owner
-// group, one in another owner group), to addresses nobody lists, and to wildcard-shaped subjects; every one is refused.
+// group, one in another group), to addresses nobody lists, and to wildcard-shaped subjects; every one is refused.
 // It cannot watch any other address's heartbeat nor publish one. Its own fixed subjects still reach.
 func assertDenyAll(t *testing.T, e *liveEnv, c *Compiled, self string, named []string) {
 	t.Helper()
@@ -235,9 +235,9 @@ func assertDenyAll(t *testing.T, e *liveEnv, c *Compiled, self string, named []s
 	assertOwnSubjectsReach(t, sc, admin, obs, self)
 }
 
-func denyAllSet(rng string, tagged bool) ListSet {
+func denyAllSet(owner string, tagged bool) ListSet {
 	ls := ListSet{
-		Range: rng,
+		Owner: owner,
 		Switches: concat(
 			switches("foo.c", Closed, Closed, Closed, Closed),
 			switches("foo.d", Closed, Closed, Closed, Closed)),
@@ -323,7 +323,7 @@ func TestAT003OwnerLineDroppedAndDenyHolds(t *testing.T) {
 	}
 	set := func(mail Switch, coreDeny ...string) ListSet {
 		return ListSet{
-			Range:    "foo",
+			Owner:    "foo",
 			Switches: switches("foo.c", mail, Closed, Closed, Closed),
 			Senders: []SenderLists{
 				{Sender: "foo.c.core", Deny: coreDeny},
@@ -407,14 +407,14 @@ func pinnedOpenSubjects() []openRow {
 	const doc = "ADR 0007, 0009"
 	return []openRow{
 		{"_INBOX.foo.foo_c_lead.nuid1", true, []string{"foo.c.lead"}, "replies may go to any caller's reply prefix: no response permission, an answer is a plain publish (ADR 0007); the receiver accepts only verified callers"},
-		{"_INBOX.foo.foo_d_solo.nuid1", true, []string{"foo.d.solo"}, "the same in another owner group: the reply prefix is not part of an owner line"},
+		{"_INBOX.foo.foo_d_solo.nuid1", true, []string{"foo.d.solo"}, "the same in another group: the reply prefix is not part of an owner line"},
 		{"$SRV.INFO.agents", true, []string{"foo.c.lead", "foo.d.solo"}, "service discovery and live-prompt requests go to every endpoint (ADR 0007)"},
 		{"$SRV.PING", true, []string{"foo.c.lead", "foo.d.solo"}, "the same: every sender subscribes to $SRV.> to answer discovery"},
 		{"_INBOX.foo.foo_c_core.nuid1", true, nil, "its own reply prefix: no other address receives it"},
 		{subj("foo.c.core", Heartbeat), true, nil, "its own heartbeat, a fixed line; nobody here subscribed to it"},
 		{"$JS.API.INFO", true, nil, "JetStream account info: a server API call, reaches no address"},
-		{"$JS.API.STREAM.INFO.KV_mash-directory", true, nil, "reads the directory: it is public to the range by design (" + doc + ")"},
-		{"$JS.API.DIRECT.GET.KV_mash-directory.$KV.mash-directory.foo_c_lead", true, nil, "reads another address's directory record: public to the range, read only"},
+		{"$JS.API.STREAM.INFO.KV_mash-directory", true, nil, "reads the directory: it is public to the owner by design (" + doc + ")"},
+		{"$JS.API.DIRECT.GET.KV_mash-directory.$KV.mash-directory.foo_c_lead", true, nil, "reads another address's directory record: public to the owner, read only"},
 		{"$JS.API.STREAM.INFO.KV_mash-leases", true, nil, "reads the lease bucket's state"},
 		{"$KV.mash-leases.foo_c_core", true, nil, "its own lease key"},
 		{"$JS.API.CONSUMER.MSG.NEXT.inbox-foo_c_core.deliver", true, nil, "its own inbox consumer"},
@@ -430,7 +430,7 @@ func pinnedOpenSubjects() []openRow {
 		{"$JS.ACK.inbox-foo_c_lead.deliver.1.1.1.1.1", false, nil, "acknowledging another inbox's message: refused"},
 		{"$JS.API.STREAM.MSG.GET.inbox-foo_c_lead", false, nil, "reading a stored message of another inbox: refused"},
 		{"$JS.API.DIRECT.GET.inbox-foo_c_lead", false, nil, "direct read of another inbox: refused"},
-		{"$JS.API.DIRECT.GET.inbox-foo_d_solo.x", false, nil, "direct read of an inbox in another owner group: refused"},
+		{"$JS.API.DIRECT.GET.inbox-foo_d_solo.x", false, nil, "direct read of an inbox in another group: refused"},
 		{"$JS.API.STREAM.DELETE.inbox-foo_c_lead", false, nil, "deleting another inbox: refused"},
 		{"$JS.API.STREAM.PURGE.inbox-foo_c_lead", false, nil, "purging another inbox: refused"},
 		{subj("foo.c.lead", Heartbeat), false, nil, "another address's heartbeat: refused"},

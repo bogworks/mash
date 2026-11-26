@@ -61,7 +61,7 @@ func TestGenerationOfKeptSigners(t *testing.T) {
 		"declared kept key missing":      {base, keptSet, false},
 		"kept key under another role":    {wrongRole, map[string]string{foreignGroup: wrongPub}, false},
 		"kept key present only plain":    {plainTok, map[string]string{foreignGroup: plain}, false},
-		"kept key of this range's group": {tok, map[string]string{"foo.c": kept}, false},
+		"kept key of this owner's group": {tok, map[string]string{"foo.c": kept}, false},
 		"another key, declared instead":  {other, map[string]string{foreignGroup: otherPub}, true},
 	} {
 		cands := []Candidate{{Generation: 1, Compiled: c, Signers: k.signers, Kept: tc.kept}}
@@ -71,7 +71,7 @@ func TestGenerationOfKeptSigners(t *testing.T) {
 	}
 }
 
-// keptWorld is newWorld in a multi-range account: every JWT also carries another range's scoped key.
+// keptWorld is newWorld in a multi-owner account: every JWT also carries another owner's scoped key.
 func keptWorld(t *testing.T) (*world, map[string]string) {
 	w := newWorld(t)
 	var pub string
@@ -98,7 +98,7 @@ func keptRun(t *testing.T, w *world, kept map[string]string) RunInput {
 	return in
 }
 
-func TestRunMultiRangeAccountKeepsOtherRangesSigners(t *testing.T) {
+func TestRunMultiOwnerAccountKeepsOtherOwnersSigners(t *testing.T) {
 	w, kept := keptWorld(t)
 	st, err := Run(context.Background(), keptRun(t, w, kept))
 	if err != nil {
@@ -116,7 +116,7 @@ func TestRunMultiRangeAccountKeepsOtherRangesSigners(t *testing.T) {
 	}
 }
 
-func TestRunMultiRangeRollbackKeepsOtherRangesSigners(t *testing.T) {
+func TestRunMultiOwnerRollbackKeepsOtherOwnersSigners(t *testing.T) {
 	w, kept := keptWorld(t)
 	w.cluster.failPush["s2"] = true
 	st, err := Run(context.Background(), keptRun(t, w, kept))
@@ -136,7 +136,7 @@ func TestRunMultiRangeRollbackKeepsOtherRangesSigners(t *testing.T) {
 	}
 }
 
-func TestRunMultiRangeRollbackDroppingKeptSignerIsNotPushed(t *testing.T) {
+func TestRunMultiOwnerRollbackDroppingKeptSignerIsNotPushed(t *testing.T) {
 	w, kept := keptWorld(t)
 	w.cluster.failPush["s2"] = true
 	in := keptRun(t, w, kept)

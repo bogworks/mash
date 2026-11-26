@@ -312,7 +312,7 @@ func Build(ctx context.Context, in Input) (Plan, error) {
 	for _, k := range in.Signers {
 		scoped[k] = true
 	}
-	kept, err := KeptSigners(in.Claims, in.Held, in.Signers, in.ListSet.Range)
+	kept, err := KeptSigners(in.Claims, in.Held, in.Signers, in.ListSet.Owner)
 	if err != nil {
 		return Plan{}, err
 	}

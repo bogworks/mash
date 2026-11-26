@@ -19,8 +19,8 @@ import (
 // minus the deny list. It refuses on any address reachable that the lists do not give, and on any the lists give that
 // is not reachable.
 //
-// The addresses compared are every address the list set names plus probes: another name in each owner group, another
-// owner group in the range, another range. Check also refuses a template with no tag-free allow line in either
+// The addresses compared are every address the list set names plus probes: another instance in each group, another
+// group of the owner, another owner. Check also refuses a template with no tag-free allow line in either
 // direction, a user that carries permission claims or a tag other than allow: and deny:, a deny-key user without a
 // deny tag, and any line outside the fixed set and the agents. subjects the lists give.
 //
@@ -36,19 +36,19 @@ func Check(ls ListSet, c *Compiled) error {
 	var ps []Problem
 	bad := func(entry, format string, a ...any) { ps = append(ps, Problem{entry, fmt.Sprintf(format, a...)}) }
 
-	if c.Range != m.rng {
-		bad("compiled address prefix "+quote(c.Range), "is not the list set's address prefix %q", m.rng)
+	if c.Owner != m.owner {
+		bad("compiled owner "+quote(c.Owner), "is not the list set's owner %q", m.owner)
 	}
 
 	senderGroups := map[string]bool{}
 	for _, s := range m.senders {
-		senderGroups[s.addr.group()] = true
+		senderGroups[s.addr.groupKey()] = true
 	}
 	templates := map[string]jwt.Permissions{}
 	for _, t := range c.Templates {
 		entry := "template " + quote(t.Group)
 		if !senderGroups[t.Group] {
-			bad(entry, "belongs to no owner group that has a sender")
+			bad(entry, "belongs to no group that has a sender")
 			continue
 		}
 		if _, dup := templates[t.Group]; dup {
@@ -65,7 +65,7 @@ func Check(ls ListSet, c *Compiled) error {
 	}
 	for g := range senderGroups {
 		if _, ok := templates[g]; !ok {
-			bad("template "+quote(g), "missing for an owner group that has a sender")
+			bad("template "+quote(g), "missing for a group that has a sender")
 		}
 	}
 
@@ -95,15 +95,15 @@ func Check(ls ListSet, c *Compiled) error {
 			bad(who, "has no user")
 			continue
 		}
-		tpl, ok := templates[s.addr.group()]
+		tpl, ok := templates[s.addr.groupKey()]
 		if !ok {
 			continue
 		}
 		if !claimsEmpty(u.Permissions) {
 			bad(who, "its user JWT carries permission claims; a user signed by a scoped key carries tags only")
 		}
-		if u.Name != s.addr.name {
-			bad(who, "user name %q is not the sender's name part %q, which the template's {{name()}} expands to", u.Name, s.addr.name)
+		if u.Name != s.addr.instance {
+			bad(who, "user name %q is not the sender's instance part %q, which the template's {{name()}} expands to", u.Name, s.addr.instance)
 		}
 		for _, t := range u.Tags {
 			if !strings.HasPrefix(t, AllowTag+":") && !strings.HasPrefix(t, DenyTag+":") {
@@ -126,14 +126,14 @@ func Check(ls ListSet, c *Compiled) error {
 			}
 		}
 		// Every fixed grant the sender needs must be present and survive the deny lines.
-		flat := s.addr.rng + "_" + s.addr.owner + "_" + s.addr.name
-		for _, line := range fixedPub(subj(s.addr.String(), Heartbeat), PolicySubject(s.addr.rng), s.addr.rng, flat) {
+		flat := s.addr.owner + "_" + s.addr.group + "_" + s.addr.instance
+		for _, line := range fixedPub(subj(s.addr.String(), Heartbeat), PolicySubject(s.addr.owner), s.addr.owner, flat) {
 			if !slices.Contains(p.pubAllow, line) || !p.canPub(concrete(line)) {
 				bad(who, "required publish grant %q is missing or denied: %s", line, fixedBreaks(line))
 			}
 		}
 		for _, line := range []string{
-			"_INBOX." + s.addr.rng + "." + flat + ".>",
+			"_INBOX." + s.addr.owner + "." + flat + ".>",
 			subj(s.addr.String(), Prompt),
 			subj(s.addr.String(), Status),
 			"$SRV.>",
@@ -230,7 +230,7 @@ func reachVerb(v Verb) string {
 	return "publish " + string(v) + " to"
 }
 
-// isPolicySubject reports whether line is a policy responder subject, agents.policy.<range>: three tokens, no address.
+// isPolicySubject reports whether line is a policy responder subject, agents.policy.<owner>: three tokens, no address.
 func isPolicySubject(line string) bool {
 	toks := strings.Split(line, ".")
 	return len(toks) == 3 && toks[0] == "agents" && toks[1] == "policy"
@@ -245,9 +245,9 @@ func subj(address string, v Verb) string { return "agents." + v.subject() + "." 
 // part of it.
 func wantReach(m *model, s sender, v Verb, universe []string) map[string]bool {
 	want := map[string]bool{}
-	if m.shared(s.addr.group(), v) {
+	if m.shared(s.addr.groupKey(), v) {
 		for _, a := range universe {
-			if strings.HasPrefix(a, s.addr.group()+".") {
+			if strings.HasPrefix(a, s.addr.groupKey()+".") {
 				want[a] = true
 			}
 		}
@@ -283,32 +283,32 @@ func (m *model) universeAll() []address {
 	return out
 }
 
-// universeOf is every address the list set names plus probes: a name no list names in each owner group the set
-// mentions, another owner group of the range, and another range.
+// universeOf is every address the list set names plus probes: an instance no list names in each group the set
+// mentions, another group of the owner, and another owner.
 func universeOf(m *model) []string {
 	named := m.universeAll()
 	taken := map[string]bool{}
-	owners := map[string]bool{}
+	usedGroups := map[string]bool{}
 	for _, a := range named {
 		taken[a.String()] = true
-		owners[a.owner] = true
+		usedGroups[a.group] = true
 	}
-	free := func(rng, owner, name string) address {
-		a := address{rng, owner, name}
+	free := func(owner, group, instance string) address {
+		a := address{owner, group, instance}
 		for i := 2; taken[a.String()]; i++ {
-			a.name = fmt.Sprintf("%s%d", name, i)
+			a.instance = fmt.Sprintf("%s%d", instance, i)
 		}
 		taken[a.String()] = true
 		return a
 	}
-	freeOwner := "probe-owner"
-	for owners[freeOwner] {
-		freeOwner += "x"
+	freeGroup := "probe-group"
+	for usedGroups[freeGroup] {
+		freeGroup += "x"
 	}
 	out := slices.Clone(named)
 	groups := map[string]address{}
 	for _, a := range named {
-		groups[a.group()] = a
+		groups[a.groupKey()] = a
 	}
 	keys := make([]string, 0, len(groups))
 	for g := range groups {
@@ -317,10 +317,10 @@ func universeOf(m *model) []string {
 	sort.Strings(keys)
 	for _, g := range keys {
 		a := groups[g]
-		out = append(out, free(a.rng, a.owner, "probe-name"))
-		out = append(out, free("probe-range", a.owner, "probe-name"))
+		out = append(out, free(a.owner, a.group, "probe-instance"))
+		out = append(out, free("probe-owner", a.group, "probe-instance"))
 	}
-	out = append(out, free(m.rng, freeOwner, "probe-name"))
+	out = append(out, free(m.owner, freeGroup, "probe-instance"))
 	res := make([]string, len(out))
 	for i, a := range out {
 		res[i] = a.String()
@@ -331,13 +331,13 @@ func universeOf(m *model) []string {
 
 // fixedLines are the non-agents lines a sender's expanded template may hold: publish, then subscribe.
 func fixedLines(s sender) (pub, sub []string) {
-	flat := s.addr.rng + "_" + s.addr.owner + "_" + s.addr.name
-	for _, l := range fixedPub("", PolicySubject(s.addr.rng), s.addr.rng, flat) {
+	flat := s.addr.owner + "_" + s.addr.group + "_" + s.addr.instance
+	for _, l := range fixedPub("", PolicySubject(s.addr.owner), s.addr.owner, flat) {
 		if (!strings.HasPrefix(l, "agents.") || isPolicySubject(l)) && l != "" {
 			pub = append(pub, l)
 		}
 	}
-	return pub, []string{"_INBOX." + s.addr.rng + "." + flat + ".>", "$SRV.>"}
+	return pub, []string{"_INBOX." + s.addr.owner + "." + flat + ".>", "$SRV.>"}
 }
 
 // lineRefusal says why an expanded allow line is not one the lists could have asked for, or "".
@@ -366,8 +366,8 @@ func (m *model) lineRefusal(s sender, dir, line string) string {
 	if v == "" {
 		return fmt.Sprintf("has verb %q, which is none of mail, prompt, status, hb", toks[1])
 	}
-	if toks[2] != m.rng {
-		return fmt.Sprintf("address prefix %q is not the account's address prefix %q", toks[2], m.rng)
+	if toks[2] != m.owner {
+		return fmt.Sprintf("owner %q is not the account's owner %q", toks[2], m.owner)
 	}
 	own := s.addr.String()
 	lit := toks[2] + "." + toks[3] + "." + toks[4]
@@ -386,10 +386,10 @@ func (m *model) lineRefusal(s sender, dir, line string) string {
 		return ""
 	}
 	if toks[4] == "*" {
-		if toks[3] != s.addr.owner || strings.ContainsAny(toks[3], "*>") {
-			return "is a wildcard outside the sender's owner group"
+		if toks[3] != s.addr.group || strings.ContainsAny(toks[3], "*>") {
+			return "is a wildcard outside the sender's group"
 		}
-		if !m.shared(s.addr.group(), v) {
+		if !m.shared(s.addr.groupKey(), v) {
 			return "is an owner line on a verb that is not shared"
 		}
 		return ""
@@ -646,12 +646,12 @@ func expandSender(c *Compiled, sender string) (*expanded, error) {
 		return nil, errors.New(reason)
 	}
 	for i := range c.Templates {
-		if c.Templates[i].Group == a.group() {
+		if c.Templates[i].Group == a.groupKey() {
 			tpl = &c.Templates[i]
 		}
 	}
 	if tpl == nil {
-		return nil, fmt.Errorf("no template %s", a.group())
+		return nil, fmt.Errorf("no template %s", a.groupKey())
 	}
 	return expandPermissions(tpl.Permissions, user.Name, user.Tags)
 }

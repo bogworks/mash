@@ -18,14 +18,14 @@ func TestAT002_BadEntriesRefuseTheWholeSet(t *testing.T) {
 		entry  string // part of the Problem.Entry that must name it
 		reason string
 	}{
-		{"wildcard owner-part star", func(l *ListSet) { l.Senders[0].Allow = append(l.Senders[0].Allow, "foo.c.*") }, `"foo.c.*"`, "wildcard"},
+		{"wildcard group part star", func(l *ListSet) { l.Senders[0].Allow = append(l.Senders[0].Allow, "foo.c.*") }, `"foo.c.*"`, "wildcard"},
 		{"wildcard tail", func(l *ListSet) { l.Senders[0].Allow = append(l.Senders[0].Allow, "foo.>") }, `"foo.>"`, "wildcard"},
 		{"wildcard in a deny", func(l *ListSet) { l.Senders[0].Deny = append(l.Senders[0].Deny, "foo.*.sdk") }, `"foo.*.sdk"`, "wildcard"},
 		{"wildcard sender", func(l *ListSet) { l.Senders = append(l.Senders, SenderLists{Sender: "foo.c.*"}) }, `sender "foo.c.*"`, "wildcard"},
 		{"wildcard group", func(l *ListSet) { l.Switches = append(l.Switches, SwitchEntry{"foo.*", Mail, Shared}) }, `switch "foo.*"`, "wildcard"},
-		{"other range", func(l *ListSet) { l.Senders[1].Allow = append(l.Senders[1].Allow, "bar.c.lead") }, `"bar.c.lead"`, "address prefix"},
-		{"other range sender", func(l *ListSet) { l.Senders = append(l.Senders, SenderLists{Sender: "bar.c.lead"}) }, `sender "bar.c.lead"`, "address prefix"},
-		{"other range group", func(l *ListSet) { l.Switches = append(l.Switches, SwitchEntry{"bar.c", Mail, Shared}) }, `switch "bar.c"`, "address prefix"},
+		{"other owner", func(l *ListSet) { l.Senders[1].Allow = append(l.Senders[1].Allow, "bar.c.lead") }, `"bar.c.lead"`, "owner"},
+		{"other owner sender", func(l *ListSet) { l.Senders = append(l.Senders, SenderLists{Sender: "bar.c.lead"}) }, `sender "bar.c.lead"`, "owner"},
+		{"other owner group", func(l *ListSet) { l.Switches = append(l.Switches, SwitchEntry{"bar.c", Mail, Shared}) }, `switch "bar.c"`, "owner"},
 		{"grammar failing part", func(l *ListSet) { l.Senders[2].Allow = append(l.Senders[2].Allow, "foo.C.lead") }, `"foo.C.lead"`, "lower-case"},
 		{"grammar failing name", func(l *ListSet) { l.Senders[2].Allow = append(l.Senders[2].Allow, "foo.c.-lead") }, `"foo.c.-lead"`, "letter"},
 		{"two parts", func(l *ListSet) { l.Senders[2].Allow = append(l.Senders[2].Allow, "foo.c") }, `"foo.c"`, "three"},
@@ -38,7 +38,7 @@ func TestAT002_BadEntriesRefuseTheWholeSet(t *testing.T) {
 		{"sender twice", func(l *ListSet) { l.Senders = append(l.Senders, SenderLists{Sender: "foo.c.lead"}) }, `sender "foo.c.lead"`, "twice"},
 		{"allow twice", func(l *ListSet) { l.Senders[0].Allow = []string{"foo.c.lead", "foo.c.lead"} }, `allow of "foo.c.core"`, "twice"},
 		{"allow and deny", func(l *ListSet) { l.Senders[0].Deny = []string{"foo.c.lead"} }, `deny of "foo.c.core"`, "allow list"},
-		{"bad range", func(l *ListSet) { l.Range = "" }, `address prefix ""`, "empty"},
+		{"bad owner", func(l *ListSet) { l.Owner = "" }, `owner ""`, "empty"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -98,7 +98,7 @@ func TestDenyRule(t *testing.T) {
 			ls.Senders[1].Deny = []string{"foo.c.sdk"}
 			return ls
 		},
-		"outside the owner group": func() ListSet {
+		"outside the group": func() ListSet {
 			ls := at003Deny()
 			ls.Senders[1].Deny = []string{"foo.d.solo"}
 			return ls
@@ -125,7 +125,7 @@ func TestCompileDoesNotModifyInput(t *testing.T) {
 }
 
 func flatten(ls ListSet) []string {
-	out := []string{ls.Range}
+	out := []string{ls.Owner}
 	for _, s := range ls.Switches {
 		out = append(out, s.Group, string(s.Verb), string(s.Switch))
 	}
@@ -173,8 +173,8 @@ func TestAT004_Corpus(t *testing.T) {
 				}
 				a, _ := parseAddress(u.Sender)
 				hasDenyTag := slices.ContainsFunc(u.Tags, func(s string) bool { return strings.HasPrefix(s, "deny:") })
-				if denyKey[a.group()] != hasDenyTag {
-					t.Errorf("user %s: deny tag %v, want %v", u.Sender, hasDenyTag, denyKey[a.group()])
+				if denyKey[a.groupKey()] != hasDenyTag {
+					t.Errorf("user %s: deny tag %v, want %v", u.Sender, hasDenyTag, denyKey[a.groupKey()])
 				}
 			}
 			for sender, want := range tc.want {
@@ -300,10 +300,10 @@ func TestMutationsAreRefused(t *testing.T) {
 		{"a wildcard line", at001, func(c *Compiled) {
 			tpl(c, "foo.c").Permissions.Pub.Allow.Add("agents.>")
 		}, "agents.>"},
-		{"a wildcard in another owner group", at001, func(c *Compiled) {
+		{"a wildcard in another group", at001, func(c *Compiled) {
 			tpl(c, "foo.c").Permissions.Pub.Allow.Add("agents.mail.foo.*.*")
 		}, "agents.mail.foo.*.*"},
-		{"another range", at001, func(c *Compiled) {
+		{"another owner", at001, func(c *Compiled) {
 			tpl(c, "foo.c").Permissions.Pub.Allow.Add("agents.mail.bar.c.lead")
 		}, "agents.mail.bar.c.lead"},
 		{"a foreign plumbing line", at001, func(c *Compiled) {
@@ -333,7 +333,7 @@ func TestMutationsAreRefused(t *testing.T) {
 		{"a wildcard tag at the tail", at001, func(c *Compiled) {
 			user(c, "foo.c.sdk").Tags = []string{"allow:>"}
 		}, "foo.c.sdk, verb mail"},
-		{"a tag that names another range through the template's range", at001, func(c *Compiled) {
+		{"a tag that names another owner through the template's owner", at001, func(c *Compiled) {
 			user(c, "foo.c.sdk").Tags = []string{"allow:c.zz-unlisted"}
 		}, "zz-unlisted"},
 		{"an extra allow tag", at001, func(c *Compiled) {
@@ -360,7 +360,7 @@ func TestMutationsAreRefused(t *testing.T) {
 		}, "user name"},
 		{"a missing template", at001, func(c *Compiled) {
 			c.Templates = nil
-		}, "missing for an owner group"},
+		}, "missing for a group"},
 		{"a template with no allow line at all (the server would open everything)", at001, func(c *Compiled) {
 			tpl(c, "foo.c").Permissions = jwt.Permissions{}
 		}, "no publish allow line"},
@@ -624,8 +624,8 @@ func TestTemplateHasPolicyGrant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := PolicySubject(c.Range)
-	if want != "agents.policy."+c.Range {
+	want := PolicySubject(c.Owner)
+	if want != "agents.policy."+c.Owner {
 		t.Fatalf("PolicySubject = %q", want)
 	}
 	for _, tpl := range c.Templates {
@@ -651,7 +651,7 @@ func TestTemplateHasPolicyGrant(t *testing.T) {
 	}
 }
 
-// A compiled template grants publish only under the inboxes of the sender's own SAP owner (the range of this package,
+// A compiled template grants publish only under the inboxes of the sender's own SAP owner (the owner of the account,
 // as internal/admin binds _INBOX.<owner>.>), and Check refuses a template that still carries the wide _INBOX.> line.
 func TestPublishInboxBoundToOwner(t *testing.T) {
 	ls := at001()

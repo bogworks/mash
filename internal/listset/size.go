@@ -55,7 +55,7 @@ func (s ServerLimits) accountJWT() int {
 //
 // For each user it encodes a user JWT structurally identical to the one that would be issued (the name, the tags, the
 // issuer account, no permissions or limits) signed by a scoped key, adds ConnectLineOverhead, and compares the sum
-// with the server's MaxConnectLine. It also encodes an account JWT carrying every owner-group template as a scoped
+// with the server's MaxConnectLine. It also encodes an account JWT carrying every group template as a scoped
 // signing key and compares it with MaxAccountJWT.
 //
 // The measure uses throwaway nkeys generated inside the call and discarded: it never touches a real key, and a key's
@@ -83,7 +83,7 @@ func SizeCheck(c *Compiled, servers []ServerLimits) []Problem {
 		}
 		if limit := s.accountJWT(); accountSize > limit {
 			ps = append(ps, Problem{
-				fmt.Sprintf("account %s, server %s", quote(c.Range), quote(s.Server)),
+				fmt.Sprintf("account %s, server %s", quote(c.Owner), quote(s.Server)),
 				fmt.Sprintf("the account JWT with %d scoped signing keys would be %d bytes, over the %d byte limit of server %s",
 					len(c.Templates), accountSize, limit, quote(s.Server)),
 			})
@@ -146,9 +146,9 @@ func measure(c *Compiled) (map[string]int, int, error) {
 		if reason != "" {
 			return nil, 0, fmt.Errorf("sender %q: %s", u.Sender, reason)
 		}
-		kp, ok := signers[a.group()]
+		kp, ok := signers[a.groupKey()]
 		if !ok {
-			return nil, 0, fmt.Errorf("sender %q is in owner group %s, which has no template", u.Sender, a.group())
+			return nil, 0, fmt.Errorf("sender %q is in group %s, which has no template", u.Sender, a.groupKey())
 		}
 		uc := jwt.NewUserClaims(upub)
 		uc.Name = u.Name

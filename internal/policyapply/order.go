@@ -19,9 +19,9 @@ import (
 // (Provisioner.IssueCredential). The second rule is for an existing address newly denied to a sender: the change is
 // reported applied only after that sender's gate passes (Applied).
 //
-// Cost. Each push that finishes a sender's gate closes every connection under that owner group's scoped key, so every
+// Cost. Each push that finishes a sender's gate closes every connection under that group's scoped key, so every
 // sender under the key is disconnected, not only the one whose reach changed (ADR 0097). RunOrdered pushes once for
-// the whole change, so the price is paid once per owner group, not once per sender.
+// the whole change, so the price is paid once per group, not once per sender.
 //
 // A rollback while an inbox may exist is refused: see ProvisionMarkers.
 //

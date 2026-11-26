@@ -453,7 +453,7 @@ type RunInput struct {
 	// (see Candidate.Signers). Signers is required: Run refuses a target without it.
 	Signers         map[string]string
 	PreviousSigners map[string]string
-	// KeptSigners are the scoped signing keys of other ranges (group -> public key) that stay in the account JWT of
+	// KeptSigners are the scoped signing keys of other owners (group -> public key) that stay in the account JWT of
 	// the target, of the previous generation and of the rollback (see Candidate.Kept).
 	KeptSigners map[string]string
 	// PlainSigners are mash's own plain signing keys that may stand in the account JWT (see Candidate.Plain).
@@ -1061,7 +1061,7 @@ func refusals(stage string, ps []listset.Problem) []listset.Refusal {
 // cloneCompiled deep-copies c. A User's Permissions must be empty (Check refuses otherwise), so copying it by value
 // shares nothing.
 func cloneCompiled(c *listset.Compiled) *listset.Compiled {
-	out := &listset.Compiled{Range: c.Range}
+	out := &listset.Compiled{Owner: c.Owner}
 	for _, t := range c.Templates {
 		p := t.Permissions
 		p.Pub.Allow, p.Pub.Deny = slices.Clone(p.Pub.Allow), slices.Clone(p.Pub.Deny)

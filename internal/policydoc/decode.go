@@ -1,5 +1,5 @@
 // Package policydoc decodes the list-set document: the one value per account that a policy author keeps and mash applies. It
-// decodes the document (raw canonical JSON, or a compact JWS signed by the range's submitter key) into a
+// decodes the document (raw canonical JSON, or a compact JWS signed by the owner's submitter key) into a
 // listset.ListSet and checks the format's rules.
 //
 // DECISION D211 (and DEC-004) IS PENDING: the document's schema value and field names are the proposed author-mash
@@ -41,7 +41,7 @@ var (
 
 // DecodeOptions configures Decode.
 type DecodeOptions struct {
-	// Submitter is the nkeys public key of the range's submitter. When set, the document must be a JWS whose signature
+	// Submitter is the nkeys public key of the owner's submitter. When set, the document must be a JWS whose signature
 	// verifies under it. When empty, a JWS's signature is not checked and the result is not Verified.
 	Submitter string
 }
@@ -56,7 +56,7 @@ type DecodeOptions struct {
 type Document struct {
 	Schema         string
 	Account        string
-	Range          string
+	Owner          string
 	Generation     uint64
 	BaseGeneration uint64
 	IssuedAt       time.Time
@@ -83,7 +83,7 @@ type wireSender struct {
 type wireDoc struct {
 	Schema         *string                `json:"schema"`
 	Account        *string                `json:"account"`
-	Range          *string                `json:"range"`
+	Owner          *string                `json:"owner"`
 	Generation     *uint64                `json:"generation"`
 	BaseGeneration *uint64                `json:"base_generation"`
 	Groups         map[string]*wireGroup  `json:"groups"`
@@ -172,7 +172,7 @@ func decodePayload(p []byte) (Document, error) {
 		name    string
 		missing bool
 	}{
-		{"schema", w.Schema == nil}, {"account", w.Account == nil}, {"range", w.Range == nil},
+		{"schema", w.Schema == nil}, {"account", w.Account == nil}, {"owner", w.Owner == nil},
 		{"generation", w.Generation == nil}, {"base_generation", w.BaseGeneration == nil},
 		{"groups", w.Groups == nil}, {"senders", w.Senders == nil}, {"issued_at", w.IssuedAt == nil},
 	} {
@@ -183,8 +183,8 @@ func decodePayload(p []byte) (Document, error) {
 	if *w.Schema != DocumentSchema {
 		return Document{}, bad("schema is %q, not %q", *w.Schema, DocumentSchema)
 	}
-	if *w.Account == "" || *w.Range == "" {
-		return Document{}, bad("account and range must not be empty")
+	if *w.Account == "" || *w.Owner == "" {
+		return Document{}, bad("account and owner must not be empty")
 	}
 	if *w.BaseGeneration == math.MaxUint64 || *w.Generation != *w.BaseGeneration+1 {
 		return Document{}, bad("generation %d is not base_generation %d plus one", *w.Generation, *w.BaseGeneration)
@@ -200,34 +200,34 @@ func decodePayload(p []byte) (Document, error) {
 		}
 		next = *w.NextSubmitter
 	}
-	d := Document{Schema: *w.Schema, Account: *w.Account, Range: *w.Range, Generation: *w.Generation,
+	d := Document{Schema: *w.Schema, Account: *w.Account, Owner: *w.Owner, Generation: *w.Generation,
 		BaseGeneration: *w.BaseGeneration, IssuedAt: at, NextSubmitter: next}
-	d.ListSet = listset.ListSet{Range: d.Range, Base: d.BaseGeneration, Switches: []listset.SwitchEntry{}, Senders: []listset.SenderLists{}}
+	d.ListSet = listset.ListSet{Owner: d.Owner, Base: d.BaseGeneration, Switches: []listset.SwitchEntry{}, Senders: []listset.SenderLists{}}
 
-	owners := make([]string, 0, len(w.Groups))
-	for o := range w.Groups {
-		owners = append(owners, o)
+	groupKeys := make([]string, 0, len(w.Groups))
+	for k := range w.Groups {
+		groupKeys = append(groupKeys, k)
 	}
-	sort.Strings(owners)
-	for _, o := range owners {
-		g := w.Groups[o]
+	sort.Strings(groupKeys)
+	for _, k := range groupKeys {
+		g := w.Groups[k]
 		if g == nil {
-			return Document{}, bad("group %q is null", o)
+			return Document{}, bad("group %q is null", k)
 		}
-		if strings.Contains(o, ".") {
-			return Document{}, bad("group %q: a group is keyed by its owner part only (no dots); the address prefix is the document's, and a switch is set for an owner group, never for a single sender", o)
+		if strings.Contains(k, ".") {
+			return Document{}, bad("group %q: a group is keyed by its group part only (no dots); the owner is the document's, and a switch is set for a group, never for a single sender", k)
 		}
 		for _, v := range []struct {
 			verb listset.Verb
 			val  *string
 		}{{listset.Mail, g.Mail}, {listset.Prompt, g.Prompt}, {listset.Status, g.Status}, {listset.Heartbeat, g.Heartbeat}} {
 			if v.val == nil {
-				return Document{}, bad("group %q: verb %q is missing", o, v.verb)
+				return Document{}, bad("group %q: verb %q is missing", k, v.verb)
 			}
 			if *v.val != string(listset.Shared) && *v.val != string(listset.Closed) {
-				return Document{}, bad("group %q: verb %q is %q, not shared or closed", o, v.verb, *v.val)
+				return Document{}, bad("group %q: verb %q is %q, not shared or closed", k, v.verb, *v.val)
 			}
-			d.ListSet.Switches = append(d.ListSet.Switches, listset.SwitchEntry{Group: d.Range + "." + o, Verb: v.verb, Switch: listset.Switch(*v.val)})
+			d.ListSet.Switches = append(d.ListSet.Switches, listset.SwitchEntry{Group: d.Owner + "." + k, Verb: v.verb, Switch: listset.Switch(*v.val)})
 		}
 	}
 	names := make([]string, 0, len(w.Senders))

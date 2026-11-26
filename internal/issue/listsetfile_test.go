@@ -23,7 +23,7 @@ func listSetDir(t *testing.T) (string, string) {
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(listset.ListSet{
-		Range: "foo",
+		Owner: "foo",
 		Switches: []listset.SwitchEntry{
 			{Group: "foo.c", Verb: listset.Mail, Switch: listset.Closed}, {Group: "foo.c", Verb: listset.Prompt, Switch: listset.Closed},
 			{Group: "foo.c", Verb: listset.Status, Switch: listset.Closed}, {Group: "foo.c", Verb: listset.Heartbeat, Switch: listset.Closed},
