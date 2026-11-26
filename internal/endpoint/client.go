@@ -496,7 +496,7 @@ type presenceProbe struct {
 // next, and the answers are held until awaitPresence.
 func (e *Endpoint) startPresence() *presenceProbe {
 	p := &presenceProbe{start: time.Now(), kick: make(chan struct{}, 1)}
-	inbox := e.nc.NewInbox()
+	inbox := e.presenceInbox()
 	sub, err := e.nc.Subscribe(inbox, func(m *nats.Msg) {
 		p.mu.Lock()
 		p.msgs = append(p.msgs, m)

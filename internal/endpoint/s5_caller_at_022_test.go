@@ -149,7 +149,7 @@ func TestS5AT022_Item1_OwnerBoundaryOnCapturedSubjects(t *testing.T) {
 // each, counts it, and does not attribute it to bob. AT-015's race is run here: carol's invalid answer ahead of the
 // valid one, which the caller survives.
 func TestS5AT022_Item2_RegistrationForgery(t *testing.T) {
-	needS5Caller(t, "AT-022 item 2 (registration forgery by a same-owner peer; the rejected-answer count: mash's discovery does not count rejected answers yet: REQ-016/TO-12)")
+	needS5Caller(t, "AT-022 item 2 (registration forgery by a same-owner peer)")
 	z := newS5Fix(t)
 	genuine := z.genuineRegistration(t, z.bob)
 	var three []s5Answer

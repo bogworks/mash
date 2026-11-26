@@ -1,10 +1,10 @@
 package endpoint
 
-// AT-015 (REQ-016): the caller refuses what it cannot verify. Run on the S5 constructor under a test driver; the
-// discovery under test is mash's own (presence, applyPresence, the $SRV.INFO answer handling), not the SDK's. The
-// real-W-binary variant (mash who, mash send discovery, mash prompt; the warning line, answers_not_verified in
-// --json, the stored send) is W's: the seam reports the count and the accepted registrations, which is what those
-// views are built from.
+// AT-015 (REQ-016): the caller refuses what it cannot verify. Run on main's own discovery through the S5 seam
+// (s5_caller_wire_test.go): presence (applyPresence) and the recipient discovery of prompt (discoverSubject), both
+// through mash's one verify step. The real-W-binary variant (mash who, mash send discovery, mash prompt; the warning
+// line, answers_not_verified in --json, the stored send) is W's: nothing is printed here (amendment 5, N10), and the
+// seam reports the count and the accepted registrations, which is what those views are built from.
 
 import (
 	"context"
@@ -44,37 +44,71 @@ func TestS5AT015_Positive(t *testing.T) {
 	}
 }
 
+// s5Negative is what one invalid answer, on its own, did to a discovery.
+type s5Negative struct {
+	Accepted    []s5Registration // what the discovery attributed to bob
+	NotVerified int              // counted by the discovery
+	Total       int              // the caller's cumulative count
+	Err         error            // the discovery failed
+}
+
+// s5RunNegative publishes the invalid answer f, with no valid answer at all (bob is offline), and runs one discovery.
+// It reports what happened and decides nothing, so the mutation test of AT-010 reads the same outcome.
+func s5RunNegative(t *testing.T, z *s5Fix, f s5Answer) (s5Negative, s5Caller) {
+	t.Helper()
+	z.race(t, s5None, []s5Answer{f}, nil)
+	cl, _ := z.caller(t, z.alice, s5Inputs{})
+	got, err := cl.Discover(s5Ctx(t), z.bob)
+	return s5Negative{Accepted: got.Accepted, NotVerified: got.NotVerified, Total: cl.NotVerified(), Err: err}, cl
+}
+
+// s5CheckNegative is the whole of AT-015's negative case for f: rejected, counted once, never attributed to bob, and
+// no unverified retry (a prompt to bob is refused and nothing reaches his prompt subject).
+func s5CheckNegative(t *testing.T, z *s5Fix, tp *s5Tap, f s5Answer) {
+	t.Helper()
+	got, cl := s5RunNegative(t, z, f)
+	if got.Err != nil {
+		t.Fatalf("an invalid answer failed the discovery: %v", got.Err)
+	}
+	if len(got.Accepted) != 0 {
+		t.Fatalf("a %s answer was attributed to bob: %+v", f.Name, got.Accepted)
+	}
+	if got.NotVerified != 1 || got.Total != 1 {
+		t.Fatalf("%s: counted %d (total %d) as not verified, want 1", f.Name, got.NotVerified, got.Total)
+	}
+	// Prompt acts as for an endpoint with no answer: an error, and nothing published to bob.
+	if _, err := cl.Prompt(s5Ctx(t), z.bob, "ping"); err == nil {
+		t.Fatalf("%s: a prompt to an endpoint with no verified answer succeeded", f.Name)
+	}
+	if p := tp.where(func(m s5Msg) bool { return m.Subject == mustSubj(z.bob).Prompt }); len(p) != 0 {
+		t.Fatalf("%s: a prompt reached bob's prompt subject without a verified registration (%d)", f.Name, len(p))
+	}
+}
+
 // TestS5AT015_NegativesEachRejectedNeverAttributed: each invalid answer on its own, with no valid answer at all (bob
 // is offline): rejected, counted once, and bob is not found (he shows as with no answer from the peer). No prompt is
 // published (no unverified retry).
 func TestS5AT015_NegativesEachRejectedNeverAttributed(t *testing.T) {
-	needS5Caller(t, "AT-015 negatives (the rejected-answer count: mash's discovery does not count rejected answers yet: REQ-016/TO-12)")
+	needS5Caller(t, "AT-015 negatives")
 	z := newS5Fix(t)
 	genuine := z.genuineRegistration(t, z.bob)
-	forged := z.forgeries(t, genuine)
 	tp := z.tap(t, "agents.prompt.>")
-	for _, f := range forged {
-		t.Run(f.Name, func(t *testing.T) {
-			z.race(t, s5None, []s5Answer{f}, nil)
-			cl, _ := z.caller(t, z.alice, s5Inputs{})
-			got, err := cl.Discover(s5Ctx(t), z.bob)
-			if err != nil {
-				t.Fatalf("an invalid answer failed the discovery: %v", err)
-			}
-			if len(got.Accepted) != 0 {
-				t.Fatalf("a %s answer was attributed to bob: %+v", f.Name, got.Accepted)
-			}
-			if got.NotVerified != 1 || cl.NotVerified() != 1 {
-				t.Fatalf("%s: counted %d (total %d) as not verified, want 1", f.Name, got.NotVerified, cl.NotVerified())
-			}
-			// Prompt acts as for an endpoint with no answer: an error, and nothing published to bob.
-			if _, err := cl.Prompt(s5Ctx(t), z.bob, "ping"); err == nil {
-				t.Fatalf("%s: a prompt to an endpoint with no verified answer succeeded", f.Name)
-			}
-			if p := tp.where(func(m s5Msg) bool { return m.Subject == mustSubj(z.bob).Prompt }); len(p) != 0 {
-				t.Fatalf("%s: a prompt reached bob's prompt subject without a verified registration (%d)", f.Name, len(p))
-			}
-		})
+	for _, f := range z.refused(t, genuine) {
+		t.Run(f.Name, func(t *testing.T) { s5CheckNegative(t, z, tp, f) })
+	}
+}
+
+// TestS5AT015_OwnerDifferenceRefused is the owner case of the negative list: a registration validly signed by bob's
+// key whose metadata owner differs from the directory record's owner. REQ-016 refuses it, behind the S5 switch.
+func TestS5AT015_OwnerDifferenceRefused(t *testing.T) {
+	needS5Caller(t, "AT-015 negatives, owner")
+	z := newS5Fix(t)
+	genuine := z.genuineRegistration(t, z.bob)
+	tp := z.tap(t, "agents.prompt.>")
+	for _, f := range z.forgeries(t, genuine) {
+		if f.Name == "owner" {
+			s5CheckNegative(t, z, tp, f)
+		}
 	}
 }
 
@@ -83,12 +117,10 @@ func TestS5AT015_NegativesEachRejectedNeverAttributed(t *testing.T) {
 // it. Every run: the valid discovery succeeds with bob found once, and every invalid answer is rejected and counted.
 // Then a prompt to bob works.
 func TestS5AT015_RaceInvalidNeverDeniesTheValidAnswer(t *testing.T) {
-	needS5Caller(t, "AT-015 race (SEC-12; the late-invalid count: mash's discovery does not count rejected answers yet: REQ-016/TO-12, S5/W)")
-	// Why this is skipped today: mash's discovery does not count rejected answers yet (REQ-016/TO-12, S5/W). Main's
-	// applyPresence drops an invalid answer silently, before or after the valid one.
+	needS5Caller(t, "AT-015 race (SEC-12)")
 	z := newS5Fix(t)
 	genuine := z.genuineRegistration(t, z.bob)
-	forged := z.forgeries(t, genuine)
+	forged := z.refused(t, genuine)
 	sets := []struct {
 		name string
 		set  []s5Answer
@@ -116,9 +148,7 @@ func TestS5AT015_RaceInvalidNeverDeniesTheValidAnswer(t *testing.T) {
 					t.Fatalf("the valid answer did not win: accepted %+v", got.Accepted)
 				}
 				// Counting (REQ-016, SEC-12): every invalid answer sent is counted exactly once, whether it arrives
-				// before or after the valid one, and the valid answer wins. This is mash's own discovery's job. Main
-				// does not count rejected answers yet (applyPresence only returns the count it accepted), so the
-				// late-invalid count is skip-guarded until S5/W lands it (TO-12).
+				// before or after the valid one, and the valid answer wins.
 				if got.NotVerified != len(s.set) {
 					t.Fatalf("counted %d answers as not verified, want %d (each once, %s the valid one)", got.NotVerified, len(s.set), mode)
 				}
@@ -132,7 +162,7 @@ func TestS5AT015_RaceInvalidNeverDeniesTheValidAnswer(t *testing.T) {
 func TestS5AT015_PromptWorksThroughTheRace(t *testing.T) {
 	needS5Caller(t, "AT-015 race, prompt")
 	z := newS5Fix(t)
-	forged := z.forgeries(t, z.genuineRegistration(t, z.bob))
+	forged := z.refused(t, z.genuineRegistration(t, z.bob))
 	z.serveEcho(t, z.bob, nil)
 	z.race(t, s5None, forged, nil) // carol's answers; bob's real service answers for himself
 	cl, _ := z.caller(t, z.alice, s5Inputs{})
@@ -143,9 +173,20 @@ func TestS5AT015_PromptWorksThroughTheRace(t *testing.T) {
 	if got := s5Join(chunks); got != "pong from bob" {
 		t.Fatalf("prompt answered %q", got)
 	}
-	if cl.NotVerified() < len(forged) {
-		t.Fatalf("counted %d as not verified, want at least %d", cl.NotVerified(), len(forged))
+	// The prompt does not wait for the rest of the window once bob has answered; the invalid answers that follow are
+	// counted as they arrive, so the count is read when they have.
+	// Only the answers for the requested subject are counted (codex M1): the forgery that names another subject is
+	// not this discovery's business.
+	want, atWant := mustSubj(z.bob).Prompt, 0
+	for _, f := range forged {
+		if s5PromptSubjectOf(t, f.Data) == want {
+			atWant++
+		}
 	}
+	if atWant == 0 || atWant == len(forged) {
+		t.Fatalf("%d of %d forged answers name bob's subject: the list must hold one that names another", atWant, len(forged))
+	}
+	s5Wait(t, "carol's invalid answers to be counted", 10*time.Second, func() bool { return cl.NotVerified() >= atWant })
 }
 
 // s5SendToOfflineBobAndAssertStored sends one mail from alice to bob, who is offline (nothing serves him), by main's
@@ -183,7 +224,7 @@ func TestS5Today_MailToOfflineEndpointIsStored(t *testing.T) {
 func TestS5AT015_AnswerNamingOfflineEndpointDoesNotStopMail(t *testing.T) {
 	needS5Caller(t, "AT-015 forged answer naming an offline endpoint")
 	z := newS5Fix(t)
-	forged := z.forgeries(t, z.genuineRegistration(t, z.bob))
+	forged := z.refused(t, z.genuineRegistration(t, z.bob))
 	z.race(t, s5None, forged, nil)
 	cl, _ := z.caller(t, z.alice, s5Inputs{})
 	got, err := cl.Discover(s5Ctx(t), z.bob)
@@ -193,13 +234,11 @@ func TestS5AT015_AnswerNamingOfflineEndpointDoesNotStopMail(t *testing.T) {
 	s5SendToOfflineBobAndAssertStored(t, z, "hello offline bob, after forged answers")
 }
 
-// TestS5Today_PresenceVerdictOnTheNegativeList pins what main's presence check (applyPresence) does with each answer
-// of AT-015's negative list, so the contract's tightening is visible and deliberate. It runs now. Main counts the
-// answer as presence when the id_sig verifies and the key is the directory's key for the address in the prompt
-// subject. So main refuses the unsigned, forged-sig, wrong-key, subject and user-nkey answers, and it ACCEPTS the
-// owner and account differences (it does not compare metadata owner or account with the directory record; the code
-// comment says metadata owner is not a filter). REQ-016 asks the new caller to refuse those two as well.
-func TestS5Today_PresenceVerdictOnTheNegativeList(t *testing.T) {
+// TestS5Presence_VerdictOnTheNegativeList pins what presence does with each answer of AT-015's negative list under the
+// S5 switch: it refuses every one, the owner difference included, counting each once as not verified, and counts the
+// genuine answer as presence.
+func TestS5Presence_VerdictOnTheNegativeList(t *testing.T) {
+	setS5Hook(t, s5On())
 	z := newS5Fix(t)
 	forged := z.forgeries(t, z.genuineRegistration(t, z.bob))
 	alice, err := OpenClientWith(context.Background(), z.cfgAt(z.alice), ClientOptions{FullDirectory: true})
@@ -207,18 +246,17 @@ func TestS5Today_PresenceVerdictOnTheNegativeList(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(alice.Close)
-	today := map[string]int{"unsigned": 0, "forged-sig": 0, "wrong-key": 0, "subject": 0, "user-nkey": 0, "owner": 1, "account": 1}
 	for _, f := range forged {
-		want, ok := today[f.Name]
-		if !ok {
-			t.Fatalf("no recorded verdict for %s", f.Name)
-		}
-		if got := alice.applyPresence(&nats.Msg{Data: f.Data}); got != want {
-			t.Errorf("main's presence check counted %d for the %s answer, recorded %d", got, f.Name, want)
+		before := alice.AnswersNotVerified()
+		if got := alice.applyPresence(&nats.Msg{Data: f.Data}); got != 0 || alice.AnswersNotVerified() != before+1 {
+			t.Errorf("the %s answer counted %d and rejected %d, want 0 and 1", f.Name, got, alice.AnswersNotVerified()-before)
 		}
 	}
-	// the valid answer is counted
-	if got := alice.applyPresence(&nats.Msg{Data: z.genuineRegistration(t, z.bob)}); got != 1 {
-		t.Errorf("main's presence check counted %d for the genuine answer, want 1", got)
+	before := alice.AnswersNotVerified()
+	if got := alice.applyPresence(&nats.Msg{Data: z.genuineRegistration(t, z.bob)}); got != 1 || alice.AnswersNotVerified() != before {
+		t.Errorf("the genuine answer counted %d and rejected %d, want 1 and 0", got, alice.AnswersNotVerified()-before)
+	}
+	if n := alice.AnswersNotVerified(); n != len(forged) {
+		t.Errorf("the endpoint's total is %d, want %d (every refused answer once)", n, len(forged))
 	}
 }

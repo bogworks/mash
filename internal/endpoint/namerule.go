@@ -79,6 +79,9 @@ func (e *Endpoint) DiscoverRecipient(ctx context.Context, arg string) (string, e
 	if err := e.checkKey(pointPromptRecipient, arg); err != nil {
 		return "", err
 	}
+	if h := s5Hook(); h != nil && h.promptDirectory {
+		return e.discoverRecipientS5(ctx, h, arg)
+	}
 	return DiscoverRecipient(ctx, e.nc, arg)
 }
 

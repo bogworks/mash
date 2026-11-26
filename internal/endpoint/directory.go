@@ -55,6 +55,9 @@ func (e *Endpoint) pollDirectory(ctx context.Context, every time.Duration) {
 // is the directory's key for the address in the prompt subject. The address comes from the subject alone; metadata
 // owner is not a filter (an SDK host registers under another token) and never names the address.
 func (e *Endpoint) applyPresence(m *nats.Msg) (counted int) {
+	if h := s5Hook(); h != nil {
+		return e.applyPresenceS5(h, m)
+	}
 	var info struct {
 		Metadata  map[string]string `json:"metadata"`
 		Endpoints []struct {

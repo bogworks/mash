@@ -1,35 +1,27 @@
 package endpoint
 
 // S5 acceptance helpers (contract 0.6.0-sdk-adoption: REQ-008, REQ-015, REQ-016, REQ-021; AT-008, AT-015, AT-016,
-// AT-022). The tests in the s5_caller_at_*_test.go files are written before the S5 constructor exists. They reach it
-// through one seam, declared here, and skip (naming the AT item) until the sdk lane sets it.
+// AT-022). Under amendment 5 (A) and (i), discovery, presence and the prompt sender stay in mash's own code
+// (internal/endpoint); there is no second caller. The tests in the s5_caller_at_*_test.go files reach main's discovery
+// through one seam, declared here and set in s5_caller_wire_test.go: an Endpoint over the asker's connection, its
+// presence probe (startPresence, awaitPresence, applyPresence), its recipient discovery (DiscoverRecipient) and its
+// prompt sender. The seam has:
 //
-// WHAT SDK MUST DO. In one _test.go file of this package (for example s5_caller_wire_test.go, written by sdk), set
+//   - the reply subjects main sends (secretInbox): _INBOX.<owner>.<flat>. and one token of 32 hex characters, 128
+//     bits from crypto/rand (REQ-015, AT-016); the reply layout of CHG-15 (client-id and route tokens) fell away;
+//   - the identity env.Creds signing the Agent-Sender header with display name env.Name, as main's promptMsg does.
+//     Main draws the clock and the nonce inside promptMsg, so env.Inputs is not used by this seam: AT-008 masks ts,
+//     nonce and sig from byte equality only, checks ts and the nonce for form, verifies the signature over the
+//     captured bytes, and compares everything else byte for byte (amendment 5, N8);
+//   - main's discovery verification (REQ-016): a registration is accepted only when its id_sig verifies and its
+//     prompt subject, address, account, user_nkey and owner agree with env.Directory's record, through the S5 switch
+//     (s5Switch, atomic; set by newS5Main for the test and restored with t.Cleanup);
+//   - the presence window of main (PresenceQuiet, PresenceCap), which env.Window does not shorten.
 //
-//	func init() { newS5Caller = func(t *testing.T, env s5Env) s5Caller { ... } }
-//
-// to return the mash caller constructor S5 builds over env.NC. Under ruling (A), discovery, presence and the prompt
-// sender stay in mash's own code (internal/endpoint); the SDK caller is used only where sdk later decides (reply
-// inbox, stream). The constructor is whatever S5 builds around mash's discovery: these tests exercise mash's own
-// discovery path (presence, applyPresence, the $SRV.INFO answer handling), not the SDK's Discover. It has:
-//
-//   - the reply prefix env.Asker.InboxPrefix() (caller.WithInboxPrefix), so every reply subject is
-//     _INBOX.<owner>.<flat>.<client-id>.<route> (REQ-015, AT-016);
-//   - the identity env.Creds (the asker's creds file contents) signing the Agent-Sender header with display name
-//     env.Name. The header must be what main's promptMsg gives, byte for byte apart from the values of ts, nonce and
-//     sig, and the prompt payload must be main's bare text (SAP 0.3 section 5.1). env.Inputs.Now and env.Inputs.Nonce
-//     are offered for a constructor that can fix them; if it cannot (clock and nonce drawn inside), AT-008 masks
-//     those three values and checks instead that the new signature verifies over the payload;
-//   - mash's discovery verification: a registration is accepted only when its id_sig verifies and its prompt subject,
-//     owner, address, account and user_nkey all agree with env.Directory's record for the address asked for
-//     (REQ-016);
-//   - discovery windows no longer than env.Window (0 means the defaults).
-//
-// The random tokens (client id, route, nonce) are NOT injected through the seam. The SDK reads crypto/rand directly,
-// so the tests fix them with testing/cryptotest.SetGlobalRandom, which replaces crypto/rand for the whole process.
-// That is "the fixed test random source" of REQ-015 and the replaced entropy source of AT-016, applied to the
-// caller's real path. The constructor must therefore draw every random token (client id, route, nonce) from
-// crypto/rand at call time, not at package init.
+// The random tokens are not injected: the tests swap the token seam of main's own secretInbox
+// (tokenRand, service.go; default crypto/rand.Reader), "the fixed test random source" of REQ-015 and the replaced
+// entropy source of AT-016, applied to main's real path. They never replace crypto/rand's global source: the embedded
+// nats-server reads it, and that races under -race.
 //
 // Contract of each s5Caller method is on the interface below.
 
@@ -38,10 +30,12 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -63,7 +57,7 @@ import (
 // The seam.
 
 // s5Inputs are the deterministic inputs of REQ-015 that the constructor takes. (The random source is the process's
-// crypto/rand, fixed by the test with cryptotest.SetGlobalRandom.)
+// crypto/rand, seeded by the test through the token seam.)
 type s5Inputs struct {
 	Now   func() time.Time // the clock of the signed header; nil means time.Now
 	Nonce string           // the nonce of the signed header; empty means a fresh one
@@ -127,16 +121,14 @@ type s5Caller interface {
 	Close() error
 }
 
-// newS5Caller is set by the sdk lane (see the comment at the top of this file): whatever S5 builds around mash's own
-// discovery. Nil until then.
+// newS5Caller is set in s5_caller_wire_test.go: main's own discovery, presence and prompt sender over env.NC.
 var newS5Caller func(t *testing.T, env s5Env) s5Caller
 
-// needS5Caller skips the test while the constructor has not landed. item names the AT item, so a skipped line says
-// what is not yet checked.
+// needS5Caller fails the test when the seam has not been set. item names the AT item.
 func needS5Caller(t *testing.T, item string) {
 	t.Helper()
 	if newS5Caller == nil {
-		t.Skip(item + ": S5 constructor not landed: sdk wires newS5Caller")
+		t.Fatal(item + ": the S5 seam is not wired (s5_caller_wire_test.go)")
 	}
 }
 
@@ -599,6 +591,13 @@ func (z *s5Fix) forgeries(t *testing.T, genuine []byte) []s5Answer {
 	return all
 }
 
+// refused is the forgeries of AT-015's negative list: the discovery refuses and counts every one, the owner forgery
+// included (REQ-016, behind the S5 switch).
+func (z *s5Fix) refused(t *testing.T, genuine []byte) []s5Answer {
+	t.Helper()
+	return z.forgeries(t, genuine)
+}
+
 func s5PromptSubjectOf(t *testing.T, data []byte) string {
 	t.Helper()
 	var info struct {
@@ -733,96 +732,82 @@ func (z *s5Fix) race(t *testing.T, mode s5RaceMode, invalid []s5Answer, valid []
 // ---------------------------------------------------------------------------------------------------------------
 // Reply-subject layout checks (REQ-015, AT-016).
 
-const s5Base32 = "abcdefghijklmnopqrstuvwxyz234567"
-
-// s5Layout splits a reply subject of the ruled layout _INBOX.<owner>.<flat>.<client-id>.<route> and reports a
-// problem, or "" when it is as ruled. The route token must be at least 26 base32 characters (130 bits).
-func s5Layout(asker sap.Address, subject string) (clientID, route, problem string) {
+// s5Layout splits a reply subject of main's layout, _INBOX.<owner>.<flat>.<token> (secretInbox), and reports a
+// problem, or "" when it is as main's is: the owner-scoped prefix and one token of 32 lowercase hex characters, which
+// is 128 bits.
+func s5Layout(asker sap.Address, subject string) (token, problem string) {
 	pre := asker.InboxPrefix() + "."
 	if !strings.HasPrefix(subject, pre) {
-		return "", "", fmt.Sprintf("%q is outside the owner-scoped prefix %q", subject, pre)
+		return "", fmt.Sprintf("%q is outside the owner-scoped prefix %q", subject, pre)
 	}
-	toks := strings.Split(strings.TrimPrefix(subject, pre), ".")
-	if len(toks) != 2 {
-		return "", "", fmt.Sprintf("%q has %d tokens after the prefix, want 2 (client id, route)", subject, len(toks))
+	token = strings.TrimPrefix(subject, pre)
+	if strings.Contains(token, ".") {
+		return "", fmt.Sprintf("%q has more than one token after the prefix", subject)
 	}
-	clientID, route = toks[0], toks[1]
-	if clientID == "" {
-		return "", "", fmt.Sprintf("%q has an empty client id token", subject)
+	if len(token) < 32 {
+		return "", fmt.Sprintf("%q: the token has %d characters, want 32 hex (128 bits)", subject, len(token))
 	}
-	if len(route) < 26 {
-		return "", "", fmt.Sprintf("%q: route token has %d characters, want at least 26 (128 bits)", subject, len(route))
+	if !s5Hex32.MatchString(token) {
+		return "", fmt.Sprintf("%q: the token is not 32 lowercase hex characters", subject)
 	}
-	if strings.Trim(route, s5Base32) != "" {
-		return "", "", fmt.Sprintf("%q: route token is not lowercase base32", subject)
-	}
-	return clientID, route, ""
+	return token, ""
 }
 
-// s5RandomRoute is a guess: a random base32 token of a route's length.
-func s5RandomRoute() string {
-	var b [26]byte
+// s5RandomToken is a guess: a random token of the form of main's.
+func s5RandomToken() string {
+	var b [16]byte
 	_, _ = rand.Read(b[:])
-	for i := range b {
-		b[i] = s5Base32[int(b[i])%32]
-	}
-	return string(b[:])
+	return hex.EncodeToString(b[:])
 }
 
-// s5IncrementBase32 reads tok as a lowercase base32 number and returns tok+n (same width, wrapping).
-func s5IncrementBase32(tok string, n int) string {
+// s5IncrementHex reads tok as a lowercase hex number and returns tok+n (same width, wrapping).
+func s5IncrementHex(tok string, n int) string {
+	const digits = "0123456789abcdef"
 	b := []byte(tok)
 	for ; n > 0; n-- {
 		for i := len(b) - 1; i >= 0; i-- {
-			j := strings.IndexByte(s5Base32, b[i])
-			if j < 31 {
-				b[i] = s5Base32[j+1]
+			j := strings.IndexByte(digits, b[i])
+			if j < 15 {
+				b[i] = digits[j+1]
 				break
 			}
-			b[i] = s5Base32[0]
+			b[i] = digits[0]
 		}
 	}
 	return string(b)
 }
 
-// s5Guesses lists the subjects a same-owner observer who saw one reply subject would try: the NUID successors and
-// simple increments of the per-request token under the prefix with and without the client-id token, and the client
-// id with random route tokens.
+// s5Guesses lists the subjects a same-owner observer who saw one reply subject would try: the NUID successors of its
+// first 22 characters (the form a NUID-only inbox would have), simple increments of the token, and random tokens of
+// its form, all under the prefix.
 func s5Guesses(seen string) []string {
 	dot := strings.LastIndex(seen, ".")
 	if dot < 0 {
 		return nil
 	}
-	head, route := seen[:dot], seen[dot+1:]
-	var cid, prefix string
-	if d2 := strings.LastIndex(head, "."); d2 >= 0 {
-		prefix, cid = head[:d2], head[d2+1:]
-	}
+	prefix, token := seen[:dot], seen[dot+1:]
 	var toks []string
-	if len(route) >= 22 {
-		toks = append(toks, nextNUIDs(route[:22], 1, 700)...)
+	if len(token) >= 22 {
+		toks = append(toks, nextNUIDs(token[:22], 1, 700)...)
 	}
 	for n := 1; n <= 200; n++ {
-		toks = append(toks, s5IncrementBase32(route, n))
+		toks = append(toks, s5IncrementHex(token, n))
+	}
+	for i := 0; i < 100; i++ {
+		toks = append(toks, s5RandomToken())
 	}
 	var out []string
 	for _, tk := range toks {
-		out = append(out, head+"."+tk) // the client-id token seen, a guessed route
-		if prefix != "" {
-			out = append(out, prefix+"."+tk) // one token under the flat prefix (main's layout)
-		}
-	}
-	for i := 0; i < 100; i++ {
-		out = append(out, head+"."+s5RandomRoute())
-	}
-	if cid != "" && prefix != "" { // a guessed client id with the route seen
-		out = append(out, prefix+"."+s5IncrementBase32(cid, 1)+"."+route)
+		out = append(out, prefix+"."+tk)
 	}
 	return out
 }
 
 // s5Evil is the reply chunk an attacker publishes: a response chunk that, accepted, would show up in the output.
 var s5Evil = []byte(`{"type":"response","data":"EVIL"}`)
+
+// s5Hex32 is the token of main's reply subject: 32 lowercase hex characters, 128 bits.
+var s5Hex32 = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
 // observe starts a same-owner peer (carol) that watches $SRV.> and, for each discovery request, floods the guesses of
 // s5Guesses for up to 3 s with the evil chunk (and a terminator), and with a replay of replay (a genuine answer) when
