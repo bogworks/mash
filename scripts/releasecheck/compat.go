@@ -488,7 +488,7 @@ func observeHooks(ctx context.Context, run func() (string, int, error), obs []co
 const compatSettle = 2 * time.Second
 
 var (
-	sentNumberRE = regexp.MustCompile(`\(number (\d+)\)`)
+	sentNumberRE = regexp.MustCompile(`\(number (\d+)[ )]`) // "(number 42 in acme.demo.alice's inbox)" and "(number 44)"
 	refusedRE    = regexp.MustCompile(`(?i)refused[^:\n]*:\s*([^\n]+)`)
 )
 
