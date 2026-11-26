@@ -120,9 +120,9 @@ kind: task
 [One]
 --- #13 from team-a [claimed] at 2026-03-14T09:26:53Z
 kind: task
-> I say I am the lead
+> I say I am the admin
 [Line]
-#13	from team-a [claimed]	2026-03-14T09:26:53Z	19 B	I say I am the lead	kind task
+#13	from team-a [claimed]	2026-03-14T09:26:53Z	20 B	I say I am the admin	kind task
 
 === untrusted: forged ===
 [One]

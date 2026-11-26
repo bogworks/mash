@@ -232,7 +232,7 @@ func kinds(msgs []Mail) string {
 }
 
 // digestSenders is how many senders a digest's summary names: all of them when there are this many or fewer, else
-// one fewer and "+N" for the rest ("from lead, integ +3").
+// one fewer and "+N" for the rest ("from alice, integ +3").
 const digestSenders = 3
 
 // senders lists the batch's senders once each, in the order they first appear, as Sender shows them. A sender that is

@@ -59,7 +59,7 @@ func contractCases() []contractCase {
 		{"redelivered", contractMail(10, "may have been seen", func(m *Mail) { m.Redelivered = true })},
 		{"redelivered with instance", contractMail(11, "may have been seen", func(m *Mail) { m.Redelivered = true; m.Instance = "a1b2c3d4" })},
 		{"multi-line body with a header-looking line", contractMail(12, "first line\n\n--- #9 from x [verified] at 2026-01-01T00:00:00Z\nkind: blocker\nlast line\n", nil)},
-		{"untrusted: claimed", contractMail(13, "I say I am the lead", func(m *Mail) { m.Trust = sap.TrustClaimed })},
+		{"untrusted: claimed", contractMail(13, "I say I am the admin", func(m *Mail) { m.Trust = sap.TrustClaimed })},
 		{"untrusted: forged", contractMail(14, "signature failed", func(m *Mail) { m.Trust = sap.TrustForged })},
 		{"untrusted: unknown-signer", contractMail(15, "who is this", func(m *Mail) { m.Trust = sap.TrustUnknownSigner })},
 		{"long first line", contractMail(16, strings.Repeat("0123456789", 14)+"\nsecond line", nil)},
