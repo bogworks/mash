@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -35,6 +36,13 @@ var scorecardSteps = []string{
 	"actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
 	"ossf/scorecard-action@23f22cd43608bae7a1f1fa2603d7314dee9538a5",
 	"github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d",
+}
+
+// scorecardStepWith is the exact with map of each step, by step index (ADR 0189).
+var scorecardStepWith = []map[string]any{
+	{"persist-credentials": false},
+	{"results_file": "results.sarif", "results_format": "sarif", "publish_results": true, "fail_on_publish_error": true},
+	{"sarif_file": "results.sarif"},
 }
 
 // scorecardJobPermissions is the exact permission set of the job analysis.
@@ -198,11 +206,10 @@ func scorecardProblems(text string) []string {
 				out = append(out, fmt.Sprintf("step %d if %q must be %q (only the upload step runs if: always(); no other step has an if)", i+1, st.If, want))
 			}
 		}
-		if steps[0].With["persist-credentials"] != false {
-			out = append(out, "the checkout step must keep persist-credentials: false")
-		}
-		if steps[1].With["publish_results"] != true || steps[1].With["fail_on_publish_error"] != true {
-			out = append(out, "the scorecard step must set publish_results: true and fail_on_publish_error: true")
+		for i, want := range scorecardStepWith {
+			if !reflect.DeepEqual(steps[i].With, want) {
+				out = append(out, fmt.Sprintf("step %d with must be exactly %v, have %v (checkout keeps persist-credentials: false; the scorecard step sets publish_results: true and fail_on_publish_error: true)", i+1, want, steps[i].With))
+			}
 		}
 	}
 	return out
@@ -481,6 +488,13 @@ jobs:
 		"a swapped sha":                           {"scorecard.yml", swap("upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d", "upload-sarif@0000000000000000000000000000000000000000"), "step 3"},
 		"publish_results false":                   {"scorecard.yml", swap("publish_results: true", "publish_results: false"), "publish_results"},
 		"no fail_on_publish_error":                {"scorecard.yml", swap("          fail_on_publish_error: true\n", ""), "fail_on_publish_error"},
+		"results_format json":                     {"scorecard.yml", swap("results_format: sarif", "results_format: json"), "step 2 with"},
+		"sarif_file other.sarif":                  {"scorecard.yml", swap("sarif_file: results.sarif", "sarif_file: other.sarif"), "step 3 with"},
+		"results_file other.sarif":                {"scorecard.yml", swap("results_file: results.sarif", "results_file: other.sarif"), "step 2 with"},
+		"an extra with key on checkout":           {"scorecard.yml", swap("          persist-credentials: false\n", "          persist-credentials: false\n          ref: evil\n"), "step 1 with"},
+		"an extra with key on scorecard":          {"scorecard.yml", swap("          fail_on_publish_error: true\n", "          fail_on_publish_error: true\n          repo_token: x\n"), "step 2 with"},
+		"an extra with key on upload":             {"scorecard.yml", swap("          sarif_file: results.sarif\n", "          sarif_file: results.sarif\n          category: x\n"), "step 3 with"},
+		"a removed results_format":                {"scorecard.yml", swap("          results_format: sarif\n", ""), "step 2 with"},
 		"checkout persisting credentials":         {"scorecard.yml", swap("persist-credentials: false", "persist-credentials: true"), "persist-credentials"},
 		"a missing step":                          {"scorecard.yml", swap("      - uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3\n        if: always()\n        with:\n          sarif_file: results.sarif\n", ""), "steps"},
 		"if false on the upload step":             {"scorecard.yml", swap("        if: always()\n", "        if: false\n"), "step 3 if"},

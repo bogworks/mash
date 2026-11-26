@@ -45,12 +45,15 @@ The workflow:
   `publish_results`;
 * has exactly three steps, no `run` step, by full `uses` string and in this order: `actions/checkout`,
   `ossf/scorecard-action` and `github/codeql-action/upload-sarif`, each pinned by full commit sha (a version comment
-  follows); checkout keeps `persist-credentials: false`; the Scorecard step sets `publish_results: true` and
-  `fail_on_publish_error: true`, so a failed publication fails the job; the upload step runs `if: always()`, so the SARIF result reaches code scanning even then; no other step has an `if` and no step has `continue-on-error`.
+  follows); the `with` options of the three steps hold exactly, no more and no fewer: checkout
+  `persist-credentials: false`; Scorecard `results_file: results.sarif`, `results_format: sarif`, `publish_results: true`
+  and `fail_on_publish_error: true`; upload `sarif_file: results.sarif` (the same path as `results_file`).
+  `fail_on_publish_error: true` makes a rejected publication fail the step; a network error or an HTTP 408, 429 or 5xx
+  response still leaves the step green, and the next weekly run publishes (a verifier job was declined). The upload step runs `if: always()`, so the SARIF result reaches code scanning even then; no other step has an `if` and no step has `continue-on-error`.
 
 What stays true from ADR 0079: no other job moves; there is no `||` fallback to a hosted label; forks skip; and the
 guard allows a GitHub-hosted label only in the file named exactly `scorecard.yml`, only `ubuntu-latest`, only for the
-job `analysis`, and only while the file's triggers are `schedule` and `push` to `main`, the job keeps the fork exclusion, and the cron, permissions, steps and their `if` and `continue-on-error` above hold exactly. The same text under another file name, a
+job `analysis`, and only while the file's triggers are `schedule` and `push` to `main`, the job keeps the fork exclusion, and the cron, permissions, steps, their `with` options and their `if` and `continue-on-error` above hold exactly. The same text under another file name, a
 pull-request trigger, another job name, another label or a fallback fails the guard.
 
 ### Consequences
