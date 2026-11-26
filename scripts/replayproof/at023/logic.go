@@ -88,11 +88,54 @@ type Replay struct {
 	Chunks     []Chunk   `json:"chunks"`
 	SessionSaw bool      `json:"session_saw_prompt"` // the endpoint's session got a prompt event
 	ReplyText  string    `json:"reply_text,omitempty"`
+	// ReplyToolOK is whether the session's reply tool call came back as a success.
+	ReplyToolOK bool `json:"reply_tool_ok"`
+	// ExpectedText is the text the session was told to reply with; the caller must receive exactly this.
+	ExpectedText string `json:"expected_text,omitempty"`
+	// StreamComplete is whether the reply stream ended with its final (end) chunk.
+	StreamComplete bool `json:"stream_complete"`
+}
+
+// The texts the session replies with, so the assertion can compare what the caller received to them exactly.
+const (
+	baselineAnswer = "the date is today"
+	replayAnswer   = "answer to the replayed prompt"
+)
+
+// StreamEnded reports whether the last chunk is the end of the stream (an error chunk is not a completed stream).
+func StreamEnded(chunks []Chunk) bool {
+	return len(chunks) > 0 && chunks[len(chunks)-1].Kind == "end"
+}
+
+// AnswerProblem returns "" when r is an accepted prompt that the session saw, answered through a successful reply
+// tool call, whose caller received exactly the expected text, and whose reply stream completed. Otherwise it returns
+// a sentence naming what is missing.
+func AnswerProblem(r Replay) string {
+	var p []string
+	if r.Outcome != "accepted" {
+		p = append(p, "not accepted ("+r.Outcome+")")
+	}
+	if !r.SessionSaw {
+		p = append(p, "the session never saw the prompt")
+	}
+	if !r.ReplyToolOK {
+		p = append(p, "the reply tool call did not succeed")
+	}
+	if r.ExpectedText == "" {
+		p = append(p, "no expected answer text recorded")
+	} else if r.ReplyText != r.ExpectedText {
+		p = append(p, fmt.Sprintf("the caller received %q, expected %q", r.ReplyText, r.ExpectedText))
+	}
+	if !r.StreamComplete {
+		p = append(p, "the reply stream did not complete")
+	}
+	return strings.Join(p, "; ")
 }
 
 // Summary is a replay in one line, for the comparison.
 func (r Replay) Summary() string {
-	return fmt.Sprintf("%s; session saw the prompt: %v; answer back to the caller: %q", r.Outcome, r.SessionSaw, r.ReplyText)
+	return fmt.Sprintf("%s; session saw the prompt: %v; reply tool ok: %v; answer back to the caller: %q (expected %q); stream complete: %v",
+		r.Outcome, r.SessionSaw, r.ReplyToolOK, r.ReplyText, r.ExpectedText, r.StreamComplete)
 }
 
 // Result is the part of a build's run that the two builds are compared on. Times and ids are not in it.
@@ -136,6 +179,9 @@ func ParseSums(text string) (map[string]string, error) {
 type KnownIssue struct {
 	URL    string `json:"url"`
 	Status string `json:"status"`
+	// VerifiedBy says how the entry was checked: "launcher" (the issue exists and carries the label, checked on the
+	// host with gh), "form only" (the URL's form; no token in this venue), or "" when no URL is given.
+	VerifiedBy string `json:"verified_by,omitempty"`
 }
 
 // NewKnownIssue says in its status whether the link is given.
@@ -161,4 +207,21 @@ func KnownIssueFormProblem(url, repo string) string {
 		return ""
 	}
 	return "expected exactly " + prefix + "<positive integer>, got " + fmt.Sprintf("%q", url)
+}
+
+// KnownIssueCheck sets ki.VerifiedBy from the launcher's verified text (empty in a venue with no token) and returns the
+// assertion's pass flag and detail. The pass rule is the form of the URL; the label check only changes what is recorded.
+func KnownIssueCheck(ki *KnownIssue, repo, verified string) (bool, string) {
+	if ki.URL == "" {
+		return false, ki.Status + " " + ki.URL
+	}
+	if p := KnownIssueFormProblem(ki.URL, repo); p != "" {
+		return false, p
+	}
+	if v := strings.TrimSpace(verified); v != "" {
+		ki.VerifiedBy = "launcher"
+		return true, ki.Status + " " + ki.URL + " (verified by the launcher: " + v + ")"
+	}
+	ki.VerifiedBy = "form only"
+	return true, ki.Status + " " + ki.URL + " (checked for form only: label not confirmed in this venue)"
 }

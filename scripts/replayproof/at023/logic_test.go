@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -93,6 +94,75 @@ func TestKnownIssueFormProblem(t *testing.T) {
 	} {
 		if got := KnownIssueFormProblem(c.url, "acme/mash") == ""; got != c.good {
 			t.Errorf("%q: good %v, want %v", c.url, got, c.good)
+		}
+	}
+}
+
+func TestAnswerProblem(t *testing.T) {
+	good := Replay{Outcome: "accepted", SessionSaw: true, ReplyToolOK: true, ReplyText: replayAnswer, ExpectedText: replayAnswer,
+		StreamComplete: true, Chunks: []Chunk{{Kind: "ack"}, {Kind: "response", Text: replayAnswer}, {Kind: "end"}}}
+	if p := AnswerProblem(good); p != "" {
+		t.Fatalf("a complete answer was refused: %s", p)
+	}
+	for _, c := range []struct {
+		name string
+		edit func(*Replay)
+		want string
+	}{
+		{"reply tool failed", func(r *Replay) { r.ReplyToolOK = false }, "reply tool"},
+		{"no answer", func(r *Replay) { r.ReplyText = "" }, "received"},
+		{"wrong text", func(r *Replay) { r.ReplyText = "something else" }, "received"},
+		{"extra text", func(r *Replay) { r.ReplyText += "!" }, "received"},
+		{"stream incomplete", func(r *Replay) { r.StreamComplete = false }, "stream"},
+		{"no expected text", func(r *Replay) { r.ExpectedText = "" }, "expected answer"},
+		{"session never saw it", func(r *Replay) { r.SessionSaw = false }, "never saw"},
+		{"refused", func(r *Replay) { r.Outcome = "refused 401" }, "not accepted"},
+	} {
+		r := good
+		c.edit(&r)
+		if p := AnswerProblem(r); p == "" || !strings.Contains(p, c.want) {
+			t.Errorf("%s: problem %q, want it to mention %q", c.name, p, c.want)
+		}
+	}
+	// Both builds failing the same way must still fail: the check is on each build, not on their equality.
+	bad := good
+	bad.ReplyToolOK = false
+	if len(Diff(Result{Replay: bad.Summary()}, Result{Replay: bad.Summary()})) != 0 || AnswerProblem(bad) == "" {
+		t.Error("an identical failure on both builds passed")
+	}
+}
+
+func TestStreamEnded(t *testing.T) {
+	for _, c := range []struct {
+		chunks []Chunk
+		want   bool
+	}{
+		{nil, false}, {[]Chunk{{Kind: "ack"}}, false}, {[]Chunk{{Kind: "ack"}, {Kind: "error"}}, false},
+		{[]Chunk{{Kind: "ack"}, {Kind: "response"}, {Kind: "end"}}, true},
+	} {
+		if got := StreamEnded(c.chunks); got != c.want {
+			t.Errorf("%v: %v, want %v", c.chunks, got, c.want)
+		}
+	}
+}
+
+func TestKnownIssueCheck(t *testing.T) {
+	url := "https://github.com/acme/mash/issues/1829"
+	for _, c := range []struct {
+		name, url, verified, by string
+		pass                    bool
+		detail                  string
+	}{
+		{"launcher verified", url, "open, label known-0.6.0", "launcher", true, "verified by the launcher"},
+		{"form only", url, "", "form only", true, "form only"},
+		{"blank verified is form only", url, "  ", "form only", true, "label not confirmed"},
+		{"bad form even if verified", "https://github.com/zeta/mash/issues/1", "open, label known-0.6.0", "", false, "expected exactly"},
+		{"no url", "", "open", "", false, "EMPTY"},
+	} {
+		ki := NewKnownIssue(c.url)
+		pass, detail := KnownIssueCheck(&ki, "acme/mash", c.verified)
+		if pass != c.pass || ki.VerifiedBy != c.by || !strings.Contains(detail, c.detail) {
+			t.Errorf("%s: pass %v by %q detail %q", c.name, pass, ki.VerifiedBy, detail)
 		}
 	}
 }

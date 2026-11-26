@@ -45,6 +45,8 @@ const (
 	owner = "acme"
 	// replyWait is how long a replay waits for the first chunk before the result is "no reply".
 	replyWait = 5 * time.Second
+	// httpTimeout bounds one download of a release file.
+	httpTimeout = 3 * time.Minute
 )
 
 // releaseBase is the download URL prefix of the releases of repo (OWNER/REPO on GitHub).
@@ -148,10 +150,11 @@ func run() int {
 	work := flag.String("work", "", "scratch directory for servers, state and binaries (default: a new temp directory)")
 	known := flag.String("known-issue", "", "URL of the known-0.6.0 entry (REQ-022); empty fails the run")
 	repo := flag.String("release-repo", "bogworks/mash", "the GitHub repository OWNER/REPO whose releases hold the oracle")
+	knownVerified := flag.String("known-issue-verified", "", "text from the launcher saying it confirmed on the host that the -known-issue entry exists and carries the label; empty means form only")
 	venue := flag.String("venue", "", "a line describing where this runs (container image, VM), for the record")
 	flag.Parse()
 	if *src == "" || *outDir == "" || !commitRE.MatchString(*commit) || !versionRE.MatchString(*version) || !versionRE.MatchString(*oracleVer) || !repoRE.MatchString(*repo) {
-		fmt.Fprintln(os.Stderr, "usage: at023 -src <clone> -commit <40 hex> -version X.Y.Z -oracle-version X.Y.Z -out <dir> [-work dir] [-known-issue URL] [-release-repo OWNER/REPO] [-venue text]")
+		fmt.Fprintln(os.Stderr, "usage: at023 -src <clone> -commit <40 hex> -version X.Y.Z -oracle-version X.Y.Z -out <dir> [-work dir] [-known-issue URL] [-known-issue-verified text] [-release-repo OWNER/REPO] [-venue text]")
 		return 2
 	}
 	if err := os.MkdirAll(*outDir, 0o755); err != nil {
@@ -180,17 +183,8 @@ func run() int {
 	lg.f("known-issue entry: %s", rec.KnownIssue.Status+" "+rec.KnownIssue.URL)
 
 	ok := execute(rec, *src, *commit, *version, *oracleVer, *repo, wd)
-	kiProblem := ""
-	if rec.KnownIssue.URL != "" {
-		kiProblem = KnownIssueFormProblem(rec.KnownIssue.URL, *repo)
-	}
-	kiDetail := rec.KnownIssue.Status + " " + rec.KnownIssue.URL
-	if kiProblem != "" {
-		kiDetail = kiProblem
-	} else if rec.KnownIssue.URL != "" {
-		kiDetail += " (checked for form only: the issue's label was not confirmed, the container has no network token)"
-	}
-	if !rec.check("the known-issues entry is linked (REQ-022)", rec.KnownIssue.URL != "" && kiProblem == "", kiDetail) {
+	kiPass, kiDetail := KnownIssueCheck(&rec.KnownIssue, *repo, *knownVerified)
+	if !rec.check("the known-issues entry is linked (REQ-022)", kiPass, kiDetail) {
 		ok = false
 	}
 	rec.FinishedAt = time.Now().UTC()
@@ -277,12 +271,12 @@ func execute(rec *Record, src, commit, version, oracleVer, repo, wd string) bool
 func assertBuild(rec *Record, b *Build) bool {
 	ok := true
 	p := b.Role + ": "
-	ok = rec.check(p+"the original prompt was accepted and answered", b.Baseline.Outcome == "accepted" && b.Baseline.SessionSaw && b.Baseline.ReplyText != "", b.Baseline.Summary()) && ok
+	ok = rec.check(p+"the original prompt was accepted and answered (reply tool succeeded, exact answer received, stream complete)", AnswerProblem(b.Baseline) == "", b.Baseline.Summary()) && ok
 	ok = rec.check(p+"control: the same bytes replayed to the running endpoint are refused (its nonce memory is intact)", strings.HasPrefix(b.Control.Outcome, "refused") && !b.Control.SessionSaw, b.Control.Summary()) && ok
 	ok = rec.check(p+"the endpoint was restarted and the replay was sent inside the 30 s window", b.Timings.ReplayWindow.Inside,
 		fmt.Sprintf("replay sent %.2f s after the captured ts, %.2f s left", b.Timings.ReplayWindow.Elapsed.Seconds(), b.Timings.ReplayWindow.Remaining.Seconds())) && ok
 	ok = rec.check(p+"the restarted endpoint is a new process", b.Timings.OldPID != 0 && b.Timings.NewPID != 0 && b.Timings.OldPID != b.Timings.NewPID, b.PIDs) && ok
-	ok = rec.check(p+"the replay is accepted (today's behaviour)", b.Replay.Outcome == "accepted" && b.Replay.SessionSaw, b.Replay.Summary()) && ok
+	ok = rec.check(p+"the replay is accepted and answered (today's behaviour: reply tool succeeded, exact answer received, stream complete)", AnswerProblem(b.Replay) == "", b.Replay.Summary()) && ok
 	return ok
 }
 
@@ -296,7 +290,7 @@ func errText(err error) string {
 // --- binaries -----------------------------------------------------------------------------------------------------
 
 func httpGet(url string) ([]byte, error) {
-	c := &http.Client{Timeout: 3 * time.Minute}
+	c := &http.Client{Timeout: httpTimeout}
 	resp, err := c.Get(url)
 	if err != nil {
 		return nil, err
@@ -487,8 +481,15 @@ func (s *session) reply(reqID, text string) error {
 	if err := s.send(string(b)); err != nil {
 		return err
 	}
-	if _, ok := s.await(10*time.Second, idIs(id)); !ok {
+	m, ok := s.await(10*time.Second, idIs(id))
+	if !ok {
 		return errors.New("no answer to the reply tool call")
+	}
+	if _, bad := m["error"]; bad {
+		return fmt.Errorf("the reply tool call failed: %v", m["error"])
+	}
+	if res, _ := m["result"].(map[string]any); res != nil && res["isError"] == true {
+		return fmt.Errorf("the reply tool call returned an error result: %v", res["content"])
 	}
 	return nil
 }
@@ -595,16 +596,22 @@ func replayOnce(nc *nats.Conn, c Capture, s *session, label string) (Replay, err
 		}
 		return ParseChunk(x.Data, x.Header.Get("Nats-Service-Error-Code"), x.Header.Get("Nats-Service-Error"), len(x.Header) > 0), true
 	}
+	r.ExpectedText = replayAnswer
 	first, got := next(replyWait)
 	if got {
 		r.Chunks = append(r.Chunks, first)
+		if first.Kind == "response" {
+			r.ReplyText += first.Text
+		}
 	}
 	r.Outcome = Outcome(r.Chunks)
 	if r.Outcome == "accepted" {
 		if id, ok := s.prompt(5 * time.Second); ok {
 			r.SessionSaw = true
-			if err := s.reply(id, "answer to the replayed prompt"); err != nil {
-				return r, err
+			if err := s.reply(id, replayAnswer); err != nil {
+				lg.f("%s replay: %v", label, err)
+			} else {
+				r.ReplyToolOK = true
 			}
 		}
 	}
@@ -620,6 +627,7 @@ func replayOnce(nc *nats.Conn, c Capture, s *session, label string) (Replay, err
 	if r.Chunks == nil {
 		r.Chunks = []Chunk{}
 	}
+	r.StreamComplete = StreamEnded(r.Chunks)
 	lg.f("%s replay: %s", label, r.Summary())
 	return r, nil
 }
@@ -715,12 +723,14 @@ func runBuild(rec *Record, b *Build, bin, dir string) error {
 	}
 
 	id, ok := alice.prompt(10 * time.Second)
-	b.Baseline = Replay{SentAt: b.Capture.ReceivedAt, SessionSaw: ok, Outcome: "no reply", Chunks: []Chunk{}}
+	b.Baseline = Replay{SentAt: b.Capture.ReceivedAt, SessionSaw: ok, Outcome: "no reply", Chunks: []Chunk{}, ExpectedText: baselineAnswer}
 	if !ok {
 		return errors.New("alice's session never saw the original prompt")
 	}
-	if err := alice.reply(id, "the date is today"); err != nil {
-		return err
+	if err := alice.reply(id, baselineAnswer); err != nil {
+		lg.f("original prompt: %v", err)
+	} else {
+		b.Baseline.ReplyToolOK = true
 	}
 	select {
 	case p := <-pc:
@@ -729,6 +739,7 @@ func runBuild(rec *Record, b *Build, bin, dir string) error {
 		} else {
 			b.Baseline.Outcome = "accepted"
 			b.Baseline.ReplyText = strings.TrimSpace(p.out)
+			b.Baseline.StreamComplete = true // mash prompt exits 0 only after the reply stream's end
 		}
 	case <-time.After(20 * time.Second):
 		return errors.New("`mash prompt` did not return after Alice answered")

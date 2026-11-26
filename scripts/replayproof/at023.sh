@@ -2,6 +2,9 @@
 # AT-023 (REQ-022): the restart-replay proof, in one throwaway container created for the run and destroyed at the end.
 #   scripts/replayproof/at023.sh [--commit REF] [--version 0.6.0] [--oracle-version 0.5.10] [--out DIR] [--known-issue URL] [--release-repo OWNER/REPO] [--container-tmp DIR]
 # --known-issue is the link to the known-0.6.0 entry; without it the run fails (REQ-022: the entry is linked).
+# With --known-issue, the launcher first checks on the host, read-only with gh (never printing a token), that the issue exists in
+# the release repository and carries the label known-<version>; if gh is missing or the check fails, it exits 2 before the
+# container starts. The result goes into the container as KNOWN_VERIFIED and into the record (known_issue.verified_by).
 # --release-repo is the GitHub repository whose releases hold the oracle (default bogworks/mash).
 # --container-tmp is the container's scratch directory, passed as its TMPDIR (default: the image's TMPDIR, or /tmp). Everything the
 # container writes (HOME, caches, source, tree, work, output, the built runner) goes in a directory under it.
@@ -41,6 +44,23 @@ done
 [ -n "$out" ] || { echo "--out DIR is required (the record is written there)" >&2; exit 2; }
 commit=$(git -C "$root" rev-parse --verify "${ref}^{commit}") || { echo "$ref does not resolve to a commit" >&2; exit 1; }
 [ -e "$out/record.json" ] && { echo "$out already holds a record.json from an earlier run: give a new --out directory" >&2; exit 2; }
+
+# The known-issue check: on the host, where gh and its login are. The container has no token.
+knownverified=
+if [ -n "$known" ]; then
+	command -v gh >/dev/null 2>&1 || { echo "--known-issue given but gh is not installed: cannot confirm the issue and its known-$version label (exit 2)" >&2; exit 2; }
+	[[ $known =~ ^https://github\.com/$repo/issues/([1-9][0-9]*)$ ]] || { echo "--known-issue must be exactly https://github.com/$repo/issues/<number>, got: $known" >&2; exit 2; }
+	n=${BASH_REMATCH[1]}
+	info=$(gh issue view "$n" -R "$repo" --json state,labels,number --jq '[.number,.state,([.labels[].name]|join(","))]|@tsv' 2>/dev/null) \
+		|| { echo "gh could not read issue $n in $repo (missing, no access, or not logged in): the known-issue check failed (exit 2)" >&2; exit 2; }
+	IFS=$'\t' read -r inum istate ilabels <<<"$info"
+	[ "$inum" = "$n" ] || { echo "gh returned issue ${inum:-none}, expected $n (exit 2)" >&2; exit 2; }
+	case ",$ilabels," in
+	*",known-$version,"*) ;;
+	*) echo "issue $n in $repo does not carry the label known-$version (labels: ${ilabels:-none}) (exit 2)" >&2; exit 2 ;;
+	esac
+	knownverified="$(printf '%s' "$istate" | tr '[:upper:]' '[:lower:]'), label known-$version, checked by the launcher with gh at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+fi
 mkdir -p "$out" || exit 1
 
 cleanup() { docker rm -f "$name" >/dev/null 2>&1 || true; }
@@ -58,6 +78,7 @@ venue="container from $image ($imageid), name $name, docker run --rm --init, use
 	echo "version:             $version   oracle: v$oracle from github.com/$repo"
 	echo "runner tree:         this working tree, changes against the commit: ${status:-none}"
 	echo "venue:               $venue"
+echo "known issue:         ${known:-none}${knownverified:+ ($knownverified)}"
 	echo
 } | tee "$out/launcher.log"
 
@@ -68,7 +89,7 @@ echo "$commit" | git -C "$root" pack-objects --revs --stdout -q >"$out/commit.pa
 inputs=(go.mod go.sum cmd internal scripts/replayproof scripts/storedmail scripts/buildrelease)
 tar -C "$out" -cf - commit.pack -C "$root" "${inputs[@]}" |
 	docker run -i --rm --init --name "$name" --user 1000:1000 ${ctmp:+-e TMPDIR="$ctmp"} -e GOFLAGS=-buildvcs=false \
-		-e COMMIT="$commit" -e VERSION="$version" -e ORACLE="$oracle" -e KNOWN="$known" -e REPO="$repo" -e VENUE="$venue" \
+		-e COMMIT="$commit" -e VERSION="$version" -e ORACLE="$oracle" -e KNOWN="$known" -e KNOWN_VERIFIED="$knownverified" -e REPO="$repo" -e VENUE="$venue" \
 		"$image" bash -c '
 	set -euo pipefail
 	S=${TMPDIR:-/tmp}/at023
@@ -84,7 +105,7 @@ tar -C "$out" -cf - commit.pack -C "$root" "${inputs[@]}" |
 	go build -o $S/at023 ./scripts/replayproof/at023 >&2
 	rc=0
 	$S/at023 -src $S/src -commit "$COMMIT" -version "$VERSION" -oracle-version "$ORACLE" \
-		-out $S/out -work $S/work -known-issue "$KNOWN" -release-repo "$REPO" -venue "$VENUE" >&2 || rc=$?
+		-out $S/out -work $S/work -known-issue "$KNOWN" -known-issue-verified "$KNOWN_VERIFIED" -release-repo "$REPO" -venue "$VENUE" >&2 || rc=$?
 	cp $S/work/oracle/capture.json $S/out/capture-oracle.json 2>/dev/null || true
 	cp $S/work/candidate/capture.json $S/out/capture-candidate.json 2>/dev/null || true
 	for role in oracle candidate; do # the stderr of the serve processes, for a failed run (no secrets: mash prints none)
