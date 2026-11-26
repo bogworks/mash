@@ -167,3 +167,41 @@ func TestDropFromPath(t *testing.T) {
 		t.Fatal("gh still on the path")
 	}
 }
+
+func TestWhoOnline(t *testing.T) {
+	cases := []struct {
+		name, out string
+		want      []string
+		bad       []string
+		notJSON   bool
+	}{
+		{"both online", `{"endpoints":[{"address":"o.g.a","online":true},{"address":"o.g.b","online":true}]}`, []string{"o.g.a", "o.g.b"}, nil, false},
+		{"one offline", `{"endpoints":[{"address":"o.g.a","online":true},{"address":"o.g.b","online":false}]}`, []string{"o.g.a", "o.g.b"}, []string{"o.g.b is offline"}, false},
+		{"one missing", `{"endpoints":[{"address":"o.g.a","online":true}]}`, []string{"o.g.a", "o.g.b"}, []string{"o.g.b is not listed"}, false},
+		{"bad json", `not json`, []string{"o.g.a"}, nil, true},
+		{"extra fields ignored", `{"self":"o.g.a","count":2,"endpoints":[{"address":"o.g.a","online":true,"seen":"now"},{"address":"o.g.b","online":true}]}`, []string{"o.g.a", "o.g.b"}, nil, false},
+	}
+	for _, c := range cases {
+		err := whoOnline(c.out, c.want...)
+		switch {
+		case c.notJSON:
+			if err == nil || !strings.Contains(err.Error(), "not JSON") {
+				t.Errorf("%s: err = %v", c.name, err)
+			}
+		case len(c.bad) == 0:
+			if err != nil {
+				t.Errorf("%s: err = %v", c.name, err)
+			}
+		default:
+			if err == nil {
+				t.Errorf("%s: want error", c.name)
+				continue
+			}
+			for _, b := range c.bad {
+				if !strings.Contains(err.Error(), b) {
+					t.Errorf("%s: err %q lacks %q", c.name, err, b)
+				}
+			}
+		}
+	}
+}

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -78,8 +80,14 @@ func (r *runner) mixed(s *stepCtx, a, b *persona, phase, pre string) {
 		s.need(r.drain(a) == nil, a.name+"'s hook runs", "")
 	}
 	for _, p := range []*persona{a, b} {
-		res := r.mash(p, "who")
-		s.ok(res.ok() && strings.Contains(res.Out, a.addr) && strings.Contains(res.Out, b.addr), p.name+": mash who lists both endpoints", "exit %d", res.Code)
+		res := r.mash(p, "who", "--json")
+		r.evid[p.name+"-"+phase+"-who.json"] = rawOrText(res.Out)
+		err := whoOnline(res.Out, a.addr, b.addr)
+		detail := "none"
+		if err != nil {
+			detail = err.Error()
+		}
+		s.ok(res.ok() && err == nil, p.name+": mash who --json lists both endpoints online", "exit %d, %s", res.Code, detail)
 	}
 	r.promptBoth(s, a, b, pre+"p1")
 	r.promptBoth(s, b, a, pre+"p2")
@@ -184,4 +192,36 @@ func (r *runner) step8(s *stepCtx) {
 	}
 	s.ok(tenRefuseR.MatchString(first), "the release notes say first that the ten shapes are now refused", "")
 	s.ok(statusRE.Match(b), "the release notes name the status codes that move (400, 401, 403)", "")
+}
+
+// whoOnline parses the output of `mash who --json` and returns an error naming each address that is not listed or not
+// online, or an error if the output is not the expected JSON. Other fields are ignored.
+func whoOnline(out string, addrs ...string) error {
+	var doc struct {
+		Endpoints []struct {
+			Address string `json:"address"`
+			Online  bool   `json:"online"`
+		} `json:"endpoints"`
+	}
+	if err := json.Unmarshal([]byte(out), &doc); err != nil {
+		return fmt.Errorf("who output is not JSON: %v", err)
+	}
+	online := map[string]bool{}
+	for _, e := range doc.Endpoints {
+		online[e.Address] = online[e.Address] || e.Online
+	}
+	var bad []string
+	for _, a := range addrs {
+		on, listed := online[a]
+		switch {
+		case !listed:
+			bad = append(bad, a+" is not listed")
+		case !on:
+			bad = append(bad, a+" is offline")
+		}
+	}
+	if len(bad) > 0 {
+		return fmt.Errorf("%s", strings.Join(bad, "; "))
+	}
+	return nil
 }
