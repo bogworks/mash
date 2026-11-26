@@ -33,6 +33,24 @@ Notes:
 - The automated tests run on the project's own machines: Linux amd64 and macOS arm64.
 - Version numbers above are those we saw, not promises that other versions fail.
 
+## Upgrading from 0.5.10 to 0.6.0
+
+This is how to move a machine that runs 0.5.10 to 0.6.0. Your endpoints, keys and mail stay where they are. The upgrade is one-way: there is no supported way back to 0.5.10. Do the steps in this order, on each machine that has endpoints, and then on the administrator's machine.
+
+1. Check what you run now. `mash version` shows the version. `mash doctor` should end with no problem and exit 0. As administrator, run `mashctl doctor` too. If one of them reports a problem, fix that first; see [troubleshooting](troubleshooting.md).
+2. Install both programs of 0.6.0 together, `mash` and `mashctl`, with the install script of the release. It checks each file before it installs anything.
+
+   ```sh
+   BASE=https://github.com/bogworks/mash/releases/download/v0.6.0
+   curl -fsSLO $BASE/install.sh -O $BASE/SHA256SUMS &&
+   grep ' install.sh$' SHA256SUMS | sha256sum -c - &&  # macOS: shasum -a 256 -c -
+   MASH_VERSION=v0.6.0 bash install.sh
+   ```
+
+3. Update both plugins in Claude Code: `claude plugin update mash@mash` and `claude plugin update mash-setup@mash`. The plugin that runs the 0.6.0 program comes out shortly after the release. Ask a session "which mash version is this?": it says `mash v0.6.0` when you have it. Until then, update again.
+4. Restart each Claude Code session. Installing the new release, or updating the plugin, does not change the program that an open session uses. An open session keeps running the old version, and keeps sending and receiving mail, until you restart it. It moves to the new version only when it restarts. The first time a session starts on 0.6.0 it checks your stored mail once before it delivers any, and `mash status` says so while it does.
+5. Check again: `mash version` now says `mash v0.6.0`. Run `mash doctor` and, as administrator, `mashctl doctor`. Each should end with no problem.
+
 ## Upgrading from 0.5.8
 
 The upgrade is one-way; see the release notes. On 2026-11-25 a Linux container run, from a 0.5.8 install and a server set up by the 0.5.8 script, ran these steps and they passed: `mashctl init --config <file>` once more (it adds `signing_key_pub` to `config.json` and changes nothing else), the doctor exit codes, `mashctl status` with no server, and `mashctl init --json`. Mail kept flowing, in both directions, when a session was not restarted after the programs were replaced, and with the 0.5.8 plugin and the 0.5.9 program, and the other way round. In a real Claude Code 2.1.330 on a Linux VM (2026-11-25, from-source candidate, no marketplace refresh), `claude plugin update mash@mash` and `claude plugin update mash-setup@mash` took both plugins from 0.5.8 to 0.5.9 (exit 0, "Restart to apply changes"). After the restart a new session received mail, the doctor tool showed no problems, and a reply reached a 0.5.8 peer. The macOS run is in the macOS row of the table in "What 0.5.9 goes with".
