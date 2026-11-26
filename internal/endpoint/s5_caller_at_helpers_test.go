@@ -868,3 +868,13 @@ func s5Contains(msgs []s5Msg, s string) bool {
 	}
 	return false
 }
+
+// sdkIdentity is identity for the callers that take the SDK identity (Prompt).
+func sdkIdentity(t *testing.T, creds string) sapsdk.Identity {
+	t.Helper()
+	id, err := sapsdk.IdentityFromCredsAt(creds, mustRead(t, creds))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
