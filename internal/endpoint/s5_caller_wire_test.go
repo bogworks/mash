@@ -29,7 +29,7 @@ func s5On() *s5Hooks {
 	return &s5Hooks{
 		verify: func(reg registration, d *dirView) (string, bool) {
 			return discovery.Verify(discovery.Registration{Subject: reg.Subject, Metadata: reg.Metadata},
-				discovery.Directory{Holder: d.holder, HasRecord: d.hasRec, Owner: d.rec.Owner, Account: d.rec.Account})
+				discovery.Directory{HasRecord: d.hasRec, User: d.rec.User, Owner: d.rec.Owner, Account: d.rec.Account})
 		},
 		secretPresence:  true,
 		promptDirectory: true,

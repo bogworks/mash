@@ -37,7 +37,7 @@ func reg(t *testing.T, id sap.Identity, owner, subj string) Registration {
 
 func TestVerify(t *testing.T) {
 	bob, carol := identity(t, "ACCT"), identity(t, "ACCT")
-	dir := Directory{Holder: "acme_ops_bob", HasRecord: true, Owner: "acme", Account: "ACCT"}
+	dir := Directory{User: bob.User, HasRecord: true, Owner: "acme", Account: "ACCT"}
 	good := reg(t, bob, "acme", subject)
 
 	if name, ok := Verify(good, dir); !ok || name != "acme_ops_bob" {
@@ -58,13 +58,13 @@ func TestVerify(t *testing.T) {
 	}{
 		{"unsigned", unsigned, dir},
 		{"forged id_sig", flipped, dir},
-		{"wrong key (carol's key, held by carol, answering for bob)", reg(t, carol, "acme", subject), Directory{Holder: "acme_ops_carol", HasRecord: true, Owner: "acme", Account: "ACCT"}},
+		{"wrong key (carol's key, answering for bob)", reg(t, carol, "acme", subject), Directory{User: bob.User, HasRecord: true, Owner: "acme", Account: "ACCT"}},
 		{"another subject than the one signed", Registration{Subject: "agents.prompt.acme.ops.carol", Metadata: good.Metadata}, dir},
 		{"owner differs from the record's", otherOwner, dir},
-		{"account differs from the record's", otherAccount, Directory{Holder: "acme_ops_bob", HasRecord: true, Owner: "acme", Account: "ACCT"}},
-		{"no record for the address", good, Directory{Holder: "acme_ops_bob", Owner: "acme", Account: "ACCT"}},
-		{"the key is held by another address", good, Directory{Holder: "acme_ops_carol", HasRecord: true, Owner: "acme", Account: "ACCT"}},
-		{"the key is held by nobody", good, Directory{HasRecord: true, Owner: "acme", Account: "ACCT"}},
+		{"account differs from the record's", otherAccount, Directory{User: bob.User, HasRecord: true, Owner: "acme", Account: "ACCT"}},
+		{"no record for the address", good, Directory{User: bob.User, Owner: "acme", Account: "ACCT"}},
+		{"the record holds another key", good, Directory{User: carol.User, HasRecord: true, Owner: "acme", Account: "ACCT"}},
+		{"the record holds no key", good, Directory{HasRecord: true, Owner: "acme", Account: "ACCT"}},
 		{"not a prompt subject", Registration{Subject: "nonsense", Metadata: good.Metadata}, dir},
 	} {
 		if _, ok := Verify(c.reg, c.dir); ok {
@@ -76,7 +76,7 @@ func TestVerify(t *testing.T) {
 // A record with no account verifies nothing: it is not read as accepting any account.
 func TestVerifyRecordWithoutAccount(t *testing.T) {
 	bob := identity(t, "ACCT")
-	dir := Directory{Holder: "acme_ops_bob", HasRecord: true, Owner: "acme"}
+	dir := Directory{User: bob.User, HasRecord: true, Owner: "acme"}
 	if _, ok := Verify(reg(t, bob, "acme", subject), dir); ok {
 		t.Error("a record with no account accepted a registration that claims an account")
 	}

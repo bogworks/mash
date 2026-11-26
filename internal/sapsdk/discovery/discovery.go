@@ -11,21 +11,20 @@ type Registration struct {
 	Metadata map[string]string
 }
 
-// Directory is what the directory says about the registration: who holds its user_nkey, and the record, if any, of the
-// address its prompt subject names.
+// Directory is what the directory says about the registration: the record, if any, of the address its prompt subject
+// names.
 type Directory struct {
-	// Holder is the name of the endpoint that holds the registration's user_nkey, or empty.
-	Holder string
 	// HasRecord says whether a record exists for the subject's address.
 	HasRecord bool
-	// Owner and Account are the record's.
+	// User, Owner and Account are the record's own: the user key it holds now, not a key it held before it was replaced.
+	User    string
 	Owner   string
 	Account string
 }
 
 // Verify returns the address name the registration vouches for and whether it is verified. It is verified when
 // the id_sig verifies over the user_nkey, account, agent, owner and prompt subject; a record exists for the subject's
-// address; the user_nkey is held by that address; the record has an account and it is the registration's (a record with no account verifies nothing); and
+// address; the user_nkey is the record's own User key; the record has an account and it is the registration's (a record with no account verifies nothing); and
 // metadata.owner is the record's owner. An agent that is not in the directory has no record and is not verified here.
 func Verify(reg Registration, d Directory) (name string, ok bool) {
 	a, _, found := sap.AddressFromSubject(reg.Subject)
@@ -37,7 +36,7 @@ func Verify(reg Registration, d Directory) (name string, ok bool) {
 	if !sap.VerifyIDSig(md["user_nkey"], md["account"], md["agent"], md["owner"], reg.Subject, md["id_sig"]) {
 		return name, false
 	}
-	if !d.HasRecord || d.Holder != name {
+	if !d.HasRecord || d.User != md["user_nkey"] {
 		return name, false
 	}
 	if d.Account == "" || md["account"] != d.Account {

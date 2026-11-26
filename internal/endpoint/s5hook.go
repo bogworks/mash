@@ -48,10 +48,9 @@ type registration struct {
 	Metadata map[string]string
 }
 
-// dirView is what the directory says about one registration: the endpoint that holds its user_nkey, and the record of
-// the address its prompt subject names.
+// dirView is what the directory says about one registration: the record of the address its prompt subject names. The
+// record's own User field is the key that address holds now; the reverse index is not consulted.
 type dirView struct {
-	holder string
 	rec    store.Record
 	hasRec bool
 }
@@ -93,7 +92,7 @@ func parseAnswer(data []byte) []registration {
 
 // viewOfLocked reads the directory for reg. The caller holds e.mu.
 func (e *Endpoint) viewOfLocked(reg registration) *dirView {
-	d := &dirView{holder: e.byUser[reg.Metadata["user_nkey"]]}
+	d := &dirView{}
 	if a, _, ok := sap.AddressFromSubject(reg.Subject); ok {
 		d.rec, d.hasRec = e.dir[a.Flat()]
 	}
