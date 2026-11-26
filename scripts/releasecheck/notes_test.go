@@ -31,11 +31,11 @@ func notesRepo(t *testing.T, cutover, changelog string) (Options, string) {
 	if cutover != "" {
 		body = strp(cutover + "\n")
 	}
-	repo, x := cutoverRepo(t, body)
+	repo, _ := cutoverRepo(t, body)
 	write(t, repo, "CHANGELOG.md", changelog)
 	gitT(t, repo, "add", "-A")
 	gitT(t, repo, "commit", "-q", "-m", "changelog")
-	x = gitT(t, repo, "rev-parse", "HEAD")
+	x := gitT(t, repo, "rev-parse", "HEAD")
 	return Options{Repo: repo}, x
 }
 

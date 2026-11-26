@@ -72,13 +72,6 @@ func good() map[string]string {
 	return map[string]string{"README.md": goodReadme, "0001-use-one-way.md": goodADR, "guide.md": "guide\n"}
 }
 
-func without(m map[string]string, keys ...string) map[string]string {
-	for _, k := range keys {
-		delete(m, k)
-	}
-	return m
-}
-
 func with(m map[string]string, kv ...string) map[string]string {
 	out := map[string]string{}
 	for k, v := range m {

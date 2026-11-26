@@ -433,15 +433,6 @@ func TestWhoMatchesSpec(t *testing.T) {
 	}
 }
 
-func anyOption(c map[string]any, name string) map[string]any {
-	for _, o := range anyList(c["options"]) {
-		if o["name"] == name {
-			return o
-		}
-	}
-	return nil
-}
-
 func sameJSON(t *testing.T, a, b string) bool {
 	t.Helper()
 	var x, y any

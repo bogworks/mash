@@ -5,14 +5,12 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/sap"
-	"github.com/bogworks/mash/internal/store"
 	"github.com/bogworks/mash/internal/testenv"
 )
 
@@ -53,37 +51,6 @@ func (f *auditFixture) publishBig(t *testing.T, subject string, n int) {
 		if _, err := f.js.Publish(context.Background(), subject, body); err != nil {
 			t.Fatal(err)
 		}
-	}
-}
-
-func (f *auditFixture) lease(t *testing.T, key, val string) {
-	t.Helper()
-	kv, err := f.js.KeyValue(context.Background(), store.LeaseBucket)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := kv.Put(context.Background(), key, []byte(val)); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// pullUnacked takes one message from the endpoint's consumer and leaves it unacknowledged.
-func (f *auditFixture) pullUnacked(t *testing.T, a sap.Address) {
-	t.Helper()
-	c, err := f.js.Consumer(context.Background(), a.InboxStream(), store.Consumer)
-	if err != nil {
-		t.Fatal(err)
-	}
-	b, err := c.Fetch(1, jetstream.FetchMaxWait(5*time.Second))
-	if err != nil {
-		t.Fatal(err)
-	}
-	n := 0
-	for range b.Messages() {
-		n++
-	}
-	if n != 1 {
-		t.Fatalf("fetched %d", n)
 	}
 }
 

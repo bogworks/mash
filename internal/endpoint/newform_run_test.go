@@ -262,10 +262,10 @@ func TestSameInstanceInTwoGroupsWithoutCrosstalk(t *testing.T) {
 	if _, err := tbc.Send(ctx, ta.Flat(), "to team a", 0); err != nil {
 		t.Fatal(err)
 	}
-	dg := dev.waitFor(t, 1, 5*time.Second)
-	tg := tev.waitFor(t, 1, 5*time.Second)
+	dev.waitFor(t, 1, 5*time.Second)
+	tev.waitFor(t, 1, 5*time.Second)
 	time.Sleep(300 * time.Millisecond)
-	dg, tg = dev.all(), tev.all()
+	dg, tg := dev.all(), tev.all()
 	if len(dg) != 1 || !strings.Contains(dg[0], "to dev a") || !strings.Contains(dg[0], "from "+tdot("b")+" [verified]") || strings.Contains(dg[0], "to team") {
 		t.Fatalf("dev a got %q", dg)
 	}

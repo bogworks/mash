@@ -174,11 +174,7 @@ func TestStatusMatchesSpec(t *testing.T) {
 			held := &fakeHealth{rep: cmds.HealthReport{Endpoint: "acme.demo.bob", MailHeld: true, Checks: []cmds.HealthCheck{ok("config", ""), ok("sign-in", "")}}}
 			code, out, errs = runStatus(held, cliframe.Global{})
 		case "No endpoint chosen and several installed":
-			// the specification's own text, then the hint when the addresses come in no particular order
-			code, out, errs = runStatus(&fakeHealth{err: &config.SeveralEndpointsError{Addresses: []string{"acme.demo.bob", "acme.demo.alice"}}}, cliframe.Global{})
-			wantErr := strings.SplitN(text, "\n", 2)[0]
-			wantErr = "error: more than one endpoint is installed here: acme.demo.bob, acme.demo.alice"
-			_ = wantErr
+			// the specification's own text for addresses in order, then the hint when they come in no particular order (below)
 			code, out, errs = runStatus(&fakeHealth{err: &config.SeveralEndpointsError{Addresses: []string{"acme.demo.alice", "acme.demo.bob"}}}, cliframe.Global{})
 			if code != 2 || out != "" || errs != text+"\n" || code != int(oc["exit"].(float64)) {
 				t.Errorf("%s: %d %q %q, spec %q", oc["case"], code, out, errs, text)

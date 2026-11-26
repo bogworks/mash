@@ -18,50 +18,55 @@ import (
 // instead of an accident.
 func TestCompatTrustConstantsMatchSpoolGolden(t *testing.T) {
 	fset := token.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, ".", func(fi os.FileInfo) bool { return !strings.HasSuffix(fi.Name(), "_test.go") }, 0)
+	names, err := filepath.Glob("*.go")
 	if err != nil {
 		t.Fatal(err)
 	}
 	code := map[string]bool{}
-	for _, pkg := range pkgs {
-		for _, f := range pkg.Files {
-			for _, d := range f.Decls {
-				gd, ok := d.(*ast.GenDecl)
-				if !ok || gd.Tok != token.CONST {
-					continue
+	for _, name := range names {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, name, nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, d := range f.Decls {
+			gd, ok := d.(*ast.GenDecl)
+			if !ok || gd.Tok != token.CONST {
+				continue
+			}
+			// A Trust constant is written as `Name Trust = "v"`, as `Name = Trust("v")`, or as a bare name that repeats the
+			// previous spec of its group (the type and the value both carry over). Each form is collected.
+			var lastType ast.Expr
+			var lastValues []ast.Expr
+			for _, sp := range gd.Specs {
+				vs := sp.(*ast.ValueSpec)
+				typ, values := vs.Type, vs.Values
+				if typ == nil && len(values) == 0 { // an implicit repetition of the previous spec
+					typ, values = lastType, lastValues
+				} else {
+					lastType, lastValues = typ, values
 				}
-				// A Trust constant is written as `Name Trust = "v"`, as `Name = Trust("v")`, or as a bare name that repeats the
-				// previous spec of its group (the type and the value both carry over). Each form is collected.
-				var lastType ast.Expr
-				var lastValues []ast.Expr
-				for _, sp := range gd.Specs {
-					vs := sp.(*ast.ValueSpec)
-					typ, values := vs.Type, vs.Values
-					if typ == nil && len(values) == 0 { // an implicit repetition of the previous spec
-						typ, values = lastType, lastValues
-					} else {
-						lastType, lastValues = typ, values
+				isTrust := func(e ast.Expr) bool { id, ok := e.(*ast.Ident); return ok && id.Name == "Trust" }
+				for _, v := range values {
+					var lit *ast.BasicLit
+					switch x := v.(type) {
+					case *ast.BasicLit:
+						if isTrust(typ) {
+							lit = x
+						}
+					case *ast.CallExpr: // Trust("new")
+						if len(x.Args) == 1 && isTrust(x.Fun) {
+							lit, _ = x.Args[0].(*ast.BasicLit)
+						}
 					}
-					isTrust := func(e ast.Expr) bool { id, ok := e.(*ast.Ident); return ok && id.Name == "Trust" }
-					for _, v := range values {
-						var lit *ast.BasicLit
-						switch x := v.(type) {
-						case *ast.BasicLit:
-							if isTrust(typ) {
-								lit = x
-							}
-						case *ast.CallExpr: // Trust("new")
-							if len(x.Args) == 1 && isTrust(x.Fun) {
-								lit, _ = x.Args[0].(*ast.BasicLit)
-							}
+					if lit != nil && lit.Kind == token.STRING {
+						s, err := strconv.Unquote(lit.Value)
+						if err != nil {
+							t.Fatal(err)
 						}
-						if lit != nil && lit.Kind == token.STRING {
-							s, err := strconv.Unquote(lit.Value)
-							if err != nil {
-								t.Fatal(err)
-							}
-							code[s] = true
-						}
+						code[s] = true
 					}
 				}
 			}

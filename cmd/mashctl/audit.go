@@ -15,12 +15,6 @@ import (
 // This file sorts the server snapshot into what `mashctl doctor` judges: the directory records against the inbox
 // streams, the mail an inbox lost unread, and the retired-name bucket. It reads and changes nothing.
 
-// auditVersion is the version field of the JSON report. It changes only when a field is removed or changes meaning.
-const auditVersion = 2
-
-// auditNow is the clock for the report's generated field; a test replaces it.
-var auditNow = time.Now
-
 type auditDeliver struct {
 	Present    bool   `json:"present"`
 	Pending    uint64 `json:"pending"`

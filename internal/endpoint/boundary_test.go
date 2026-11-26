@@ -256,18 +256,18 @@ func TestBoundaryBurstWakesOnce(t *testing.T) {
 		}
 	}
 	waitSpooledProgress(t, sp, fyi)
-	got := ev.waitFor(t, 1, 5*time.Second)
+	ev.waitFor(t, 1, 5*time.Second)
 	time.Sleep(time.Second)
-	if got = ev.all(); len(got) != 1 || strings.HasPrefix(got[0], "urgent") {
+	if got := ev.all(); len(got) != 1 || strings.HasPrefix(got[0], "urgent") {
 		t.Fatalf("%d wakes for the backlog, want exactly 1 and not urgent: %q", len(got), got)
 	}
 	if seq, err := b.SendWith(ctx, tdot("a"), "the build is red", SendOptions{Kind: kind.Task, Urgent: true}); err != nil || seq != total {
 		t.Fatalf("urgent send: #%d %v", seq, err)
 	}
 	until(t, "601 spooled", func() bool { return len(waiting(t, sp)) == total })
-	got = ev.waitFor(t, 2, 5*time.Second)
+	ev.waitFor(t, 2, 5*time.Second)
 	time.Sleep(time.Second)
-	if got = ev.all(); len(got) != 2 || !strings.HasPrefix(got[1], "urgent, 601 messages") {
+	if got := ev.all(); len(got) != 2 || !strings.HasPrefix(got[1], "urgent, 601 messages") {
 		t.Fatalf("want the backlog wake and one urgent ring, got %d: %q", len(got), got)
 	}
 
@@ -306,7 +306,7 @@ func TestBoundaryBurstWakesOnce(t *testing.T) {
 		t.Fatalf("%d drained, want %d", n, total)
 	}
 	time.Sleep(time.Second)
-	if got = ev.all(); len(got) != 2 {
+	if got := ev.all(); len(got) != 2 {
 		t.Fatalf("%d wakes after the drain, want still 2: %q", len(got), got)
 	}
 	if w := waiting(t, sp); len(w) != 0 {

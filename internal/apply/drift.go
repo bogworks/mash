@@ -91,11 +91,6 @@ func (a agreement) describe() string {
 	return strings.Join(parts, ", ")
 }
 
-// differs says the answers are not one and the same non-empty JWT.
-func (a agreement) differs() bool {
-	return len(a.groups) != 1 || a.groups[0].token == ""
-}
-
 func (a agreement) differText() string {
 	return fmt.Sprintf("servers differ: %d of %d servers answered; %d distinct account JWTs (%s)", a.answered, a.need, len(a.groups), a.describe())
 }

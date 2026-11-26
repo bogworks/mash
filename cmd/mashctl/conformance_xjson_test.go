@@ -99,13 +99,13 @@ func xjsonDiff(path string, a, b any) []string {
 }
 
 func xjsonKind(v any) string {
-	switch v.(type) {
+	switch v := v.(type) {
 	case map[string]any:
 		return "an object"
 	case []any:
 		return "a list"
 	case string:
-		return v.(string)
+		return v
 	}
 	return fmt.Sprint(v)
 }

@@ -176,15 +176,6 @@ type node struct {
 func (n *node) page() string { return strings.Join(n.path, "-") + ".md" }
 func (n *node) full() string { return strings.Join(n.path, " ") }
 
-// builtSet is true when an ancestor, or the entry itself, sets x-release to
-// the current version; the tool's own root is built by default, which does
-// not count, so a planned command can sit directly under it.
-//
-// isOldPlannedRelease reports whether r is the old way of planning an entry:
-// x-release naming the next release, with no x-plan. It is accepted only
-// until the planner moves the planned entries to x-plan; remove then.
-func isOldPlannedRelease(r string) bool { return r == nextRelease }
-
 func validPlan(p string) bool { return p == "now" || p == "next" || p == "later" }
 
 func buildTree(c *cmdSpec, path []string, current, inheritedRelease, inheritedPlan string, builtSet, root bool) (*node, error) {
@@ -363,7 +354,7 @@ func (g *gen) tree(n *node) error {
 				return err
 			}
 		}
-	case nextRelease: // the old form; see isOldPlannedRelease
+	case nextRelease: // the old form of planning an entry
 		if err := g.checkPlanned(n); err != nil {
 			return err
 		}

@@ -40,7 +40,7 @@ func sealStream(t *testing.T, js jetstream.JetStream, stream string) {
 }
 
 // each case: the key was revoked by a hook that also breaks the next step.
-func partialWith(t *testing.T, step func(js jetstream.JetStream, user string), drained bool) (error, string) {
+func partialWith(t *testing.T, step func(js jetstream.JetStream, user string), drained bool) (string, error) {
 	t.Helper()
 	e, a, js := setup(t)
 	provisionFor(t, e, a, "w")
@@ -55,25 +55,25 @@ func partialWith(t *testing.T, step func(js jetstream.JetStream, user string), d
 		if err != nil {
 			t.Fatal(err)
 		}
-		return ra.DeprovisionDrained(context.Background(), ep(t, "w"), st.ID, st.LastSeq), user
+		return user, ra.DeprovisionDrained(context.Background(), ep(t, "w"), st.ID, st.LastSeq)
 	}
-	return ra.DeprovisionIfUser(context.Background(), ep(t, "w"), user), user
+	return user, ra.DeprovisionIfUser(context.Background(), ep(t, "w"), user)
 }
 
 func TestPartialCauseLockLost(t *testing.T) {
-	err, _ := partialWith(t, func(js jetstream.JetStream, _ string) { putLock(t, js, "o_dev_w", time.Now().Add(time.Minute)) }, false)
+	_, err := partialWith(t, func(js jetstream.JetStream, _ string) { putLock(t, js, "o_dev_w", time.Now().Add(time.Minute)) }, false)
 	wantCause(t, err, "its lock was lost")
 }
 
 func TestPartialCauseLockExpiring(t *testing.T) {
 	t.Cleanup(admin.SetLockTiming(expiryTTL, longWait, fastPoll))
 	t.Cleanup(admin.SetLockSafety(expirySafety))
-	err, _ := partialWith(t, func(jetstream.JetStream, string) { time.Sleep(expiryStall) }, true)
+	_, err := partialWith(t, func(jetstream.JetStream, string) { time.Sleep(expiryStall) }, true)
 	wantCause(t, err, "its lock was lost")
 }
 
 func TestPartialCauseRecordCouldNotBeRead(t *testing.T) {
-	err, _ := partialWith(t, func(js jetstream.JetStream, _ string) { corruptRecord(t, js, "w") }, false)
+	_, err := partialWith(t, func(js jetstream.JetStream, _ string) { corruptRecord(t, js, "w") }, false)
 	wantCause(t, err, "its record could not be read")
 }
 
@@ -99,33 +99,33 @@ func TestPartialCauseRecordChanged(t *testing.T) {
 	wantCause(t, err, "its record changed meanwhile")
 
 	// the same record, a new revision, found by DeprovisionDrained
-	err, _ = partialWith(t, func(js jetstream.JetStream, user string) { putUser(t, js, "w", user) }, true)
+	_, err = partialWith(t, func(js jetstream.JetStream, user string) { putUser(t, js, "w", user) }, true)
 	wantCause(t, err, "its record changed meanwhile")
 }
 
 func TestPartialCauseRecordRemovalNotConfirmed(t *testing.T) {
 	for _, drained := range []bool{false, true} {
 		prev := admin.SetDirectoryPurgeFault(func() error { return context.DeadlineExceeded })
-		err, _ := partialWith(t, func(jetstream.JetStream, string) {}, drained)
+		_, err := partialWith(t, func(jetstream.JetStream, string) {}, drained)
 		admin.SetDirectoryPurgeFault(prev)
 		wantCause(t, err, "record removal not confirmed")
 	}
 }
 
 func TestPartialCauseNameNotFreed(t *testing.T) {
-	err, _ := partialWith(t, func(js jetstream.JetStream, _ string) { sealStream(t, js, "KV_"+store.RetiredBucket) }, false)
+	_, err := partialWith(t, func(js jetstream.JetStream, _ string) { sealStream(t, js, "KV_"+store.RetiredBucket) }, false)
 	wantCause(t, err, "its name was not freed")
 }
 
 func TestPartialCauseAddressNotClosed(t *testing.T) {
-	err, _ := partialWith(t, func(js jetstream.JetStream, _ string) { sealStream(t, js, store.LeaseStreamName) }, false)
+	_, err := partialWith(t, func(js jetstream.JetStream, _ string) { sealStream(t, js, store.LeaseStreamName) }, false)
 	wantCause(t, err, "its address was not closed")
 }
 
 func TestPartialCauseInboxStillThere(t *testing.T) {
 	admin.InboxDeleteFault = func() error { return errors.New("stream delete failed") }
 	t.Cleanup(func() { admin.InboxDeleteFault = nil })
-	err, _ := partialWith(t, func(jetstream.JetStream, string) {}, false)
+	_, err := partialWith(t, func(jetstream.JetStream, string) {}, false)
 	wantCause(t, err, "its inbox is still there")
 }
 

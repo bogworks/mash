@@ -132,8 +132,7 @@ type InboxResult struct {
 	// what the text needs and the object does not carry
 	wide  bool
 	rows  []inboxRow
-	count int // wake_count, for the line that names it
-	age   string
+	count int      // wake_count, for the line that names it
 	why   []string // why the count is not exact, one reason per line, the cap first; none when it is
 }
 

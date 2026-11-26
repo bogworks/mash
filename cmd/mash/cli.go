@@ -15,7 +15,6 @@ import (
 
 // cli runs the one-shot commands that are not on the command table (prompt) as the endpoint (MASH_ENDPOINT, owner.group.name), without taking its lease.
 func cli(cfg config.Config, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	fail := func(err error) int { fmt.Fprintln(stderr, err); return 1 }
 	if args[0] == "prompt" && len(args) >= 3 { // an address is owner.group.name; the flat form is refused, nothing is attempted
 		if _, err := cmdcore.ParseAddress(args[1], "mash prompt --help"); err != nil {
 			return cliframe.Report(stdout, stderr, err, false)
@@ -29,7 +28,7 @@ func cli(cfg config.Config, args []string, stdin io.Reader, stdout, stderr io.Wr
 	openCtx, openCancel := context.WithTimeout(ctx, cfg.OpenTimeout)
 	ep, err := endpoint.OpenClientWith(openCtx, cfg, endpoint.ClientOptions{})
 	openCancel()
-	fail = func(err error) int {
+	fail := func(err error) int {
 		if f := framedIn(cfg, cfg.DisplayName(), err); f != err {
 			return cliframe.Report(stdout, stderr, f, false)
 		}

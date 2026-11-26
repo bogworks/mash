@@ -667,16 +667,6 @@ func (z *s5Fix) answerer(t *testing.T, a sap.Address) *s5Answerer {
 	return an
 }
 
-func (an *s5Answerer) publish(t *testing.T, reply string, data []byte) {
-	t.Helper()
-	if err := an.c.nc.Publish(reply, data); err != nil {
-		t.Fatal(err)
-	}
-	if err := an.c.nc.Flush(); err != nil {
-		t.Fatal(err)
-	}
-}
-
 // s5RaceMode says where the valid answer comes relative to the invalid ones.
 type s5RaceMode string
 

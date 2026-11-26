@@ -218,6 +218,7 @@ func (k *kit) sendAll(r *result, a, b string) error {
 		}
 	}
 	send(true, a, "", to(b), "hello bob")
+	//lint:ignore ST1018 deliberate bidi-override (U+202E) test input, written as the literal character
 	send(false, a, "", to(b), "unicode é世界 \U0001F600 ‮ rtl", "--kind", "fyi")
 	send(false, a, ".", to(b), "--file", "-")
 	send(false, a, long, to(b), "--file", "-", "--kind", "result")

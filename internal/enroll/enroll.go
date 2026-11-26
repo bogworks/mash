@@ -181,8 +181,7 @@ func Create(ctx context.Context, d Deps, r Request) (Result, error) {
 		return fail(&Refusal{Code: CodeKeyRetired, Msg: fmt.Sprintf("endpoint %s was retired and its address is never reassigned", r.Addr)})
 	}
 	// An address that already has a record is refused before anything is written, so the key is not bound to it.
-	exists, err := d.checkAddress(ctx, r.Addr, pub)
-	if err != nil {
+	if _, err := d.checkAddress(ctx, r.Addr, pub); err != nil {
 		return fail(err)
 	}
 	tok, err := d.sign(r.Addr, pub)
@@ -191,7 +190,8 @@ func Create(ctx context.Context, d Deps, r Request) (Result, error) {
 	}
 	// Looked at again just before the issue record is written (the sign above takes time), so the window in which a
 	// concurrent Create of the same address can win unseen is only the gap to Provision's own check under the lock.
-	if exists, err = d.checkAddress(ctx, r.Addr, pub); err != nil {
+	exists, err := d.checkAddress(ctx, r.Addr, pub)
+	if err != nil {
 		return fail(err)
 	}
 	if err := d.record(ctx, r.Addr, pub, store.PurposeIssue); err != nil {

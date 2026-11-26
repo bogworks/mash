@@ -1358,8 +1358,7 @@ func (s *at4) plain() {
 	var held = true
 	var detail []string
 	for _, c := range calls[:3] {
-		var lenv []string
-		lenv = []string{"MASH_SERVER=" + lurl, "MASH_OPEN_TIMEOUT=2s"}
+		lenv := []string{"MASH_SERVER=" + lurl, "MASH_OPEN_TIMEOUT=2s"}
 		before := cc.Count()
 		r := c.run(append(slices.Clone(lenv), "MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1"))
 		ok, d := dangerousWarned(r, cc.Count()-before)

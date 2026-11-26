@@ -39,15 +39,14 @@ func whoCell(t *testing.T, out, address, col string) string {
 	if start < 0 {
 		t.Fatalf("no column %s in %q", col, head)
 	}
-	end := len(head)
 	for _, l := range lines[1:] {
 		if f := strings.Fields(l); len(f) > 0 && f[0] == address {
 			rest := head[start+len(col):]
-			if i := strings.IndexFunc(rest, func(r rune) bool { return r != ' ' }); i >= 0 {
-				end = start + len(col) + i
-			} else {
+			i := strings.IndexFunc(rest, func(r rune) bool { return r != ' ' })
+			if i < 0 {
 				return strings.TrimSpace(l[min(start, len(l)):])
 			}
+			end := start + len(col) + i
 			return strings.TrimSpace(l[min(start, len(l)):min(end, len(l))])
 		}
 	}

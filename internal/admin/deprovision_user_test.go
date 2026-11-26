@@ -102,7 +102,7 @@ func TestDeprovisionIfUserMetadataChangeRetriesAndRemoves(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	defer admin.SetAfterDeprovisionGet(prev)
+	defer func() { admin.SetAfterDeprovisionGet(prev) }()
 	if err := a.DeprovisionIfUser(ctx, ep(t, "alpha"), user); err != nil {
 		t.Fatalf("a metadata-only change refused the deprovision: %v", err)
 	}
@@ -143,7 +143,7 @@ func TestDeprovisionIfUserUserChangeBetweenReadAndPurgeRefused(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	defer admin.SetAfterDeprovisionGet(prev)
+	defer func() { admin.SetAfterDeprovisionGet(prev) }()
 	err := a.DeprovisionIfUser(ctx, ep(t, "alpha"), user)
 	if !errors.Is(err, admin.ErrRecordChanged) {
 		t.Fatalf("err %v, want ErrRecordChanged", err)
@@ -174,7 +174,7 @@ func TestDeprovisionIfUserRetriesExhaustedRefused(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	defer admin.SetAfterDeprovisionGet(prev)
+	defer func() { admin.SetAfterDeprovisionGet(prev) }()
 	err := a.DeprovisionIfUser(ctx, ep(t, "alpha"), user)
 	if !errors.Is(err, admin.ErrRecordChanged) || !strings.Contains(err.Error(), "the record for o_dev_alpha changed; left in place") {
 		t.Fatalf("err %v, want the changed-record refusal", err)
@@ -216,7 +216,7 @@ func TestDeprovisionIfUserRecreatedByOtherLeavesIt(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	defer admin.SetAfterDeprovisionGet(prev)
+	defer func() { admin.SetAfterDeprovisionGet(prev) }()
 	if err := a.DeprovisionIfUser(ctx, ep(t, "alpha"), user); !errors.Is(err, admin.ErrRecordChanged) {
 		t.Fatalf("err %v, want ErrRecordChanged", err)
 	}
@@ -288,7 +288,7 @@ func TestDeprovisionIfUserHoldsNameAcrossPurgeAndFence(t *testing.T) {
 		case <-time.After(1500 * time.Millisecond):
 		}
 	})
-	defer admin.SetAfterDeprovisionPurge(prev)
+	defer func() { admin.SetAfterDeprovisionPurge(prev) }()
 	if err := a.DeprovisionIfUser(ctx, ep(t, "alpha"), user); err != nil {
 		t.Fatal(err)
 	}

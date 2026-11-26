@@ -283,12 +283,12 @@ var AT006 = Scenario{
 		d := a.Mash("doctor-strict", h, env, "doctor")
 		a.C.Check("mash doctor as the endpoint says sign-in ok on the strict server", d.Code == 0 && strings.Contains(d.Stdout, "sign-in   ok"), snip(grepLine(d.Text(), "sign-in")))
 
-		pub, join := filepath.Join(h.Dir, "reissue.pub"), filepath.Join(h.Dir, "reissue.join")
+		join := filepath.Join(h.Dir, "reissue.join")
 		k := a.Mash("key-create-reissue", h, a.Conn(), "key", "create", "--out", filepath.Join(h.Dir, "reissue.seed"))
 		if !a.C.Check("a new key for the reissue", k.Code == 0, exitDetail(k)) {
 			return
 		}
-		pub = pubOf(filepath.Join(h.Dir, "reissue.seed"))
+		pub := pubOf(filepath.Join(h.Dir, "reissue.seed"))
 		r = a.Ctl("endpoint-reissue-strict", h, a.Conn(), "endpoint", "reissue", "alice.dev.design", "--out", join, "--public-key", pub)
 		a.C.Check("mashctl endpoint reissue keeps working: the revocation rewrites the account JWT with the signing key in it", r.Code == 0, exitDetail(r))
 		r = a.Ctl("endpoint-delete-strict", h, a.Conn(), "endpoint", "delete", "alice.dev.design", "--yes")

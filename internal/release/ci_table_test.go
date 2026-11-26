@@ -1,7 +1,6 @@
 package release
 
 import (
-	"fmt"
 	"os"
 	"sort"
 	"strings"
@@ -116,7 +115,7 @@ func TestCITable_matchesTheWorkflows(t *testing.T) {
 			t.Errorf("ci.yml job %s: macOS and eph never run per change (rule 21)", jn)
 		}
 	}
-	if !strings.Contains(string(b), fmt.Sprint("macOS runs on tagged releases only")) {
+	if !strings.Contains(string(b), "macOS runs on tagged releases only") {
 		t.Error("docs/ci-table.md lost the macOS rule line")
 	}
 }

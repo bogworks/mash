@@ -21,7 +21,6 @@ import (
 type fakeConnz struct {
 	mu    sync.Mutex
 	calls int // follow-up requests, over all scans
-	first int
 }
 
 func startFakeConnz(t *testing.T, page func(call, offset int) (cids []uint64, total int)) (*nats.Conn, *fakeConnz) {
