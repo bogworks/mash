@@ -76,3 +76,23 @@ func TestParseSumsAndKnownIssue(t *testing.T) {
 		t.Errorf("given: %+v", k)
 	}
 }
+
+func TestKnownIssueFormProblem(t *testing.T) {
+	for _, c := range []struct {
+		url  string
+		good bool
+	}{
+		{"https://github.com/acme/mash/issues/1829", true},
+		{"https://github.com/zeta/mash/issues/1829", false},
+		{"https://github.com/acme/mash/pull/1829", false},
+		{"https://github.com/acme/mash/issues/1829x", false},
+		{"https://github.com/acme/mash/issues/1829/", false},
+		{"https://github.com/acme/mash/issues/0", false},
+		{"https://github.com/acme/mash/issues/", false},
+		{"", false},
+	} {
+		if got := KnownIssueFormProblem(c.url, "acme/mash") == ""; got != c.good {
+			t.Errorf("%q: good %v, want %v", c.url, got, c.good)
+		}
+	}
+}

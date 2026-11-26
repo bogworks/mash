@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # AT-023 (REQ-022): the restart-replay proof, in one throwaway container created for the run and destroyed at the end.
-#   scripts/replayproof/at023.sh [--commit REF] [--version 0.6.0] [--oracle-version 0.5.10] [--out DIR] [--known-issue URL] [--release-repo OWNER/REPO]
+#   scripts/replayproof/at023.sh [--commit REF] [--version 0.6.0] [--oracle-version 0.5.10] [--out DIR] [--known-issue URL] [--release-repo OWNER/REPO] [--container-tmp DIR]
 # --known-issue is the link to the known-0.6.0 entry; without it the run fails (REQ-022: the entry is linked).
 # --release-repo is the GitHub repository whose releases hold the oracle (default bogworks/mash).
+# --container-tmp is the container's scratch directory, passed as its TMPDIR (default: the image's TMPDIR, or /tmp). Everything the
+# container writes (HOME, caches, source, tree, work, output, the built runner) goes in a directory under it.
 # Inside the container (image golang:1.27, a non-root user, no bind mount of the checkout): everything it gets arrives as
 # one tar archive on stdin: the git objects of the commit (git pack-objects, staged as commit.pack in DIR) and the runner's
 # tree (go.mod, go.sum, cmd, internal and the scripts the runner imports). The runner's unit tests run; a clean clone of the candidate
@@ -22,6 +24,7 @@ oracle=0.5.10
 ref=HEAD
 known=
 repo=bogworks/mash
+ctmp=
 out=
 while [ $# -gt 0 ]; do
 	case $1 in
@@ -31,7 +34,8 @@ while [ $# -gt 0 ]; do
 	--out) out=${2:?}; shift 2 ;;
 	--known-issue) known=${2:?}; shift 2 ;;
 	--release-repo) repo=${2:?}; shift 2 ;;
-	*) echo "usage: at023.sh [--commit REF] [--version X.Y.Z] [--oracle-version X.Y.Z] [--out DIR] [--known-issue URL] [--release-repo OWNER/REPO]" >&2; exit 2 ;;
+	--container-tmp) ctmp=${2:?}; shift 2 ;;
+	*) echo "usage: at023.sh [--commit REF] [--version X.Y.Z] [--oracle-version X.Y.Z] [--out DIR] [--known-issue URL] [--release-repo OWNER/REPO] [--container-tmp DIR]" >&2; exit 2 ;;
 	esac
 done
 [ -n "$out" ] || { echo "--out DIR is required (the record is written there)" >&2; exit 2; }
@@ -63,30 +67,31 @@ git -C "$root" rev-list "$commit" >/dev/null || exit 1
 echo "$commit" | git -C "$root" pack-objects --revs --stdout -q >"$out/commit.pack" 2>>"$out/launcher.log" || { echo "git pack-objects failed" >&2; exit 1; }
 inputs=(go.mod go.sum cmd internal scripts/replayproof scripts/storedmail scripts/buildrelease)
 tar -C "$out" -cf - commit.pack -C "$root" "${inputs[@]}" |
-	docker run -i --rm --init --name "$name" --user 1000:1000 \
-		-e HOME=/tmp/h -e GOCACHE=/tmp/h/gocache -e GOPATH=/tmp/h/gopath -e GOFLAGS=-buildvcs=false \
+	docker run -i --rm --init --name "$name" --user 1000:1000 ${ctmp:+-e TMPDIR="$ctmp"} -e GOFLAGS=-buildvcs=false \
 		-e COMMIT="$commit" -e VERSION="$version" -e ORACLE="$oracle" -e KNOWN="$known" -e REPO="$repo" -e VENUE="$venue" \
 		"$image" bash -c '
 	set -euo pipefail
-	mkdir -p /tmp/h /tmp/at023/src /tmp/at023/tree /tmp/at023/out /tmp/at023/work
-	tar -C /tmp/at023/tree -xf -
-	(cd /tmp/at023/src && git init -q && git unpack-objects -q < /tmp/at023/tree/commit.pack && git checkout -q --detach "$COMMIT" \
+	S=${TMPDIR:-/tmp}/at023
+	export HOME=$S/h GOCACHE=$S/h/gocache GOPATH=$S/h/gopath
+	mkdir -p "$HOME" "$S/src" "$S/tree" "$S/out" "$S/work"
+	tar -C $S/tree -xf -
+	(cd $S/src && git init -q && git unpack-objects -q < $S/tree/commit.pack && git checkout -q --detach "$COMMIT" \
 		&& test "$(git rev-parse HEAD)" = "$COMMIT" && test -z "$(git status --porcelain --untracked-files=all --ignored=matching)") >&2 \
 		|| { echo "FAIL: a clean clone at $COMMIT" >&2; exit 1; }
-	cd /tmp/at023/tree
+	cd $S/tree
 	echo "== unit tests ==" >&2
 	go test -count=1 ./scripts/replayproof/... >&2 || { echo "FAIL: unit tests" >&2; exit 1; }
-	go build -o /tmp/at023/at023 ./scripts/replayproof/at023 >&2
+	go build -o $S/at023 ./scripts/replayproof/at023 >&2
 	rc=0
-	/tmp/at023/at023 -src /tmp/at023/src -commit "$COMMIT" -version "$VERSION" -oracle-version "$ORACLE" \
-		-out /tmp/at023/out -work /tmp/at023/work -known-issue "$KNOWN" -release-repo "$REPO" -venue "$VENUE" >&2 || rc=$?
-	cp /tmp/at023/work/oracle/capture.json /tmp/at023/out/capture-oracle.json 2>/dev/null || true
-	cp /tmp/at023/work/candidate/capture.json /tmp/at023/out/capture-candidate.json 2>/dev/null || true
+	$S/at023 -src $S/src -commit "$COMMIT" -version "$VERSION" -oracle-version "$ORACLE" \
+		-out $S/out -work $S/work -known-issue "$KNOWN" -release-repo "$REPO" -venue "$VENUE" >&2 || rc=$?
+	cp $S/work/oracle/capture.json $S/out/capture-oracle.json 2>/dev/null || true
+	cp $S/work/candidate/capture.json $S/out/capture-candidate.json 2>/dev/null || true
 	for role in oracle candidate; do # the stderr of the serve processes, for a failed run (no secrets: mash prints none)
-		for f in /tmp/at023/work/$role/serve-*.stderr; do [ -f "$f" ] && cp "$f" "/tmp/at023/out/$role-$(basename "$f")"; done
+		for f in $S/work/$role/serve-*.stderr; do [ -f "$f" ] && cp "$f" "$S/out/$role-$(basename "$f")"; done
 	done
-	echo "$rc" > /tmp/at023/out/exit-code
-	tar -C /tmp/at023/out -cf - .
+	echo "$rc" > $S/out/exit-code
+	tar -C $S/out -cf - .
 	exit "$rc"
 ' | tar -x -C "$out"
 ps=("${PIPESTATUS[@]}")

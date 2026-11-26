@@ -145,3 +145,20 @@ func NewKnownIssue(url string) KnownIssue {
 	}
 	return KnownIssue{URL: strings.TrimSpace(url), Status: "linked"}
 }
+
+// KnownIssueFormProblem returns "" when url is exactly https://github.com/<repo>/issues/<positive integer>, otherwise
+// a sentence saying which form is expected. Only the form is checked: the issue's label needs the network and a token.
+func KnownIssueFormProblem(url, repo string) string {
+	prefix := "https://github.com/" + repo + "/issues/"
+	n := strings.TrimPrefix(url, prefix)
+	ok := n != url && n != "" && n[0] != '0'
+	for _, c := range n {
+		if c < '0' || c > '9' {
+			ok = false
+		}
+	}
+	if ok {
+		return ""
+	}
+	return "expected exactly " + prefix + "<positive integer>, got " + fmt.Sprintf("%q", url)
+}

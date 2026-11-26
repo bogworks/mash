@@ -180,7 +180,17 @@ func run() int {
 	lg.f("known-issue entry: %s", rec.KnownIssue.Status+" "+rec.KnownIssue.URL)
 
 	ok := execute(rec, *src, *commit, *version, *oracleVer, *repo, wd)
-	if !rec.check("the known-issues entry is linked (REQ-022)", rec.KnownIssue.URL != "", rec.KnownIssue.Status+" "+rec.KnownIssue.URL) {
+	kiProblem := ""
+	if rec.KnownIssue.URL != "" {
+		kiProblem = KnownIssueFormProblem(rec.KnownIssue.URL, *repo)
+	}
+	kiDetail := rec.KnownIssue.Status + " " + rec.KnownIssue.URL
+	if kiProblem != "" {
+		kiDetail = kiProblem
+	} else if rec.KnownIssue.URL != "" {
+		kiDetail += " (checked for form only: the issue's label was not confirmed, the container has no network token)"
+	}
+	if !rec.check("the known-issues entry is linked (REQ-022)", rec.KnownIssue.URL != "" && kiProblem == "", kiDetail) {
 		ok = false
 	}
 	rec.FinishedAt = time.Now().UTC()
