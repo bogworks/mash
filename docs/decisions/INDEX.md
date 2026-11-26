@@ -170,3 +170,5 @@
 | [0191](0191-a-pinned-plugin-rechecks-its-cached-mash-once-per-session-and-doctor-shows-which-mash-runs.md) | A pinned plugin re-checks its cached mash once per session, and doctor shows which mash runs | accepted | 2026-11-26 |
 | [0192](0192-doctor-checks-every-installed-endpoint-when-none-is-chosen.md) | `mash doctor` checks every installed endpoint when none is chosen | accepted | 2026-11-26 |
 | [0193](0193-after-a-release-the-plugin-version-gets-a-pin-suffix-so-installed-plugins-receive-the-pin.md) | After a release the plugin version gets a `-pin.1` suffix, so installed plugins receive the pin | accepted | 2026-11-26 |
+| [0194](0194-the-policy-engine-says-owner-group-instance-and-the-range-word-is-gone.md) | The policy engine says owner, group and instance; the word `range` is gone from it | accepted | 2026-11-26 |
+| [0195](0195-submitter-only-list-sets-and-the-verified-intake-are-removed-from-the-policy-engine-for-now.md) | Submitter-only list sets and the verified intake are removed from the policy engine for now | accepted | 2026-11-26 |
