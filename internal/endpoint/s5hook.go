@@ -102,8 +102,9 @@ func (e *Endpoint) viewOfLocked(reg registration) *dirView {
 // applyPresenceS5 is applyPresence with the S5 verify step: it records the agents the step accepts as seen now,
 // and counts once, in AnswersNotVerified, an answer that carried a registration the step refused. It returns how many
 // registrations it recorded. The step runs outside e.mu, on a copy of the directory view taken under the read lock;
-// the write lock is taken only to record a verified registration, and then the record is read again: if the name's
-// record was replaced or removed while the step ran, the registration is not recorded and counts as not verified.
+// the write lock is taken only to record a verified registration, and then the record is read again: the user key,
+// owner and account the step saw must be unchanged, so if the name's record was replaced, or removed, or its owner or
+// account changed while the step ran, the registration is not recorded and counts as not verified.
 func (e *Endpoint) applyPresenceS5(h *s5Hooks, m *nats.Msg) (counted int) {
 	regs := parseAnswer(m.Data)
 	views := make([]*dirView, len(regs))
@@ -118,7 +119,7 @@ func (e *Endpoint) applyPresenceS5(h *s5Hooks, m *nats.Msg) (counted int) {
 		if ok {
 			e.mu.Lock()
 			cur, has := e.dir[name]
-			if has && views[i].hasRec && cur.User == views[i].rec.User {
+			if has && views[i].hasRec && sameVerifiedFields(cur, views[i].rec) {
 				e.lastSeen[name] = time.Now()
 				counted++
 			} else {
@@ -134,6 +135,12 @@ func (e *Endpoint) applyPresenceS5(h *s5Hooks, m *nats.Msg) (counted int) {
 		e.notVerified.Add(1)
 	}
 	return counted
+}
+
+// sameVerifiedFields reports whether two records agree on the fields verification reads: the user key, the owner and
+// the account. (Record holds a map, so it cannot be compared with ==.)
+func sameVerifiedFields(a, b store.Record) bool {
+	return a.User == b.User && a.Owner == b.Owner && a.Account == b.Account
 }
 
 // judgeAnswerS5 reports whether an answer carries a verified registration at the prompt subject want, and counts once

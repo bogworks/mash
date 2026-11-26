@@ -126,3 +126,39 @@ func TestS5PresenceRechecksTheRecordAfterVerify(t *testing.T) {
 		t.Errorf("counted %d, want 1", n)
 	}
 }
+
+// rkRechecksField replaces bob's record mid-verify with one that has the same user key and alter applied, and expects
+// the presence to be refused.
+func rkRechecksField(t *testing.T, alter func(*store.Record)) {
+	t.Helper()
+	k1 := rkIdentity(t)
+	data, _ := rkAnswer(t, k1)
+	e := rkEndpoint()
+	e.learn(map[string]recordResult{"acme_ops_bob": {rec: rkRecord(k1.User)}})
+	base := s5On()
+	h := &s5Hooks{secretPresence: true, promptDirectory: true,
+		verify: func(reg registration, d *dirView) (string, bool) {
+			name, ok := base.verify(reg, d)
+			changed := rkRecord(k1.User)
+			alter(&changed)
+			e.learn(map[string]recordResult{"acme_ops_bob": {rec: changed}}) // same key, one field changed mid-verify
+			return name, ok
+		}}
+	if got := e.applyPresenceS5(h, &nats.Msg{Data: data}); got != 0 {
+		t.Errorf("a record changed during verify was recorded as seen (%d)", got)
+	}
+	if _, seen := e.lastSeen["acme_ops_bob"]; seen {
+		t.Error("lastSeen holds bob after the record changed during verify")
+	}
+	if n := e.AnswersNotVerified(); n != 1 {
+		t.Errorf("counted %d, want 1", n)
+	}
+}
+
+func TestS5PresenceRechecksOwnerAfterVerify(t *testing.T) {
+	rkRechecksField(t, func(r *store.Record) { r.Owner = "mallory" })
+}
+
+func TestS5PresenceRechecksAccountAfterVerify(t *testing.T) {
+	rkRechecksField(t, func(r *store.Record) { r.Account = rkAccount + "X" })
+}
