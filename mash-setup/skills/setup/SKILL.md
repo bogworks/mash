@@ -357,10 +357,14 @@ Replace `vX.Y.Z` with the tag from the block above (each block runs in a
 fresh shell). Expected: it exits 0 and says it verified. Any failure: stop,
 run nothing.
 If `gh` is missing, does not run, or is older than 2.102.0, do not run the
-block above. The plan's `checks` row already told the person and the one yes
-covers it: do not raise it again as a separate remark or question, and do not
-open with it. The scripts are then checked against checksums from the same
-release, not authenticated (the installer says the same).
+block above. If the plan's `checks` row already told the person (gh was
+missing, too old or not running then), the one yes covers it: do not raise it
+again as a separate remark or question, and do not open with it. If gh looked
+fine at the plan and fails now, the plan did not cover this: say the scripts
+would be checked against checksums from the same download only, so they do
+not prove who made them, and ask for a yes before running them. The scripts
+are then checked against checksums from the same release, not authenticated
+(the installer says the same).
 
 Expected: `install.sh: OK` and `mash-local-nats-setup.sh: OK`. On macOS
 `sha256sum` may be missing: use `shasum -a 256 -c -`. Anything else, or a
@@ -595,10 +599,12 @@ Close by pointing the person at the quick start's step 4: in Bob's session
 say "Send alice a note: lunch at noon?", and in Alice's "Do I have mail?"
 (Alice sees the setup's test note and then that one, both verified). Do not
 ask them to run `mash inbox` in a Claude session: it is a shell command. Say
-the setup is done only when one session has received mail from the other
-(your own `MASH_ENDPOINT=<alice> mash inbox` check in step 7 shows it as
-verified). Do not claim mail is broken because your own session started
-before the plugin was installed: the plugin loads in the next session.
+the server and the endpoints work (your own `MASH_ENDPOINT=<alice> mash
+inbox` check in step 7 shows the test note as verified), and that mail
+between the two sessions is proven when Alice sees Bob's note in step 4:
+do not say session mail works before that. Do not claim mail is broken
+because your own session started before the plugin was installed: the plugin
+loads in the next session.
 
 ### Try it: a first job for the pair
 
