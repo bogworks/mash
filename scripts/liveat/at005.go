@@ -86,7 +86,7 @@ func at005Main(args []string, stdout, stderr io.Writer) int {
 	scenario := at005Scenario
 	if *dry {
 		id = "at005-dry-setup"
-		scenario = "At005 --dry-setup: certificates; M1 by the setup script; the three-node TLS cluster; init --config with one server listed refused; the buckets (mashctl init --config); M2 by init --config; mashctl endpoint list from both; everything stopped by PID and cleaned up."
+		scenario = "At005 --dry-setup: certificates; M1 by the setup script; the three-node TLS cluster; init --config with one server listed refused; the buckets (mashctl init --config); mashctl endpoint list from both; everything stopped by PID and cleaned up."
 	}
 	func() {
 		defer func() {

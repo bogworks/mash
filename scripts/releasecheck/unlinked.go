@@ -26,11 +26,8 @@ const policyPrefix = "internal/policy"
 
 // policyNamedElsewhere lists the engine packages whose names do not start with internal/policy. A new engine package
 // whose name does not start with internal/policy must be added to this list, or the gate will not see it. Each matches
-// the package and its subpackages: internal/listset/sub is refused; internal/listsetx and internal/xissue are not.
+// the package and its subpackages: internal/listset/sub is refused; internal/listsetx and internal/xlistset are not.
 var policyNamedElsewhere = []string{
-	"internal/requesterreg",
-	"internal/issue",
-	"internal/reconcile",
 	"internal/listset",
 }
 
