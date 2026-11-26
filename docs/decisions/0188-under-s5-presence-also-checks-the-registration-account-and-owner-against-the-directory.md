@@ -55,7 +55,10 @@ This amends the sentence of ADR 0066 quoted above. The rest of ADR 0066 stands.
 
 * Good, because a registration that the directory does not vouch for, in account, owner or verb, no longer counts
   as online.
-* Good, because a replaced key stops counting at once: the record's own key is compared, not an index.
+* Good, because a replaced key stops counting as soon as the endpoint's copy of the directory holds the new record:
+  the record's own key is compared, not an index. The directory watch and the poll keep that copy current; whether
+  prompt discovery reads the record from the directory on every request is decided before the switch-on (#1760).
+* Bad, because until the endpoint's copy holds the new record, the replaced key still verifies.
 * Bad, because at switch-on a registration under another owner token stops counting, and a foreign agent is counted as
   not verified.
 * Bad, because a record with no account never verifies.
