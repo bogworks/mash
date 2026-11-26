@@ -43,33 +43,104 @@ func TestLearnReplacedRecordDropsTheOldKey(t *testing.T) {
 }
 
 // Presence: an $SRV.INFO answer signed by the replaced key is not counted.
-func TestPresenceReplacedKeyIsNotCounted(t *testing.T) {
-	k1, k2 := newFormIdentity(t), newFormIdentity(t)
+// presenceFor is a presence answer for lrName signed by id.
+func presenceFor(t *testing.T, id sap.Identity) *nats.Msg {
+	t.Helper()
 	subject := "agents.prompt.acme.team1.bob"
-	sig, err := k1.IDSig(sap.AgentName, "acme", subject)
+	sig, err := id.IDSig(sap.AgentName, "acme", subject)
 	if err != nil {
 		t.Fatal(err)
 	}
 	data, err := json.Marshal(map[string]any{
-		"metadata": map[string]string{"owner": "acme", "agent": sap.AgentName, "account": k1.Account,
-			"user_nkey": k1.User, "id_sig": sig},
+		"metadata": map[string]string{"owner": "acme", "agent": sap.AgentName, "account": id.Account,
+			"user_nkey": id.User, "id_sig": sig},
 		"endpoints": []map[string]string{{"name": "prompt", "subject": subject}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	e := keyEndpoint(nil)
+	return &nats.Msg{Data: data}
+}
+
+func lrOnline(e *Endpoint) bool {
+	for _, p := range e.Who() {
+		if flatOf(p.Record) == lrName {
+			return p.Online
+		}
+	}
+	return false
+}
+
+// markedOnlineByK1 is a client that read bob's record with K1 and counted K1's presence answer.
+func markedOnlineByK1(t *testing.T) (e *Endpoint, k1, k2 sap.Identity) {
+	t.Helper()
+	k1, k2 = newFormIdentity(t), newFormIdentity(t)
+	e = keyEndpoint(nil)
 	e.learn(map[string]recordResult{lrName: {rec: lrRecord(k1.User)}})
-	if got := e.applyPresence(&nats.Msg{Data: data}); got != 1 {
+	if got := e.applyPresence(presenceFor(t, k1)); got != 1 {
 		t.Fatalf("the record's own key counted %d, want 1", got)
 	}
-	delete(e.lastSeen, lrName)
+	if !lrOnline(e) {
+		t.Fatal("bob is not online after K1's own answer")
+	}
+	return e, k1, k2
+}
+
+// Presence: an answer the replaced key signed counts nothing, and the time it set does not outlive the key.
+func TestPresenceReplacedKeyIsNotCounted(t *testing.T) {
+	e, k1, k2 := markedOnlineByK1(t)
 	e.learn(map[string]recordResult{lrName: {rec: lrRecord(k2.User)}})
-	if got := e.applyPresence(&nats.Msg{Data: data}); got != 0 {
+	if lrOnline(e) {
+		t.Error("bob is online on the new key from an answer the old key signed (learn)")
+	}
+	if got := e.applyPresence(presenceFor(t, k1)); got != 0 {
 		t.Errorf("the replaced key counted %d, want 0", got)
 	}
-	if _, seen := e.lastSeen[lrName]; seen {
-		t.Error("lastSeen holds bob after an answer signed by the replaced key")
+	if lrOnline(e) {
+		t.Error("bob is online after another answer signed by the replaced key")
+	}
+	if got := e.applyPresence(presenceFor(t, k2)); got != 1 || !lrOnline(e) {
+		t.Errorf("the new key counted %d, online %v, want 1 and online", got, lrOnline(e))
+	}
+}
+
+// The full-directory replacement (installDirectory) clears the last-seen time of a name whose key changed.
+func TestInstallDirectoryReplacedKeyClearsLastSeen(t *testing.T) {
+	e, _, k2 := markedOnlineByK1(t)
+	e.installDirectory(map[string]recordResult{lrName: {rec: lrRecord(k2.User)}})
+	if lrOnline(e) {
+		t.Error("bob is online on the new key from an answer the old key signed (installDirectory)")
+	}
+	// The same key reinstalled keeps its time.
+	if got := e.applyPresence(presenceFor(t, k2)); got != 1 {
+		t.Fatalf("new key counted %d, want 1", got)
+	}
+	e.installDirectory(map[string]recordResult{lrName: {rec: lrRecord(k2.User)}})
+	if !lrOnline(e) {
+		t.Error("an unchanged key lost its last-seen time")
+	}
+}
+
+// The sender reload (reloadSender, the watch path) clears the last-seen time of a name whose key changed.
+// NEEDS A NATS SERVER (testenv.Start, in process).
+func TestReloadSenderReplacedKeyClearsLastSeen(t *testing.T) {
+	f := newFixture(t, "a", "b")
+	a := f.client(t, "a")
+	cur := f.record(t, tkey("b"))
+	old := cur
+	old.User = newFormIdentity(t).User
+	a.learn(map[string]recordResult{tkey("b"): {rec: old}})
+	a.mu.Lock()
+	a.lastSeen[tkey("b")] = time.Now()
+	a.mu.Unlock()
+	if !a.reloadSender(sap.SenderHeader{V: 1, User: cur.User, Name: tkey("b")}) {
+		t.Fatal("the reload did not install the new record")
+	}
+	a.mu.RLock()
+	_, seen := a.lastSeen[tkey("b")]
+	a.mu.RUnlock()
+	if seen {
+		t.Error("lastSeen survived a key replacement through reloadSender")
 	}
 }
 

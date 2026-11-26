@@ -406,6 +406,9 @@ func (e *Endpoint) learn(got map[string]recordResult) {
 			if old, ok := e.dir[name]; ok && old.User != r.rec.User && e.byUser[old.User] == name {
 				delete(e.byUser, old.User) // a replaced key no longer names this record
 			}
+			if old, ok := e.dir[name]; ok && old.User != r.rec.User {
+				delete(e.lastSeen, name) // an answer the old key signed is not presence for the new key
+			}
 			e.dir[name] = r.rec
 			e.byUser[r.rec.User] = name
 		}
