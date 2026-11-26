@@ -47,7 +47,7 @@ func TestS5AT015_Positive(t *testing.T) {
 // is offline): rejected, counted once, and bob is not found (he shows as with no answer from the peer). No prompt is
 // published (no unverified retry).
 func TestS5AT015_NegativesEachRejectedNeverAttributed(t *testing.T) {
-	needS5Caller(t, "AT-015 negatives")
+	needS5Caller(t, "AT-015 negatives (the rejected-answer count: mash's discovery does not count rejected answers yet: REQ-016/TO-12)")
 	z := newS5Fix(t)
 	genuine := z.genuineRegistration(t, z.bob)
 	forged := z.forgeries(t, genuine)
