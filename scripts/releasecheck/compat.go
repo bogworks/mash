@@ -96,6 +96,7 @@ type CompatOptions struct {
 	ErrOut   io.Writer
 	Download func(ctx context.Context, tag, dir string) (string, error)                                   // test seam: the published binary of tag for this host, in dir; default gh release download
 	Sums     func(ctx context.Context, tag string) ([]byte, error)                                        // test seam: the SHA256SUMS asset of the published release tag; default gh release download
+	Attest   func(ctx context.Context, tag, path string) error                                            // test seam: the build provenance attestation of the downloaded binary at path, for release tag; default gh attestation verify
 	Drive    func(ctx context.Context, writer, reader compatBin, corpus []compatMsg) ([]compatObs, error) // test seam: writer writes the corpus and reader reads it; default a throwaway NATS server and the real binaries
 	Panic    bool                                                                                         // test seam: panic inside the run
 }
@@ -247,6 +248,21 @@ func verifyDownloaded(ctx context.Context, sums func(context.Context, string) ([
 	return nil
 }
 
+// attestDownloaded holds a downloaded binary to the build provenance of the release workflow at tag: the same
+// `gh attestation verify` flags the release gate uses (attestFlags), with x the commit the tag points to.
+func attestDownloaded(o Options, tag, path string) error {
+	out, err := gh(o, "api", fmt.Sprintf("repos/%s/commits/%s", o.GHRepo, tag), "--jq", ".sha")
+	if err != nil {
+		return err
+	}
+	x := strings.TrimSpace(string(out))
+	if len(x) != 40 {
+		return fmt.Errorf("the commit of %s is %q", tag, x)
+	}
+	_, err = gh(o, append([]string{"attestation", "verify", path}, attestFlags(o, tag, x)...)...)
+	return err
+}
+
 func compatRun(ctx context.Context, args []string, o CompatOptions, ev *compatEvidence) (refused bool, err error) {
 	pos, fl, err := parseCompatArgs(args)
 	candidate := fl.candidate
@@ -285,6 +301,10 @@ func compatRun(ctx context.Context, args []string, o CompatOptions, ev *compatEv
 	if sums == nil {
 		sums = func(_ context.Context, tag string) ([]byte, error) { return downloadAsset(gho, tag, release.SumsName) }
 	}
+	attest := o.Attest
+	if attest == nil {
+		attest = func(_ context.Context, tag, path string) error { return attestDownloaded(gho, tag, path) }
+	}
 	work, err := os.MkdirTemp("", "release-check-compat-")
 	if err != nil {
 		return false, err
@@ -307,6 +327,13 @@ func compatRun(ctx context.Context, args []string, o CompatOptions, ev *compatEv
 		// Never run an unverified binary.
 		if verr := verifyDownloaded(ctx, sums, "v"+v, p); verr != nil {
 			return false, compatUndecided{v + " failed its checksum"}
+		}
+		// A matching SHA256SUMS of the same release does not say who built the binary: the build provenance does.
+		if aerr := attest(ctx, "v"+v, p); aerr != nil {
+			return false, compatUndecided{v + " has no verifying build provenance attestation"}
+		}
+		if err := os.Chmod(p, 0o755); err != nil { // a release download carries no execute bit
+			return false, err
 		}
 		bins[i] = compatBin{Version: v, Path: p}
 	}
