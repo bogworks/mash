@@ -106,7 +106,10 @@ echo "container exit status: $RC"
 
 # The container was started with --rm: show it is gone.
 REMOVED=true
-if docker ps -a --filter "name=^$NAME\$" --format '{{.Names}}' | grep -q .; then
+if ! LISTED=$(docker ps -a --filter "name=^$NAME\$" --format '{{.Names}}'); then
+  REMOVED=false
+  STATE="docker ps -a failed, so the removal of the container $NAME is not confirmed"
+elif [ -n "$LISTED" ]; then
   REMOVED=false
   STATE="the container $NAME STILL EXISTS after the run"
 else
