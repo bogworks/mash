@@ -6,11 +6,11 @@ Every row's status is one of four forms: `adopted`, `kept in mash (why)`, `kept 
 
 ## Reading this page
 
-Nothing here is shipped in a 0.5.x release, and `main` has no SDK import yet. Where a row says `adopted`, the change lands in the stage named in the note and is switched off until stage W (wiring and views). The stage-4 and stage-5 code is guarded out of 0.5.x binaries. Do not read an `adopted` row as a behaviour a released mash has today.
+The SDK is a dependency of `mash` and `mashctl` from v0.5.10: both build addresses and subjects through it (`internal/sap`, stage S3). Nothing else on this page is in a released mash. Where a row says `adopted`, the change lands in the stage named in the note and is switched off until stage W (wiring and views). The stage-4 and stage-5 code is guarded out of 0.5.x binaries. Do not read an `adopted` row as a behaviour a released mash has today.
 
 | Stage | What it is |
 | --- | --- |
-| S1 | The SDK pin in `go.mod`, as a test-only import. Not on `main` yet. |
+| S1 | The SDK pin in `go.mod`. On `main`, first as a test-only import; in releases from v0.5.10. |
 | S2 | The compatibility gate. Tests only. |
 | S3 | Constants and subjects built through the SDK's subject constructor. |
 | S4 | The identity adapter in `internal/sapsdk`: signing, id signatures, stored and live verification, sender classification, the nonce set. |
