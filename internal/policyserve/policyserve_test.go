@@ -76,7 +76,7 @@ func TestDecodeClassifiesErrors(t *testing.T) {
 	kp, _ := nkeys.CreateAccount()
 	pub, _ := kp.PublicKey()
 	other, _ := nkeys.CreateAccount()
-	payload := `{"schema":"` + policydoc.DocumentSchema + `","account":"A","range":"foo","generation":1,"base_generation":0,` +
+	payload := `{"schema":"` + policydoc.DocumentSchema + `","account":"A","owner":"foo","generation":1,"base_generation":0,` +
 		`"issued_at":"2026-11-14T12:00:00Z","groups":{},"senders":{}}`
 	d, err := Decode(jws(t, kp, payload), pub)
 	if err != nil || !d.Verified || d.Account != "A" || d.Range != "foo" || d.Generation != 1 || d.BaseGeneration != 0 {
@@ -98,7 +98,7 @@ func TestInForce(t *testing.T) {
 	if got, err := InForce(l)(context.Background()); err != nil || got != "" {
 		t.Fatalf("nothing in force: %q %v", got, err)
 	}
-	rec, _, err := listset.Accept(listset.Record{}, listset.ListSet{Range: "foo"}, []byte("raw"))
+	rec, _, err := listset.Accept(listset.Record{}, listset.ListSet{Owner: "foo"}, []byte("raw"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,7 +240,7 @@ func TestProductionStepsOnlyCheck(t *testing.T) {
 		t.Error("Deliver succeeded")
 	}
 	c, err := listset.Compile(listset.ListSet{
-		Range: "foo",
+		Owner: "foo",
 		Switches: []listset.SwitchEntry{{Group: "foo.c", Verb: listset.Mail, Switch: listset.Closed}, {Group: "foo.c", Verb: listset.Prompt, Switch: listset.Closed},
 			{Group: "foo.c", Verb: listset.Status, Switch: listset.Closed}, {Group: "foo.c", Verb: listset.Heartbeat, Switch: listset.Closed}},
 		Senders: []listset.SenderLists{{Sender: "foo.c.x"}},

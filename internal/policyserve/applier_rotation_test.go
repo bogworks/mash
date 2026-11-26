@@ -29,7 +29,7 @@ func (okGuard) Before(context.Context, string) error { return nil }
 // base 1 with the very content in force.
 func sameContentApplier(t *testing.T) (*Applier, policyintake.Doc) {
 	t.Helper()
-	ls := listset.ListSet{Range: "foo"}
+	ls := listset.ListSet{Owner: "foo"}
 	c, err := listset.Compile(ls)
 	if err != nil {
 		t.Fatal(err)
@@ -44,7 +44,7 @@ func sameContentApplier(t *testing.T) (*Applier, policyintake.Doc) {
 			return []ServerInfo{{Name: "s1", Host: "127.0.0.1", Port: 4222}}, nil
 		},
 	}
-	raw := fmt.Sprintf(`{"schema":%q,"account":"A","range":"foo","generation":2,"base_generation":1,"issued_at":"2026-11-14T10:00:00Z","groups":{},"senders":{}}`, "mash.listset/1")
+	raw := fmt.Sprintf(`{"schema":%q,"account":"A","owner":"foo","generation":2,"base_generation":1,"issued_at":"2026-11-14T10:00:00Z","groups":{},"senders":{}}`, "mash.listset/1")
 	return a, policyintake.Doc{Raw: []byte(raw)}
 }
 
@@ -102,7 +102,7 @@ func newAddressApplier(t *testing.T, inboxes InboxChecker) (*Applier, policyinta
 	a.Ledger = memLedger{policyapply.NewMemLedger(listset.Record{})}
 	a.Inboxes = inboxes
 	a.Keys = makeKeys{memKeys{}}
-	d.Raw = []byte(fmt.Sprintf(`{"schema":%q,"account":"A","range":"foo","generation":1,"base_generation":0,"issued_at":"2026-11-14T10:00:00Z",`+
+	d.Raw = []byte(fmt.Sprintf(`{"schema":%q,"account":"A","owner":"foo","generation":1,"base_generation":0,"issued_at":"2026-11-14T10:00:00Z",`+
 		`"groups":{"c":{"mail":"closed","prompt":"closed","status":"shared","heartbeat":"closed"}},`+
 		`"senders":{"foo.c.core":{"allow":[],"deny":[]}}}`, "mash.listset/1"))
 	called := new(bool)
@@ -149,7 +149,7 @@ func (makeKeys) GroupKey(string, bool) (nkeys.KeyPair, error) { return nkeys.Cre
 // non-mash signing key is dropped once the exempt users stay under kept keys, where without the fields it is refused.
 func TestApplierDropsANonMashKeyOnTheFirstApplyWhenTheDropFieldsAreSet(t *testing.T) {
 	w := newDropWorld(t)
-	raw := []byte(fmt.Sprintf(`{"schema":%q,"account":%q,"range":"foo","generation":1,"base_generation":0,"issued_at":"2026-11-14T10:00:00Z",`+
+	raw := []byte(fmt.Sprintf(`{"schema":%q,"account":%q,"owner":"foo","generation":1,"base_generation":0,"issued_at":"2026-11-14T10:00:00Z",`+
 		`"groups":{"c":{"mail":"closed","prompt":"closed","status":"shared","heartbeat":"closed"}},`+
 		`"senders":{"foo.c.core":{"allow":[],"deny":[]}}}`, "mash.listset/1", w.acct))
 	exempt := map[string][]string{"UEXEMPT": {w.acct, w.otherRange}}

@@ -14,7 +14,7 @@ import (
 	"github.com/nats-io/nkeys"
 )
 
-// UserIssuer issues a user JWT for a public key the sender's host made. It signs under the owner group's scoped key.
+// UserIssuer issues a user JWT for a public key the sender's host made. It signs under the group's scoped key.
 type UserIssuer interface {
 	Issue(ctx context.Context, address, userPub, name string, tags []string) (userJWT string, err error)
 }

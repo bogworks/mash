@@ -108,7 +108,7 @@ func TestSignKeepsOtherRangesGroupKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	c, err := listset.Compile(listset.ListSet{
-		Range: "foo",
+		Owner: "foo",
 		Switches: []listset.SwitchEntry{{Group: "foo.c", Verb: listset.Mail, Switch: listset.Closed}, {Group: "foo.c", Verb: listset.Prompt, Switch: listset.Closed},
 			{Group: "foo.c", Verb: listset.Status, Switch: listset.Closed}, {Group: "foo.c", Verb: listset.Heartbeat, Switch: listset.Closed}},
 		Senders: []listset.SenderLists{{Sender: "foo.c.x"}},
@@ -222,7 +222,7 @@ func newDropWorld(t *testing.T) *dropWorld {
 		t.Fatal(err)
 	}
 	w.compiled, err = listset.Compile(listset.ListSet{
-		Range: "foo",
+		Owner: "foo",
 		Switches: []listset.SwitchEntry{{Group: "foo.c", Verb: listset.Mail, Switch: listset.Closed}, {Group: "foo.c", Verb: listset.Prompt, Switch: listset.Closed},
 			{Group: "foo.c", Verb: listset.Status, Switch: listset.Closed}, {Group: "foo.c", Verb: listset.Heartbeat, Switch: listset.Closed}},
 		Senders: []listset.SenderLists{{Sender: "foo.c.x"}},
@@ -396,7 +396,7 @@ func TestSignCarriesEveryPlainSigningKey(t *testing.T) {
 	iss := &Issuer{Ctx: context.Background(), Keys: keys, Resolver: oneJWT{tok}, Account: apub, Trust: trust, Servers: 1, Range: "foo",
 		Now: func() time.Time { return now }}
 	c, err := listset.Compile(listset.ListSet{
-		Range: "foo",
+		Owner: "foo",
 		Switches: []listset.SwitchEntry{{Group: "foo.c", Verb: listset.Mail, Switch: listset.Closed}, {Group: "foo.c", Verb: listset.Prompt, Switch: listset.Closed},
 			{Group: "foo.c", Verb: listset.Status, Switch: listset.Closed}, {Group: "foo.c", Verb: listset.Heartbeat, Switch: listset.Closed}},
 		Senders: []listset.SenderLists{{Sender: "foo.c.x"}},

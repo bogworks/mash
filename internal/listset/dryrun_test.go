@@ -15,11 +15,11 @@ import (
 
 var update = flag.Bool("update", false, "rewrite the golden files in testdata")
 
-// drySet is the set in force for the dry-run tests: account foo, owner group c, status shared and the rest closed;
+// drySet is the set in force for the dry-run tests: account foo, group c, status shared and the rest closed;
 // core allows lead and sdk, lead allows core, sdk has no exception.
 func drySet() ListSet {
 	return ListSet{
-		Range:    "foo",
+		Owner:    "foo",
 		Switches: switches("foo.c", Closed, Closed, Shared, Closed),
 		Senders: []SenderLists{
 			{Sender: "foo.c.core", Allow: []string{"foo.c.lead", "foo.c.sdk"}},
@@ -33,7 +33,7 @@ func drySet() ListSet {
 // reaches sdk), and closes one verb (status).
 func at008Next() ListSet {
 	return ListSet{
-		Range:    "foo",
+		Owner:    "foo",
 		Switches: switches("foo.c", Closed, Closed, Closed, Closed),
 		Senders: []SenderLists{
 			{Sender: "foo.c.core", Allow: []string{"foo.c.lead"}},
@@ -189,7 +189,7 @@ func TestDryRunCloseAVerbIsADisconnectNotARotation(t *testing.T) {
 func TestDryRunSenderLeaves(t *testing.T) {
 	base := at003Deny()
 	next := at003Deny()
-	next.Senders = next.Senders[:3] // foo.d.solo leaves, and with it owner group foo.d
+	next.Senders = next.Senders[:3] // foo.d.solo leaves, and with it group foo.d
 	p := dry(t, &base, next, nil)
 	wantList(t, "revoke", p.Revoke, "foo.d.solo")
 	if len(p.Templates) != 1 || p.Templates[0].Group != "foo.d" || p.Templates[0].Change != TemplateRemoved || p.Templates[0].Disconnects {
@@ -268,7 +268,7 @@ func TestDryRunInForceThatDoesNotValidateIsRefused(t *testing.T) {
 
 // longSender is a sender with n allow entries at long names.
 func longSet(n int) ListSet {
-	ls := ListSet{Range: "foo", Switches: switches("foo.ownerwithalongname", Closed, Closed, Closed, Closed)}
+	ls := ListSet{Owner: "foo", Switches: switches("foo.ownerwithalongname", Closed, Closed, Closed, Closed)}
 	var allow []string
 	for i := 0; i < n; i++ {
 		allow = append(allow, fmt.Sprintf("foo.ownerwithalongname.receiver-with-a-long-name-%03d", i))
@@ -341,7 +341,7 @@ func TestDryRunDoesNotMutateItsInputs(t *testing.T) {
 
 // reorder returns ls with every slice reversed.
 func reorder(ls ListSet) ListSet {
-	out := ListSet{Range: ls.Range}
+	out := ListSet{Owner: ls.Owner}
 	out.Switches = slices.Clone(ls.Switches)
 	slices.Reverse(out.Switches)
 	for _, s := range ls.Senders {

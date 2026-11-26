@@ -8,7 +8,7 @@ import (
 
 // AT-007 as the contract states it (draft-2) is '100 exceptions at 14-character names accepted; 59 at 32-character
 // names'; those two numbers do NOT hold at the 4096 default connect line (measured: 83 at 14 characters and 50 at 32,
-// owner part 4); the maintainer rules on the contract's numbers; this test pins the measured ones.
+// group part 4); the maintainer rules on the contract's numbers; this test pins the measured ones.
 
 const exceptionCountsChanged = "the documented exception counts changed: report to the maintainer"
 
@@ -26,7 +26,7 @@ func ownerPart(first string, p int) string {
 }
 
 // exceptionSet builds a sender with n allow entries, all four verbs Closed, no deny entries. Names are l characters
-// and owner parts p characters; the receivers sit in another owner group, which has a second sender for its template.
+// and group part p characters; the receivers sit in another group, which has a second sender for its template.
 func exceptionSet(n, p, l int) (ListSet, string) {
 	ga, gb := "foo."+ownerPart("a", p), "foo."+ownerPart("b", p)
 	sender := ga + "." + padName("s0", l)
@@ -35,7 +35,7 @@ func exceptionSet(n, p, l int) (ListSet, string) {
 		allow[i] = gb + "." + padName(fmt.Sprintf("r%d", i), l)
 	}
 	return ListSet{
-		Range:    "foo",
+		Owner:    "foo",
 		Switches: concat(switches(ga, Closed, Closed, Closed, Closed), switches(gb, Closed, Closed, Closed, Closed)),
 		Senders: []SenderLists{
 			{Sender: sender, Allow: allow},
@@ -78,7 +78,7 @@ func assertLimit(t *testing.T, n, p, l int) {
 }
 
 func TestAT007DocumentedExceptionLimit(t *testing.T) {
-	// The pinned cases at owner part 4, with the sizes measured for N (fits) and N+1 (refused).
+	// The pinned cases at group part 4, with the sizes measured for N (fits) and N+1 (refused).
 	pinned := []struct {
 		l, n, jwtN, lineN, jwtOver, lineOver int
 	}{
@@ -123,7 +123,7 @@ func TestAT007DocumentedExceptionLimit(t *testing.T) {
 		}
 	})
 
-	// The full measured table: the most exceptions that fit at the default 4096 connect line, by owner-part length P
+	// The full measured table: the most exceptions that fit at the default 4096 connect line, by group part length P
 	// and name length L (7, 14, 32).
 	table := []struct {
 		p    int

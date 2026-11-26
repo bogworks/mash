@@ -20,7 +20,7 @@ import (
 	"github.com/bogworks/mash/internal/natsauth"
 )
 
-// GroupSigner signs a user JWT with the scoped signing key of an owner group (the group is "range.owner", the role
+// GroupSigner signs a user JWT with the scoped signing key of a group (the group is "owner.group", the role
 // of the key). The user's permissions then come only from the key's template.
 type GroupSigner interface {
 	SignUser(group string, uc *jwt.UserClaims) (string, error)
@@ -30,7 +30,7 @@ type GroupSigner interface {
 const DefaultProbeTTL = 5 * time.Minute
 
 // ProbeMinter mints probe credentials: a fresh user key, the sender's name and exactly the tags of the ProbeCred,
-// no permissions of its own, signed by the sender's owner group's scoped key. It can give a probe nothing the
+// no permissions of its own, signed by the sender's group's scoped key. It can give a probe nothing the
 // sender's credential does not have under the template.
 type ProbeMinter struct {
 	Signer GroupSigner

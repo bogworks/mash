@@ -16,7 +16,7 @@ const testAccount = "ACXTEST"
 
 func doc(gen, base int, mod func(m map[string]any)) []byte {
 	m := map[string]any{
-		"schema": DocumentSchema, "account": testAccount, "range": "foo", "generation": gen, "base_generation": base,
+		"schema": DocumentSchema, "account": testAccount, "owner": "foo", "generation": gen, "base_generation": base,
 		"issued_at": "2026-11-12T17:00:00Z",
 		"groups": map[string]any{
 			"c": map[string]any{"mail": "shared", "prompt": "closed", "status": "shared", "heartbeat": "shared"},
@@ -63,7 +63,7 @@ func TestDecodeRaw(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if d.Verified || d.Generation != 7 || d.BaseGeneration != 6 || d.ListSet.Base != 6 || d.ListSet.Range != "foo" || string(d.Raw) != string(raw) {
+	if d.Verified || d.Generation != 7 || d.BaseGeneration != 6 || d.ListSet.Base != 6 || d.ListSet.Owner != "foo" || string(d.Raw) != string(raw) {
 		t.Fatalf("%+v", d)
 	}
 	if len(d.ListSet.Switches) != 4 || d.ListSet.Switches[0] != (listset.SwitchEntry{Group: "foo.c", Verb: listset.Mail, Switch: listset.Shared}) {
@@ -124,7 +124,7 @@ func TestDecodeRefusals(t *testing.T) {
 		"generation skips":    doc(8, 6, nil),
 		"generation repeats":  doc(6, 6, nil),
 		"bad time":            doc(7, 6, func(m map[string]any) { m["issued_at"] = "yesterday" }),
-		"duplicate key":       []byte(strings.Replace(string(doc(7, 6, nil)), `"range":"foo"`, `"range":"foo","range":"bar"`, 1)),
+		"duplicate key":       []byte(strings.Replace(string(doc(7, 6, nil)), `"owner":"foo"`, `"owner":"foo","owner":"bar"`, 1)),
 		"duplicate nested":    []byte(strings.Replace(string(doc(7, 6, nil)), `"mail":"shared"`, `"mail":"shared","mail":"closed"`, 1)),
 		"trailing data":       append(doc(7, 6, nil), []byte(` {}`)...),
 		"not json":            []byte("hello"),
@@ -140,16 +140,16 @@ func TestDecodeRefusals(t *testing.T) {
 }
 
 func TestDecodeGroupKeyedByAddress(t *testing.T) {
-	for name, key := range map[string]string{"address": "lab.h1.l1", "range.owner": "lab.h1"} {
+	for name, key := range map[string]string{"address": "lab.h1.l1", "owner.group": "lab.h1"} {
 		b := doc(7, 6, func(m map[string]any) {
-			m["range"] = "lab"
+			m["owner"] = "lab"
 			g := m["groups"].(map[string]any)
 			g[key] = g["c"]
 			delete(g, "c")
 		})
 		_, err := Decode(b, DecodeOptions{})
 		if !errors.Is(err, ErrBadDocument) || !strings.Contains(err.Error(), `group "`+key+`"`) ||
-			!strings.Contains(err.Error(), "owner part") || strings.Contains(err.Error(), "lab.lab") {
+			!strings.Contains(err.Error(), "group part") || strings.Contains(err.Error(), "lab.lab") {
 			t.Errorf("%s: got %v", name, err)
 		}
 	}

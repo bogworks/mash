@@ -161,7 +161,7 @@ func accept(inForce Record, ls ListSet, received []byte, rotationStep bool) (Rec
 //
 // Encoding (every string is its length as a uvarint, then its bytes; every count is a uvarint):
 //
-//	"mash.listset.v1\x00" | Base as 8 bytes big-endian | Range
+//	"mash.listset.v1\x00" | Base as 8 bytes big-endian | Owner
 //	| count of switches | switches sorted by their encoding, each Group Verb Switch
 //	| count of senders  | senders sorted by their encoding, each Sender
 //	                        | count of allow | allow sorted | count of deny | deny sorted
@@ -170,7 +170,7 @@ func accept(inForce Record, ls ListSet, received []byte, rotationStep bool) (Rec
 func DigestListSet(ls ListSet) Digest {
 	e := newEnc("mash.listset.v1\x00")
 	e.u64(ls.Base)
-	e.str(ls.Range)
+	e.str(ls.Owner)
 
 	sw := make([]string, len(ls.Switches))
 	for i, s := range ls.Switches {
@@ -191,7 +191,7 @@ func DigestListSet(ls ListSet) Digest {
 //
 // Encoding (strings and counts as in DigestListSet):
 //
-//	"mash.compiled.v1\x00" | Range
+//	"mash.compiled.v1\x00" | Owner
 //	| count of templates | templates sorted by their encoding, each Group
 //	    | pub allow sorted | pub deny sorted | sub allow sorted | sub deny sorted
 //	    | response permission: 0, or 1 then MaxMsgs and Expires as 8 bytes big-endian
@@ -206,7 +206,7 @@ func DigestCompiled(c *Compiled) Digest {
 	if c == nil {
 		c = &Compiled{}
 	}
-	e.str(c.Range)
+	e.str(c.Owner)
 
 	ts := make([]string, len(c.Templates))
 	for i, t := range c.Templates {

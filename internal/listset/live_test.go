@@ -25,7 +25,7 @@ type liveEnv struct {
 	url    string
 	acc    nkeys.KeyPair
 	accPub string
-	scoped map[string]nkeys.KeyPair // owner group -> signing key
+	scoped map[string]nkeys.KeyPair // group -> signing key
 }
 
 func newLiveEnv(t *testing.T, c *Compiled) *liveEnv {
@@ -35,7 +35,7 @@ func newLiveEnv(t *testing.T, c *Compiled) *liveEnv {
 	acc, _ := nkeys.CreateAccount()
 	accPub, _ := acc.PublicKey()
 	ac := jwt.NewAccountClaims(accPub)
-	ac.Name = c.Range
+	ac.Name = c.Owner
 	e := &liveEnv{t: t, acc: acc, accPub: accPub, scoped: map[string]nkeys.KeyPair{}}
 	for _, tpl := range c.Templates {
 		sk, _ := nkeys.CreateAccount()
@@ -192,7 +192,7 @@ func TestLiveMatchesCheck(t *testing.T) {
 			env := newLiveEnv(t, c)
 			m, _ := validate(ls)
 			universe := universeNamed(m)
-			universe = append(universe, ls.Range+".probe-owner.probe-name", ls.Range+"."+m.senders[0].addr.owner+".probe-name")
+			universe = append(universe, ls.Owner+".probe-group.probe-instance", ls.Owner+"."+m.senders[0].addr.group+".probe-instance")
 
 			admin, err := env.connect(env.acc, "admin", nil, false)
 			if err != nil {
@@ -210,7 +210,7 @@ func TestLiveMatchesCheck(t *testing.T) {
 			for _, u := range c.Users {
 				a, _ := parseAddress(u.Sender)
 				// The user JWT carries only tags: the connection below is signed with no permissions of its own.
-				sc, err := env.connect(env.scoped[a.group()], u.Name, u.Tags, true)
+				sc, err := env.connect(env.scoped[a.groupKey()], u.Name, u.Tags, true)
 				if err != nil {
 					t.Fatalf("%s cannot connect with tags %v: %v", u.Sender, u.Tags, err)
 				}
@@ -225,7 +225,7 @@ func TestLiveMatchesCheck(t *testing.T) {
 							t.Errorf("%s publish %s to %s: server %v, Check simulates %v", u.Sender, v, addr, got, w)
 						} else if !slices.Contains(universeNamed(m), addr) && got {
 							// a probe is outside every list: only a shared owner line may reach it
-							if !m.shared(a.group(), v) || !strings.HasPrefix(addr, a.group()+".") {
+							if !m.shared(a.groupKey(), v) || !strings.HasPrefix(addr, a.groupKey()+".") {
 								t.Errorf("%s publish %s reaches probe %s", u.Sender, v, addr)
 							}
 						}

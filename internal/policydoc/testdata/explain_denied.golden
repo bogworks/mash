@@ -5,7 +5,7 @@ server nats-b: generation 7
 sender: foo.c.lead
 receiver: foo.c.core
 mail: denied (deny_tag) "foo.c.core" is on the deny list
-prompt: denied (no_entry) owner group "foo.c" keeps prompt closed and "foo.c.core" is on no list
+prompt: denied (no_entry) group "foo.c" keeps prompt closed and "foo.c.core" is on no list
 status: denied (deny_tag) "foo.c.core" is on the deny list
 heartbeat: denied (deny_tag) "foo.c.core" is on the deny list
 open publish: $JS.ACK.inbox-foo_c_lead.deliver.>, $JS.API.CONSUMER.INFO.inbox-foo_c_lead.deliver, $JS.API.CONSUMER.MSG.NEXT.inbox-foo_c_lead.deliver, $JS.API.DIRECT.GET.KV_mash-directory.>, $JS.API.DIRECT.GET.KV_mash-leases.$KV.mash-leases.foo_c_lead, $JS.API.DIRECT.GET.inbox-foo_c_lead, $JS.API.DIRECT.GET.inbox-foo_c_lead.>, $JS.API.INFO, $JS.API.STREAM.INFO.KV_mash-directory, $JS.API.STREAM.INFO.KV_mash-leases, $JS.API.STREAM.INFO.inbox-foo_c_lead, $KV.mash-leases.foo_c_lead, $SRV.>, _INBOX.foo.>, agents.policy.foo

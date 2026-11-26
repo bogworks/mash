@@ -34,7 +34,7 @@ func sw(group string, mail, prompt, status, hb listset.Switch) []listset.SwitchE
 // testSet: r.o.a reaches r.p.x by allow and is denied r.o.c; r.p.x reaches r.o.a and r.o.b.
 func testSet() listset.ListSet {
 	return listset.ListSet{
-		Range:    "r",
+		Owner:    "r",
 		Switches: append(sw("r.o", listset.Shared, listset.Closed, listset.Closed, listset.Shared), sw("r.p", listset.Closed, listset.Closed, listset.Closed, listset.Closed)...),
 		Senders: []listset.SenderLists{
 			{Sender: "r.o.a", Allow: []string{"r.p.x"}, Deny: []string{"r.o.c"}},
@@ -123,7 +123,7 @@ func newRig(t *testing.T) *rig {
 		r.users[c.id.User] = a
 	}
 	stop, err := Mount(r.nc, Options{
-		Range: "r", Store: r.store, Now: func() time.Time { return r.now },
+		Owner: "r", Store: r.store, Now: func() time.Time { return r.now },
 		ResolveAddress: func(_ context.Context, pub string) (string, bool, error) {
 			a, ok := r.users[pub]
 			return a, ok, nil
@@ -298,7 +298,7 @@ func TestExplainReceiver(t *testing.T) {
 		t.Error("an invalid receiver was answered")
 	}
 	if msg := errorOf(r.ask(t, "r.o.a", Request{Op: OpExplain, Receiver: "q.o.z"})); msg == "" {
-		t.Error("a receiver outside the range was answered")
+		t.Error("a receiver outside the owner was answered")
 	}
 }
 
@@ -368,9 +368,9 @@ func TestKeyWithNoAddressIsRefused(t *testing.T) {
 	if got := errorOf(r.do(t, r.signed(t, stranger, b))); !strings.Contains(got, "names no endpoint") {
 		t.Errorf("unknown key: %q", got)
 	}
-	// A key that maps to an address outside the range.
-	if got := errorOf(r.ask(t, "q.o.z", Request{Op: OpShow})); !strings.Contains(got, "not an endpoint under address prefix") {
-		t.Errorf("outside the range: %q", got)
+	// A key that maps to an address outside the owner.
+	if got := errorOf(r.ask(t, "q.o.z", Request{Op: OpShow})); !strings.Contains(got, "not an endpoint under owner") {
+		t.Errorf("outside the owner: %q", got)
 	}
 	// An address is never taken from the body.
 	b = []byte(`{"op":"show","sender":"r.o.a"}`)
@@ -412,9 +412,9 @@ func TestMountRefusesIncompleteOptions(t *testing.T) {
 	nc := e.Conn(t, e.AdminCreds)
 	res := func(context.Context, string) (string, bool, error) { return "", false, nil }
 	for name, o := range map[string]Options{
-		"no range":    {Store: &fakeStore{}, ResolveAddress: res},
-		"no store":    {Range: "r", ResolveAddress: res},
-		"no resolver": {Range: "r", Store: &fakeStore{}},
+		"no owner":    {Store: &fakeStore{}, ResolveAddress: res},
+		"no store":    {Owner: "r", ResolveAddress: res},
+		"no resolver": {Owner: "r", Store: &fakeStore{}},
 	} {
 		if _, err := Mount(nc, o); err == nil {
 			t.Errorf("%s: mounted", name)

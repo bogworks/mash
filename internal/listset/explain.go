@@ -20,7 +20,7 @@ type Reason string
 
 // The reasons, in order of precedence when more than one holds: deny (on a shared verb), allow, owner line, no entry.
 const (
-	// ReasonOwnerLine: the receiver is in the sender's owner group and the verb is shared there.
+	// ReasonOwnerLine: the receiver is in the sender's group and the verb is shared there.
 	ReasonOwnerLine Reason = "owner_line"
 	// ReasonAllowTag: the receiver is on the sender's allow list.
 	ReasonAllowTag Reason = "allow_tag"
@@ -41,8 +41,8 @@ type View struct {
 	Describes string `json:"describes"`
 	// Generation is the generation of the list set in force, as the caller read it from the generation record.
 	Generation uint64 `json:"generation"`
-	// Range is the account's range.
-	Range string `json:"range"`
+	// Owner is the account's owner.
+	Owner string `json:"owner"`
 	// Switches is every group and verb switch, sorted by group, then verb in Verbs order.
 	Switches []SwitchView `json:"switches"`
 	// Senders is one entry per sender, sorted by sender.
@@ -51,7 +51,7 @@ type View struct {
 	RawClientLimit string `json:"raw_client_limit"`
 }
 
-// SwitchView is one owner group's setting of one verb.
+// SwitchView is one group's setting of one verb.
 type SwitchView struct {
 	Group  string `json:"group"`
 	Verb   Verb   `json:"verb"`
@@ -125,7 +125,7 @@ func Show(ls ListSet, c *Compiled, generation uint64) (View, error) {
 	v := View{
 		Describes:      DescribesListSet,
 		Generation:     generation,
-		Range:          m.rng,
+		Owner:          m.owner,
 		Switches:       []SwitchView{},
 		Senders:        []SenderView{},
 		RawClientLimit: RawClientLimit,
@@ -174,7 +174,7 @@ func Show(ls ListSet, c *Compiled, generation uint64) (View, error) {
 // returns an error. Explain is pure.
 //
 // It returns an error for a ListSet that fails Validate, a sender the set does not list, and a receiver that is not
-// a valid three-part address in the set's range. The receiver need not be named in the set.
+// a valid three-part address in the set's owner. The receiver need not be named in the set.
 func Explain(ls ListSet, c *Compiled, sender, receiver string) (Explanation, error) {
 	m, err := validate(ls)
 	if err != nil {
@@ -201,8 +201,8 @@ func Explain(ls ListSet, c *Compiled, sender, receiver string) (Explanation, err
 	if reason != "" {
 		return Explanation{}, fmt.Errorf("receiver %q: %s", receiver, reason)
 	}
-	if ra.rng != m.rng {
-		return Explanation{}, fmt.Errorf("receiver %q: address prefix %q is not the list set's address prefix %q", receiver, ra.rng, m.rng)
+	if ra.owner != m.owner {
+		return Explanation{}, fmt.Errorf("receiver %q: owner %q is not the list set's owner %q", receiver, ra.owner, m.owner)
 	}
 	who, to := sa.String(), ra.String()
 	reach, err := reachOver(c, who, []string{to})
@@ -221,8 +221,8 @@ func Explain(ls ListSet, c *Compiled, sender, receiver string) (Explanation, err
 		OpenSubjects:   open,
 		RawClientLimit: RawClientLimit,
 	}
-	group := sa.group()
-	inGroup := ra.group() == group
+	group := sa.groupKey()
+	inGroup := ra.groupKey() == group
 	for _, verb := range Verbs {
 		var ve VerbExplanation
 		switch {
@@ -231,11 +231,11 @@ func Explain(ls ListSet, c *Compiled, sender, receiver string) (Explanation, err
 		case slices.Contains(s.allow, ra):
 			ve = VerbExplanation{verb, true, ReasonAllowTag, fmt.Sprintf("%q is on the allow list", to)}
 		case inGroup && m.shared(group, verb):
-			ve = VerbExplanation{verb, true, ReasonOwnerLine, fmt.Sprintf("owner group %q shares %s", group, verb)}
+			ve = VerbExplanation{verb, true, ReasonOwnerLine, fmt.Sprintf("group %q shares %s", group, verb)}
 		case inGroup:
-			ve = VerbExplanation{verb, false, ReasonNoEntry, fmt.Sprintf("owner group %q keeps %s closed and %q is on no list", group, verb, to)}
+			ve = VerbExplanation{verb, false, ReasonNoEntry, fmt.Sprintf("group %q keeps %s closed and %q is on no list", group, verb, to)}
 		default:
-			ve = VerbExplanation{verb, false, ReasonNoEntry, fmt.Sprintf("%q is outside owner group %q and on no list", to, group)}
+			ve = VerbExplanation{verb, false, ReasonNoEntry, fmt.Sprintf("%q is outside group %q and on no list", to, group)}
 		}
 		if got := slices.Contains(reach[verb], to); got != ve.Allowed {
 			return Explanation{}, fmt.Errorf("compiled credential of %s does not match the lists: %s to %s is %s by the lists (%s) but %s by the credential",

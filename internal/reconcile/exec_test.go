@@ -234,7 +234,7 @@ func TestExecuteRevokesPushesCommitsAndMarks(t *testing.T) {
 	if rec, _ := f.ledger.InForce(); rec != f.rec {
 		t.Errorf("the record in force changed: %+v", rec)
 	}
-	if ls, ok, _ := f.ledger.InForceListSet(); !ok || ls.Range != "foo" {
+	if ls, ok, _ := f.ledger.InForceListSet(); !ok || ls.Owner != "foo" {
 		t.Errorf("the list set in force changed: %v %v", ls, ok)
 	}
 	// only the recorded key has a record to mark

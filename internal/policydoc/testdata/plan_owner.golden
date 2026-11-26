@@ -1,0 +1,4 @@
+refused: nothing would change
+  [owner] owner: the document's `owner` field is bar and the selected owner is foo
+  [validate] sender "foo.c.core": owner "foo" is not the account's owner "bar"
+  [validate] sender "foo.c.lead": owner "foo" is not the account's owner "bar"

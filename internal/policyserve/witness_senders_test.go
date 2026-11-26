@@ -15,7 +15,7 @@ func witnessSet(t *testing.T, senders ...listset.SenderLists) *listset.Compiled 
 	for _, v := range []listset.Verb{listset.Mail, listset.Prompt, listset.Status, listset.Heartbeat} {
 		sw = append(sw, listset.SwitchEntry{Group: "foo.c", Verb: v, Switch: listset.Closed})
 	}
-	c, err := listset.Compile(listset.ListSet{Range: "foo", Switches: sw, Senders: senders})
+	c, err := listset.Compile(listset.ListSet{Owner: "foo", Switches: sw, Senders: senders})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +33,7 @@ func witnessSetWith(t *testing.T, shared []listset.Verb, senders ...listset.Send
 		}
 		sw = append(sw, listset.SwitchEntry{Group: "foo.c", Verb: v, Switch: sw_})
 	}
-	c, err := listset.Compile(listset.ListSet{Range: "foo", Switches: sw, Senders: senders})
+	c, err := listset.Compile(listset.ListSet{Owner: "foo", Switches: sw, Senders: senders})
 	if err != nil {
 		t.Fatal(err)
 	}

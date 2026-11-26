@@ -43,7 +43,7 @@ type at010Env struct {
 	sysPub  string
 	opts    []*jwt.OperatorClaims
 	sysJWT  string
-	scoped  map[string]nkeys.KeyPair // owner group -> scoped signing key
+	scoped  map[string]nkeys.KeyPair // group -> scoped signing key
 	dirs    map[string]string
 	srvs    map[string]*server.Server
 	urls    map[string]string
@@ -169,7 +169,7 @@ func (e *at010Env) SignUser(group string, uc *jwt.UserClaims) (string, error) {
 	return uc.Encode(kp)
 }
 
-// account builds the account JWT of a compiled generation: a scoped signing key per owner group, role = group, and the
+// account builds the account JWT of a compiled generation: a scoped signing key per group, role = group, and the
 // revocations.
 func (e *at010Env) account(c *listset.Compiled, revoked ...string) string {
 	ac := jwt.NewAccountClaims(e.acctPub)
@@ -371,7 +371,7 @@ func credsOf(c *listset.Compiled) []ProbeCred {
 	return out
 }
 
-// signers returns the expected scoped signing key of each template's owner group.
+// signers returns the expected scoped signing key of each template's group.
 func (e *at010Env) signers(c *listset.Compiled) map[string]string {
 	out := map[string]string{}
 	for _, tpl := range c.Templates {

@@ -59,8 +59,8 @@ type ApplyDeps struct {
 	// generations unless the signer set does, also PreviousSigners. A caller whose signer set changed with this
 	// generation must call Run itself.
 	Signers map[string]string
-	// KeptSigners are the scoped signing keys of other ranges (group -> public key) that the account JWT keeps
-	// beside Signers (RunInput.KeptSigners). Without them a multi-range account is never read as the target.
+	// KeptSigners are the scoped signing keys of other owners (group -> public key) that the account JWT keeps
+	// beside Signers (RunInput.KeptSigners). Without them a multi-owner account is never read as the target.
 	KeptSigners map[string]string
 	// PlainSigners are mash's own plain signing keys that stay in the account JWT (RunInput.PlainSigners).
 	PlainSigners []string

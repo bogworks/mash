@@ -4,7 +4,7 @@ latest attempt: generation 8, refused
 server nats-a: generation 7
 server nats-b: generation 7
 generation: 7
-range: foo
+owner: foo
 
 switches:
   foo.c mail shared

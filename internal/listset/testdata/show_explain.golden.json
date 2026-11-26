@@ -2,7 +2,7 @@
   "show": {
     "describes": "list_set",
     "generation": 4,
-    "range": "r",
+    "owner": "r",
     "switches": [
       {
         "group": "r.o",
@@ -296,25 +296,25 @@
           "verb": "mail",
           "allowed": true,
           "reason": "owner_line",
-          "detail": "owner group \"r.o\" shares mail"
+          "detail": "group \"r.o\" shares mail"
         },
         {
           "verb": "prompt",
           "allowed": false,
           "reason": "no_entry",
-          "detail": "owner group \"r.o\" keeps prompt closed and \"r.o.a\" is on no list"
+          "detail": "group \"r.o\" keeps prompt closed and \"r.o.a\" is on no list"
         },
         {
           "verb": "status",
           "allowed": false,
           "reason": "no_entry",
-          "detail": "owner group \"r.o\" keeps status closed and \"r.o.a\" is on no list"
+          "detail": "group \"r.o\" keeps status closed and \"r.o.a\" is on no list"
         },
         {
           "verb": "heartbeat",
           "allowed": true,
           "reason": "owner_line",
-          "detail": "owner group \"r.o\" shares heartbeat"
+          "detail": "group \"r.o\" shares heartbeat"
         }
       ],
       "open_subjects": {
@@ -357,13 +357,13 @@
           "verb": "prompt",
           "allowed": false,
           "reason": "no_entry",
-          "detail": "owner group \"r.o\" keeps prompt closed and \"r.o.c\" is on no list"
+          "detail": "group \"r.o\" keeps prompt closed and \"r.o.c\" is on no list"
         },
         {
           "verb": "status",
           "allowed": false,
           "reason": "no_entry",
-          "detail": "owner group \"r.o\" keeps status closed and \"r.o.c\" is on no list"
+          "detail": "group \"r.o\" keeps status closed and \"r.o.c\" is on no list"
         },
         {
           "verb": "heartbeat",
@@ -461,25 +461,25 @@
           "verb": "mail",
           "allowed": false,
           "reason": "no_entry",
-          "detail": "\"r.q.z\" is outside owner group \"r.o\" and on no list"
+          "detail": "\"r.q.z\" is outside group \"r.o\" and on no list"
         },
         {
           "verb": "prompt",
           "allowed": false,
           "reason": "no_entry",
-          "detail": "\"r.q.z\" is outside owner group \"r.o\" and on no list"
+          "detail": "\"r.q.z\" is outside group \"r.o\" and on no list"
         },
         {
           "verb": "status",
           "allowed": false,
           "reason": "no_entry",
-          "detail": "\"r.q.z\" is outside owner group \"r.o\" and on no list"
+          "detail": "\"r.q.z\" is outside group \"r.o\" and on no list"
         },
         {
           "verb": "heartbeat",
           "allowed": false,
           "reason": "no_entry",
-          "detail": "\"r.q.z\" is outside owner group \"r.o\" and on no list"
+          "detail": "\"r.q.z\" is outside group \"r.o\" and on no list"
         }
       ],
       "open_subjects": {

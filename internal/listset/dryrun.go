@@ -44,7 +44,7 @@ type Plan struct {
 	// comparison is of effective reach, the addresses each credential would reach once its tags are expanded through
 	// its template (Check's simulation), over the addresses either set names. A pair with no difference is absent.
 	Receivers []ReceiverChange `json:"receivers"`
-	// Templates is the owner-group templates added, removed or changed, sorted by group.
+	// Templates is the group templates added, removed or changed, sorted by group.
 	Templates []TemplateChange `json:"templates"`
 	// Tags is the senders of the new set whose tags are new or differ, sorted by sender. A sender that leaves has no
 	// entry.
@@ -76,7 +76,7 @@ type ReceiverChange struct {
 	Removed []string `json:"removed"`
 }
 
-// TemplateChange is one owner group's template that is added, removed or changed.
+// TemplateChange is one group's template that is added, removed or changed.
 //
 // Applying a changed template on a scoped key disconnects every open connection under that key (AT-011, ADR 0097);
 // the clients reconnect and are bound by the new template, with no re-issue needed. Disconnects is true for a changed
@@ -276,7 +276,7 @@ func (p *Plan) diff(oldM *model, oldC *Compiled, newM *model, newC *Compiled) er
 			for _, s := range sortedKeys(senders) {
 				_, wasIn := oldUsers[s]
 				_, stays := newUsers[s]
-				if a, _ := parseAddress(s); wasIn && stays && a.group() == g {
+				if a, _ := parseAddress(s); wasIn && stays && a.groupKey() == g {
 					tc.DisconnectedSenders = append(tc.DisconnectedSenders, s)
 				}
 			}

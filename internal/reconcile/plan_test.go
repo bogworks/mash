@@ -29,7 +29,7 @@ func switches(group string, mail, prompt, status, hb listset.Switch) []listset.S
 // testSet is a list set with one group, foo.c, and the senders foo.c.core and foo.c.docs.
 func testSet() listset.ListSet {
 	return listset.ListSet{
-		Range:    "foo",
+		Owner:    "foo",
 		Switches: switches("foo.c", listset.Shared, listset.Closed, listset.Closed, listset.Closed),
 		Senders:  []listset.SenderLists{{Sender: "foo.c.core"}, {Sender: "foo.c.docs"}},
 	}

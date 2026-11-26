@@ -49,7 +49,7 @@ func TestKeptSignersAreOtherRangesGroupsInTheJWT(t *testing.T) {
 		t.Errorf("got %v, want %v", got, want)
 	}
 	c, err := listset.Compile(listset.ListSet{
-		Range: "foo",
+		Owner: "foo",
 		Switches: []listset.SwitchEntry{{Group: "foo.c", Verb: listset.Mail, Switch: listset.Closed}, {Group: "foo.c", Verb: listset.Prompt, Switch: listset.Closed},
 			{Group: "foo.c", Verb: listset.Status, Switch: listset.Closed}, {Group: "foo.c", Verb: listset.Heartbeat, Switch: listset.Closed}},
 		Senders: []listset.SenderLists{{Sender: "foo.c.x"}},
@@ -101,7 +101,7 @@ func TestSignKeepsTheConfiguredAccountSigningKey(t *testing.T) {
 			Now: func() time.Time { return now }}
 	}
 	c, err := listset.Compile(listset.ListSet{
-		Range: "foo",
+		Owner: "foo",
 		Switches: []listset.SwitchEntry{{Group: "foo.c", Verb: listset.Mail, Switch: listset.Closed}, {Group: "foo.c", Verb: listset.Prompt, Switch: listset.Closed},
 			{Group: "foo.c", Verb: listset.Status, Switch: listset.Closed}, {Group: "foo.c", Verb: listset.Heartbeat, Switch: listset.Closed}},
 		Senders: []listset.SenderLists{{Sender: "foo.c.x"}},
