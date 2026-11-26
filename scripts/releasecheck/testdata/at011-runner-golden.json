@@ -1,0 +1,97 @@
+{
+  "kind": "at-011",
+  "commit": "abababababababababababababababababababab",
+  "environment": "golden: a throwaway container created for the run and destroyed after it",
+  "result": "passed",
+  "executables": [
+    {
+      "name": "mash",
+      "goos": "linux",
+      "goarch": "amd64",
+      "sha256": "01e3a8a93832704f4e7668d5184a9ec736f0381d522d7c89338dacead76482c0",
+      "build": {
+        "toolchain": "go1.27.4",
+        "tags": [],
+        "flags": [
+          "-trimpath",
+          "-buildvcs=false",
+          "-mod=readonly",
+          "-ldflags",
+          "-X github.com/bogworks/mash/internal/endpoint.Version=0.6.0 -X main.commit=abababababababababababababababababababab"
+        ]
+      }
+    },
+    {
+      "name": "mashctl",
+      "goos": "linux",
+      "goarch": "amd64",
+      "sha256": "5022e1a6ffad2ea289c92528db29be29a7f9d57bb632110c7e61584ea06a8c1d",
+      "build": {
+        "toolchain": "go1.27.4",
+        "tags": [],
+        "flags": [
+          "-trimpath",
+          "-buildvcs=false",
+          "-mod=readonly",
+          "-ldflags",
+          "-X github.com/bogworks/mash/internal/endpoint.Version=0.6.0 -X main.commit=abababababababababababababababababababab"
+        ]
+      }
+    }
+  ],
+  "install_sh_sha256": "043df5bdbf6639d7a77e1d44c5226fd7371e5259a1e4df3a0dd5d64c30dca44f",
+  "sha256sums_sha256": "e6351d3766186d2b4d187ee3c1613bf7516a35fd9b3207d9bf72fc7c2576e076",
+  "previous_version": "0.5.10",
+  "previous_artifacts": [
+    {
+      "name": "mash",
+      "goos": "darwin",
+      "goarch": "amd64",
+      "sha256": "8b82c2aa1b7cc9a5c0aad7812f404e9a9cc7da547163d819c9eefedabed1803a"
+    },
+    {
+      "name": "mash",
+      "goos": "darwin",
+      "goarch": "arm64",
+      "sha256": "139b48afbbc7a2c3c8f7eccea75119577e349d9254623a7ae067c9461d6907a6"
+    },
+    {
+      "name": "mash",
+      "goos": "linux",
+      "goarch": "amd64",
+      "sha256": "0d08932da94259b9c26da6524bd4ae58b0be5d10372f9d9e5e051e1c4ed8a2e0"
+    },
+    {
+      "name": "mash",
+      "goos": "linux",
+      "goarch": "arm64",
+      "sha256": "861768b825f8eca891e610fed6ff0976bdd4ecfb779d0056ce7b99c3c9ce1c6b"
+    },
+    {
+      "name": "mashctl",
+      "goos": "darwin",
+      "goarch": "amd64",
+      "sha256": "074ab8a92707133d0407f013ecaf79517edab64db861d85ac46416571c2be994"
+    },
+    {
+      "name": "mashctl",
+      "goos": "darwin",
+      "goarch": "arm64",
+      "sha256": "cbe690830df13bd16cbc5666698a50965d93a2a1e776526d57a6b438aa1bb5b2"
+    },
+    {
+      "name": "mashctl",
+      "goos": "linux",
+      "goarch": "amd64",
+      "sha256": "51f14f269f5e51c2bf23e7a2baa44e3a8b7f8974642ae69aec2cbe06c8bbc0ca"
+    },
+    {
+      "name": "mashctl",
+      "goos": "linux",
+      "goarch": "arm64",
+      "sha256": "be66e9d75fd610338dc61da60992224e342cd4a81893b7a8350fa013d4d687c6"
+    }
+  ],
+  "upgrade_page_blob": "0123456789abcdef0123456789abcdef01234567",
+  "exit_status": 0
+}
