@@ -31,7 +31,7 @@ grep ' install.sh$' SHA256SUMS | sha256sum -c - &&  # macOS: shasum -a 256 -c -
 bash install.sh
 ```
 
-It finds the machine's type (Linux or macOS, amd64 or arm64), downloads `mash` and `mashctl` from the same release together with that release's `SHA256SUMS`, checks each binary against it, and puts both in `~/.local/bin` (`MASH_INSTALL_DIR` names another folder; `MASH_VERSION=v0.5.9` pins a release, and without it the script first looks up the latest release's tag and downloads from that tag; `MASH_REPO=owner/name` names another repository, default `bogworks/mash`, for the download, the tag lookup and the attestation check; `MASH_API_BASE` names where the tag's commit is looked up when gh cannot, default `https://api.github.com`; a `MASH_RELEASE_BASE` mirror needs `MASH_VERSION`). It prints one line for each, with the path it used, for example `Installed mash v0.5.9 (<commit>) in ~/.local/bin`, asks nothing and needs no `sudo`. If the folder is not on your `PATH` it says so in one line. A symbolic link to the folder is followed. It refuses a folder that belongs to another user, or that, or any folder above it, other users can write to (a root-owned sticky folder such as `/tmp` above it is fine), and on any failed check nothing is installed; both binaries are staged before either is put in place. Ctrl-C, a closed terminal or a `kill` (SIGINT, SIGTERM, SIGHUP) while it swaps them in leaves both old or both new, never one of each; another signal, such as `kill -9` or SIGQUIT, can still split them in a very small window.
+It finds the machine's type (Linux or macOS, amd64 or arm64), downloads `mash` and `mashctl` from the same release together with that release's `SHA256SUMS`, checks each binary against it, and puts both in `~/.local/bin` (`MASH_INSTALL_DIR` names another folder; `MASH_VERSION=v0.5.10` pins a release, and without it the script first looks up the latest release's tag and downloads from that tag; `MASH_REPO=owner/name` names another repository, default `bogworks/mash`, for the download, the tag lookup and the attestation check; `MASH_API_BASE` names where the tag's commit is looked up when gh cannot, default `https://api.github.com`; a `MASH_RELEASE_BASE` mirror needs `MASH_VERSION`). It prints one line for each, with the path it used, for example `Installed mash v0.5.10 (<commit>) in ~/.local/bin`, asks nothing and needs no `sudo`. If the folder is not on your `PATH` it says so in one line. A symbolic link to the folder is followed. It refuses a folder that belongs to another user, or that, or any folder above it, other users can write to (a root-owned sticky folder such as `/tmp` above it is fine), and on any failed check nothing is installed; both binaries are staged before either is put in place. Ctrl-C, a closed terminal or a `kill` (SIGINT, SIGTERM, SIGHUP) while it swaps them in leaves both old or both new, never one of each; another signal, such as `kill -9` or SIGQUIT, can still split them in a very small window.
 
 If you want a NATS server on this machine, `mash-local-nats-setup.sh` is the other script of the release; [by hand, step 3](guide/by-hand.md#3-make-a-server) uses it.
 
@@ -48,11 +48,11 @@ What `install.sh` does on its own:
 To check the script and the attestation yourself, with a current `gh`:
 
 ```sh
-BASE=https://github.com/bogworks/mash/releases/download/v0.5.9   # use the tag of the release you want, on every line; for another repository (MASH_REPO) change bogworks/mash on every line too
+BASE=https://github.com/bogworks/mash/releases/download/v0.5.10   # use the tag of the release you want, on every line; for another repository (MASH_REPO) change bogworks/mash on every line too
 curl -fsSLO $BASE/install.sh -O $BASE/SHA256SUMS -O $BASE/mash.intoto.jsonl &&
-COMMIT=$(curl -fsSL -H 'Accept: application/vnd.github.sha' https://api.github.com/repos/bogworks/mash/commits/v0.5.9) &&
+COMMIT=$(curl -fsSL -H 'Accept: application/vnd.github.sha' https://api.github.com/repos/bogworks/mash/commits/v0.5.10) &&
 gh attestation verify SHA256SUMS -R bogworks/mash --bundle mash.intoto.jsonl \
-  --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/v0.5.9 --source-digest "$COMMIT" &&
+  --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/v0.5.10 --source-digest "$COMMIT" &&
 grep ' install.sh$' SHA256SUMS | sha256sum -c - &&           # macOS: shasum -a 256 -c -
 less install.sh && bash install.sh
 ```
@@ -62,7 +62,7 @@ When the attestation check passes, `gh attestation verify` can print nothing and
 To check a binary's SBOM (a CycloneDX list of what it was built from), which the release workflow also attests, verify it against the same workflow and tag. The binary here is `mash` for Linux on amd64; use the file for your platform:
 
 ```sh
-TAG=v0.5.9   # the tag of the release you want
+TAG=v0.5.10   # the tag of the release you want
 curl -fsSLO https://github.com/bogworks/mash/releases/download/$TAG/mash-linux-amd64 &&
 gh attestation verify mash-linux-amd64 -R bogworks/mash --predicate-type https://cyclonedx.org/bom \
   --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/$TAG
@@ -74,7 +74,7 @@ If `gh` is missing or older than 2.102.0, skip the `gh attestation verify` lines
 
 An agent does not pipe a download into a shell: the setup skill downloads each script, checks it against `SHA256SUMS`, shows you what it is about to run and runs it after a yes. Both scripts are also the repository's own `scripts/` files at the release commit, byte for byte; the release check compares them ([ADR 0150](decisions/0150-releases-carry-install-and-local-nats-setup-scripts-as-attested-assets.md)).
 
-To build from source instead, `go install github.com/bogworks/mash/cmd/mash@v0.5.9` and `go install github.com/bogworks/mash/cmd/mashctl@v0.5.9` need Go 1.27.4 or newer; the result is not the attested build. Use the tag of the release you want, not `@latest`.
+To build from source instead, `go install github.com/bogworks/mash/cmd/mash@v0.5.10` and `go install github.com/bogworks/mash/cmd/mashctl@v0.5.10` need Go 1.27.4 or newer; the result is not the attested build. Use the tag of the release you want, not `@latest`.
 
 ## 2. The plugin
 
