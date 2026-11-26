@@ -35,10 +35,10 @@ Chosen: `.github/workflows/scorecard.yml` is the one workflow whose job runs on 
 [ADR 0079](0079-ci-and-release-jobs-run-on-self-hosted-runners-only.md) for that workflow only; it supersedes nothing.
 The workflow:
 
-* triggers only on `schedule` (weekly) and `push` to `main`; never on `pull_request`, `pull_request_target` or
+* triggers only on `schedule` (weekly) and `push` with `branches: [main]` and nothing else; never on `pull_request`, `pull_request_target` or
   `workflow_dispatch`;
-* has one job, `analysis`, on `runs-on: ubuntu-latest`, with `if: github.repository == 'bogworks/mash'`, so a fork
-  skips it;
+* has one job, `analysis`, on `runs-on: ubuntu-latest`, with `if: ${{ !github.event.repository.fork }}`, so a
+  fork skips it;
 * sets `permissions: read-all` at the top and, on the job, `security-events: write`, `id-token: write`,
   `contents: read` and `actions: read`, as the action's documentation asks for `publish_results`;
 * pins `actions/checkout`, `ossf/scorecard-action` and `github/codeql-action/upload-sarif` by full commit sha with a
@@ -46,7 +46,7 @@ The workflow:
 
 What stays true from ADR 0079: no other job moves; there is no `||` fallback to a hosted label; forks skip; and the
 guard allows a GitHub-hosted label only in the file named exactly `scorecard.yml`, only `ubuntu-latest`, only for the
-job `analysis`, and only while the file's triggers are `schedule` and `push`. The same text under another file name, a
+job `analysis`, and only while the file's triggers are `schedule` and `push` to `main` and the job keeps the fork exclusion. The same text under another file name, a
 pull-request trigger, another job name, another label or a fallback fails the guard.
 
 ### Consequences

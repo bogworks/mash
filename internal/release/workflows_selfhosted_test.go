@@ -26,7 +26,17 @@ const (
 	scorecardFile   = "scorecard.yml"
 	scorecardJob    = "analysis"
 	scorecardRunsOn = "ubuntu-latest"
+	scorecardIf     = "!github.event.repository.fork"
 )
+
+// scorecardIfExpr strips an optional ${{ }} wrapper and surrounding space from a job-level if.
+func scorecardIfExpr(s string) string {
+	s = strings.TrimSpace(s)
+	if strings.HasPrefix(s, "${{") && strings.HasSuffix(s, "}}") {
+		s = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(s, "${{"), "}}"))
+	}
+	return s
+}
 
 // linuxLabels, macosLabels, gateLabels and ephLabels are fmt.Sprint forms of the only allowed runs-on lists. rh-gate is carried only
 // by small dedicated runners with no rh-linux label, for the gate jobs (TestGateJobsUseGateRunners). rh-linux-eph (ADR 0123) is carried
@@ -80,7 +90,8 @@ func scorecardProblems(text string) []string {
 	var w struct {
 		On   any `yaml:"on"`
 		Jobs map[string]struct {
-			RunsOn any `yaml:"runs-on"`
+			If     string `yaml:"if"`
+			RunsOn any    `yaml:"runs-on"`
 		} `yaml:"jobs"`
 	}
 	if err := yaml.Unmarshal([]byte(text), &w); err != nil {
@@ -99,6 +110,14 @@ func scorecardProblems(text string) []string {
 	if ok && (triggers["schedule"] == nil || triggers["push"] == nil) {
 		out = append(out, "want both the schedule and push triggers")
 	}
+	if ok && triggers["push"] != nil {
+		// the push trigger selects only main: branches is exactly [main] and it has no other key
+		p, _ := triggers["push"].(map[string]any)
+		b, _ := p["branches"].([]any)
+		if len(p) != 1 || len(b) != 1 || b[0] != "main" {
+			out = append(out, "the push trigger must be exactly branches: [main] and nothing else")
+		}
+	}
 	if len(w.Jobs) != 1 {
 		out = append(out, fmt.Sprintf("want exactly the one job %s, have %d jobs", scorecardJob, len(w.Jobs)))
 	}
@@ -106,6 +125,9 @@ func scorecardProblems(text string) []string {
 		out = append(out, fmt.Sprintf("has no job %s", scorecardJob))
 	} else if r, _ := j.RunsOn.(string); r != scorecardRunsOn {
 		out = append(out, fmt.Sprintf("job %s runs-on %v is not %s", scorecardJob, j.RunsOn, scorecardRunsOn))
+	}
+	if j := w.Jobs[scorecardJob]; scorecardIfExpr(j.If) != scorecardIf {
+		out = append(out, fmt.Sprintf("job %s if %q is not the fork exclusion ${{ %s }}", scorecardJob, j.If, scorecardIf))
 	}
 	return out
 }
@@ -318,7 +340,7 @@ on:
 permissions: read-all
 jobs:
   analysis:
-    if: github.repository == 'bogworks/mash'
+    if: ${{ !github.event.repository.fork }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@0123456789012345678901234567890123456789 # v7.0.1
@@ -347,6 +369,14 @@ jobs:
 		"a self-hosted list":                     {"scorecard.yml", swap("ubuntu-latest", "[self-hosted, rh-linux]"), "is not"},
 		"a hosted label in a step":               {"scorecard.yml", good + "      - run: echo ubuntu-latest\n", "ubuntu-latest"},
 		"a host name":                            {"scorecard.yml", good + "      - run: ssh bf1\n", "bf1"},
+		"push with no branches":                  {"scorecard.yml", swap("    branches: [main]\n", ""), "push trigger"},
+		"push with branches main and dev":        {"scorecard.yml", swap("[main]", "[main, dev]"), "push trigger"},
+		"push with branches-ignore":              {"scorecard.yml", swap("    branches: [main]\n", "    branches-ignore: [dev]\n"), "push trigger"},
+		"push with tags":                         {"scorecard.yml", swap("    branches: [main]\n", "    branches: [main]\n    tags: ['v*']\n"), "push trigger"},
+		"push with branches dev":                 {"scorecard.yml", swap("[main]", "[dev]"), "push trigger"},
+		"a missing if":                           {"scorecard.yml", swap("    if: ${{ !github.event.repository.fork }}\n", ""), "fork exclusion"},
+		"an if that is true":                     {"scorecard.yml", swap("${{ !github.event.repository.fork }}", "true"), "fork exclusion"},
+		"an if comparing the repository name":    {"scorecard.yml", swap("${{ !github.event.repository.fork }}", "github.repository == 'bogworks/mash'"), "fork exclusion"},
 	} {
 		v := selfHostedViolations(c.file, c.text)
 		if len(v) == 0 || !strings.Contains(strings.Join(v, "\n"), c.want) {

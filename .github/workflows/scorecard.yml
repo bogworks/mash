@@ -10,7 +10,7 @@ on:
 permissions: read-all
 jobs:
   analysis:
-    if: github.repository == 'bogworks/mash'
+    if: ${{ !github.event.repository.fork }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
