@@ -7,8 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nats-io/nkeys"
-
 	"github.com/bogworks/mash/internal/listset"
 )
 
@@ -36,34 +34,13 @@ func doc(gen, base int, mod func(m map[string]any)) []byte {
 	return b
 }
 
-func sign(t *testing.T, kp nkeys.KeyPair, payload []byte) []byte {
-	t.Helper()
-	enc := base64.RawURLEncoding
-	in := enc.EncodeToString([]byte(`{"alg":"EdDSA","typ":"JWT"}`)) + "." + enc.EncodeToString(payload)
-	sig, err := kp.Sign([]byte(in))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return []byte(in + "." + enc.EncodeToString(sig))
-}
-
-func submitter(t *testing.T) (nkeys.KeyPair, string) {
-	t.Helper()
-	kp, err := nkeys.CreateAccount()
-	if err != nil {
-		t.Fatal(err)
-	}
-	pub, _ := kp.PublicKey()
-	return kp, pub
-}
-
 func TestDecodeRaw(t *testing.T) {
 	raw := doc(7, 6, nil)
 	d, err := Decode(raw, DecodeOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if d.Verified || d.Generation != 7 || d.BaseGeneration != 6 || d.ListSet.Base != 6 || d.ListSet.Owner != "foo" || string(d.Raw) != string(raw) {
+	if d.Generation != 7 || d.BaseGeneration != 6 || d.ListSet.Base != 6 || d.ListSet.Owner != "foo" || string(d.Raw) != string(raw) {
 		t.Fatalf("%+v", d)
 	}
 	if len(d.ListSet.Switches) != 4 || d.ListSet.Switches[0] != (listset.SwitchEntry{Group: "foo.c", Verb: listset.Mail, Switch: listset.Shared}) {
@@ -72,42 +49,22 @@ func TestDecodeRaw(t *testing.T) {
 	if len(d.ListSet.Senders) != 2 || d.ListSet.Senders[0].Sender != "foo.c.core" || d.ListSet.Senders[1].Deny[0] != "foo.c.core" {
 		t.Fatalf("senders %+v", d.ListSet.Senders)
 	}
-	if _, err := Decode(raw, DecodeOptions{Submitter: "x"}); !errors.Is(err, ErrUnsigned) {
-		t.Fatalf("raw with a submitter: %v", err)
+}
+
+// A compact JWS (the withdrawn signed form) is refused like any non-JSON input.
+func TestDecodeRefusesJWS(t *testing.T) {
+	enc := base64.RawURLEncoding
+	tok := enc.EncodeToString([]byte(`{"alg":"EdDSA","typ":"JWT"}`)) + "." + enc.EncodeToString(doc(7, 6, nil)) + "." + enc.EncodeToString([]byte("sig"))
+	if _, err := Decode([]byte(tok), DecodeOptions{}); !errors.Is(err, ErrBadDocument) {
+		t.Fatalf("JWS-shaped input: %v", err)
 	}
 }
 
-func TestDecodeJWS(t *testing.T) {
-	kp, pub := submitter(t)
-	tok := sign(t, kp, doc(7, 6, nil))
-	d, err := Decode(tok, DecodeOptions{Submitter: pub})
-	if err != nil || !d.Verified || string(d.Raw) != string(tok) {
-		t.Fatalf("verified decode: %+v, %v", d, err)
-	}
-	d, err = Decode(append(tok, '\n'), DecodeOptions{})
-	if err != nil || d.Verified {
-		t.Fatalf("unchecked decode: %+v, %v", d, err)
-	}
-	_, other := submitter(t)
-	if _, err := Decode(tok, DecodeOptions{Submitter: other}); !errors.Is(err, ErrBadSignature) {
-		t.Fatalf("other key: %v", err)
-	}
-	// A payload changed after signing.
-	parts := strings.Split(string(tok), ".")
-	parts[1] = base64.RawURLEncoding.EncodeToString(doc(8, 7, nil))
-	forged := []byte(strings.Join(parts, "."))
-	if _, err := Decode(forged, DecodeOptions{Submitter: pub}); !errors.Is(err, ErrBadSignature) {
-		t.Fatalf("forged payload: %v", err)
-	}
-	if d, err := Decode(forged, DecodeOptions{}); err != nil || d.Verified {
-		t.Fatalf("forged payload without a submitter must decode unverified: %+v, %v", d, err)
-	}
-	if _, err := Decode(tok, DecodeOptions{Submitter: "not a key"}); err == nil {
-		t.Fatal("a bad submitter key was accepted")
-	}
-	none := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none"}`)) + "." + parts[1] + "."
-	if _, err := Decode([]byte(none), DecodeOptions{}); !errors.Is(err, ErrBadDocument) {
-		t.Fatalf("alg none: %v", err)
+// next_submitter (the withdrawn rotation field) is an unknown field.
+func TestDecodeRefusesNextSubmitter(t *testing.T) {
+	_, err := Decode(doc(7, 6, func(m map[string]any) { m["next_submitter"] = "UABC" }), DecodeOptions{})
+	if !errors.Is(err, ErrBadDocument) || !strings.Contains(err.Error(), "next_submitter") {
+		t.Fatalf("next_submitter: %v", err)
 	}
 }
 
@@ -152,42 +109,5 @@ func TestDecodeGroupKeyedByAddress(t *testing.T) {
 			!strings.Contains(err.Error(), "group part") || strings.Contains(err.Error(), "lab.lab") {
 			t.Errorf("%s: got %v", name, err)
 		}
-	}
-}
-
-func TestNextSubmitter(t *testing.T) {
-	d, err := Decode(doc(7, 6, nil), DecodeOptions{})
-	if err != nil || d.NextSubmitter != "" {
-		t.Fatalf("absent: %+v, %v", d, err)
-	}
-	_, next := submitter(t)
-	d, err = Decode(doc(7, 6, func(m map[string]any) { m["next_submitter"] = next }), DecodeOptions{})
-	if err != nil || d.NextSubmitter != next {
-		t.Fatalf("valid key: %+v, %v", d, err)
-	}
-	for name, v := range map[string]any{"invalid": "not a key", "empty": "", "number": 5, "null-ish prefix": "ACXTEST"} {
-		if _, err := Decode(doc(7, 6, func(m map[string]any) { m["next_submitter"] = v }), DecodeOptions{}); !errors.Is(err, ErrBadDocument) {
-			t.Errorf("%s: got %v", name, err)
-		}
-	}
-	if _, err := Decode(doc(7, 6, func(m map[string]any) { m["next_submitter"] = next; m["other"] = 1 }), DecodeOptions{}); !errors.Is(err, ErrBadDocument) {
-		t.Errorf("other unknown field beside next_submitter: %v", err)
-	}
-}
-
-func TestNextSubmitterSigned(t *testing.T) {
-	kp, pub := submitter(t)
-	_, next := submitter(t)
-	tok := sign(t, kp, doc(7, 6, func(m map[string]any) { m["next_submitter"] = next }))
-	d, err := Decode(tok, DecodeOptions{Submitter: pub})
-	if err != nil || !d.Verified || d.NextSubmitter != next {
-		t.Fatalf("signed: %+v, %v", d, err)
-	}
-	// Swapping the field after signing breaks the signature.
-	_, other := submitter(t)
-	parts := strings.Split(string(tok), ".")
-	parts[1] = base64.RawURLEncoding.EncodeToString(doc(7, 6, func(m map[string]any) { m["next_submitter"] = other }))
-	if _, err := Decode([]byte(strings.Join(parts, ".")), DecodeOptions{Submitter: pub}); !errors.Is(err, ErrBadSignature) {
-		t.Fatalf("tampered next_submitter: %v", err)
 	}
 }

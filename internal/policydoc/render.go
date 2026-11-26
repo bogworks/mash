@@ -101,14 +101,11 @@ func RenderPlan(p DiffPlan) string {
 		}
 		return b.String()
 	}
-	if p.rotation == "" && !p.completes() && len(p.Receivers) == 0 && len(p.Templates) == 0 && len(p.Tags) == 0 && len(p.RotateAndRevoke) == 0 &&
+	if len(p.Receivers) == 0 && len(p.Templates) == 0 && len(p.Tags) == 0 && len(p.RotateAndRevoke) == 0 &&
 		len(p.NewCredential) == 0 && len(p.Revoke) == 0 && len(p.FirstCredential) == 0 {
 		return "accepted: nothing would change\n" + SizeLimitsLine + "\n" + p.signatureNote()
 	}
 	b.WriteString("accepted: this would change\n" + SizeLimitsLine + "\n")
-	if p.rotation != "" {
-		b.WriteString("rotation: " + p.rotation + "\n")
-	}
 	section := func(name string, items []string) {
 		fmt.Fprintf(&b, "%s: %s\n", name, list(items))
 	}
@@ -133,17 +130,10 @@ func RenderPlan(p DiffPlan) string {
 	return b.String()
 }
 
-// signatureNote is the line that says the document's signature was not checked, when no --submitter was given.
+// signatureNote is the line that says the inbox and narrowing checks were not run, when Diff got no FailClosedFunc.
 func (p DiffPlan) signatureNote() string {
-	var s string
 	if p.inboxUnchecked {
-		s = InboxNotCheckedLine + "\n"
+		return InboxNotCheckedLine + "\n"
 	}
-	if p.adoptionUnchecked {
-		s += "adoption not checked: the adoption marker was not read\n"
-	}
-	if p.unsigned {
-		s += "signature not checked: give --submitter to check it against the adoption marker\n"
-	}
-	return s
+	return ""
 }

@@ -3,7 +3,6 @@ package policyserve
 import (
 	"context"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"slices"
 	"time"
@@ -14,19 +13,15 @@ import (
 	"github.com/bogworks/mash/internal/policyintake"
 )
 
-// Decode is the intake's Decode: policydoc.Decode with the signature checked under submitter, its errors classified for
-// the intake (a missing or bad signature wraps policyintake.ErrSignature, anything else policyintake.ErrDocument).
+// Decode is the intake's Decode: policydoc.Decode, its errors classified for the intake (policyintake.ErrDocument).
+// The document is plain JSON, so submitter is not used.
 func Decode(raw []byte, submitter string) (policyintake.Doc, error) {
-	d, err := policydoc.Decode(raw, policydoc.DecodeOptions{Submitter: submitter})
-	switch {
-	case errors.Is(err, policydoc.ErrUnsigned), errors.Is(err, policydoc.ErrBadSignature):
-		return policyintake.Doc{}, fmt.Errorf("%w: %v", policyintake.ErrSignature, err)
-	case err != nil:
+	d, err := policydoc.Decode(raw, policydoc.DecodeOptions{})
+	if err != nil {
 		return policyintake.Doc{}, fmt.Errorf("%w: %v", policyintake.ErrDocument, err)
 	}
 	return policyintake.Doc{
 		Account: d.Account, Range: d.Owner, Generation: d.Generation, BaseGeneration: d.BaseGeneration,
-		Verified: d.Verified, NextSubmitter: d.NextSubmitter,
 	}, nil
 }
 

@@ -1,5 +1,5 @@
 // Package policydoc decodes the list-set document: the one value per account that a policy author keeps and mash applies. It
-// decodes the document (raw canonical JSON, or a compact JWS signed by the owner's submitter key) into a
+// decodes the document (plain canonical JSON, unsigned) into a
 // listset.ListSet and checks the format's rules.
 //
 // DECISION D211 (and DEC-004) IS PENDING: the document's schema value and field names are the proposed author-mash
@@ -8,8 +8,6 @@ package policydoc
 
 import (
 	"bytes"
-	"crypto/ed25519"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,8 +18,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nats-io/nkeys"
-
 	"github.com/bogworks/mash/internal/listset"
 )
 
@@ -29,30 +25,13 @@ import (
 // kept here, in one place, and a document with any other value is refused.
 const DocumentSchema = "mash.listset/1"
 
-// Errors Decode returns, wrapped with detail.
-var (
-	// ErrUnsigned: a submitter key was given and the document is raw JSON.
-	ErrUnsigned = errors.New("the document is not signed")
-	// ErrBadSignature: the JWS does not verify under the submitter key.
-	ErrBadSignature = errors.New("the document signature does not verify")
-	// ErrBadDocument: the document is malformed, has an unknown or missing field, or breaks a rule of the format.
-	ErrBadDocument = errors.New("the document is refused")
-)
+// ErrBadDocument: the document is malformed, has an unknown or missing field, or breaks a rule of the format.
+var ErrBadDocument = errors.New("the document is refused")
 
-// DecodeOptions configures Decode.
-type DecodeOptions struct {
-	// Submitter is the nkeys public key of the owner's submitter. When set, the document must be a JWS whose signature
-	// verifies under it. When empty, a JWS's signature is not checked and the result is not Verified.
-	Submitter string
-}
+// DecodeOptions configures Decode. It has no options; the document is plain JSON.
+type DecodeOptions struct{}
 
 // Document is a decoded list-set document.
-//
-// NextSubmitter is the optional planned-rotation field (wire "next_submitter"): a list set signed by the current
-// submitter MAY name the nkeys public key that signs the next generation. It is "" when the field is absent; when
-// present it must be a valid nkeys public key (an explicit empty string is malformed). Decode only validates and
-// returns it, covered by the JWS signature like the rest of the payload. Requiring the next generation to be signed by
-// that key, and refusing the old key from then on, is the intake's job, not this package's.
 type Document struct {
 	Schema         string
 	Account        string
@@ -60,12 +39,9 @@ type Document struct {
 	Generation     uint64
 	BaseGeneration uint64
 	IssuedAt       time.Time
-	NextSubmitter  string
 	ListSet        listset.ListSet
-	// Raw is the exact bytes received (the JWS when it was one).
+	// Raw is the exact bytes received.
 	Raw []byte
-	// Verified is true only when a Submitter was given and the signature verified.
-	Verified bool
 }
 
 type wireGroup struct {
@@ -89,70 +65,25 @@ type wireDoc struct {
 	Groups         map[string]*wireGroup  `json:"groups"`
 	Senders        map[string]*wireSender `json:"senders"`
 	IssuedAt       *string                `json:"issued_at"`
-	NextSubmitter  *string                `json:"next_submitter"`
 }
 
 func bad(format string, a ...any) error {
 	return fmt.Errorf("%w: %s", ErrBadDocument, fmt.Sprintf(format, a...))
 }
 
-// Decode decodes b: raw JSON, or a compact JWS (three base64url parts, header alg EdDSA) whose payload is the JSON.
-// The optional next_submitter field is validated and returned in Document.NextSubmitter; any other unknown field is
-// refused.
-func Decode(b []byte, opts DecodeOptions) (Document, error) {
+// Decode decodes b, a plain JSON document. Any unknown field, including next_submitter, is refused; so is input that
+// is not a JSON object (a compact JWS, for one).
+func Decode(b []byte, _ DecodeOptions) (Document, error) {
 	trimmed := bytes.TrimSpace(b)
-	payload := trimmed
-	verified := false
-	if len(trimmed) > 0 && trimmed[0] != '{' {
-		var err error
-		if payload, verified, err = openJWS(string(trimmed), opts.Submitter); err != nil {
-			return Document{}, err
-		}
-	} else if opts.Submitter != "" {
-		return Document{}, fmt.Errorf("%w: a signed document is required", ErrUnsigned)
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		return Document{}, bad("not a JSON document")
 	}
-	d, err := decodePayload(payload)
+	d, err := decodePayload(trimmed)
 	if err != nil {
 		return Document{}, err
 	}
-	d.Raw, d.Verified = bytes.Clone(b), verified
+	d.Raw = bytes.Clone(b)
 	return d, nil
-}
-
-func openJWS(s, submitter string) (payload []byte, verified bool, err error) {
-	parts := strings.Split(s, ".")
-	if len(parts) != 3 {
-		return nil, false, bad("neither JSON nor a compact JWS")
-	}
-	var raw [3][]byte
-	for i, p := range parts {
-		if raw[i], err = base64.RawURLEncoding.DecodeString(p); err != nil {
-			return nil, false, bad("JWS part %d is not base64url: %v", i+1, err)
-		}
-	}
-	var hdr struct {
-		Alg string `json:"alg"`
-		Typ string `json:"typ"`
-	}
-	dec := json.NewDecoder(bytes.NewReader(raw[0]))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&hdr); err != nil {
-		return nil, false, bad("JWS header: %v", err)
-	}
-	if hdr.Alg != "EdDSA" {
-		return nil, false, bad("JWS alg is %q, not EdDSA", hdr.Alg)
-	}
-	if submitter != "" {
-		kp, err := nkeys.FromPublicKey(submitter)
-		if err != nil {
-			return nil, false, fmt.Errorf("submitter key %q is not an nkeys public key: %w", submitter, err)
-		}
-		if len(raw[2]) != ed25519.SignatureSize || kp.Verify([]byte(parts[0]+"."+parts[1]), raw[2]) != nil {
-			return nil, false, ErrBadSignature
-		}
-		verified = true
-	}
-	return raw[1], verified, nil
 }
 
 func decodePayload(p []byte) (Document, error) {
@@ -193,15 +124,8 @@ func decodePayload(p []byte) (Document, error) {
 	if err != nil {
 		return Document{}, bad("issued_at: %v", err)
 	}
-	var next string
-	if w.NextSubmitter != nil {
-		if _, err := nkeys.FromPublicKey(*w.NextSubmitter); err != nil {
-			return Document{}, bad("next_submitter %q is not an nkeys public key: %v", *w.NextSubmitter, err)
-		}
-		next = *w.NextSubmitter
-	}
 	d := Document{Schema: *w.Schema, Account: *w.Account, Owner: *w.Owner, Generation: *w.Generation,
-		BaseGeneration: *w.BaseGeneration, IssuedAt: at, NextSubmitter: next}
+		BaseGeneration: *w.BaseGeneration, IssuedAt: at}
 	d.ListSet = listset.ListSet{Owner: d.Owner, Base: d.BaseGeneration, Switches: []listset.SwitchEntry{}, Senders: []listset.SenderLists{}}
 
 	groupKeys := make([]string, 0, len(w.Groups))

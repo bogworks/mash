@@ -2,7 +2,6 @@ package policyserve
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"strings"
 	"testing"
@@ -14,7 +13,6 @@ import (
 	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/listset"
 	"github.com/bogworks/mash/internal/policyapply"
-	"github.com/bogworks/mash/internal/policydoc"
 	"github.com/bogworks/mash/internal/policyintake"
 	"github.com/bogworks/mash/internal/sap"
 )
@@ -58,38 +56,6 @@ func TestLimitsAndURLs(t *testing.T) {
 	}
 	if u := URLs(s); u["a"] != "nats://a:1" || u["b"] != "nats://b:2" {
 		t.Errorf("%+v", u)
-	}
-}
-
-func jws(t *testing.T, kp nkeys.KeyPair, payload string) []byte {
-	t.Helper()
-	enc := base64.RawURLEncoding
-	in := enc.EncodeToString([]byte(`{"alg":"EdDSA","typ":"JWT"}`)) + "." + enc.EncodeToString([]byte(payload))
-	sig, err := kp.Sign([]byte(in))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return []byte(in + "." + enc.EncodeToString(sig))
-}
-
-func TestDecodeClassifiesErrors(t *testing.T) {
-	kp, _ := nkeys.CreateAccount()
-	pub, _ := kp.PublicKey()
-	other, _ := nkeys.CreateAccount()
-	payload := `{"schema":"` + policydoc.DocumentSchema + `","account":"A","owner":"foo","generation":1,"base_generation":0,` +
-		`"issued_at":"2026-11-14T12:00:00Z","groups":{},"senders":{}}`
-	d, err := Decode(jws(t, kp, payload), pub)
-	if err != nil || !d.Verified || d.Account != "A" || d.Range != "foo" || d.Generation != 1 || d.BaseGeneration != 0 {
-		t.Fatalf("%+v %v", d, err)
-	}
-	if _, err := Decode(jws(t, other, payload), pub); !errors.Is(err, policyintake.ErrSignature) {
-		t.Errorf("wrong key: %v", err)
-	}
-	if _, err := Decode([]byte(payload), pub); !errors.Is(err, policyintake.ErrSignature) {
-		t.Errorf("unsigned: %v", err)
-	}
-	if _, err := Decode(jws(t, kp, `{"schema":"x"}`), pub); !errors.Is(err, policyintake.ErrDocument) {
-		t.Errorf("malformed: %v", err)
 	}
 }
 

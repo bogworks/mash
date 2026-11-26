@@ -7,10 +7,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/listset"
 	"github.com/bogworks/mash/internal/policyapply"
-	"github.com/bogworks/mash/internal/store"
 )
 
 // Reader is what the read path needs of the ledger: the list set in force and the latest status, read together from one
@@ -199,125 +197,13 @@ type DiffPlan struct {
 	listset.Plan
 	// SizeLimits says which limits the size check used: "default" (the apply checks each server's own).
 	SizeLimits string `json:"size_limits"`
-	// NextSubmitter is the document's next_submitter (a planned submitter rotation, ADR 0112); empty when it has none.
-	NextSubmitter string `json:"next_submitter"`
-	// Rotation is what the document does to the submitter rotation: nil when nothing (and for a refused plan). A plan
-	// with a Rotation is a change.
-	Rotation *RotationAction `json:"rotation"`
-	// rotation is the text of the rotation line, after "rotation: ".
-	rotation string
-	// unsigned is true when no --submitter was given, so the document's signature was not checked.
-	unsigned bool
-	// adoptionUnchecked is true when the caller passed no marker source, so the adoption was not checked.
-	adoptionUnchecked bool
 	// inboxUnchecked is true when the caller passed no FailClosedFunc, so the inbox and narrowing checks were not run.
 	inboxUnchecked bool
-}
-
-// Rotation actions of a RotationAction.
-const (
-	// RotationStarts: the document's next_submitter would be recorded as a planned rotation.
-	RotationStarts = "starts"
-	// RotationCompletes: the document, signed by the pending next submitter, would complete the pending rotation.
-	RotationCompletes = "completes"
-	// RotationPending: a rotation is pending and the document does not complete it, or (Unknown) whether it does
-	// cannot be told.
-	RotationPending = "pending"
-)
-
-// RotationAction is the part of a plan that concerns the submitter rotation (ADR 0112).
-type RotationAction struct {
-	// Action is "starts", "completes" or "pending".
-	Action string `json:"action"`
-	// NextSubmitter is the key the rotation is to: the document's next_submitter for "starts", the marker's pending
-	// next submitter for "completes" and "pending".
-	NextSubmitter string `json:"next_submitter"`
-	// Unknown is true when the signer could not be told (not a JWS the marker's keys verify) and no --submitter was
-	// given, so whether the document completes the pending rotation cannot be checked.
-	Unknown bool `json:"unknown,omitempty"`
-}
-
-func (p DiffPlan) completes() bool {
-	return p.Rotation != nil && p.Rotation.Action == RotationCompletes
-}
-
-// RotationContext is what the intake would check a document's next_submitter against: the adoption marker and the keys
-// mash holds, read by the caller, and the key that signed the document when it is known (the --submitter).
-type RotationContext struct {
-	// Adopted is whether the account has an adoption marker; Marker is it.
-	Adopted bool
-	Marker  store.Marker
-	// Held is the public keys mash holds.
-	Held []string
-	// Signer is the key that signed the document; "" when unknown.
-	Signer string
-	// Err is why the marker or the held keys could not be read; the plan is then refused at stage document.
-	Err error
-	// MarkerErr is why the adoption marker could not be read (Err is set too); with a Signer, the plan is then refused at
-	// stage signature.
-	MarkerErr error
 }
 
 // ErrOwnerNeeded is what Diff returns when no list set is in force and the caller gave no owner: a first document's
 // owner cannot be checked without one.
 var ErrOwnerNeeded = errors.New("--owner is needed to check a first list set's owner when nothing is in force")
-
-// StageSignature is the stage of the refusal Diff reports for a signer the adoption marker does not accept.
-const StageSignature = "signature"
-
-// signerShortLen is how much of a public key a refusal shows, as the intake's.
-const signerShortLen = 8
-
-func shortKey(k string) string {
-	if len(k) > signerShortLen {
-		return k[:signerShortLen] + "..."
-	}
-	return k
-}
-
-// checkAdoption is the intake's first check: an account that is not adopted has every list set ignored, so no
-// submission to it is accepted. A marker that cannot be read is a refusal too. A nil rc means the caller read no marker:
-// nothing is checked and the plan says so.
-func checkAdoption(rc *RotationContext, account string) []listset.Refusal {
-	if rc == nil {
-		return nil
-	}
-	refuse := func(reason string) []listset.Refusal {
-		return []listset.Refusal{{Stage: StageAdoption, Entry: "adoption", Reason: reason}}
-	}
-	if rc.MarkerErr != nil {
-		return refuse("the adoption marker cannot be read: " + rc.MarkerErr.Error())
-	}
-	if !rc.Adopted {
-		return refuse("this account is not adopted: list sets are ignored")
-	}
-	// The marker is read over the admin connection, whose adoption bucket holds one marker and cannot be addressed by
-	// account: a marker for another account is not this account's adoption (the intake refuses it too).
-	if rc.Marker.Account != "" && rc.Marker.Account != account {
-		return refuse("the adoption marker names another account: list sets are ignored")
-	}
-	return nil
-}
-
-// checkSigner is the intake's rule on who may sign: the adoption marker's next submitter when a rotation is pending,
-// else its submitter. It applies only when the caller named the signer and the account is adopted (checkAdoption).
-func checkSigner(rc *RotationContext) []listset.Refusal {
-	if rc == nil || rc.Signer == "" || rc.MarkerErr != nil || !rc.Adopted {
-		return nil
-	}
-	expected, pending := rc.Marker.Submitter, rc.Marker.NextSubmitter != ""
-	if pending {
-		expected = rc.Marker.NextSubmitter
-	}
-	if rc.Signer == expected {
-		return nil
-	}
-	reason := "the adoption marker expects " + shortKey(expected)
-	if pending {
-		reason += " (a rotation is pending: only the next submitter's key is accepted)"
-	}
-	return []listset.Refusal{{Stage: StageSignature, Entry: "signature", Reason: reason}}
-}
 
 // StageInbox is the stage of the refusal Diff reports for a change that adds an address whose inbox is missing or
 // suspended; the apply refuses it before pushing anything.
@@ -335,72 +221,13 @@ type FailClosedFunc func(ctx context.Context, prev, target *listset.Compiled) ([
 // InboxNotCheckedLine says the apply's inbox and narrowing checks were not run, when Diff got no FailClosedFunc.
 const InboxNotCheckedLine = "inbox not checked: the apply's inbox and narrowing checks were not run, so it may still refuse"
 
-// StageDocument is the stage of the refusal Diff reports for a next_submitter the intake would refuse.
-const StageDocument = "document"
-
-// StageAdoption is the stage of the refusal Diff reports for an account that is not adopted or whose adoption marker
-// cannot be read.
-const StageAdoption = "adoption"
-
-// rotate adds what the document's next_submitter would do to p, the way policyintake checks it before an apply. A nil
-// rc means the caller read neither the marker nor the keys: the rotation is shown, and said not to be validated.
-func rotate(p *DiffPlan, next Document, rc *RotationContext) []listset.Refusal {
-	p.NextSubmitter = next.NextSubmitter
-	if rc == nil {
-		if next.NextSubmitter != "" {
-			p.rotation = "next submitter " + next.NextSubmitter + " would be recorded (not validated: the adoption marker and the keys mash holds were not read)"
-			p.Rotation = &RotationAction{Action: RotationStarts, NextSubmitter: next.NextSubmitter}
-		}
-		return nil
-	}
-	refuse := func(stage, reason string) []listset.Refusal {
-		return []listset.Refusal{{Stage: stage, Entry: "next_submitter", Reason: reason}}
-	}
-	if rc.MarkerErr != nil || !rc.Adopted && rc.Err == nil {
-		return nil // checkAdoption refuses the plan
-	}
-	if rc.Err != nil {
-		if next.NextSubmitter == "" {
-			return nil
-		}
-		return refuse(StageDocument, "next_submitter cannot be checked: "+rc.Err.Error())
-	}
-	pending := rc.Adopted && rc.Marker.NextSubmitter != ""
-	if pending && rc.Signer != "" && rc.Signer == rc.Marker.NextSubmitter {
-		p.Rotation = &RotationAction{Action: RotationCompletes, NextSubmitter: rc.Marker.NextSubmitter}
-		p.rotation = "generation would complete the pending rotation to " + rc.Marker.NextSubmitter
-		return nil
-	}
-	if next.NextSubmitter == "" {
-		return nil
-	}
-	if pending {
-		p.rotation = "a rotation to " + rc.Marker.NextSubmitter + " is pending"
-		p.Rotation = &RotationAction{Action: RotationPending, NextSubmitter: rc.Marker.NextSubmitter}
-		return nil
-	}
-	if err := admin.ValidateNextSubmitter(next.Account, rc.Marker, next.NextSubmitter, rc.Held); err != nil {
-		detail := "next_submitter is not acceptable: " + err.Error()
-		if errors.Is(err, admin.ErrNextIsMashKey) {
-			detail = "next_submitter is a key mash holds"
-		}
-		return refuse(StageDocument, detail)
-	}
-	p.rotation = "next submitter " + next.NextSubmitter + " would be recorded"
-	p.Rotation = &RotationAction{Action: RotationStarts, NextSubmitter: next.NextSubmitter}
-	return nil
-}
-
-// Diff decodes file (raw JSON or a JWS, whose signature is not checked) and returns what applying it would do. A
-// document for another account is an error. A document for an owner other than owner (when owner is empty, the owner of
-// the list set in force; with none in force it is an error, ErrOwnerNeeded) is reported in the plan as a refusal with stage "owner", and
-// one whose base_generation is not the generation in force as a refusal with stage "base", and one whose content is not
-// that of the pending generation as a refusal with stage "pending", and one whose next_submitter the intake would
-// refuse as a refusal with stage "document" or "adoption" (checked against rc; see RotationContext): a submission of
-// any would be refused. A document whose content is that in force is refused as the apply refuses it, with stage "unchanged", unless it starts or
-// completes a submitter rotation; one with no adoption marker (rc nil: not checked) or an account that is not adopted or
-// whose marker cannot be read is refused with stage "adoption".
-func Diff(ctx context.Context, r Reader, file []byte, owner string, servers []listset.ServerLimits, rc *RotationContext, failClosed FailClosedFunc) (DiffPlan, error) {
+// Diff decodes file (raw JSON) and returns what applying it would do. A document for another account is an error. A
+// document for an owner other than owner (when owner is empty, the owner of the list set in force; with none in force
+// it is an error, ErrOwnerNeeded) is reported in the plan as a refusal with stage "owner", one whose base_generation
+// is not the generation in force as a refusal with stage "base", and one whose content is not that of the pending
+// generation as a refusal with stage "pending": a submission of any would be refused. A document whose content is that
+// in force is refused as the apply refuses it, with stage "unchanged".
+func Diff(ctx context.Context, r Reader, file []byte, owner string, servers []listset.ServerLimits, failClosed FailClosedFunc) (DiffPlan, error) {
 	next, err := Decode(file, DecodeOptions{})
 	if err != nil {
 		return DiffPlan{}, err
@@ -439,40 +266,10 @@ func Diff(ctx context.Context, r Reader, file []byte, owner string, servers []li
 			Reason: fmt.Sprintf("generation %d is pending: only the same list set can be submitted until it is applied or rolled back", cur.pending.Generation)})
 	}
 	dp := DiffPlan{Plan: p, SizeLimits: SizeLimitsDefault}
-	dp.unsigned = rc == nil || rc.Signer == ""
-	dp.adoptionUnchecked = rc == nil
 	dp.inboxUnchecked = failClosed == nil
-	pre = append(pre, checkAdoption(rc, r.Account())...)
-	pre = append(pre, checkSigner(rc)...)
-	// The signer decides whether the document completes a pending rotation. Without --submitter it is told from the
-	// JWS: the key of the marker (the pending next submitter, or the current one) that verifies the signature.
-	rotRC, signerKnown := rc, rc != nil && rc.Signer != ""
-	if rc != nil && !signerKnown && rc.Adopted && rc.MarkerErr == nil && rc.Err == nil {
-		if k := signerFromJWS(file, rc.Marker); k != "" {
-			c := *rc
-			c.Signer, rotRC, signerKnown = k, &c, true
-		}
-	}
-	pre = append(pre, rotate(&dp, next, rotRC)...)
-	// The apply refuses a list set whose compiled content is that in force (ADR 0119), unless the submission starts or
-	// completes a submitter rotation: it asks listset.Accept, or AcceptRotationStep for a rotation step.
+	// The apply refuses a list set whose compiled content is that in force (ADR 0119).
 	if cur.committed {
-		pendingRotation := rc != nil && rc.Adopted && rc.Marker.NextSubmitter != ""
-		accept := listset.Accept
-		if dp.completes() || next.NextSubmitter != "" && !pendingRotation {
-			accept = listset.AcceptRotationStep
-		}
-		if _, _, err := accept(cur.rec, next.ListSet, file); errors.Is(err, listset.ErrUnchanged) && pendingRotation && !signerKnown && rc.Err == nil && rc.MarkerErr == nil {
-			// The intake completes the pending rotation when the pending key signed this document, which cannot be
-			// told: not a refusal.
-			note := "whether this document completes the pending rotation cannot be checked without --submitter"
-			if dp.rotation == "" {
-				dp.rotation = "a rotation to " + rc.Marker.NextSubmitter + " is pending; " + note
-			} else {
-				dp.rotation += "; " + note
-			}
-			dp.Rotation = &RotationAction{Action: RotationPending, NextSubmitter: rc.Marker.NextSubmitter, Unknown: true}
-		} else if errors.Is(err, listset.ErrUnchanged) {
+		if _, _, err := listset.Accept(cur.rec, next.ListSet, file); errors.Is(err, listset.ErrUnchanged) {
 			pre = append(pre, listset.Refusal{Stage: policyapply.StageUnchanged, Entry: "list_set",
 				Reason: fmt.Sprintf("same content as generation %d in force; nothing to apply", gen)})
 		}
@@ -496,7 +293,6 @@ func Diff(ctx context.Context, r Reader, file []byte, owner string, servers []li
 	}
 	p = dp.Plan
 	if len(pre) > 0 {
-		dp.Rotation = nil // nothing is applied, so no rotation step is taken
 		p.Refusals = append(pre, p.Refusals...)
 		p.Refused = true
 		p.Receivers, p.Templates, p.Tags = []listset.ReceiverChange{}, []listset.TemplateChange{}, []listset.TagChange{}
@@ -504,18 +300,4 @@ func Diff(ctx context.Context, r Reader, file []byte, owner string, servers []li
 	}
 	dp.Plan = p
 	return dp, nil
-}
-
-// signerFromJWS returns the key of m that signed file (a JWS): the pending next submitter, else the current one;
-// "" when the file is not a JWS or neither verifies.
-func signerFromJWS(file []byte, m store.Marker) string {
-	for _, k := range []string{m.NextSubmitter, m.Submitter} {
-		if k == "" {
-			continue
-		}
-		if d, err := Decode(file, DecodeOptions{Submitter: k}); err == nil && d.Verified {
-			return k
-		}
-	}
-	return ""
 }
