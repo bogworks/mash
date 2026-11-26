@@ -57,6 +57,16 @@ Credentials: <config dir>/acme.demo.bob.creds
 Next: MASH_ENDPOINT=acme.demo.bob claude
 ```
 
+### Created with --config-dir: the next step names the folder
+
+Stream: stdout. Exit code: 0.
+
+```text
+Created endpoint acme.demo.bob
+Credentials: <config dir>/acme.demo.bob.creds
+Next: MASH_CONFIG_DIR=<config dir> MASH_ENDPOINT=acme.demo.bob claude
+```
+
 ### Created, with a join file
 
 Stream: stdout. Exit code: 0.

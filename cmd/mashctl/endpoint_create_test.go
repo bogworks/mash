@@ -187,7 +187,7 @@ func TestEndpointCreateDefaultInstalls(t *testing.T) {
 	h := newFleetEnv(t)
 	a := ad("same")
 	so, se, code := h.run("endpoint", "create", a.String())
-	if code != 0 || so != "Created endpoint "+a.String()+"\nCredentials: "+h.creds(a)+"\nNext: MASH_ENDPOINT="+a.String()+" claude\n" {
+	if code != 0 || so != "Created endpoint "+a.String()+"\nCredentials: "+h.creds(a)+"\nNext: MASH_CONFIG_DIR="+shellQuote(h.dir)+" MASH_ENDPOINT="+a.String()+" claude\n" {
 		t.Fatalf("code %d %q %q", code, so, se)
 	}
 	p := h.creds(a)
@@ -239,7 +239,7 @@ func TestEndpointCreateDefaultInstalls(t *testing.T) {
 	}
 	// --verbose
 	so, _, code = h.run("endpoint", "create", ad("same3").String(), "--detail")
-	if code != 0 || so != "Created endpoint "+ad("same3").String()+"\nCredentials: "+h.creds(ad("same3"))+"\nNext: MASH_ENDPOINT="+ad("same3").String()+" claude\n" { // --detail adds nothing to create
+	if code != 0 || so != "Created endpoint "+ad("same3").String()+"\nCredentials: "+h.creds(ad("same3"))+"\nNext: MASH_CONFIG_DIR="+shellQuote(h.dir)+" MASH_ENDPOINT="+ad("same3").String()+" claude\n" { // --detail adds nothing to create
 		t.Errorf("verbose %d %q", code, so)
 	}
 }
@@ -628,7 +628,7 @@ func TestEndpointCreateCredentialsLine(t *testing.T) {
 	a := ad("cl1")
 	so, se, code := h.run("endpoint", "create", a.String(), "--config-dir", other)
 	want := other + string(filepath.Separator) + a.String() + ".creds"
-	if code != 0 || so != "Created endpoint "+a.String()+"\nCredentials: "+want+"\nNext: MASH_ENDPOINT="+a.String()+" claude\n" {
+	if code != 0 || so != "Created endpoint "+a.String()+"\nCredentials: "+want+"\nNext: MASH_CONFIG_DIR="+shellQuote(other)+" MASH_ENDPOINT="+a.String()+" claude\n" {
 		t.Fatalf("config-dir: %d %q %q", code, so, se)
 	}
 	if _, err := os.Stat(want); err != nil {
@@ -639,5 +639,73 @@ func TestEndpointCreateCredentialsLine(t *testing.T) {
 	so, se, code = h.run("endpoint", "create", b.String(), "--out", jf)
 	if code != 0 || so != "Created endpoint "+b.String()+"\nJoin file: "+jf+"\n" {
 		t.Fatalf("join: %d %q %q", code, so, se)
+	}
+}
+
+// The Next line names the config folder when the creds went to one a plain shell would not use, quoted for a shell, and
+// is the bare line when they went to the default folder.
+func TestEndpointCreateNextLineConfigDir(t *testing.T) {
+	next := func(so string) string { return so[strings.Index(so, "Next: "):] }
+	t.Run("config-dir plain path", func(t *testing.T) {
+		h := newFleetEnv(t)
+		other := filepath.Join(t.TempDir(), "elsewhere")
+		if err := os.MkdirAll(other, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		a := ad("nx1")
+		so, se, code := h.run("endpoint", "create", a.String(), "--config-dir", other)
+		if code != 0 || next(so) != "Next: MASH_CONFIG_DIR="+other+" MASH_ENDPOINT="+a.String()+" claude\n" {
+			t.Fatalf("%d %q %q", code, so, se)
+		}
+	})
+	t.Run("MASH_CONFIG_DIR with a space and a quote", func(t *testing.T) {
+		h := newFleetEnv(t)
+		odd := filepath.Join(t.TempDir(), "it's mine")
+		if err := os.MkdirAll(odd, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		h.env["MASH_CONFIG_DIR"] = odd
+		a := ad("nx2")
+		so, se, code := h.run("endpoint", "create", a.String())
+		want := "Next: MASH_CONFIG_DIR='" + strings.ReplaceAll(odd, "'", `'\''`) + "' MASH_ENDPOINT=" + a.String() + " claude\n"
+		if code != 0 || next(so) != want {
+			t.Fatalf("%d %q %q want %q", code, so, se, want)
+		}
+	})
+	t.Run("default folder has no prefix", func(t *testing.T) {
+		h := newFleetEnv(t)
+		home := h.env["HOME"]
+		def := filepath.Join(home, ".config", "mash")
+		if err := os.MkdirAll(def, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		delete(h.env, "MASH_CONFIG_DIR")
+		a := ad("nx3")
+		so, se, code := h.run("endpoint", "create", a.String())
+		if code != 0 || so != "Created endpoint "+a.String()+"\nCredentials: "+filepath.Join(def, a.String()+".creds")+"\nNext: MASH_ENDPOINT="+a.String()+" claude\n" {
+			t.Fatalf("%d %q %q", code, so, se)
+		}
+	})
+	t.Run("--out and --dry-run print no Next line", func(t *testing.T) {
+		h := newFleetEnv(t)
+		so, _, code := h.run("endpoint", "create", ad("nx4").String(), "--dry-run")
+		if code != 0 || strings.Contains(so, "Next:") {
+			t.Fatalf("%d %q", code, so)
+		}
+	})
+}
+
+func TestShellQuote(t *testing.T) {
+	for in, want := range map[string]string{
+		"/a/b-c_d.e:f@g%h+i=j,k": "/a/b-c_d.e:f@g%h+i=j,k",
+		"/a b":                   "'/a b'",
+		"it's":                   `'it'\''s'`,
+		"a$b":                    "'a$b'",
+		"":                       "''",
+		"~x":                     "'~x'",
+	} {
+		if got := shellQuote(in); got != want {
+			t.Errorf("shellQuote(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

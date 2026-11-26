@@ -898,6 +898,12 @@
           "verbatim": true
          },
          {
+          "case": "Created with --config-dir: the next step names the folder",
+          "text": "Created endpoint acme.demo.bob\nCredentials: <config dir>/acme.demo.bob.creds\nNext: MASH_CONFIG_DIR=<config dir> MASH_ENDPOINT=acme.demo.bob claude",
+          "stream": "stdout",
+          "exit": 0
+         },
+         {
           "case": "Created, with a join file",
           "text": "Created endpoint acme.demo.bob\nJoin file: acme.demo.bob.join",
           "stream": "stdout",

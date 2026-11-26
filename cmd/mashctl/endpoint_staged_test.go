@@ -50,7 +50,7 @@ func TestEndpointCreateMakeKeyShortcutNeedsMatchingRecord(t *testing.T) {
 		t.Fatal(err)
 	}
 	so, se, code := h.run(args(a)...)
-	if code != 0 || so != "Created endpoint "+a.String()+"\nCredentials: "+h.creds(a)+"\nNext: MASH_ENDPOINT="+a.String()+" claude\n" || !gone(t, h.creds(a)+".pending") {
+	if code != 0 || so != "Created endpoint "+a.String()+"\nCredentials: "+h.creds(a)+"\nNext: MASH_CONFIG_DIR="+shellQuote(h.dir)+" MASH_ENDPOINT="+a.String()+" claude\n" || !gone(t, h.creds(a)+".pending") {
 		t.Fatalf("matching record: %d %q %q", code, so, se)
 	}
 

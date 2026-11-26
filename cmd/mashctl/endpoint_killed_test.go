@@ -132,7 +132,7 @@ func TestEndpointCreateKilledAfterEnroll(t *testing.T) {
 		t.Fatal("no directory record after the kill")
 	}
 	so, se, code := h.run(args...)
-	if code != 0 || so != "Created endpoint "+a.String()+"\nCredentials: "+h.creds(a)+"\nNext: MASH_ENDPOINT="+a.String()+" claude\n" {
+	if code != 0 || so != "Created endpoint "+a.String()+"\nCredentials: "+h.creds(a)+"\nNext: MASH_CONFIG_DIR="+shellQuote(h.dir)+" MASH_ENDPOINT="+a.String()+" claude\n" {
 		t.Fatalf("rerun %d %q %q", code, so, se)
 	}
 	noSecrets(t, so, se)
@@ -222,7 +222,7 @@ func TestEndpointCreateCredsExist(t *testing.T) {
 		t.Fatal(err)
 	}
 	so, se, code := h.run(args...)
-	if code != 0 || so != "Created endpoint "+a.String()+"\nCredentials: "+h.creds(a)+"\nNext: MASH_ENDPOINT="+a.String()+" claude\n" {
+	if code != 0 || so != "Created endpoint "+a.String()+"\nCredentials: "+h.creds(a)+"\nNext: MASH_CONFIG_DIR="+shellQuote(h.dir)+" MASH_ENDPOINT="+a.String()+" claude\n" {
 		t.Fatalf("same key: %d %q %q", code, so, se)
 	}
 	noPending(t, h)

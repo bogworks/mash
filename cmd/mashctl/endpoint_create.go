@@ -119,6 +119,8 @@ type epTarget struct {
 	pub     string // the public key --public-key names
 	outPath string // the join file with --out, else the creds file in the config folder
 	again   string // the command that finishes a run that did part of its work
+
+	configDirPrefix string // "MASH_CONFIG_DIR=<dir> " for the Next line when the creds went to a folder other than mash's default
 }
 
 // epLoadTarget reads the configuration and the options. Nothing is written and no server is asked.
@@ -132,6 +134,7 @@ func epLoadTarget(verb string, in *epInput, env func(string) string, lookup conf
 		return t, failErr(err)
 	}
 	t.cfg = cfg
+	t.configDirPrefix = configDirPrefix(cfg.Dir, env)
 	if t.base, err = joinBaseOf(cfg); err != nil {
 		if errors.Is(err, errCAFile) {
 			return t, cliframe.Failf("%s", strings.TrimPrefix(err.Error(), errCAFile.Error()+": "))
@@ -255,7 +258,9 @@ func epPrint(w io.Writer, verb string, t epTarget, res epResult, detail, jsonOut
 		rows = append(rows, cliframe.Row{Label: "Join file", Value: t.outPath})
 	} else if verb == "create" {
 		fmt.Fprintf(w, "Credentials: %s\n", t.outPath)
-		fmt.Fprintf(w, "Next: MASH_ENDPOINT=%s claude\n", name) // the creds are installed here: the next step is a session as this endpoint
+		// the creds are installed here: the next step is a session as this endpoint, which finds them only in the folder they
+		// went to, so a folder other than the one mash uses by default is named
+		fmt.Fprintf(w, "Next: %sMASH_ENDPOINT=%s claude\n", t.configDirPrefix, name)
 	}
 	if verb == "reissue" && detail {
 		rows = append(rows, cliframe.Row{Label: "servers acknowledged", Value: strconv.Itoa(res.acked)})
@@ -722,3 +727,30 @@ func epCredsUserOf(raw []byte, path string, addr sap.Address) (string, error) {
 // that is not a refusal; nothing else does.
 var enrollCreate = enroll.Create
 var enrollReissue = enroll.Reissue
+
+// configDirPrefix is "MASH_CONFIG_DIR=<dir> " when dir is not the folder mash uses with no --config-dir and no
+// MASH_CONFIG_DIR (a later session in a plain shell), and "" when it is.
+func configDirPrefix(dir string, env func(string) string) string {
+	if dir == "" {
+		return ""
+	}
+	def := config.ConfigDir(func(k string) string {
+		if k == "MASH_CONFIG_DIR" {
+			return ""
+		}
+		return env(k)
+	}, env("HOME"))
+	if def != "" && filepath.Clean(dir) == def {
+		return ""
+	}
+	return "MASH_CONFIG_DIR=" + shellQuote(dir) + " "
+}
+
+// shellQuote writes s as one word for a POSIX shell: bare when it holds only [A-Za-z0-9_./:@%+=,-], else in single
+// quotes, each single quote in s closed, escaped and reopened (quote, backslash, quote, quote).
+func shellQuote(s string) string {
+	if s != "" && strings.Trim(s, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_./:@%+=,-") == "" {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
