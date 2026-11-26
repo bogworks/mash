@@ -5,7 +5,8 @@ description: >-
   server, add or remove an agent mailbox (endpoint), see why mail is not
   arriving. Use when the person asks to add an agent, give a session a
   mailbox, see mash status, fix mail delivery, or bring the server back after
-  a reboot, and `mash version` works. If mash is not installed, use the setup
+  a reboot ("start mash's server again"), and `mash version` works. If mash
+  is not installed, use the setup
   skill instead.
 ---
 
@@ -72,8 +73,12 @@ person chose in setup. Get them from the person, or from where
 
 ```sh
 BIN="$HOME/.local/bin"; SRV="$HOME/mash-nats"; DL="$HOME/mash-setup-dl"
-PATH="$BIN:$PATH" bash "$DL/mash-local-nats-setup.sh" --dir "$SRV" --start
+S="$SRV/mash-local-nats-setup.sh"; [ -f "$S" ] || S="$DL/mash-local-nats-setup.sh"
+PATH="$BIN:$PATH" bash "$S" --dir "$SRV" --start
 ```
+
+The setup keeps a copy of the script in the server folder; the download folder
+is the fallback for a server set up before it did.
 
 The install folder goes first on the PATH so the script finds `nats-server`;
 without it the script may say `error: missing: nats-server`.
@@ -82,7 +87,7 @@ If `command -v nats-server` fails and the person chose a system package,
 find its folder again from the package's file list (`dpkg -L nats-server |
 grep 'bin/nats-server$'` on Debian and Ubuntu, `rpm -ql` or `pacman -Ql`
 elsewhere; never assume `/usr/sbin`). Put that folder in front for the
-command: `PATH="<folder>:$BIN:$PATH" bash "$DL/mash-local-nats-setup.sh"
+command: `PATH="<folder>:$BIN:$PATH" bash "$S"
 --dir "$SRV" --start`.
 
 `--start` never creates a server: if the folder is missing it says so and

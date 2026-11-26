@@ -155,11 +155,17 @@ I will:
   nats-server and nats              you choose how: the default is a download
                                     from their GitHub releases, checked against
                                     SHA256SUMS, into ~/.local/bin
+  checks                            checksums of every download [gh missing,
+                                    too old or not running: "checksums only;
+                                    they come from the same download, so they
+                                    do not prove who made it. Install gh to
+                                    also verify the signature."]
   use no sudo                       unless you choose a system route and say
                                     yes to that exact command
   make a NATS server                in ~/mash-nats, this machine only, run as you
                                     (a program you run: after a reboot it is
-                                     stopped; start it again with --start)
+                                     stopped; ask me "start mash's server
+                                     again")
   use the owner name                acme
   install the mash plugin           from the bogworks/mash marketplace
   make two agent mailboxes          acme.demo.bob and acme.demo.alice
@@ -301,9 +307,14 @@ Each block starts with `set -e`, so a checksum that does not match stops it
 before anything is unpacked or installed. Each checksum line should end in `OK`
 (a mismatch: stop, install nothing, ask).
 `nats-server --version` prints `nats-server: v2.15.1` and `nats --version`
-prints `0.5.2`. `BIN` must be on the PATH: if it is not, tell the person to
-add it (do not edit their shell files); for this session use the full path, or
-put `PATH="$BIN:$PATH"` in front of a command. Both programs are explained at
+prints `0.5.2`. `BIN` must be on the PATH: if it is not, give them the line
+for their shell (`echo $SHELL` says which): for bash
+`echo 'export PATH="<BIN>:$PATH"' >> ~/.bashrc`, for zsh the same with
+`${ZDOTDIR:-$HOME}/.zshrc`, then a new terminal. Write the install folder
+the person chose in place of `<BIN>` (`$HOME/.local/bin` by default; never
+assume it). They run it themselves (do not edit
+their shell files); for this session use the full path, or put
+`PATH="$BIN:$PATH"` in front of a command. Both programs are explained at
 https://github.com/bogworks/mash/blob/main/docs/nats-server.md#getting-nats-server-and-the-nats-command
 
 Verify: `nats-server --version` is 2.10.7 or newer, and
@@ -346,10 +357,14 @@ Replace `vX.Y.Z` with the tag from the block above (each block runs in a
 fresh shell). Expected: it exits 0 and says it verified. Any failure: stop,
 run nothing.
 If `gh` is missing, does not run, or is older than 2.102.0, do not run the
-block above. Say so to the person in one sentence: the scripts are then
-checked against checksums from the same release, not authenticated (the
-installer says the same). Run them only if the person says yes
-to that.
+block above. If the plan's `checks` row already told the person (gh was
+missing, too old or not running then), the one yes covers it: do not raise it
+again as a separate remark or question, and do not open with it. If gh looked
+fine at the plan and fails now, the plan did not cover this: say the scripts
+would be checked against checksums from the same download only, so they do
+not prove who made them, and ask for a yes before running them. The scripts
+are then checked against checksums from the same release, not authenticated
+(the installer says the same).
 
 Expected: `install.sh: OK` and `mash-local-nats-setup.sh: OK`. On macOS
 `sha256sum` may be missing: use `shasum -a 256 -c -`. Anything else, or a
@@ -377,8 +392,13 @@ MASH_INSTALL_DIR="$BIN" MASH_VERSION="$TAG" bash "$DL/install.sh"
 Replace `vX.Y.Z` with the tag from step 3.
 
 Expected: `Installed mash v<version> (<commit>) in <folder>` and the same for
-`mashctl`. If it says the folder is not on the PATH, tell the person to add it
-(do not edit their shell files): for this session use the full path the line
+`mashctl`. If it says the folder is not on the PATH, give them the line for
+their shell (`echo $SHELL` says which): for bash
+`echo 'export PATH="<BIN>:$PATH"' >> ~/.bashrc`, for zsh the same with
+`${ZDOTDIR:-$HOME}/.zshrc`, then a new terminal. Write the install folder
+the person chose in place of `<BIN>` (`$HOME/.local/bin` by default; never
+assume it). They run it themselves (do not edit
+their shell files): for this session use the full path the line
 printed. The folder is the one in the output; take it from there. If it says
 the folder `is writable by its group or other users`, see the table at the
 end. A line on stderr starting `warning: gh not found` (or `gh did not run`, `gh
@@ -413,9 +433,18 @@ printed as it printed it (`mashctl init --config <folder>/mash-setup.yaml`);
 take the path from the output, never from memory. Then check: `mashctl status`
 prints the server's address, `ok` and the endpoint count.
 
+Keep a copy of the script beside the server, so a restart needs nothing from
+the download folder:
+
+```sh
+SRV="$HOME/mash-nats"; DL="$HOME/mash-setup-dl"
+install -m 755 "$DL/mash-local-nats-setup.sh" "$SRV/mash-local-nats-setup.sh"
+```
+
 The server is a program running as you. It does not come back after a reboot:
-after one, run the script again with `--start` (day-2 skill). Tell the person
-this now, before they reboot. If `nats-server` came from a system package
+after one, run the script again with `--start` (day-2 skill; the person only
+has to ask "start mash's server again"). Tell the person this now, before
+they reboot. If `nats-server` came from a system package
 and its folder is not on their PATH, name that folder too: the restart
 command needs it in front of the PATH, as `PATH="<folder>:$BIN:$PATH"`.
 
@@ -470,7 +499,7 @@ mailbox open yet.
 ## 7. Send mail
 
 ```sh
-MASH_ENDPOINT=acme.demo.bob mash send acme.demo.alice "lunch at noon?"
+MASH_ENDPOINT=acme.demo.bob mash send acme.demo.alice "Test from setup: mail works."
 ```
 
 ```sh
@@ -479,7 +508,9 @@ MASH_ENDPOINT=acme.demo.alice mash inbox
 
 Expected: `Mail sent (number 1 in acme.demo.alice's inbox)`, then
 `1 message for acme.demo.alice, 1 new, 0 urgent.` and a one-row table with
-`lunch at noon?`.
+`Test from setup: mail works.`
+(not "lunch at noon?": that is the note the person sends themselves in the
+quick start).
 `MASH_ENDPOINT=acme.demo.alice mash read 1` shows the message in full,
 with `trust: verified`.
 
@@ -560,18 +591,25 @@ bob
 alice
 ```
 
-Each session says on its first turn which mode it is in. `--name` shows the
-agent's address as the session's name; for a session already open,
-`/rename acme.demo.alice` does the same.
+Waking an idle session needs mash's channel; without it, mail arrives at the
+next prompt. `--name` shows the agent's address as the session's name; for a
+session already open, `/rename acme.demo.alice` does the same.
 
-Say the setup is done only when one session has received mail from the other
-(`mash inbox` in the second terminal shows it as verified). Do not claim mail
-is broken because your own session started before the plugin was installed:
-the plugin loads in the next session.
+Close by pointing the person at the quick start's step 4: in Bob's session
+say "Send alice a note: lunch at noon?", and in Alice's "Do I have mail?"
+(Alice sees the setup's test note and then that one, both verified). Do not
+ask them to run `mash inbox` in a Claude session: it is a shell command. Say
+the server and the endpoints work (your own `MASH_ENDPOINT=<alice> mash
+inbox` check in step 7 shows the test note as verified), and that mail
+between the two sessions is proven when Alice sees Bob's note in step 4:
+do not say session mail works before that. Do not claim mail is broken
+because your own session started before the plugin was installed: the plugin
+loads in the next session.
 
 ### Try it: a first job for the pair
 
-In both setups, finish by giving the person this to paste into the first
+Only after the note has arrived, offer (do not push) the first job. Give the
+person this to paste into the first
 session (the one started with `MASH_ENDPOINT=acme.demo.bob`), with the
 person's own agent names in place of `bob` and `alice` (the first agent is the
 lead, the second the peer):

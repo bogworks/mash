@@ -202,11 +202,11 @@ func TestStatusConfigAndCredsReasons(t *testing.T) {
 func TestStatusAndDoctorNoEndpointInstalled(t *testing.T) {
 	for _, verb := range []string{"status", "doctor"} {
 		r := runMash(map[string]string{"HOME": t.TempDir()}, verb)
-		if r.code != 1 || r.out != "" || r.errs != "error: no endpoint is installed here\n" {
+		if r.code != 1 || r.out != "" || r.errs != "error: no endpoint is installed here (set mash up with the setup skill: see the quick start)\n" {
 			t.Fatalf("%s: %+v", verb, r)
 		}
 		j := runMash(map[string]string{"HOME": t.TempDir()}, verb, "--json")
-		if j.code != 1 || j.errs != "" || j.out != `{"error":"no endpoint is installed here"}`+"\n" {
+		if j.code != 1 || j.errs != "" || j.out != `{"error":"no endpoint is installed here (set mash up with the setup skill: see the quick start)"}`+"\n" {
 			t.Fatalf("%s --json: %+v", verb, j)
 		}
 	}

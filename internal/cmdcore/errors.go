@@ -58,7 +58,8 @@ func errNoEnv(name string) *cliframe.Error {
 type NoEndpointKind int
 
 const (
-	// NoneInstalled is a shell with no endpoint chosen and none installed (exit 1, no hint).
+	// NoneInstalled is a shell with no endpoint chosen and none installed (exit 1). It has no hint: no single command fixes
+	// a fresh machine (ADR 0168).
 	NoneInstalled NoEndpointKind = iota
 	// SeveralInstalled is a shell with no endpoint chosen and several installed (exit 2).
 	SeveralInstalled
@@ -86,5 +87,5 @@ func NoEndpoint(kind NoEndpointKind, command string, addresses []string) *clifra
 	case NoneForSession:
 		return cliframe.Failf("No endpoint is chosen for this session.").WithHint(SessionNoEndpointHint)
 	}
-	return cliframe.Failf("no endpoint is installed here")
+	return cliframe.Failf("no endpoint is installed here (set mash up with the setup skill: see the quick start)")
 }
