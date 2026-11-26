@@ -153,11 +153,11 @@ func TestClassifyReplacedKeyDoesNotNameTheEndpoint(t *testing.T) {
 	e := keyEndpoint(nil)
 	e.learn(map[string]recordResult{lrName: {rec: lrRecord(k1.User)}})
 	hdr, subj, data := signedHeader(t, k1, lrName)
-	if from, trust, _, _ := e.classify(subj, hdr, data, time.Now()); trust != sap.TrustVerified || from != lrName {
+	if from, trust, _, _ := e.classify(subj, hdr.Values(sap.HeaderName), data, time.Now()); trust != sap.TrustVerified || from != lrName {
 		t.Fatalf("before the replace: from %q trust %v, want %s verified", from, trust, lrName)
 	}
 	e.learn(map[string]recordResult{lrName: {rec: lrRecord(k2.User)}})
-	_, trust, _, ok := e.classify(subj, hdr, data, time.Now())
+	_, trust, _, ok := e.classify(subj, hdr.Values(sap.HeaderName), data, time.Now())
 	if !ok || trust != sap.TrustUnknownSigner {
 		t.Errorf("after the replace: ok %v trust %v, want unknown-signer", ok, trust)
 	}
