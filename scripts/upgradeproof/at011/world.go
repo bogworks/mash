@@ -138,10 +138,14 @@ func (r *runner) env(p *persona, withGH, natsTools bool, extra ...string) []stri
 	return append(e, extra...)
 }
 
+// noPluginRoot is a plugin root with no manifest: a path under the run's work directory that setup
+// checked is absent and that nothing creates.
+func (r *runner) noPluginRoot() string { return filepath.Join(r.work, "no-plugin-root") }
+
 // sessionEnv is the environment Claude Code gives a session and its hooks.
 func (r *runner) sessionEnv(p *persona) []string {
 	return r.env(p, false, false, "MASH_SPOOL_FROM_START=1", "CLAUDE_CODE_SESSION_ID=sess-"+p.name,
-		"MASH_LAUNCH_TOKEN=tok-"+p.name, "MASH_PLUGIN_ROOT=/nonexistent", "MASH_BATCH_MSGS=1000", "MASH_BATCH_BYTES=100000000")
+		"MASH_LAUNCH_TOKEN=tok-"+p.name, "MASH_PLUGIN_ROOT="+r.noPluginRoot(), "MASH_BATCH_MSGS=1000", "MASH_BATCH_BYTES=100000000")
 }
 
 func (r *runner) mash(p *persona, args ...string) cmdResult {

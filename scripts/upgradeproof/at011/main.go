@@ -98,6 +98,10 @@ func cmdRun(args []string) int {
 		fmt.Fprintln(os.Stderr, "at011:", err)
 		return 2
 	}
+	if _, err := os.Lstat(r.noPluginRoot()); !os.IsNotExist(err) {
+		fmt.Fprintf(os.Stderr, "at011: %s must not exist (it is the plugin root with no manifest): %v\n", r.noPluginRoot(), err)
+		return 2
+	}
 	for _, n := range []string{"admin", "alice", "bob", "mallory"} {
 		p := &persona{name: n, home: filepath.Join(r.work, n, "home"), cfg: filepath.Join(r.work, n, "cfg"), st: filepath.Join(r.work, n, "state")}
 		if n != "admin" {

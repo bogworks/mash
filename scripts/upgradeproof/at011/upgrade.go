@@ -133,7 +133,11 @@ func (r *runner) upgrade(s *stepCtx, p *persona, order []string, mailFrom *perso
 			v := r.run(r.env(p, false, false), p.home, time.Minute, bin, "version")
 			d := r.run(r.env(p, false, false), p.home, doctorTimeout, bin, "doctor")
 			ctl := r.mashctl("doctor")
-			if act == actAfter {
+			if act == actCheck {
+				s.ok(strings.Contains(v.Out, oldVer), p.name+": mash version reports "+oldVer+" before the upgrade", "%s", strings.TrimSpace(v.Out))
+				s.ok(d.ok(), p.name+": mash doctor exits 0 before the upgrade", "exit %d", d.Code)
+				s.ok(ctl.ok(), "mashctl doctor exits 0 before the upgrade", "exit %d", ctl.Code)
+			} else {
 				s.ok(strings.Contains(v.Out, newVer), p.name+": mash version reports "+newVer+" after the upgrade", "%s", strings.TrimSpace(v.Out))
 				s.ok(d.ok(), p.name+": mash doctor exits 0 after the upgrade", "exit %d", d.Code)
 				s.ok(ctl.ok(), "mashctl doctor exits 0 after the upgrade", "exit %d", ctl.Code)
