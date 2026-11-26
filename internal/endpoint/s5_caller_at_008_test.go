@@ -165,7 +165,7 @@ func (z *s5Fix) todayWire(t *testing.T, in s5Inputs) s5Wire {
 	if err := Prompt(s5Ctx(t), c.nc, id, z.alice.Flat(), subj, "ping", &out); err != nil || out.String() != "pong" {
 		t.Fatalf("today's Prompt: %q, %v", out.String(), err)
 	}
-	d, p := tp.requestsFrom(z.alice)
+	d, p := tp.waitRequestsFrom(t, z.alice, 1, 2)
 	if len(d) != 1 || len(p) != 2 {
 		t.Fatalf("captured %d discovery and %d prompt requests, want 1 and 2", len(d), len(p))
 	}
@@ -217,7 +217,7 @@ func TestS5AT008_WireEqualsToday(t *testing.T) {
 	if err != nil || s5Join(chunks) != "pong" {
 		t.Fatalf("the constructor's prompt: %q, %v", chunks, err)
 	}
-	d, p := tp.requestsFrom(z.alice)
+	d, p := tp.waitRequestsFrom(t, z.alice, 1, 1)
 	if len(d) != 1 || len(p) != 1 {
 		t.Fatalf("the constructor put %d discovery and %d prompt requests on the wire, want 1 and 1", len(d), len(p))
 	}
@@ -264,7 +264,7 @@ func TestS5AT008_Mixed1_OldAskerDiscoversNewResponder(t *testing.T) {
 	if err != nil || subj != mustSubj(z.bob).Prompt {
 		t.Fatalf("old asker, new responder: %q, %v (want bob online)", subj, err)
 	}
-	d, _ := tp.requestsFrom(z.alice)
+	d, _ := tp.waitRequestsFrom(t, z.alice, 1, 0)
 	if len(d) != 1 || !s5Hex32.MatchString(strings.TrimPrefix(d[0].Reply, z.alice.InboxPrefix()+".")) {
 		t.Fatalf("old asker's reply subject: %+v (want the prefix and one 32-hex token)", d)
 	}
@@ -284,7 +284,7 @@ func TestS5AT008_Mixed2_NewAskerDiscoversOldResponder(t *testing.T) {
 	if err != nil || len(got.Accepted) != 1 || got.Accepted[0].Address != z.bob || got.NotVerified != 0 {
 		t.Fatalf("new asker, old responder: %+v, %v (want bob online, nothing refused)", got, err)
 	}
-	d, _ := tp.requestsFrom(z.alice)
+	d, _ := tp.waitRequestsFrom(t, z.alice, 1, 0)
 	if len(d) != 1 {
 		t.Fatalf("captured %d discovery requests", len(d))
 	}
@@ -313,7 +313,7 @@ func TestS5AT008_Mixed3_OldAskerPromptsNewResponder(t *testing.T) {
 	if err := Prompt(s5Ctx(t), c.nc, identity(t, z.creds[z.alice.Flat()]), z.alice.Flat(), subj, "ping", &out); err != nil || out.String() != "one two" {
 		t.Fatalf("old asker, new responder: %q, %v (want both chunks)", out.String(), err)
 	}
-	_, p := tp.requestsFrom(z.alice)
+	_, p := tp.waitRequestsFrom(t, z.alice, 0, 1)
 	if len(p) != 1 || !s5Hex32.MatchString(strings.TrimPrefix(p[0].Reply, z.alice.InboxPrefix()+".")) {
 		t.Fatalf("old asker's prompt reply subject: %+v", p)
 	}
@@ -336,7 +336,7 @@ func TestS5AT008_Mixed4_NewAskerPromptsOldResponder(t *testing.T) {
 	if err != nil || s5Join(chunks) != "one two" {
 		t.Fatalf("new asker, old responder: %q, %v (want both chunks)", chunks, err)
 	}
-	_, p := tp.requestsFrom(z.alice)
+	_, p := tp.waitRequestsFrom(t, z.alice, 0, 1)
 	if len(p) != 1 {
 		t.Fatalf("captured %d prompt requests", len(p))
 	}

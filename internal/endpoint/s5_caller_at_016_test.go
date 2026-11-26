@@ -259,7 +259,7 @@ func TestS5Today_ReplyInboxIsOneToken(t *testing.T) {
 	if err := Prompt(s5Ctx(t), c.nc, identity(t, z.creds[z.alice.Flat()]), z.alice.Flat(), subj, "ping", &out); err != nil || out.String() != "pong from bob" {
 		t.Fatalf("prompt: %q, %v", out.String(), err)
 	}
-	d, p := tp.requestsFrom(z.alice)
+	d, p := tp.waitRequestsFrom(t, z.alice, 1, 1)
 	if len(d) != 1 || len(p) != 1 {
 		t.Fatalf("captured %d discovery and %d prompt requests, want 1 and 1", len(d), len(p))
 	}
