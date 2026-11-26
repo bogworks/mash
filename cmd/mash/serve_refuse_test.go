@@ -30,8 +30,13 @@ func TestServeRefusesUnverifiedMailAndDoctorCountsIt(t *testing.T) {
 	publishUnsigned(t, w, "a", "b", "unsigned again")
 	eventually(t, 10*time.Second, "doctor counts them", func() bool {
 		out, _ := w.cli(t, "a", "doctor")
-		return strings.Contains(out, "refused   warn  2 unverified messages were refused\n")
+		return strings.Contains(out, "refused   ok    2 messages were refused\n                2 not verified\n")
 	})
+	// the refused row is ok whatever it counts (CHG-14): it is no problem and no warning; the only warning here is the
+	// plain-text test server
+	if out, code := w.cli(t, "a", "doctor"); code != 0 || !strings.HasSuffix(out, "\n\n1 warning.\n") || strings.Contains(out, "FAIL") {
+		t.Fatalf("doctor: exit %d, %q", code, out)
+	}
 	if _, code := w.cli(t, "b", "send", tTo("a"), "signed body"); code != 0 {
 		t.Fatal("send failed")
 	}
@@ -39,7 +44,7 @@ func TestServeRefusesUnverifiedMailAndDoctorCountsIt(t *testing.T) {
 		t.Fatalf("channel event %q", got)
 	}
 	out, _ := w.cli(t, "a", "inbox")
-	if !strings.Contains(out, "1 message for") || strings.Contains(out, "unsigned") {
+	if !strings.Contains(out, "3 messages for") || !strings.Contains(out, "2 refused.") || strings.Contains(out, "unsigned") || strings.Count(out, "  refused  ") != 2 {
 		t.Fatalf("inbox:\n%s", out)
 	}
 	const refusedText = "error: message 1 was refused: it was not verified\nhint: mash doctor\n"
@@ -56,7 +61,7 @@ func TestServeRefusesUnverifiedMailAndDoctorCountsIt(t *testing.T) {
 		t.Fatalf("read of a number that never existed: %d %q", code, out)
 	}
 	for _, args := range [][]string{{"inbox", "--after", "0"}, {"inbox", "--new"}, {"inbox", "--limit", "10"}} {
-		if out, _ := w.cli(t, "a", args...); !strings.Contains(out, "1 message for") || strings.Contains(out, "unsigned") {
+		if out, _ := w.cli(t, "a", args...); strings.Contains(out, "unsigned") || (args[1] != "--new" && !strings.Contains(out, "2 refused")) {
 			t.Fatalf("%v:\n%s", args, out)
 		}
 	}

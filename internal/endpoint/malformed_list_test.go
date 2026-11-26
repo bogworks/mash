@@ -253,3 +253,33 @@ func TestScanOnDiskReadsTheServesRecord(t *testing.T) {
 		t.Fatal("a serve that is gone is not scanning")
 	}
 }
+
+// A shell derives the skipped scan from the directory, with no record: the scan is not done and the directory is not
+// writable. The access check is replaced, as a chmod does not block a root test.
+func TestScanSkipOnDiskIsDerivedFromTheDirectory(t *testing.T) {
+	old := DirAccessible
+	t.Cleanup(func() { DirAccessible = old })
+	sp := spool.Spool{Dir: t.TempDir()}
+	list := filepath.Join(sp.Dir, malformedSeqsFile)
+	writable := true
+	DirAccessible = func(string) bool { return writable }
+	if got := ScanSkipOnDisk(sp); got != "" {
+		t.Fatalf("writable, yet skipped: %q", got)
+	}
+	writable = false
+	if got := ScanSkipOnDisk(sp); got != sp.Dir {
+		t.Fatalf("not done and unwritable: %q", got)
+	}
+	if err := writeSeqList(list, seqList{ID: "s", Scanned: 3, Done: true}); err != nil {
+		t.Fatal(err)
+	}
+	if got := ScanSkipOnDisk(sp); got != "" {
+		t.Fatalf("scan done, yet skipped: %q", got)
+	}
+	// A directory not made yet is as writable as its nearest existing ancestor.
+	var asked string
+	DirAccessible = func(d string) bool { asked = d; return false }
+	if got := ScanSkipOnDisk(spool.Spool{Dir: filepath.Join(sp.Dir, "new", "deeper")}); got == "" || asked != sp.Dir {
+		t.Fatalf("missing dir: %q asked %q", got, asked)
+	}
+}

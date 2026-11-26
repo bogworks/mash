@@ -40,6 +40,30 @@ Stream: stdout. Exit code: 0.
 (what it prints today; unchanged in 0.5.6)
 ```
 
+### A prompt that signing refuses
+
+Stream: stderr. Exit code: 1.
+
+```text
+error: not sent: could not sign: your name is too long
+```
+
+### A prompt a peer refuses
+
+Stream: stderr. Exit code: 1.
+
+```text
+error: prompt refused: 400 malformed Agent-Sender header
+```
+
+### A live prompt past a nonce cap
+
+Stream: stderr. Exit code: 1.
+
+```text
+error: prompt refused: 401 too many recent prompts: try again shortly
+```
+
 ### mash prompt --help
 
 Stream: stdout. Exit code: 0.

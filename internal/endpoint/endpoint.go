@@ -166,6 +166,9 @@ type Endpoint struct {
 
 	// scanning is true while the one-time scan of the stored mail runs (malformed.go): nothing is delivered meanwhile.
 	scanning atomic.Bool
+	// scanSkipDir is the state directory the scan found not writable and so skipped (malformed.go): "" when the scan ran or
+	// was not needed. serve records it for mash status and mash doctor (hookstate.go).
+	scanSkipDir atomic.Pointer[string]
 	// bindInfo is the inbox stream's info as the startup read it (refuse.go bindRefusals, hook.go SetSpool): the scan
 	// reads the stream's range from it, so it costs startup no round trip of its own.
 	bindInfo atomic.Pointer[jetstream.StreamInfo]

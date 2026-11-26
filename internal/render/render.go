@@ -37,6 +37,9 @@ type Mail struct {
 	// Via is "<origin> #<seq>": the sender's signed declaration that this relays or quotes that message of its own
 	// inbox, only when it verified; empty otherwise. Neither mark changes the trust label.
 	Via string
+	// Refused is the class of a refusal (REQ-017) on an entry the views list as refused: such an entry has no sender, no
+	// body and no marks, only its number, time and this class. Empty on every other message.
+	Refused string
 	// Redelivered: a hook began to show this message and was interrupted, so it may already have been seen.
 	Redelivered bool
 }

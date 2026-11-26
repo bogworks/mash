@@ -57,6 +57,7 @@ acme.demo.bob: ready, online
 holds endpoint: yes
 hooks:          ran
 storage:        ok
+refused:        none
 ```
 
 ### With --detail, at a shell with no session
@@ -66,6 +67,47 @@ Stream: stdout. Exit code: 0.
 ```text
 acme.demo.bob: ready, offline
 session:        none
+refused:        none
+```
+
+### With --detail, one class refused
+
+Stream: stdout. Exit code: 0.
+
+```text
+acme.demo.bob: ready, online
+holds endpoint: yes
+hooks:          ran
+storage:        ok
+refused:        1 message: time not in UTC
+```
+
+### With --detail, several classes refused
+
+Stream: stdout. Exit code: 0.
+
+```text
+acme.demo.bob: ready, online
+holds endpoint: yes
+hooks:          ran
+storage:        ok
+refused:        4 messages
+                2 not verified
+                1 time not in UTC
+                1 two sender headers
+```
+
+### With --detail, while the stored-mail check is skipped
+
+Stream: stdout. Exit code: 0.
+
+```text
+acme.demo.bob: ready, online
+holds endpoint: yes
+hooks:          ran
+storage:        ok
+refused:        none
+stored mail:    not checked: ~/.local/state/mash/acme.demo.bob is not writable
 ```
 
 ### Not working
@@ -120,6 +162,15 @@ Stream: stdout. Exit code: 1.
 
 ```text
 acme.demo.bob: not ready: mail is held: its folder cannot be written
+hint: mash doctor
+```
+
+### While stored mail is checked before delivery
+
+Stream: stdout. Exit code: 1.
+
+```text
+acme.demo.bob: not ready: mail is waiting while stored mail is checked
 hint: mash doctor
 ```
 
@@ -178,7 +229,10 @@ usual one. The values are an example.
     "holds_endpoint": true,
     "hooks": "ran",
     "storage": "ok"
-  }
+  },
+  "refused": 0,
+  "refused_by_class": {},
+  "stored_mail": null
 }
 ```
 
@@ -227,7 +281,18 @@ tool), status and doctor report on that session itself, not on a fresh
 connection: 'ready, online' there means this session holds the endpoint and
 its mail will reach it. A hint names the first installed address in
 alphabetical order. At a shell every 'hint:' line goes to stderr; an MCP
-tool's text block puts the hint on the line after the result.
+tool's text block puts the hint on the line after the result. With --detail
+the answer also has a refused row, and with --json it adds refused (an
+integer: how many refused messages the inbox still holds, 0 when none, a
+message on both of the refused lists counted once) and refused_by_class (an
+object with the count of each class, {} when none; a message that was not
+verified is the class `not verified`). Both are always present with --detail
+and absent without it. With --detail the answer also has, only while the first
+start's check of the stored mail is skipped because the state directory cannot
+be written, a stored mail row, and with --json the field stored_mail: null
+otherwise (always present with --detail), and while the skip lasts the object
+{checked: false, dir, reason: "state directory not writable"}; there is no
+checked: true form.
 
 ## What it replaces
 

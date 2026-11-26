@@ -20,13 +20,16 @@ const (
 
 // MailItem is one message as the service reads it. Relay and ReplyTo are empty and zero when the message carries none.
 type MailItem struct {
-	Number  int
-	From    string // the sender's full address, owner.group.name
-	Sent    time.Time
-	New     bool // the session has not been told of it
-	Urgent  bool
-	Kind    string
-	Trust   string
+	Number int
+	From   string // the sender's full address, owner.group.name
+	Sent   time.Time
+	New    bool // the session has not been told of it
+	Urgent bool
+	Kind   string
+	Trust  string
+	// Refused is the class of a refused entry (REQ-017); empty on every other message. A refused entry has no sender,
+	// no body and no marks.
+	Refused string
 	Size    int // bytes of the body
 	ReplyTo int
 	Relay   string
@@ -45,7 +48,8 @@ type InboxQuery struct {
 // of the whole inbox, which the query does not change.
 type InboxView struct {
 	Endpoint string // the address of the endpoint whose inbox it is
-	Total    int    // every message the inbox holds
+	Total    int    // every message the inbox holds, refused ones included
+	Refused  int    // how many of them were refused (malformed or not verified)
 	Waiting  int    // the messages the session has not been told of, from the server's consumer
 	// NewUrgent is how many of the waiting messages are urgent: counted over all of them, whatever the query selects.
 	NewUrgent int
@@ -112,6 +116,8 @@ type InboxMessage struct {
 	Kind    string `json:"kind"`
 	Trust   string `json:"trust"`
 	Preview string `json:"preview"`
+	// Reason is the class of a refused entry (one of the frozen class strings); present on refused entries only.
+	Reason string `json:"reason,omitempty"`
 }
 
 // InboxResult is the listing and the counts. The JSON form is always this object. wake_count and wake_age are the
@@ -121,6 +127,7 @@ type InboxResult struct {
 	Total         int            `json:"total"`
 	New           int            `json:"new"`
 	Urgent        int            `json:"urgent"`
+	Refused       int            `json:"refused"`
 	Exact         bool           `json:"exact"`
 	WakeCount     int            `json:"wake_count"`
 	OverWakeCount bool           `json:"over_wake_count"`
@@ -138,6 +145,7 @@ type InboxResult struct {
 
 type inboxRow struct {
 	number, from, when, state, urgent, kind, trust, size, line string
+	refused                                                    string // the class, on a refused entry
 }
 
 // previewCols is the width the preview is cut for: a table of 80 columns whose lines stop at 79, so that no line fills
@@ -180,7 +188,11 @@ func (r InboxResult) Text(o cmdcore.Opts) string {
 	if !r.Exact { // a count that is not exact says so in the count itself (#958)
 		about, total = "about ", "About "+total
 	}
-	b.WriteString(total + " for " + r.Endpoint + ", " + about + strconv.Itoa(r.New) + " new, " + about + strconv.Itoa(r.Urgent) + " urgent.")
+	b.WriteString(total + " for " + r.Endpoint + ", " + about + strconv.Itoa(r.New) + " new, " + about + strconv.Itoa(r.Urgent) + " urgent")
+	if r.Refused > 0 {
+		b.WriteString(", " + strconv.Itoa(r.Refused) + " refused")
+	}
+	b.WriteString(".")
 	if o.Detail && !r.Exact { // why, directly under the count line; Opts.Detail is read here because the result is not a Detailer, which would add a param to the MCP tool
 		for _, w := range r.why {
 			b.WriteString("\nexact: no (" + w + ")")
@@ -244,12 +256,12 @@ var Inbox = cmdcore.Command[InboxParams, InboxResult]{
 			return InboxResult{}, err
 		}
 		at := now(env)
-		r := InboxResult{Endpoint: v.Endpoint, Total: v.Total, New: v.Waiting, Urgent: v.NewUrgent, WakeCount: v.WakeCount, WakeAge: v.WakeAgeText,
+		r := InboxResult{Endpoint: v.Endpoint, Total: v.Total, Refused: v.Refused, New: v.Waiting, Urgent: v.NewUrgent, WakeCount: v.WakeCount, WakeAge: v.WakeAgeText,
 			Messages: []InboxMessage{}, wide: p.Wide, count: v.WakeCount}
 		if r.WakeAge == "" {
 			r.WakeAge = "0"
 		}
-		r.Exact = v.Capped == "" && !(v.NoServe && v.Total > 0) && !v.OutOfOrder
+		r.Exact = v.Capped == "" && !(v.NoServe && v.Total > v.Refused) && !v.OutOfOrder
 		if !r.Exact {
 			r.why = nonEmpty(v.Capped, noServe(v), outOfOrder(v))
 		}
@@ -261,6 +273,11 @@ var Inbox = cmdcore.Command[InboxParams, InboxResult]{
 			r.OverWakeAge = v.WakeAge > 0 && age > v.WakeAge
 		}
 		for _, m := range v.Messages {
+			if m.Refused != "" { // no sender, no body, no preview: the class is the whole row (TO-1)
+				r.rows = append(r.rows, inboxRow{number: strconv.Itoa(m.Number), from: "?", when: render.RelTime(at, m.Sent), state: "refused",
+					urgent: "-", kind: "-", trust: "refused", size: "-", line: m.Refused, refused: m.Refused})
+				continue
+			}
 			state := "read"
 			if m.New {
 				state = "new"
@@ -271,6 +288,11 @@ var Inbox = cmdcore.Command[InboxParams, InboxResult]{
 		cut := previewCols - inboxPrefixWidth(r.rows)
 		for i, m := range v.Messages {
 			x := r.rows[i]
+			if x.refused != "" {
+				r.Messages = append(r.Messages, InboxMessage{Number: m.Number, From: "?", Sent: m.Sent.UTC().Format(time.RFC3339), State: "refused",
+					Trust: "refused", Reason: x.refused})
+				continue
+			}
 			r.Messages = append(r.Messages, InboxMessage{Number: m.Number, From: m.From, Sent: m.Sent.UTC().Format(time.RFC3339), State: x.state,
 				Urgent: m.Urgent, Kind: m.Kind, Trust: m.Trust, Preview: render.Cut(x.line, cut)})
 		}

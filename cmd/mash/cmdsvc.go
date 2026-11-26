@@ -333,6 +333,9 @@ func boundedInt(n uint64) int {
 
 // mailItem is a message as the commands read it: the sender's full address, the body safe to print.
 func mailItem(m render.Mail, floor uint64, waiting bool) cmds.MailItem {
+	if m.Refused != "" { // a refused entry: its number, its time and its class, nothing else
+		return cmds.MailItem{Number: boundedInt(m.Seq), From: "?", Sent: m.At, Trust: string(m.Trust), Refused: m.Refused}
+	}
 	it := cmds.MailItem{Number: boundedInt(m.Seq), From: sap.Display(m.From), Sent: m.At, New: waiting && m.Seq > floor, Urgent: m.Urgent,
 		Kind: m.Kind.String(), Trust: string(m.Trust), Size: len(m.Body), ReplyTo: boundedInt(m.ReplyTo), Body: render.Plain(m.Body)}
 	if origin, seq, ok := strings.Cut(m.Via, " #"); ok {
@@ -350,7 +353,7 @@ func inboxOn(ctx context.Context, ep *endpoint.Endpoint, q cmds.InboxQuery, w wa
 		return cmds.InboxView{}, plainFail(err)
 	}
 	st := r.State
-	v := cmds.InboxView{Endpoint: ep.Display(), Total: st.Total, Waiting: st.Waiting, NewUrgent: r.NewUrgent, OldestWaiting: st.OldestWaiting,
+	v := cmds.InboxView{Endpoint: ep.Display(), Total: st.Total, Refused: r.Refused, Waiting: st.Waiting, NewUrgent: r.NewUrgent, OldestWaiting: st.OldestWaiting,
 		WakeCount: w.count, WakeAge: w.age, WakeAgeText: w.text, Capped: cappedWhy(r), NoServe: noServe, OutOfOrder: r.AckedOutOfOrder, Messages: make([]cmds.MailItem, 0, len(r.Mail))}
 	for _, m := range r.Mail {
 		v.Messages = append(v.Messages, mailItem(m, st.AckFloor, st.Waiting > 0))
@@ -384,7 +387,7 @@ func messageOn(ctx context.Context, ep *endpoint.Endpoint, number int) (cmds.Rea
 	}
 	var rf *endpoint.RefusedMessageError
 	if errors.As(err, &rf) {
-		return cmds.ReadView{}, cmdcore.RefusedMessage(int(rf.Seq))
+		return cmds.ReadView{}, cmdcore.RefusedFor(int(rf.Seq), rf.Class)
 	}
 	if err != nil {
 		return cmds.ReadView{}, plainFail(err)

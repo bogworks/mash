@@ -50,6 +50,17 @@ func (s *statusSource) scanning() bool {
 	return st != nil && st.ep != nil && st.ep.StoredScanRunning()
 }
 
+// scanSkipped is the state directory that made the session skip the stored-mail scan, "" when it did not.
+func (s *statusSource) scanSkipped() string {
+	if s.state == nil {
+		return ""
+	}
+	if st := s.state.Load(); st != nil && st.ep != nil {
+		return st.ep.StoredScanSkipped()
+	}
+	return ""
+}
+
 // hookState is the session's hook state (endpoint.HookRan and the others): not_run until a spool is bound.
 func (s *statusSource) hookState() string {
 	if s.state != nil {
@@ -106,7 +117,7 @@ type sessionSvc struct {
 }
 
 func (s sessionSvc) Health(ctx context.Context) (cmds.HealthReport, error) {
-	rep, err := (&healthSvc{cfg: s.src.cfg, cfgErr: s.src.cfgErr, session: true, mailHeld: s.src.mailHeld, scanning: s.src.scanning, lease: s.src.lease, hooks: s.src.hookState}).Health(ctx)
+	rep, err := (&healthSvc{cfg: s.src.cfg, cfgErr: s.src.cfgErr, session: true, mailHeld: s.src.mailHeld, scanning: s.src.scanning, scanSkipped: s.src.scanSkipped, lease: s.src.lease, hooks: s.src.hookState}).Health(ctx)
 	if err == nil {
 		rep.Session = s.src.sessionNow(rep.Lease == "")
 	}

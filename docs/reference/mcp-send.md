@@ -109,3 +109,11 @@ The call returns this text with `isError` set.
 error: acme.demo.bob cannot sign in: the server refused its credentials
 hint: mash doctor
 ```
+
+### A send that signing refuses
+
+The call returns this text with `isError` set.
+
+```text
+error: not sent: could not sign: your name is too long
+```

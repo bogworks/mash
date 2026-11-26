@@ -147,6 +147,22 @@ error: acme.demo.bob cannot sign in: the server refused its credentials
 hint: mash doctor
 ```
 
+### A send that signing refuses
+
+Stream: stderr. Exit code: 1.
+
+```text
+error: not sent: could not sign: your name is too long
+```
+
+### A reply that signing refuses
+
+Stream: stderr. Exit code: 1.
+
+```text
+error: not sent: could not sign: your name is too long
+```
+
 ### A deleted endpoint here
 
 Stream: stderr. Exit code: 1.

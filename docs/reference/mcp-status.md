@@ -42,7 +42,10 @@ which contains the usual one. The values are an example.
     "holds_endpoint": true,
     "hooks": "ran",
     "storage": "ok"
-  }
+  },
+  "refused": 0,
+  "refused_by_class": {},
+  "stored_mail": null
 }
 ```
 

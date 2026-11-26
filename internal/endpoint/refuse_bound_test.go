@@ -80,8 +80,15 @@ func TestRecordedRefusalSurvivesSettingAndDirectoryChange(t *testing.T) {
 	if ms, err := c.Inbox(ctx, 20); err != nil || len(ms) != 0 {
 		t.Fatalf("inbox lists refused mail: %+v %v", ms, err)
 	}
-	if r, err := c.ReadInbox(ctx, InboxQuery{Limit: 20}); err != nil || len(r.Mail) != 0 {
+	// the view lists a refused message by its class alone: no sender, no body (REQ-006, TO-1)
+	if r, err := c.ReadInbox(ctx, InboxQuery{Limit: 20}); err != nil || len(r.Mail) != 4 || r.Refused != 4 || r.State.Total != 4 {
 		t.Fatalf("ReadInbox: %+v %v", r, err)
+	} else {
+		for _, m := range r.Mail {
+			if m.Refused != ClassNotVerified || m.From != "?" || m.Trust != TrustRefused || len(m.Body) != 0 {
+				t.Fatalf("refused entry: %+v", m)
+			}
+		}
 	}
 	for n := uint64(1); n <= 4; n++ {
 		var rf *RefusedMessageError

@@ -14,6 +14,7 @@ import (
 	"github.com/bogworks/mash/internal/cliframe"
 	"github.com/bogworks/mash/internal/cmdcore"
 	"github.com/bogworks/mash/internal/cmdcore/cmds"
+	"github.com/bogworks/mash/internal/sapsdk"
 )
 
 // fakeBox is a Mailbox over a fixed inbox: it applies the query the way the service does (after, new, newest-limit).
@@ -493,6 +494,21 @@ func TestInboxAndReadMatchesSpec(t *testing.T) {
 		case "With --wide":
 			_, got, _ = runInbox(b, cliframe.Global{}, "--wide")
 			got = strings.TrimRight(got, "\n")
+		case "A refused message":
+			_, got, _ = runInbox(refusedBox(), cliframe.Global{})
+			got = strings.TrimRight(got, "\n")
+		case "Every kind side by side":
+			_, got, _ = runInbox(everyKindBox(), cliframe.Global{})
+			got = strings.TrimRight(got, "\n")
+		case "--json, a refused message":
+			_, js, _ := runInbox(refusedBox(), cliframe.Global{JSON: true})
+			var ind bytes.Buffer
+			if err := json.Indent(&ind, []byte(js), "", " "); err != nil {
+				t.Fatalf("%s: %v %s", oc["case"], err, js)
+			}
+			got = ind.String()
+		case "The class strings":
+			got = strings.Join(frozenClasses(), "\n")
 		case "Empty":
 			_, got, _ = runInbox(&fakeBox{view: cmds.InboxView{Endpoint: "acme.demo.alice"}}, cliframe.Global{})
 			got = strings.TrimRight(got, "\n")
@@ -563,6 +579,10 @@ func TestInboxAndReadMatchesSpec(t *testing.T) {
 			rb := readBox()
 			rb.err = cmdcore.RefusedMessage(12)
 			code, out, errs = runRead(rb, cliframe.Global{}, "12")
+		case "A message refused for its header":
+			rb := readBox()
+			rb.err = cmdcore.RefusedFor(3, "control character in name")
+			code, out, errs = runRead(rb, cliframe.Global{}, "3")
 		case "A shell reports what serve delivered":
 			continue // a description in round brackets, not output: internal/endpoint/refuse_delivered_test.go holds the behaviour
 		case "A deleted endpoint here":
@@ -664,5 +684,111 @@ func TestInboxCountExactness(t *testing.T) {
 	}
 	if _, out, _ := runInbox(b, cliframe.Global{JSON: true}); !strings.Contains(out, `"exact":true`) && !strings.Contains(out, `"exact": true`) {
 		t.Errorf("empty inbox json: %s", out)
+	}
+}
+
+// frozenClasses are the class strings of REQ-017, in the order of the frozen list.
+func frozenClasses() []string {
+	return []string{sapsdk.ClassNotVerified, sapsdk.ClassHeaderTooLong, sapsdk.ClassTimeNotUTC, sapsdk.ClassControlChar, sapsdk.ClassNameTooLong,
+		sapsdk.ClassBrokenChar, sapsdk.ClassFieldTwice, sapsdk.ClassSpaceInSubject, sapsdk.ClassSigUnreadable, sapsdk.ClassEmpty, sapsdk.ClassTwoHeaders,
+		sapsdk.ClassUnreadable, sapsdk.ClassNotJSON, sapsdk.ClassNoVersion, sapsdk.ClassVersionType, sapsdk.ClassFieldType, sapsdk.ClassAccountUser,
+		sapsdk.ClassIncomplete, sapsdk.ClassNonce, sapsdk.ClassTimeInvalid}
+}
+
+// refusedBox is the inbox of TO-1's first drawing: two messages from bob and a third that was refused for its header.
+func refusedBox() *fakeBox {
+	return &fakeBox{view: cmds.InboxView{Endpoint: "acme.demo.alice", Total: 3, Waiting: 1, Refused: 1, WakeCount: 15, WakeAge: time.Hour, WakeAgeText: "1h",
+		OldestWaiting: ago(10 * time.Second),
+		Messages: []cmds.MailItem{
+			{Number: 1, From: "acme.demo.bob", Sent: ago(2 * time.Hour), Kind: "task", Trust: "verified", Size: 14, Body: "lunch at noon?"},
+			{Number: 2, From: "acme.demo.bob", Sent: ago(10 * time.Second), New: true, Kind: "task", Trust: "verified", Size: 6, Body: "ready?"},
+			{Number: 3, From: "?", Sent: ago(time.Hour), Refused: "control character in name"},
+		}}}
+}
+
+// everyKindBox is TO-1's second drawing: the five trust kinds, then a refused message for each of the other classes.
+func everyKindBox() *fakeBox {
+	ms := []cmds.MailItem{
+		{Number: 1, From: "o.dev.alice", Sent: ago(3 * time.Minute), Kind: "task", Trust: "verified", Body: "verified: real mash send from one endpoint to another"},
+		{Number: 2, From: "UCNY\u20264UHK", Sent: ago(3 * time.Minute), Kind: "task", Trust: "claimed", Body: "claimed: header without a signature on this endpoint"},
+		{Number: 3, From: "UCVG\u20263VVW", Sent: ago(3 * time.Minute), Kind: "task", Trust: "unknown-signer", Body: "unknown-signer: signed by a key nobody here lists"},
+		{Number: 4, From: "?", Sent: ago(3 * time.Minute), Kind: "task", Trust: "absent", Body: "absent: no Agent-Sender header at all in this message"},
+		{Number: 5, From: "o.dev.frank", Sent: ago(3 * time.Minute), Kind: "task", Trust: "stale", Body: "stale: signed an hour before the message was stored here"},
+	}
+	for i, class := range frozenClasses()[:12] {
+		at := 2 * time.Minute
+		if i >= 6 {
+			at = time.Minute
+		}
+		ms = append(ms, cmds.MailItem{Number: 6 + i, From: "?", Sent: ago(at), Refused: class})
+	}
+	return &fakeBox{view: cmds.InboxView{Endpoint: "o.dev.bob", Total: 17, Refused: 12, WakeCount: 15, WakeAge: time.Hour, WakeAgeText: "1h", Messages: ms}}
+}
+
+// A refused entry is a row with the state refused, `?` as sender, `-` for urgent and kind and the class as the message:
+// no body, no preview (TO-1). The header counts it after the urgent count, only when there is one.
+func TestInboxRefusedRowHasNoBodyOrPreview(t *testing.T) {
+	b := refusedBox()
+	b.view.Messages[2].Body = "THE-SECRET-BODY" // a view must never carry it, but if one did the row must not show it
+	b.view.Messages[2].Size = 99
+	code, out, _ := runInbox(b, cliframe.Global{}, "--wide")
+	if code != 0 || strings.Contains(out, "THE-SECRET-BODY") || !strings.Contains(out, "refused") || !strings.Contains(out, "control character in name") {
+		t.Errorf("wide: %d %q", code, out)
+	}
+	_, js, _ := runInbox(b, cliframe.Global{JSON: true})
+	if strings.Contains(js, "THE-SECRET-BODY") {
+		t.Errorf("the JSON carries the body: %s", js)
+	}
+	var o struct {
+		Refused  int
+		Messages []map[string]any
+	}
+	if err := json.Unmarshal([]byte(js), &o); err != nil || o.Refused != 1 || len(o.Messages) != 3 {
+		t.Fatalf("%v %s", err, js)
+	}
+	m := o.Messages[2]
+	want := map[string]any{"number": 3.0, "from": "?", "sent": ago(time.Hour).Format(time.RFC3339), "state": "refused", "urgent": false, "kind": "", "trust": "refused", "preview": "", "reason": "control character in name"}
+	if !reflect.DeepEqual(m, want) {
+		t.Errorf("refused entry %v\nwant %v", m, want)
+	}
+	if _, has := o.Messages[0]["reason"]; has {
+		t.Errorf("a message that was not refused has a reason: %v", o.Messages[0])
+	}
+	// with none refused: no `, N refused` in the header, and `refused` is 0 in the JSON
+	_, out, _ = runInbox(specBox(), cliframe.Global{})
+	if strings.Contains(out, "refused") {
+		t.Errorf("no refused message, but %q", out)
+	}
+	_, js, _ = runInbox(specBox(), cliframe.Global{JSON: true})
+	if !strings.Contains(js, `"refused":0`) {
+		t.Errorf("refused is not always present: %s", js)
+	}
+}
+
+// A refused message is no part of what is waiting: it is listed and counted in the total, and nowhere else.
+func TestInboxRefusedIsNotWaiting(t *testing.T) {
+	_, out, _ := runInbox(refusedBox(), cliframe.Global{})
+	if !strings.HasPrefix(out, "3 messages for acme.demo.alice, 1 new, 0 urgent, 1 refused.\n") {
+		t.Errorf("%q", out)
+	}
+}
+
+// mash read of a refused message is the refusal and its class, never the body, in both doors (TO-3).
+func TestReadRefusedGivesTheClassAlone(t *testing.T) {
+	for _, tc := range []struct{ class, want string }{
+		{"control character in name", "error: message 3 was refused: control character in name\nhint: mash doctor\n"},
+		{"not verified", "error: message 3 was refused: it was not verified\nhint: mash doctor\n"},
+		{"", "error: message 3 was refused: it was not verified\nhint: mash doctor\n"},
+	} {
+		rb := readBox()
+		rb.err = cmdcore.RefusedFor(3, tc.class)
+		code, out, errs := runRead(rb, cliframe.Global{}, "3")
+		if code != 1 || out != "" || errs != tc.want {
+			t.Errorf("%q: %d %q %q", tc.class, code, out, errs)
+		}
+		code, out, errs = runRead(rb, cliframe.Global{JSON: true}, "3")
+		if code != 1 || !strings.Contains(out, "was refused") || strings.Contains(out, `"body"`) {
+			t.Errorf("%q json: %d %q %q", tc.class, code, out, errs)
+		}
 	}
 }

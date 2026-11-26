@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/bogworks/mash/internal/cliframe"
 	"github.com/bogworks/mash/internal/cmdcore"
+	"github.com/bogworks/mash/internal/cmdcore/render"
 	"github.com/bogworks/mash/internal/config"
 )
 
@@ -34,6 +36,37 @@ const ReasonMailHeld = "mail is held: its folder cannot be written"
 // ReasonStoredScan is status's reason, and the delivery row's detail, while the first start of the switched-on build checks
 // the stored mail before it delivers any (TO-14). It happens once; there is nothing to do.
 const ReasonStoredScan = "mail is waiting while stored mail is checked"
+
+// StoredMailReason is why the scan was skipped, as status --detail --json words it.
+const StoredMailReason = "state directory not writable"
+
+// StoredMailFix is the stored mail row's fix in doctor --json.
+const StoredMailFix = "make that folder writable, then restart the session"
+
+// StoredMail is the "stored_mail" object of status --detail --json: present only while the first start's scan of the stored
+// mail is skipped because the state directory is not writable.
+type StoredMail struct {
+	Checked bool   `json:"checked"`
+	Dir     string `json:"dir"`
+	Reason  string `json:"reason"`
+}
+
+// storedMailNotChecked is what status --detail and doctor say after "not checked: ".
+func storedMailNotChecked(dir string) string { return "not checked: " + dir + " is not writable" }
+
+// StoredMailCheck is doctor's stored mail row for a skipped scan in dir; it is a skip, so it changes neither the verdict nor
+// the exit status.
+func StoredMailCheck(dir string) HealthCheck {
+	return HealthCheck{Name: CheckStoredMail, State: CheckSkip, Detail: storedMailNotChecked(dir), Fix: StoredMailFix}
+}
+
+// storedMailLine is the stored mail row of status --detail ("" when the scan is not skipped).
+func storedMailLine(dir string) string {
+	if dir == "" {
+		return ""
+	}
+	return "\nstored mail:    " + storedMailNotChecked(dir)
+}
 
 // The ways a session can fail to hold its endpoint (HealthReport.Lease), and the words for them. Asked inside a session,
 // status and doctor report on that session itself: "ready, online" means this session holds the endpoint.
@@ -137,6 +170,8 @@ const (
 	// CheckDelivery is whether mail that arrives can be stored on this machine. It is checked only inside a session.
 	CheckDelivery = "delivery"
 	CheckRefused  = "refused"
+	// CheckStoredMail is the row doctor shows only while the stored-mail scan is skipped for want of a writable state dir.
+	CheckStoredMail = "stored mail"
 )
 
 // The reason codes of status --detail: a fixed word beside the free-text reason. Each names the failure that produces it.
@@ -157,6 +192,71 @@ const (
 	CodeUnknown               = "unknown"                 // a failure that fits none of the others; the reason says what was seen
 	CodeCheckingStoredMail    = "checking_stored_mail"    // the first start's stored-mail check is running
 )
+
+// RefusedCounts is how many refused messages the endpoint's inbox still holds, in all and for each class (REQ-006). A
+// message that was refused for its header and one that was not verified are both counted; one on both lists counts once.
+type RefusedCounts struct {
+	Total   int
+	ByClass map[string]int
+}
+
+// classCount is one class and its count, for the lines that name them.
+type classCount struct {
+	class string
+	n     int
+}
+
+// sortedClasses lists the classes largest count first, ties by class name.
+func (r RefusedCounts) sortedClasses() []classCount {
+	out := make([]classCount, 0, len(r.ByClass))
+	for c, n := range r.ByClass {
+		out = append(out, classCount{c, n})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].n != out[j].n {
+			return out[i].n > out[j].n
+		}
+		return out[i].class < out[j].class
+	})
+	return out
+}
+
+// byClass is the counts as the JSON carries them: an object, never null.
+func (r RefusedCounts) byClass() map[string]int {
+	if r.ByClass == nil {
+		return map[string]int{}
+	}
+	return r.ByClass
+}
+
+// RefusedDetail is the refused row's detail (TO-5): the count in words, "no mail was refused" with none.
+func RefusedDetail(n int) string {
+	switch n {
+	case 0:
+		return "no mail was refused"
+	case 1:
+		return "1 message was refused"
+	}
+	return fmt.Sprintf("%d messages were refused", n)
+}
+
+// refusedStatusLines is the refused row of status --detail (TO-4): none; or the total and the one class on a line; or the
+// total and then one line per class under the value column.
+func (r RefusedCounts) statusLines() string {
+	const label = "refused:        "
+	cs := r.sortedClasses()
+	switch {
+	case r.Total == 0 || len(cs) == 0:
+		return label + "none"
+	case len(cs) == 1:
+		return label + render.Plural(r.Total, "message") + ": " + cs[0].class
+	}
+	lines := []string{label + render.Plural(r.Total, "message")}
+	for _, c := range cs {
+		lines = append(lines, strings.Repeat(" ", len(label))+fmt.Sprintf("%d %s", c.n, c.class))
+	}
+	return strings.Join(lines, "\n")
+}
 
 // HealthCheck is one row the service found. Detail is what the row says after its state ("" says nothing). Fix is the
 // command or step that mends a warn or fail row ("" when none is known). Reason is how status words a failing row when
@@ -185,6 +285,11 @@ type HealthReport struct {
 	// StoredScan is true while serve checks the stored mail before it delivers any, once, at the first start of the
 	// switched-on build: status says not ready with ReasonStoredScan.
 	StoredScan bool
+	// StoredSkipDir is the state directory that was not writable when the scan was due, so that it was skipped; "" when it
+	// ran or was not needed. Status --detail and doctor show it (a skip, not a failure).
+	StoredSkipDir string
+	// Refused is the refused messages the inbox still holds, from the endpoint's two lists (the refused row, status --detail).
+	Refused RefusedCounts
 	// Lease is "" at a shell and in a session that holds its endpoint; otherwise LeaseOther, LeaseLost or LeaseFailed
 	// (LeaseCause says why, for the last). A session that does not hold its endpoint is not online and not ready.
 	Lease      string
@@ -272,6 +377,8 @@ type StatusResult struct {
 	// The fuller answer (DetailValue): not part of the usual object.
 	reasonCode string
 	session    *SessionState
+	refused    RefusedCounts
+	storedSkip string
 }
 
 // StatusDetail is status's fuller object: the usual four things, then reason_code and session. reason_code is a fixed
@@ -283,20 +390,30 @@ type StatusDetail struct {
 	Reason     *string       `json:"reason"`
 	ReasonCode *string       `json:"reason_code"`
 	Session    *SessionState `json:"session"`
+	// Refused is how many refused messages the inbox holds (0 when none) and RefusedByClass the count for each class ({}
+	// when none): always present with --detail (TO-4).
+	Refused        int            `json:"refused"`
+	RefusedByClass map[string]int `json:"refused_by_class"`
+	// StoredMail is null unless the scan of the stored mail is skipped for want of a writable state directory.
+	StoredMail *StoredMail `json:"stored_mail"`
 }
 
 // DetailValue is the fuller object, which contains the usual one.
 func (r StatusResult) DetailValue() any {
-	return StatusDetail{r.Endpoint, r.Ready, r.Online, r.Reason, strPtr(r.reasonCode), r.session}
+	var sm *StoredMail
+	if r.storedSkip != "" {
+		sm = &StoredMail{Dir: r.storedSkip, Reason: StoredMailReason}
+	}
+	return StatusDetail{r.Endpoint, r.Ready, r.Online, r.Reason, strPtr(r.reasonCode), r.session, r.refused.Total, r.refused.byClass(), sm}
 }
 
 // DetailText is the session's state as 'label: value' lines, or "session: none" at a shell.
 func (r StatusResult) DetailText(cmdcore.Opts) string {
 	if r.session == nil {
-		return "session:        none"
+		return "session:        none\n" + r.refused.statusLines() + storedMailLine(r.storedSkip)
 	}
 	yn := map[bool]string{true: "yes", false: "no"}
-	return fmt.Sprintf("holds endpoint: %s\nhooks:          %s\nstorage:        %s", yn[r.session.HoldsEndpoint], r.session.Hooks, r.session.Storage)
+	return fmt.Sprintf("holds endpoint: %s\nhooks:          %s\nstorage:        %s\n%s", yn[r.session.HoldsEndpoint], r.session.Hooks, r.session.Storage, r.refused.statusLines()+storedMailLine(r.storedSkip))
 }
 
 // noSessionEndpoint is the answer of a session that names no endpoint.
@@ -372,7 +489,7 @@ var Status = cmdcore.Command[StatusParams, StatusResult]{
 		if err != nil {
 			return StatusResult{}, err
 		}
-		r := StatusResult{Endpoint: strPtr(rep.Endpoint), Ready: true, session: rep.Session}
+		r := StatusResult{Endpoint: strPtr(rep.Endpoint), Ready: true, session: rep.Session, refused: rep.Refused, storedSkip: rep.StoredSkipDir}
 		for _, c := range rep.Checks {
 			if c.State == CheckFail && statusChecks(c.Name) {
 				reason := c.Reason
@@ -422,12 +539,16 @@ type DoctorResult struct {
 	Problems int           `json:"problems"`
 	Warnings int           `json:"warnings"`
 	Checks   []DoctorCheck `json:"checks"`
+	// Refused and RefusedByClass are the same two facts as in status --detail (TO-5): always present, 0 and {} with none.
+	Refused        int            `json:"refused"`
+	RefusedByClass map[string]int `json:"refused_by_class"`
 	// HintText is the one hint the doctor ends with, null when there is none: a command of ours that fixes the first
 	// problem. Rows' own fix fields name each row's command, and only this one is offered.
 	HintText *string `json:"hint"`
 
-	strict bool
-	hint   string
+	strict  bool
+	hint    string
+	refused RefusedCounts
 }
 
 // Text is a row per check (the name in 10 columns, the state in 6, then the detail), a blank line, and the count:
@@ -439,12 +560,17 @@ func (r DoctorResult) Text(cmdcore.Opts) string {
 		return cmdcore.NoEndpoint(cmdcore.NoneForSession, "", nil).Msg
 	}
 	var b strings.Builder
+	nameW := 10 // the longest name and two; the usual rows are 8 and under
+	for _, c := range r.Checks {
+		nameW = max(nameW, len(c.Name)+2)
+	}
+	indent := strings.Repeat(" ", nameW+6) // the detail column
 	for _, c := range r.Checks {
 		state := c.State
 		if state == CheckFail {
 			state = "FAIL"
 		}
-		line := fmt.Sprintf("%-10s%-6s", c.Name, state)
+		line := fmt.Sprintf("%-*s%-6s", nameW, c.Name, state)
 		extra := ""
 		if c.Detail != nil {
 			detail := config.Clean(*c.Detail)
@@ -452,18 +578,23 @@ func (r DoctorResult) Text(cmdcore.Opts) string {
 			if c.Name == CheckDelivery && c.State == CheckFail {
 				for _, head := range []string{ReasonMailHeld, ReasonCouldNotTake} {
 					if path, ok := strings.CutPrefix(detail, head+": "); ok {
-						detail, extra = head+":", "\n"+strings.Repeat(" ", 16)+path
+						detail, extra = head+":", "\n"+indent+path
 					}
 				}
 			}
 			// a folder too long for the line goes under the detail column
 			if path, ok := strings.CutPrefix(detail, CannotWrite); ok && c.Name == CheckDelivery && len(line+detail) > 80 {
-				detail, extra = strings.TrimSpace(CannotWrite), "\n"+strings.Repeat(" ", 16)+path
+				detail, extra = strings.TrimSpace(CannotWrite), "\n"+indent+path
 			}
 			if w, ok := hookRowWraps[detail]; ok && c.Name == CheckDelivery {
-				detail, extra = w[0], "\n"+strings.Repeat(" ", 16)+w[1]
+				detail, extra = w[0], "\n"+indent+w[1]
 			}
 			line += detail
+		}
+		if c.Name == CheckRefused && c.State == CheckOK { // one line under the row for each class, under the detail column
+			for _, cc := range r.refused.sortedClasses() {
+				extra += "\n" + indent + fmt.Sprintf("%d %s", cc.n, cc.class)
+			}
 		}
 		b.WriteString(strings.TrimRight(line, " ") + extra + "\n")
 	}
@@ -512,7 +643,8 @@ var Doctor = cmdcore.Command[DoctorParams, DoctorResult]{
 		if err != nil {
 			return DoctorResult{}, err
 		}
-		r := DoctorResult{Endpoint: strPtr(rep.Endpoint), Checks: []DoctorCheck{}, strict: p.Strict}
+		r := DoctorResult{Endpoint: strPtr(rep.Endpoint), Checks: []DoctorCheck{}, strict: p.Strict, Refused: rep.Refused.Total,
+			RefusedByClass: rep.Refused.byClass(), refused: rep.Refused}
 		checks := rep.Checks
 		if cc, ok := env.Svc.(ClaudeChecker); ok && cc != nil { // the claude row sits right after config and waits on nothing
 			row := cc.ClaudeCheck(ctx)
@@ -532,6 +664,15 @@ var Doctor = cmdcore.Command[DoctorParams, DoctorResult]{
 				}
 				checks = append(append(append([]HealthCheck{}, checks[:at]...), row), checks[at:]...)
 			}
+		}
+		if rep.StoredSkipDir != "" { // the scan was skipped: a skip row after delivery, which changes no count
+			at := len(checks)
+			for i, c := range checks {
+				if c.Name == CheckDelivery {
+					at = i + 1
+				}
+			}
+			checks = append(append(append([]HealthCheck{}, checks[:at]...), StoredMailCheck(rep.StoredSkipDir)), checks[at:]...)
 		}
 		var fixes, warnFixes []string
 		for _, c := range checks {

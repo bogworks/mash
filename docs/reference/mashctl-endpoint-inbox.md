@@ -51,9 +51,21 @@ Stream: stdout. Exit code: 0.
 ```text
 2 messages for acme.demo.bob, 1 not delivered.
 
-NUMBER  FROM   SENT    TRUST     DELIVERED  KIND  SIZE
+NUMBER  FROM   SENT    TRUST     DELIVERED  KIND  SIZE  REASON
 7       alice  1m ago  verified  yes        task  48 B
-8       ?      1m ago  absent    no         task  61 B
+8       ?      1m ago  absent    no         task  61 B  not verified
+```
+
+### A refused message
+
+Stream: stdout. Exit code: 0.
+
+```text
+2 messages for acme.demo.bob, 1 not delivered, 1 refused as malformed.
+
+NUMBER  FROM   SENT    TRUST     DELIVERED  KIND  SIZE  REASON
+7       alice  1m ago  verified  yes        task  48 B
+8       ?      1m ago  refused   no         -     61 B  two sender headers
 ```
 
 ## JSON
@@ -65,6 +77,7 @@ With `--json` the result is this shape. The values are an example.
   "address": "acme.demo.bob",
   "total": 2,
   "undelivered": 1,
+  "refused": 1,
   "messages": [
     {
       "number": 7,
@@ -82,7 +95,8 @@ With `--json` the result is this shape. The values are an example.
       "delivered": false,
       "kind": "task",
       "size": 61,
-      "when": "2026-11-26T15:04:05Z"
+      "when": "2026-11-26T15:04:05Z",
+      "reason": "not verified"
     }
   ]
 }
@@ -98,7 +112,13 @@ An administrator sees everything stored. FROM is the address a message claims,
 and '?' when it names no sender at all (the same '?' in the JSON); messages
 are delivered in order, so a delivered message never follows an undelivered
 one; TRUST says whether that claim was proven, in mash's own labels: verified,
-unknown-signer, claimed, absent, stale or forged. DELIVERED is yes or no, and
+unknown-signer, claimed, absent, stale, forged or refused. `refused` is a
+message with a header fault: its REASON is the class (the same words as mash
+inbox shows), and the JSON has the same class as 'reason', present on a
+refused message and on a message that was not verified, absent on the others.
+'refused' in the JSON object counts every message mash refused, for either
+reason, that is still in the stream; a message that was not verified keeps its
+trust label and gets `not verified` as its reason. DELIVERED is yes or no, and
 means only that the endpoint took the message off the server. Whether the
 endpoint then showed it or refused it is decided on the endpoint's own machine
 and is not something mashctl can see: by default an endpoint refuses

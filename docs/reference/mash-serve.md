@@ -105,16 +105,18 @@ second line. Refusing unverified mail. Only mail whose trust is 'verified'
 reaches the session, the inbox listing and mash read. Mail that is unsigned,
 signed by an unknown key, claimed but unproven, or stale is dropped and
 counted; mash doctor shows the count. The sender is not told.
---accept-unverified delivers it instead, labelled. A refused message is
-invisible at a shell too: it is not in mash inbox's count or listing, and mash
-read on its number says it was refused. When serve refuses a message it writes
-one line to its log: 'refused message 12 from acme.demo.x: not verified
-(absent)', where the address is the one the message claims, with control
-characters escaped, and the word in brackets is the trust label. What
-'waiting' means for the wake: a message that has arrived and has not yet
-reached the session. In a session that takes delivery by channel alone, a
-message reaches it on arrival, so nothing waits and the wake never fires; the
-wake exists for sessions where mail can pile up.
+--accept-unverified delivers it instead, labelled. A refused message is shown
+at a shell too, as the views show it: mash inbox lists it as a row with the
+state refused and its class, and counts it in the total and in the refused
+count; mash status --detail and mash doctor count it by class; mash read on
+its number says it was refused and why. Its sender and its text are never
+shown. When serve refuses a message it writes one line to its log: 'refused
+message 12 from acme.demo.x: not verified (absent)', where the address is the
+one the message claims, with control characters escaped, and the word in
+brackets is the trust label. What 'waiting' means for the wake: a message that
+has arrived and has not yet reached the session. In a session that takes
+delivery by channel alone, a message reaches it on arrival, so nothing waits
+and the wake never fires; the wake exists for sessions where mail can pile up.
 
 ## What it replaces
 

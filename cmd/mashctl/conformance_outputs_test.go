@@ -193,6 +193,18 @@ func (w *confWorld) messages(addr string, n int) {
 // delivered), the clock a minute and a second after message 8 was stored.
 func confInboxMessagesRun(t *testing.T, args ...string) confOutRun {
 	t.Helper()
+	return confInboxRun(t, false, args...)
+}
+
+// confInboxRefusedRun is the world of the case "A refused message": the same message 7, and message 8 carries two sender
+// headers (a header fault, class `two sender headers`) and no kind.
+func confInboxRefusedRun(t *testing.T) confOutRun {
+	t.Helper()
+	return confInboxRun(t, true)
+}
+
+func confInboxRun(t *testing.T, refused bool, args ...string) confOutRun {
+	t.Helper()
 	w := newConfWorld(t, true)
 	w.do("endpoint", "create", "acme.demo.alice")
 	w.do("endpoint", "create", "acme.demo.bob")
@@ -230,7 +242,11 @@ func confInboxMessagesRun(t *testing.T, args ...string) confOutRun {
 	}
 	body := pad(48)
 	sendSigned(t, w.js, subject, body, signedHdr(t, alice, subject, body, "acme_demo_alice", time.Now(), "msg-7", "task"))
-	sendSigned(t, w.js, subject, pad(61), nats.Header{"Nats-Msg-Id": {"msg-8"}, "Mash-Kind": {"task"}}) // no sender header
+	if refused {
+		sendSigned(t, w.js, subject, pad(61), nats.Header{"Nats-Msg-Id": {"msg-8"}, sap.HeaderName: {"one", "two"}}) // two sender headers
+	} else {
+		sendSigned(t, w.js, subject, pad(61), nats.Header{"Nats-Msg-Id": {"msg-8"}, "Mash-Kind": {"task"}}) // no sender header
+	}
 	c, err := w.js.Consumer(w.ctx, bob.InboxStream(), store.Consumer)
 	if err != nil {
 		t.Fatal(err)
@@ -277,6 +293,7 @@ func init() {
 	reg("endpoint mashctl endpoint --help", func(t *testing.T) confOutRun { return confOutRun{ran: confRun(t, "endpoint", "--help")} })
 	reg("endpoint show mashctl endpoint show --help", func(t *testing.T) confOutRun { return confOutRun{ran: confRun(t, "endpoint", "show", "--help")} })
 	reg("endpoint inbox Messages", func(t *testing.T) confOutRun { return confInboxMessagesRun(t) })
+	reg("endpoint inbox A refused message", func(t *testing.T) confOutRun { return confInboxRefusedRun(t) })
 	reg("init Set up", func(t *testing.T) confOutRun {
 		w := newConfWorld(t, false)
 		return confOutRun{ran: w.run("init", "--config", w.a.setupPath()), subs: urlSub(w)}

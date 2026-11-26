@@ -49,12 +49,31 @@ creds     ok
 server    ok    tls://myserver:4222
 sign-in   ok
 delivery  ok
-refused   ok    no message was refused for lacking its sender's signature
+refused   ok    no mail was refused
 
 No problems.
 ```
 
-### A problem and a warning, with one hint
+### Mail was refused
+
+Stream: stdout. Exit code: 0.
+
+```text
+config    ok
+claude    ok    2.1.320
+creds     ok
+server    ok    tls://myserver:4222
+sign-in   ok
+delivery  ok
+refused   ok    4 messages were refused
+                2 not verified
+                1 time not in UTC
+                1 two sender headers
+
+No problems.
+```
+
+### A problem, with one hint
 
 Stream: stdout, then the hint on stderr. Exit code: 1.
 
@@ -65,9 +84,11 @@ creds     ok
 server    ok    tls://myserver:4222
 sign-in   FAIL  the server refused these credentials
 delivery  skip  needs sign-in
-refused   warn  3 unverified messages were refused
+refused   ok    3 messages were refused
+                2 not verified
+                1 time not in UTC
 
-1 problem, 1 warning.
+1 problem.
 hint: mash join <file> --replace
 ```
 
@@ -82,7 +103,7 @@ creds     ok
 server    FAIL  the server did not answer: tls://myserver:4222
 sign-in   skip  needs the server
 delivery  skip  needs the server
-refused   ok    no message was refused for lacking its sender's signature
+refused   ok    no mail was refused
 
 1 problem.
 ```
@@ -143,6 +164,23 @@ Stream: stdout. Exit code: 0.
 launcher  warn  mash from PATH, not the pinned one
 ```
 
+### The stored-mail check was skipped
+
+Stream: stdout. Exit code: 0.
+
+```text
+config       ok
+claude       ok    2.1.320
+creds        ok
+server       ok    tls://myserver:4222
+sign-in      ok
+delivery     ok
+stored mail  skip  not checked: ~/.local/state/mash/acme.demo.bob is not writable
+refused      ok    no mail was refused
+
+No problems.
+```
+
 ### Arriving mail cannot be stored here
 
 Stream: stdout. Exit code: 1.
@@ -154,7 +192,7 @@ creds     ok
 server    ok    tls://myserver:4222
 sign-in   ok
 delivery  FAIL  cannot write ~/.local/state/mash/acme.demo.bob
-refused   ok    no message was refused for lacking its sender's signature
+refused   ok    no mail was refused
 
 1 problem.
 ```
@@ -178,7 +216,7 @@ creds     ok
 server    ok    tls://myserver:4222
 sign-in   ok
 delivery  FAIL  another session holds this endpoint
-refused   ok    no message was refused for lacking its sender's signature
+refused   ok    no mail was refused
 
 1 problem.
 ```
@@ -204,6 +242,16 @@ delivery  FAIL  hooks are not delivering mail to this session;
 hint: claude plugin install mash@mash
 ```
 
+### While stored mail is checked before delivery
+
+Stream: stdout. Exit code: 1.
+
+```text
+delivery  FAIL  mail is waiting while stored mail is checked
+
+1 problem.
+```
+
 ### A newer session replaced this one
 
 Stream: stdout. Exit code: 1.
@@ -215,7 +263,7 @@ creds     ok
 server    ok    tls://myserver:4222
 sign-in   ok
 delivery  FAIL  this session lost this endpoint to a newer one
-refused   ok    no message was refused for lacking its sender's signature
+refused   ok    no mail was refused
 
 1 problem.
 ```
@@ -231,7 +279,7 @@ creds     ok
 server    ok    tls://myserver:4222
 sign-in   FAIL  this endpoint was deleted; its address cannot be used again
 delivery  skip  needs sign-in
-refused   ok    no message was refused for lacking its sender's signature
+refused   ok    no mail was refused
 
 1 problem.
 hint: mash join <file>
@@ -248,7 +296,7 @@ creds     FAIL  this endpoint was deleted; its address cannot be used again
 server    ok    tls://myserver:4222
 sign-in   skip  needs the creds
 delivery  skip  needs sign-in
-refused   ok    no message was refused for lacking its sender's signature
+refused   ok    no mail was refused
 
 1 problem.
 hint: mash join <file>
@@ -265,7 +313,7 @@ creds     ok
 server    FAIL  the server's certificate is not trusted: tls://myserver:4222
 sign-in   skip  needs the server
 delivery  skip  needs the server
-refused   ok    no message was refused for lacking its sender's signature
+refused   ok    no mail was refused
 
 1 problem.
 ```
@@ -281,7 +329,7 @@ creds     ok
 server    FAIL  the server did not offer TLS: tls://myserver:4222
 sign-in   skip  needs the server
 delivery  skip  needs the server
-refused   ok    no message was refused for lacking its sender's signature
+refused   ok    no mail was refused
 
 1 problem.
 ```
@@ -297,7 +345,7 @@ creds     FAIL  ~/.config/mash/acme.demo.bob.creds is missing
 server    ok    tls://myserver:4222
 sign-in   skip  needs the creds
 delivery  skip  needs sign-in
-refused   ok    no message was refused for lacking its sender's signature
+refused   ok    no mail was refused
 
 1 problem.
 hint: mash join <file>
@@ -314,7 +362,7 @@ creds     ok
 server    ok    tls://myserver:4222
 sign-in   FAIL  the server refused these credentials
 delivery  skip  needs sign-in
-refused   ok    no message was refused for lacking its sender's signature
+refused   ok    no mail was refused
 
 1 problem.
 hint: mash join <file> --replace
@@ -331,7 +379,7 @@ creds     FAIL  ~/.config/mash/acme.demo.bob.creds is not a creds file
 server    ok    tls://myserver:4222
 sign-in   skip  needs the creds
 delivery  skip  needs sign-in
-refused   ok    no message was refused for lacking its sender's signature
+refused   ok    no mail was refused
 
 1 problem.
 hint: mash join <file> --replace
@@ -348,7 +396,7 @@ creds     FAIL  ~/.config/mash/acme.demo.bob.creds can be read by others
 server    ok    tls://myserver:4222
 sign-in   skip  needs the creds
 delivery  skip  needs sign-in
-refused   ok    no message was refused for lacking its sender's signature
+refused   ok    no mail was refused
 
 1 problem.
 ```
@@ -364,7 +412,7 @@ creds     ok
 server    FAIL  the server address is not tls://: nats://myserver:4222
 sign-in   skip  needs the server
 delivery  skip  needs the server
-refused   ok    no message was refused for lacking its sender's signature
+refused   ok    no mail was refused
 
 1 problem.
 ```
@@ -385,7 +433,7 @@ Stream: stdout. Exit code: 1.
 {
  "endpoint": "acme.demo.bob",
  "problems": 1,
- "warnings": 1,
+ "warnings": 0,
  "checks": [
   {
    "name": "config",
@@ -425,11 +473,16 @@ Stream: stdout. Exit code: 1.
   },
   {
    "name": "refused",
-   "state": "warn",
-   "detail": "3 unverified messages were refused",
+   "state": "ok",
+   "detail": "3 messages were refused",
    "fix": null
   }
  ],
+ "refused": 3,
+ "refused_by_class": {
+  "not verified": 2,
+  "time not in UTC": 1
+ },
  "hint": "mash join <file> --replace"
 }
 ```
@@ -442,7 +495,7 @@ With `--json` the result is this shape. The values are an example.
 {
   "endpoint": "acme.demo.bob",
   "problems": 1,
-  "warnings": 1,
+  "warnings": 0,
   "checks": [
     {
       "name": "config",
@@ -482,11 +535,16 @@ With `--json` the result is this shape. The values are an example.
     },
     {
       "name": "refused",
-      "state": "warn",
-      "detail": "3 unverified messages were refused",
+      "state": "ok",
+      "detail": "3 messages were refused",
       "fix": null
     }
   ],
+  "refused": 3,
+  "refused_by_class": {
+    "not verified": 2,
+    "time not in UTC": 1
+  },
   "hint": "mash join <file> --replace"
 }
 ```
@@ -511,13 +569,22 @@ it. Whether storage is failing is decided by whoever asks, by trying the
 folder, not from a record kept in it. An agent host that has no hooks would
 warn for as long as it runs; only Claude Code is in scope for 0.5.6. The
 refused count is kept on this machine, so its row shows even when the server
-is down. The 'refused' row counts unverified mail that was refused on arrival
-(see mash serve). Mail that was verified on arrival and whose sender was
-deleted afterwards is not counted: mash read shows it as refused, and that is
-where it is seen. The launcher row, which says which mash the plugin's
-launcher started, reports how the mash it runs in was launched: it shows in a
-session's own doctor (the MCP tool), and a mash doctor typed in a shell has no
-launcher row.
+is down. The 'refused' row counts the refused messages the inbox still holds,
+for any reason: a message whose sender header was refused, and mail that was
+not verified on arrival (see mash serve); a message on both counts once. Its
+state is always ok: nothing a person can do removes a refused message before
+it ages out. Mail that was verified on arrival and whose sender was deleted
+afterwards is not counted: mash read shows it as refused, and that is where it
+is seen. The JSON adds refused (an integer, 0 when none) and refused_by_class
+(an object with the count of each class, {} when none); the classes are in
+refused_by_class only, and the refused entry of checks has no more than the
+usual four keys. While the first start's check of the stored mail is skipped
+because the state directory cannot be written, and only then, a row named
+`stored mail` with state skip follows the delivery row; it changes neither the
+problem count nor the exit status.
+The launcher row, which says which mash the plugin's launcher started, reports
+how the mash it runs in was launched: it shows in a session's own doctor (the
+MCP tool), and a mash doctor typed in a shell has no launcher row.
 
 ## What it replaces
 

@@ -85,6 +85,15 @@ error: message 12 was refused: it was not verified
 hint: mash doctor
 ```
 
+### A message refused for its header
+
+Stream: stderr. Exit code: 1.
+
+```text
+error: message 3 was refused: control character in name
+hint: mash doctor
+```
+
 ### A shell reports what serve delivered
 
 Stream: n/a. Exit code: 0.

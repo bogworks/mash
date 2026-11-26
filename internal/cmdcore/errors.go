@@ -13,8 +13,17 @@ func NoSuchEndpoint(addr string) *cliframe.Error {
 }
 
 // RefusedMessage is the failure for the number of a message serve refused because it was not verified (exit 1).
-func RefusedMessage(n int) *cliframe.Error {
-	return cliframe.Failf("message %d was refused: it was not verified", n).WithHint("mash doctor")
+func RefusedMessage(n int) *cliframe.Error { return RefusedFor(n, "") }
+
+// RefusedFor is the failure for the number of a message that was refused for its class (REQ-017): a header fault says its
+// class, and mail that was not verified (class "" or "not verified") keeps its own wording. It never carries the sender or
+// the body (exit 1).
+func RefusedFor(n int, class string) *cliframe.Error {
+	reason := "it was not verified"
+	if class != "" && class != "not verified" {
+		reason = class
+	}
+	return cliframe.Failf("message %d was refused: %s", n, reason).WithHint("mash doctor")
 }
 
 // RecipientSuspended is the failure for a send to an endpoint that is suspended or was deleted: its inbox takes no mail (exit 1).

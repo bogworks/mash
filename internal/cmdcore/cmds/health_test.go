@@ -29,16 +29,25 @@ func ok(name, detail string) cmds.HealthCheck {
 // allWell is the report of the specification's "All well" case.
 func allWell() *fakeHealth {
 	return &fakeHealth{rep: cmds.HealthReport{Endpoint: "acme.demo.bob", Checks: []cmds.HealthCheck{
-		ok("config", ""), ok("creds", ""), ok("server", "tls://myserver:4222"), ok("sign-in", ""), ok("delivery", ""), ok("refused", "no message was refused for lacking its sender's signature")}}}
+		ok("config", ""), ok("creds", ""), ok("server", "tls://myserver:4222"), ok("sign-in", ""), ok("delivery", ""), ok("refused", "no mail was refused")}}}
 }
 
-// refusedSignIn is the report of the specification's "A problem and a warning" case.
+// refusedSignIn is the report of the specification's "A problem, with one hint" case: three messages were refused, two
+// of them not verified, and the refused row is ok whatever it counts (CHG-14).
 func refusedSignIn() *fakeHealth {
-	return &fakeHealth{rep: cmds.HealthReport{Endpoint: "acme.demo.bob", Checks: []cmds.HealthCheck{
+	return &fakeHealth{rep: cmds.HealthReport{Endpoint: "acme.demo.bob", Refused: cmds.RefusedCounts{Total: 3, ByClass: map[string]int{"not verified": 2, "time not in UTC": 1}}, Checks: []cmds.HealthCheck{
 		ok("config", ""), ok("creds", ""), ok("server", "tls://myserver:4222"),
 		{Name: "sign-in", State: cmds.CheckFail, Detail: "the server refused these credentials", Reason: "the server refused its credentials", Fix: cmds.JoinReplaceFix},
 		{Name: "delivery", State: cmds.CheckSkip, Detail: "needs sign-in"},
-		{Name: "refused", State: cmds.CheckWarn, Detail: "3 unverified messages were refused"}}}}
+		ok("refused", "3 messages were refused")}}}
+}
+
+// refusedFour is the report of the specification's "Mail was refused" case.
+func refusedFour() *fakeHealth {
+	f := allWell()
+	f.rep.Refused = cmds.RefusedCounts{Total: 4, ByClass: map[string]int{"not verified": 2, "time not in UTC": 1, "two sender headers": 1}}
+	f.rep.Checks[len(f.rep.Checks)-1] = ok("refused", "4 messages were refused")
+	return f
 }
 
 // deletedEndpoint is the report of the specification's "The endpoint was deleted, seen from another machine" case.
@@ -46,7 +55,7 @@ func deletedEndpoint() *fakeHealth {
 	return report("acme.demo.bob", false, ok("config", ""), ok("creds", ""), ok("server", "tls://myserver:4222"),
 		cmds.HealthCheck{Name: "sign-in", State: cmds.CheckFail, Detail: cmds.ReasonEndpointDeleted, Fix: cmds.EndpointDeletedFix, Code: cmds.CodeEndpointDeleted},
 		cmds.HealthCheck{Name: "delivery", State: cmds.CheckSkip, Detail: "needs sign-in"},
-		cmds.HealthCheck{Name: "refused", State: cmds.CheckOK, Detail: "no message was refused for lacking its sender's signature"})
+		cmds.HealthCheck{Name: "refused", State: cmds.CheckOK, Detail: "no mail was refused"})
 }
 
 // deletedOnThisMachine is the report of the specification's "The endpoint was deleted, on the machine that deleted it" case.
@@ -55,14 +64,14 @@ func deletedOnThisMachine() *fakeHealth {
 		cmds.HealthCheck{Name: "creds", State: cmds.CheckFail, Detail: cmds.ReasonEndpointDeleted, Fix: cmds.EndpointDeletedFix, Code: cmds.CodeEndpointDeleted},
 		ok("server", "tls://myserver:4222"), skip("sign-in", "creds"),
 		cmds.HealthCheck{Name: "delivery", State: cmds.CheckSkip, Detail: "needs sign-in"},
-		cmds.HealthCheck{Name: "refused", State: cmds.CheckOK, Detail: "no message was refused for lacking its sender's signature"})
+		cmds.HealthCheck{Name: "refused", State: cmds.CheckOK, Detail: "no mail was refused"})
 }
 
 // skippedAfterServer is the report of the specification's "A check that could not run" case.
 func skippedAfterServer() *fakeHealth {
 	return report("acme.demo.bob", false, ok("config", ""), ok("creds", ""),
 		cmds.HealthCheck{Name: "server", State: cmds.CheckFail, Detail: "the server did not answer: tls://myserver:4222"},
-		skip("sign-in", "server"), skip("delivery", "server"), ok("refused", "no message was refused for lacking its sender's signature"))
+		skip("sign-in", "server"), skip("delivery", "server"), ok("refused", "no mail was refused"))
 }
 
 func healthEnv(svc any) cmdcore.EnvFunc {
@@ -170,9 +179,24 @@ func TestStatusMatchesSpec(t *testing.T) {
 			code, out, errs = runStatus(inSession(), cliframe.Global{Detail: true})
 		case "With --detail, at a shell with no session":
 			code, out, errs = runStatus(report("acme.demo.bob", false, ok("config", ""), ok("sign-in", "")), cliframe.Global{Detail: true})
+		case "With --detail, one class refused", "With --detail, several classes refused":
+			f := inSession()
+			f.rep.Refused = cmds.RefusedCounts{Total: 1, ByClass: map[string]int{"time not in UTC": 1}}
+			if oc["case"] == "With --detail, several classes refused" {
+				f.rep.Refused = cmds.RefusedCounts{Total: 4, ByClass: map[string]int{"two sender headers": 1, "not verified": 2, "time not in UTC": 1}}
+			}
+			code, out, errs = runStatus(f, cliframe.Global{Detail: true})
+		case "With --detail, while the stored-mail check is skipped":
+			f := inSession()
+			f.rep.StoredSkipDir = "~/.local/state/mash/acme.demo.bob"
+			code, out, errs = runStatus(f, cliframe.Global{Detail: true})
 		case "In a session that cannot store arriving mail on this machine":
 			held := &fakeHealth{rep: cmds.HealthReport{Endpoint: "acme.demo.bob", MailHeld: true, Checks: []cmds.HealthCheck{ok("config", ""), ok("sign-in", "")}}}
 			code, out, errs = runStatus(held, cliframe.Global{})
+		case "While stored mail is checked before delivery":
+			f := inSession()
+			f.rep.StoredScan = true
+			code, out, errs = runStatus(f, cliframe.Global{})
 		case "No endpoint chosen and several installed":
 			// the specification's own text for addresses in order, then the hint when they come in no particular order (below)
 			code, out, errs = runStatus(&fakeHealth{err: &config.SeveralEndpointsError{Addresses: []string{"acme.demo.alice", "acme.demo.bob"}}}, cliframe.Global{})
@@ -367,8 +391,12 @@ func TestDoctorMatchesSpec(t *testing.T) {
 		switch oc["case"] {
 		case "All well":
 			f = withClaude(allWell(), claudeOK)
-		case "A problem and a warning, with one hint":
+		case "A problem, with one hint":
 			f = withClaude(refusedSignIn(), noClaude)
+		case "Mail was refused":
+			f = withClaude(refusedFour(), claudeOK)
+		case "The stored-mail check was skipped":
+			f = withSkip(withClaude(allWell(), claudeOK), "~/.local/state/mash/acme.demo.bob")
 		case "Server not answering":
 			f = withClaude(skippedAfterServer(), noClaude)
 		case "Arriving mail cannot be stored here", "Another session holds the endpoint", "A newer session replaced this one",
@@ -410,6 +438,13 @@ func TestDoctorMatchesSpec(t *testing.T) {
 			}
 			if !strings.Contains(out, oc["text"].(string)+"\n") {
 				t.Errorf("%s: %q lacks %q", oc["case"], out, oc["text"])
+			}
+			continue
+		case "While stored mail is checked before delivery":
+			_, out, _ := runDoctor(report("acme.demo.bob", false, ok("config", ""),
+				cmds.HealthCheck{Name: "delivery", State: cmds.CheckFail, Detail: cmds.ReasonStoredScan}), cliframe.Global{})
+			if !strings.Contains(out, "delivery  FAIL  mail is waiting while stored mail is checked\n\n1 problem.\n") || oc["text"] != "delivery  FAIL  "+cmds.ReasonStoredScan+"\n\n1 problem." {
+				t.Errorf("%s: %q, spec %q", oc["case"], out, oc["text"])
 			}
 			continue
 		case "The endpoint was deleted, seen from another machine, with one hint", "The endpoint was deleted, on the machine that deleted it, with one hint":
@@ -454,6 +489,8 @@ func TestDoctorMatchesSpec(t *testing.T) {
 		Problems int
 		Warnings int
 		Checks   []map[string]any
+		Refused  int
+		ByClass  map[string]int `json:"refused_by_class"`
 	}
 	if err := json.Unmarshal([]byte(out), &got); err != nil {
 		t.Fatal(err)
@@ -461,19 +498,20 @@ func TestDoctorMatchesSpec(t *testing.T) {
 	if err := json.Unmarshal(mustJSON(meta["x-json"]), &spec); err != nil {
 		t.Fatal(err)
 	}
-	if got.Endpoint != spec.Endpoint || got.Problems != spec.Problems || got.Warnings != spec.Warnings || !reflect.DeepEqual(got.Checks, spec.Checks) {
+	if got.Endpoint != spec.Endpoint || got.Problems != spec.Problems || got.Warnings != spec.Warnings || !reflect.DeepEqual(got.Checks, spec.Checks) ||
+		got.Refused != spec.Refused || !reflect.DeepEqual(got.ByClass, spec.ByClass) {
 		t.Errorf("object %s, spec x-json %v", out, meta["x-json"])
 	}
 	// skipped rows are in the object with state skip and the detail, and are neither a problem nor a warning
 	_, sk, _ := runDoctor(skippedAfterServer(), cliframe.Global{JSON: true})
 	if !strings.Contains(sk, `"problems":1,"warnings":0`) || !strings.Contains(sk, `{"name":"sign-in","state":"skip","detail":"needs the server","fix":null}`) ||
-		!strings.Contains(sk, `{"name":"refused","state":"ok","detail":"no message was refused for lacking its sender's signature","fix":null}`) {
+		!strings.Contains(sk, `{"name":"refused","state":"ok","detail":"no mail was refused","fix":null}`) {
 		t.Errorf("skipped rows: %s", sk)
 	}
 	if !sameJSON(t, string(mustJSON(meta["x-json"])), string(mustJSON(specTool(t, "doctor")["structured"]))) {
 		t.Error("spec/mash.json x-json and spec/mash-mcp.json structured differ")
 	}
-	if !reflect.DeepEqual(orderedKeys(t, []byte(out)), []string{"endpoint", "problems", "warnings", "checks", "hint"}) {
+	if !reflect.DeepEqual(orderedKeys(t, []byte(out)), []string{"endpoint", "problems", "warnings", "checks", "refused", "refused_by_class", "hint"}) {
 		t.Errorf("key order %v", orderedKeys(t, []byte(out)))
 	}
 	// every row has the four keys; null where nothing is said
@@ -528,7 +566,7 @@ func TestStatusAndDoctorPassTheCallersContext(t *testing.T) {
 }
 
 func TestDoctorSummaryAndHint(t *testing.T) {
-	warn := cmds.HealthCheck{Name: "refused", State: cmds.CheckWarn, Detail: "2 unverified messages were refused"}
+	warn := cmds.HealthCheck{Name: "delivery", State: cmds.CheckWarn, Detail: "hooks have not run in this session yet"}
 	fail := func(fix string) cmds.HealthCheck {
 		return cmds.HealthCheck{Name: "creds", State: cmds.CheckFail, Detail: "the creds file is missing: /x", Fix: fix}
 	}
@@ -678,7 +716,7 @@ func TestStatusAndDoctorCouldNotTake(t *testing.T) {
 }
 
 func TestDoctorStrict(t *testing.T) {
-	warn := cmds.HealthCheck{Name: "refused", State: cmds.CheckWarn, Detail: "2 unverified messages were refused"}
+	warn := cmds.HealthCheck{Name: "delivery", State: cmds.CheckWarn, Detail: "hooks have not run in this session yet"}
 	for _, tc := range []struct {
 		args []string
 		code int
@@ -696,7 +734,7 @@ func TestDoctorStrict(t *testing.T) {
 // A strict doctor with only a warning is an error result in a tool, with the report and the structured result kept; without
 // strict the same report is a normal result.
 func TestDoctorToolStrictMarksTheResultAnError(t *testing.T) {
-	warn := cmds.HealthCheck{Name: "refused", State: cmds.CheckWarn, Detail: "2 unverified messages were refused"}
+	warn := cmds.HealthCheck{Name: "delivery", State: cmds.CheckWarn, Detail: "hooks have not run in this session yet"}
 	reg := cmdcore.NewRegistry(healthEnv(report("a.b.c", false, ok("config", ""), warn)), cmdcore.Register(cmds.Doctor))
 	e, _ := reg.Lookup("doctor")
 	tool := e.Tool(reg.Env)

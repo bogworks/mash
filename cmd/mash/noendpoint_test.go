@@ -93,8 +93,8 @@ func TestStatusToolSaysNotReadyWhileTheRequiredSpoolFails(t *testing.T) {
 		return reportText(t, s, id, "status") == want
 	})
 	id++
-	wantRow := "delivery  FAIL  cannot write\n                "
-	if got := reportText(t, s, id, "doctor"); !strings.Contains(got, wantRow) || strings.Contains(strings.SplitN(got, "\n                ", 2)[0], "spool") || !strings.Contains(got, "1 problem") {
+	wantRow := "delivery     FAIL  cannot write\n                   " // padded for the stored mail row, which the unwritable state shows too
+	if got := reportText(t, s, id, "doctor"); !strings.Contains(got, wantRow) || strings.Contains(strings.SplitN(got, "\n                   ", 2)[0], "spool") || !strings.Contains(got, "1 problem") {
 		t.Errorf("doctor does not show the held folder: %q", got)
 	}
 	// the spool can be made again: the retry binds it and status is ready

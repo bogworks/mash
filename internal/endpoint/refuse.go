@@ -185,10 +185,17 @@ func (e *Endpoint) bindRefusalsTo(id string) (string, error) {
 }
 
 // RefusedMessageError is the error of a read of a message serve refused because it was not verified.
-type RefusedMessageError struct{ Seq uint64 }
+// Class is the class of the refusal (REQ-017); empty or "not verified" for mail that was not verified.
+type RefusedMessageError struct {
+	Seq   uint64
+	Class string
+}
 
 func (e *RefusedMessageError) Error() string {
-	return fmt.Sprintf("mash: message #%d was refused: it was not verified", e.Seq)
+	if e.Class == "" || e.Class == ClassNotVerified {
+		return fmt.Sprintf("mash: message #%d was refused: it was not verified", e.Seq)
+	}
+	return fmt.Sprintf("mash: message #%d was refused: %s", e.Seq, e.Class)
 }
 
 // recordRefusal records the refusal of seq. An error means nothing was counted. The sequence is written first, the

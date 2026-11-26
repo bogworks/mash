@@ -252,12 +252,29 @@ func mergeRefusedLists(stream string, mal, unv seqList) (malformed []seqEntry, u
 // nothing is delivered and status says not ready, with ReasonStoredScan.
 func (e *Endpoint) StoredScanRunning() bool { return e.scanning.Load() }
 
+// StoredScanSkipped is the state directory that was not writable when the scan was due, so that it was skipped ("" when it
+// ran, was done, or was not needed). It lasts until a start that can write scans.
+func (e *Endpoint) StoredScanSkipped() string {
+	if p := e.scanSkipDir.Load(); p != nil {
+		return *p
+	}
+	return ""
+}
+
+// skipScan notes that the scan was skipped because dir cannot be written, for the session's status and doctor. A shell
+// derives the same from the directory (ScanSkipOnDisk): the record would be written to dir itself.
+func (e *Endpoint) skipScan(dir string, err error) {
+	e.log.Printf("mash: stored mail not checked: the state directory is not writable: %v", err)
+	e.scanSkipDir.Store(&dir)
+}
+
 // scanStored is the one-time scan (REQ-006 item 3): once per stream identity it reads the stream's [first, last],
 // classifies each message once through sapsdk.Classify and records the malformed ones, then writes the "scanned <last>"
 // line. It runs before consumption begins, so nothing is delivered and mail that arrives meanwhile waits in the stream.
 // A scan killed half-way is done again from the start: recording is idempotent and logs only the sequences not yet on
 // the list. It reads the stream and writes nothing else.
 func (e *Endpoint) scanStored(ctx context.Context) error {
+	e.scanSkipDir.Store(nil)
 	if e.cfg.StateDir == "" { // nowhere to keep the list or the scanned line
 		return nil
 	}
@@ -292,11 +309,11 @@ func (e *Endpoint) scanStored(ctx context.Context) error {
 	// delivered), and a start with a writable directory scans.
 	// An existing directory that is read-only passes MkdirAll, so a file is made and removed to prove it takes writes.
 	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
-		e.log.Printf("mash: stored mail not checked: the state directory is not writable: %v", err)
+		e.skipScan(filepath.Dir(p), err)
 		return nil
 	}
 	if probe, err := os.CreateTemp(filepath.Dir(p), ".scanprobe-*"); err != nil {
-		e.log.Printf("mash: stored mail not checked: the state directory is not writable: %v", err)
+		e.skipScan(filepath.Dir(p), err)
 		return nil
 	} else {
 		name := probe.Name()

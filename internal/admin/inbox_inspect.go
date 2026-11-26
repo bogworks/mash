@@ -4,14 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/sap"
+	"github.com/bogworks/mash/internal/sapsdk"
 	"github.com/bogworks/mash/internal/store"
 )
 
@@ -92,6 +93,10 @@ type InspectedMessage struct {
 	Size     int
 	Kind     string
 	State    string
+	// Reason is the class of a refusal (REQ-017) for a message mash refuses: the class of a malformed header (its Trust
+	// stays "malformed"), or "not verified" for mail whose sender could not be proved. Empty for any other message. It
+	// is a class name, never header content.
+	Reason string
 }
 
 // InboxInspection is what InspectInbox read. Consumer is nil when the stream has no `deliver` consumer.
@@ -99,6 +104,12 @@ type InboxInspection struct {
 	Stream   InspectedStream
 	Consumer *InspectedConsumer
 	Messages []InspectedMessage
+	// Refused is how many messages the stream holds that mash refuses (a Reason on them), counted over the whole stream, not
+	// only the messages listed.
+	Refused int
+	// Malformed is how many of those mashctl itself finds malformed (a header fault); it needs no endpoint setting. The
+	// header of `mashctl endpoint inbox` counts these only (ADR 0174, TO-6).
+	Malformed int
 }
 
 // DeliveryState is the state of the message at stream sequence seq given the consumer (nil when there is none). It is
@@ -221,34 +232,72 @@ func (a *Admin) InspectInbox(ctx context.Context, addr sap.Address, opts Inspect
 	}
 
 	lo, hi, ok := ClampRange(opts.From, opts.To, st.FirstSeq, st.LastSeq)
-	if !ok || st.Msgs == 0 {
+	if st.Msgs == 0 {
 		out.Messages = []InspectedMessage{}
 		return out, nil
 	}
 	senders := &senderCache{users: map[string]string{}}
 	out.Messages = []InspectedMessage{}
-	for _, seq := range inspectSeqs(lo, hi, opts.Limit, opts.From != 0) {
-		raw, err := s.GetMsg(ctx, seq)
-		if errors.Is(err, jetstream.ErrMsgNotFound) {
-			continue // gone: expired or dropped by a limit
+	listed := map[uint64]bool{}
+	if ok { // an empty window lists nothing, but the whole stream is still counted
+		for _, seq := range inspectSeqs(lo, hi, opts.Limit, opts.From != 0) {
+			listed[seq] = true
 		}
-		if err != nil {
-			return nil, fmt.Errorf("mash: stream %s message %d: %w", config.Clean(name), seq, err)
-		}
-		m := InspectedMessage{Seq: raw.Sequence, StoredAt: raw.Time.UTC(), Size: len(raw.Data),
-			MsgID: config.Clean(raw.Header.Get(jetstream.MsgIDHeader)), Kind: config.Clean(raw.Header.Get("Mash-Kind"))}
-		if m.Seq == 0 {
-			m.Seq = seq
-		}
-		m.Sender, m.Trust = a.inspectSender(ctx, senders, raw)
-		m.State = DeliveryState(m.Seq, out.Consumer)
-		out.Messages = append(out.Messages, m)
 	}
-	if opts.From == 0 {
-		slices.Reverse(out.Messages)
+	// One read-only pass over the stream (bounded by its size limit) judges every message once: the listed ones are kept,
+	// and every refused one is counted, so the header count is the stream's and not the window's.
+	for from := st.FirstSeq; from <= st.LastSeq; {
+		to := min(from+inspectBatch-1, st.LastSeq)
+		raws := make([]*jetstream.RawStreamMsg, to-from+1)
+		errs := make([]error, len(raws))
+		var wg sync.WaitGroup
+		sem := make(chan struct{}, inspectConcurrency)
+		for i := range raws {
+			wg.Add(1)
+			sem <- struct{}{}
+			go func() {
+				defer func() { <-sem; wg.Done() }()
+				raws[i], errs[i] = s.GetMsg(ctx, from+uint64(i))
+			}()
+		}
+		wg.Wait()
+		for i, raw := range raws {
+			seq := from + uint64(i)
+			if errors.Is(errs[i], jetstream.ErrMsgNotFound) {
+				continue // gone: expired or dropped by a limit
+			}
+			if errs[i] != nil {
+				return nil, fmt.Errorf("mash: stream %s message %d: %w", config.Clean(name), seq, errs[i])
+			}
+			sender, trust, reason := a.inspectSender(ctx, senders, raw)
+			if reason != "" {
+				out.Refused++
+				if trust == "malformed" {
+					out.Malformed++
+				}
+			}
+			if !listed[seq] {
+				continue
+			}
+			m := InspectedMessage{Seq: raw.Sequence, StoredAt: raw.Time.UTC(), Size: len(raw.Data),
+				MsgID: config.Clean(raw.Header.Get(jetstream.MsgIDHeader)), Kind: config.Clean(raw.Header.Get("Mash-Kind")),
+				Sender: sender, Trust: trust, Reason: reason}
+			if m.Seq == 0 {
+				m.Seq = seq
+			}
+			m.State = DeliveryState(m.Seq, out.Consumer)
+			out.Messages = append(out.Messages, m)
+		}
+		from = to + 1
 	}
-	return out, nil
+	return out, nil // the pass runs oldest first, so the listed messages already are
 }
+
+// inspectBatch and inspectConcurrency bound the pass: this many messages are read at once, a batch at a time.
+const (
+	inspectBatch       = 128
+	inspectConcurrency = 16
+)
 
 // senderCache holds the directory handle and the user key on record for each sender name already looked up.
 type senderCache struct {
@@ -260,17 +309,32 @@ type senderCache struct {
 // inspectSender names a message's sender and its trust label the way the receiving endpoint does, with the directory
 // asked by the signer's own name (one key read) instead of listing it. A signed name that is not a directory key, or
 // whose record holds another user key, is unknown-signer.
-func (a *Admin) inspectSender(ctx context.Context, cache *senderCache, raw *jetstream.RawStreamMsg) (string, string) {
-	h, trust := sap.VerifyStored(raw.Header.Get(sap.HeaderName), raw.Subject, raw.Data)
+func (a *Admin) inspectSender(ctx context.Context, cache *senderCache, raw *jetstream.RawStreamMsg) (sender, trust, reason string) {
+	values := raw.Header.Values(sap.HeaderName)
+	h, t := sapsdk.VerifyStored(values, raw.Subject, raw.Data)
+	trust = string(t)
+	if t == sap.TrustMalformed { // a header fault: refused with its class, and the sender is never shown (REQ-017)
+		_, class := sapsdk.Classify(raw.Subject, values, raw.Data)
+		if class == "" {
+			class = sapsdk.ClassUnreadable
+		}
+		return "?", trust, class
+	}
 	shown := config.Clean(h.Name)
-	switch trust {
-	case sap.TrustForged, sap.TrustMalformed, sap.TrustClaimed:
+	notVerified := func(sender, trust string) (string, string, string) { return sender, trust, sapsdk.ClassNotVerified }
+	switch t {
+	case sap.TrustForged:
 		if shown == "" {
 			shown = "?"
 		}
-		return shown, string(trust)
+		return shown, trust, ""
+	case sap.TrustClaimed:
+		if shown == "" {
+			shown = "?"
+		}
+		return notVerified(shown, trust)
 	case sap.TrustAbsent:
-		return "?", string(trust)
+		return notVerified("?", trust)
 	}
 	user, seen := cache.users[h.Name]
 	if !seen {
@@ -296,12 +360,12 @@ func (a *Admin) inspectSender(ctx context.Context, cache *senderCache, raw *jets
 		if shown == "" {
 			shown = "?"
 		}
-		return shown, string(sap.TrustUnknownSigner)
+		return notVerified(shown, string(sap.TrustUnknownSigner))
 	}
 	if signed, err := time.Parse(time.RFC3339Nano, h.TS); err == nil {
 		if age := raw.Time.Sub(signed); age > inspectMaxSignedAge || age < -sap.LiveSkew {
-			return shown, string(sap.TrustStale)
+			return notVerified(shown, string(sap.TrustStale))
 		}
 	}
-	return shown, string(sap.TrustVerified)
+	return shown, string(sap.TrustVerified), ""
 }
