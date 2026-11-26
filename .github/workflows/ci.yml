@@ -102,11 +102,11 @@ jobs:
       - uses: ./.github/actions/go-test
         with:
           forbidden-words: ${{ vars.MASH_FORBIDDEN_WORDS }}
-  # Rule 21 (dev-process 0.8.x, Randy 2026-11-21): test (macos) runs on tagged releases only (release.yml) and test (linux, eph) nightly on main
+  # Rule 21 (dev-process 0.8.x): test (macos) runs on tagged releases only (release.yml) and test (linux, eph) nightly on main
   # (nightly.yml); neither runs per change. docs/ci-table.md is the one table, pinned by internal/release/ci_table_test.go.
   # The release gate (scripts/release-check, release.RequiredChecks) requires a check run named exactly "reproducible"
   # on the candidate, so the name is explicit and the job is not matrixed. The candidate is a commit on main, which a push
-  # Runs on a queue draft and on a push, not on an ordinary pull request push (Randy 2026-11-21: the queue tests the batch once; the release gate
+  # Runs on a queue draft and on a push, not on an ordinary pull request push (the queue tests the batch once; the release gate
   # finds the draft's passed run on the commit main fast-forwards to). The skips: a docs-only change (job-level, as test) and an ordinary pull request push: every release target
   # built from two fresh clones in different directories must give identical bytes, so a change that breaks
   # reproducibility fails here, before a tag does.
@@ -190,7 +190,7 @@ jobs:
           go-version-file: go.mod
           cache: false
       - run: go run ./scripts/adrlint docs
-  # The one check a docs-only change needs (Randy 2026-11-21: "as long as they properly conform to their syntax, I don't see why
+  # The one check a docs-only change needs ("as long as they properly conform to their syntax, I don't see why
   # anything else needs to run"): every tracked Markdown file has closed code fences and relative links that resolve
   # (scripts/doclint). It runs on every change and takes seconds. Pull requests, the merge queue's drafts and pushes to
   # main all run it, and pr-check needs it.

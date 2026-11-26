@@ -1,5 +1,5 @@
 // Command doclint checks that the repository's Markdown files conform to their syntax: the one check a docs-only
-// change needs (ci.yml's docs-lint job; Randy 2026-11-21: "as long as they properly conform to their syntax, I don't see
+// change needs (ci.yml's docs-lint job; "as long as they properly conform to their syntax, I don't see
 // why anything else needs to run"). It reads every tracked *.md file and reports each violation as file:line: message on
 // stdout; the exit status is 1 when there is one, 2 when it could not run.
 //
