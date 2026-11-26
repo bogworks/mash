@@ -136,6 +136,14 @@ func OpenAdmin(prog string, cfg config.Config) (*madmin.Admin, context.Context, 
 	return OpenAdminWith(prog, cfg)
 }
 
+// NoAdminCredsError is the refusal to open the admin connection because no admin credentials are configured. Nothing
+// was tried: it is a configuration problem, not a state of the server.
+type NoAdminCredsError struct{ Prefix string }
+
+func (e *NoAdminCredsError) Error() string {
+	return e.Prefix + ": no admin credentials: set MASH_ADMIN_CREDS, or \"admin_creds\" in config.json"
+}
+
 // OpenAdminWith is OpenAdmin with extra connection options, applied after the standard ones.
 func OpenAdminWith(prog string, cfg config.Config, extra ...nats.Option) (*madmin.Admin, context.Context, func(), error) {
 	pfx, _, _ := strings.Cut(prog, " ")
@@ -145,8 +153,11 @@ func OpenAdminWith(prog string, cfg config.Config, extra ...nats.Option) (*madmi
 	if cfg.Owner == "" {
 		return nil, nil, nil, errors.New(pfx + ": no owner: set \"owner\" in config.json, or MASH_ENDPOINT or --endpoint (its owner part is the owner these commands act for)")
 	}
-	if cfg.URL == "" || cfg.AdminCreds == "" {
-		return nil, nil, nil, errors.New(pfx + ": admin commands need MASH_SERVER and MASH_ADMIN_CREDS")
+	if cfg.URL == "" {
+		return nil, nil, nil, errors.New(pfx + ": no server is configured: set MASH_SERVER, or \"servers\" in config.json")
+	}
+	if cfg.AdminCreds == "" {
+		return nil, nil, nil, &NoAdminCredsError{Prefix: pfx}
 	}
 	if raw, err := config.ReadCredsFile(cfg.AdminCreds); err != nil {
 		var pe *fs.PathError
