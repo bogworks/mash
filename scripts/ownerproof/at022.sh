@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # AT-022 (REQ-021): the owner-boundary and forgery proof on the candidate's binary, in one throwaway container created for the
 # run and destroyed at the end.
-#   scripts/ownerproof/at022.sh --out DIR [--commit REF] [--version 0.6.0] [--oracle-version 0.5.10] [--release-repo OWNER/REPO] [--container-tmp DIR]
+#   scripts/ownerproof/at022.sh --out DIR [--commit REF] [--version 0.6.0] [--oracle-version 0.5.10] [--release-repo OWNER/REPO] [--release-base URL] [--container-tmp DIR]
 # --release-repo is the GitHub repository whose releases hold the last 0.5.x release (default bogworks/mash); item 4 runs on it and
-# on the candidate and the two results must be equal.
+# on the candidate and the two results must be equal. --release-base URL overrides where the release is downloaded from (https://, ending
+# in /; the release's directory v<version>/ is appended; default https://github.com/<release-repo>/releases/download/).
 # --container-tmp is the container's scratch directory, passed as its TMPDIR (default: the image's TMPDIR, or /tmp). Everything the
 # container writes (HOME, caches, source, tree, work, output, the built runner) goes in a directory under it.
 # Inside the container (image golang:1.27, a non-root user, no bind mount of the checkout): everything it gets arrives as
@@ -25,8 +26,9 @@ oracle=0.5.10
 ref=HEAD
 repo=bogworks/mash
 ctmp=
+rbase=
 out=
-usage="usage: at022.sh --out DIR [--commit REF] [--version X.Y.Z] [--oracle-version X.Y.Z] [--release-repo OWNER/REPO] [--container-tmp DIR]"
+usage="usage: at022.sh --out DIR [--commit REF] [--version X.Y.Z] [--oracle-version X.Y.Z] [--release-repo OWNER/REPO] [--release-base URL] [--container-tmp DIR]"
 while [ $# -gt 0 ]; do
 	case $1 in
 	--commit) ref=${2:?--commit needs a value}; shift 2 ;;
@@ -34,6 +36,7 @@ while [ $# -gt 0 ]; do
 	--oracle-version) oracle=${2:?}; shift 2 ;;
 	--out) out=${2:?}; shift 2 ;;
 	--release-repo) repo=${2:?}; shift 2 ;;
+	--release-base) rbase=${2:?}; shift 2 ;;
 	--container-tmp) ctmp=${2:?}; shift 2 ;;
 	*) echo "$usage" >&2; exit 2 ;;
 	esac
@@ -67,7 +70,7 @@ git -C "$root" rev-list "$commit" >/dev/null || exit 1
 echo "$commit" | git -C "$root" pack-objects --revs --stdout -q >"$out/commit.pack" 2>>"$out/launcher.log" || { echo "git pack-objects failed" >&2; exit 1; }
 inputs=(go.mod go.sum cmd internal scripts/ownerproof scripts/buildrelease)
 tar -C "$out" -cf - commit.pack -C "$root" "${inputs[@]}" |
-	docker run -i --rm --init --name "$name" --user 1000:1000 ${ctmp:+-e TMPDIR="$ctmp"} -e GOFLAGS=-buildvcs=false \
+	docker run -i --rm --init --name "$name" --user 1000:1000 ${ctmp:+-e TMPDIR="$ctmp"} ${rbase:+-e RELEASE_BASE="$rbase"} -e GOFLAGS=-buildvcs=false \
 		-e COMMIT="$commit" -e VERSION="$version" -e ORACLE="$oracle" -e REPO="$repo" -e VENUE="$venue" \
 		"$image" bash -c '
 	set -euo pipefail
@@ -85,7 +88,7 @@ tar -C "$out" -cf - commit.pack -C "$root" "${inputs[@]}" |
 	go build -o $S/at022 ./scripts/ownerproof/at022 >&2
 	rc=0
 	$S/at022 -src $S/src -commit "$COMMIT" -version "$VERSION" -oracle-version "$ORACLE" \
-		-out $S/out -work $S/work -release-repo "$REPO" -venue "$VENUE" >&2 || rc=$?
+		-out $S/out -work $S/work -release-repo "$REPO" ${RELEASE_BASE:+-release-base "$RELEASE_BASE"} -venue "$VENUE" >&2 || rc=$?
 	for f in $S/work/*/serve-*.stderr; do # the stderr of the serve processes, for a failed run (no secrets: mash prints none)
 		[ -f "$f" ] && cp "$f" "$S/out/$(basename "$(dirname "$f")")-$(basename "$f")"
 	done

@@ -263,18 +263,23 @@ func TestErrorsIsSafe(t *testing.T) {
 
 func TestCheckReplySubjects(t *testing.T) {
 	const p = "_INBOX.acme.alice"
+	const h1, h2 = "0123456789abcdef0123456789abcdef", "fedcba9876543210fedcba9876543210"
 	if err := CheckReplySubjects(p, nil); err != nil {
 		t.Errorf("empty list: %v", err)
 	}
-	if err := CheckReplySubjects(p, []string{p + ".aaa", p + ".bbb"}); err != nil {
+	if err := CheckReplySubjects(p, []string{p + "." + h1, p + "." + h2}); err != nil {
 		t.Errorf("good: %v", err)
 	}
 	for name, bad := range map[string][]string{
-		"duplicate":    {p + ".aaa", p + ".bbb", p + ".aaa"},
-		"extra token":  {p + ".aaa.bbb"},
+		"duplicate":    {p + "." + h1, p + "." + h2, p + "." + h1},
+		"extra token":  {p + "." + h1 + "." + h2},
 		"empty token":  {p + "."},
 		"no token":     {p},
-		"other prefix": {"_INBOX.acme.bob.aaa"},
+		"other prefix": {"_INBOX.acme.bob." + h1},
+		"short hex":    {p + ".0123456789abcdef"},
+		"uppercase":    {p + ".0123456789ABCDEF0123456789abcdef"},
+		"nuid-like":    {p + ".abcdefghijklmnopqrstuv"},
+		"too long":     {p + "." + h1 + "0"},
 	} {
 		if err := CheckReplySubjects(p, bad); err == nil {
 			t.Errorf("%s: accepted", name)

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -148,14 +149,18 @@ func RandomToken() string {
 	return hex.EncodeToString(b[:])
 }
 
+// replyTokenRE is the token of a mash reply subject: 32 lowercase hex characters.
+var replyTokenRE = regexp.MustCompile(`^[0-9a-f]{32}$`)
+
 // CheckReplySubjects checks the reply subjects an observer saw from one caller: each must be prefix, a dot and exactly
-// one non-empty token, and none may appear twice. An empty list is not an error here.
+// one token of 32 lowercase hex characters (mash's reply subjects carry 128 random bits, see secretInbox in
+// internal/endpoint), and none may appear twice. An empty list is not an error here.
 func CheckReplySubjects(prefix string, seen []string) error {
 	got := map[string]bool{}
 	for _, s := range seen {
 		tok, ok := strings.CutPrefix(s, prefix+".")
-		if !ok || tok == "" || strings.Contains(tok, ".") {
-			return fmt.Errorf("reply subject %q is not %s. plus one token", s, prefix)
+		if !ok || !replyTokenRE.MatchString(tok) {
+			return fmt.Errorf("reply subject %q is not %s. plus 32 lowercase hex characters", s, prefix)
 		}
 		if got[s] {
 			return fmt.Errorf("reply subject %q was used for more than one request", s)

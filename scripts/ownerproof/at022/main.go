@@ -63,6 +63,18 @@ const (
 // releaseBase is the download URL prefix of the releases of repo (OWNER/REPO on GitHub).
 func releaseBase(repo string) string { return "https://github.com/" + repo + "/releases/download/" }
 
+// resolveReleaseBase returns the download URL prefix: override when set (it must start with https:// and end with /),
+// else the GitHub prefix of repo.
+func resolveReleaseBase(repo, override string) (string, error) {
+	if override == "" {
+		return releaseBase(repo), nil
+	}
+	if !strings.HasPrefix(override, "https://") || !strings.HasSuffix(override, "/") {
+		return "", fmt.Errorf("-release-base %q must start with https:// and end with /", override)
+	}
+	return override, nil
+}
+
 var (
 	repoRE    = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 	commitRE  = regexp.MustCompile(`^[0-9a-f]{40}$`)
@@ -147,6 +159,7 @@ type Record struct {
 	Commit      string      `json:"candidate_commit"`
 	Arch        string      `json:"arch"`
 	ReleaseRepo string      `json:"oracle_release_repo"`
+	ReleaseBase string      `json:"oracle_release_base"`
 	Builds      []BuildInfo `json:"builds"`
 	Setup       []Sub       `json:"setup"`
 	Items       []Item      `json:"items"`
@@ -168,10 +181,16 @@ func run() int {
 	outDir := flag.String("out", "", "directory for record.json and run.log")
 	work := flag.String("work", "", "scratch directory for servers, state and binaries (default: a new temp directory)")
 	repo := flag.String("release-repo", "bogworks/mash", "the GitHub repository OWNER/REPO whose releases hold the oracle")
+	relBase := flag.String("release-base", "", "the download URL prefix of the oracle's release (https://..., ending in /; default https://github.com/<release-repo>/releases/download/)")
 	venue := flag.String("venue", "", "a line describing where this runs (container image, VM), for the record")
 	flag.Parse()
 	if *src == "" || *outDir == "" || !commitRE.MatchString(*commit) || !versionRE.MatchString(*version) || !versionRE.MatchString(*oracleVer) || !repoRE.MatchString(*repo) {
-		fmt.Fprintln(os.Stderr, "usage: at022 -src <clone> -commit <40 hex> -version X.Y.Z -oracle-version X.Y.Z -out <dir> [-work dir] [-release-repo OWNER/REPO] [-venue text]")
+		fmt.Fprintln(os.Stderr, "usage: at022 -src <clone> -commit <40 hex> -version X.Y.Z -oracle-version X.Y.Z -out <dir> [-work dir] [-release-repo OWNER/REPO] [-release-base URL] [-venue text]")
+		return 2
+	}
+	base, err := resolveReleaseBase(*repo, *relBase)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		return 2
 	}
 	if err := os.MkdirAll(*outDir, 0o755); err != nil {
@@ -190,14 +209,14 @@ func run() int {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
 	}
-	rec := &Record{AT: "AT-022", Req: "REQ-021", Venue: *venue, StartedAt: time.Now().UTC(), Commit: *commit, ReleaseRepo: *repo, Arch: runtime.GOARCH,
+	rec := &Record{AT: "AT-022", Req: "REQ-021", Venue: *venue, StartedAt: time.Now().UTC(), Commit: *commit, ReleaseRepo: *repo, ReleaseBase: base, Arch: runtime.GOARCH,
 		Environment: "each item gets its own NATS server (operator mode, generated keys) and state directories under " + wd +
 			", created at the start of the item and stopped at its end; the launcher creates and destroys the container",
 		Note: "item 4 is recorded and compared, never asserted closed (REQ-021)"}
 	lg.f("AT-022 owner-boundary proof: candidate %s version %s, oracle v%s, %s/%s", *commit, *version, *oracleVer, runtime.GOOS, runtime.GOARCH)
 	lg.f("venue: %s", *venue)
 
-	ok := execute(rec, *src, *commit, *version, *oracleVer, *repo, wd)
+	ok := execute(rec, *src, *commit, *version, *oracleVer, base, wd)
 	rec.FinishedAt = time.Now().UTC()
 	rec.Pass = ok && len(rec.Items) > 0
 	lg.f("RESULT: %s", map[bool]string{true: "PASS", false: "FAIL"}[rec.Pass])
@@ -228,9 +247,9 @@ func (r *Record) setup(name string, pass bool, detail string) bool {
 }
 
 // execute fetches both binaries and runs the items. It returns whether every item held and item 4 is equal.
-func execute(rec *Record, src, commit, version, oracleVer, repo, wd string) bool {
+func execute(rec *Record, src, commit, version, oracleVer, base, wd string) bool {
 	arch := runtime.GOARCH
-	oracleBin, oracleSum, err := fetchOracle(repo, oracleVer, arch, filepath.Join(wd, "oracle"))
+	oracleBin, oracleSum, err := fetchOracle(base, oracleVer, arch, filepath.Join(wd, "oracle"))
 	if !rec.setup("oracle v"+oracleVer+" binary downloaded and matches the release's SHA256SUMS", err == nil, errText(err)) {
 		return false
 	}
@@ -242,7 +261,7 @@ func execute(rec *Record, src, commit, version, oracleVer, repo, wd string) bool
 	}
 	lg.f("candidate mash sha256 %s", candSum)
 	cand := BuildInfo{Role: "candidate", Version: version, Source: "scripts/buildrelease at " + commit, SHA256: candSum}
-	orc := BuildInfo{Role: "oracle", Version: oracleVer, Source: releaseBase(repo) + "v" + oracleVer + "/mash-" + runtime.GOOS + "-" + arch, SHA256: oracleSum}
+	orc := BuildInfo{Role: "oracle", Version: oracleVer, Source: base + "v" + oracleVer + "/mash-" + runtime.GOOS + "-" + arch, SHA256: oracleSum}
 	cand.VersionText = versionText(candBin)
 	orc.VersionText = versionText(oracleBin)
 	rec.Builds = []BuildInfo{cand, orc}
@@ -323,11 +342,11 @@ func httpGet(url string) ([]byte, error) {
 }
 
 // fetchOracle downloads the release's SHA256SUMS and mash-<os>-<arch> for the OS it runs on, and checks the binary against the sums.
-func fetchOracle(repo, ver, arch, dir string) (path, sum string, err error) {
+func fetchOracle(base, ver, arch, dir string) (path, sum string, err error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", "", err
 	}
-	base := releaseBase(repo) + "v" + ver + "/"
+	base = base + "v" + ver + "/"
 	sums, err := httpGet(base + "SHA256SUMS")
 	if err != nil {
 		return "", "", err
@@ -1182,8 +1201,10 @@ func item2(w *world, it *Item) {
 // item3: AT-016's observer cases through the binary. Carol sees alice's discovery request on $SRV.> and floods the
 // guesses at the reply subject for 3 s, with the evil chunk, an empty message and a replay of bob's genuine
 // registration. Alice's command must accept none of it. In the prompt phase carol also floods every reply subject she
-// saw in the discovery phase, so a candidate that reuses one for its prompt sees her chunk accepted. Last, every reply
-// subject she saw must have the inbox layout and none may repeat.
+// saw in the discovery phase, so a candidate that reuses one for its prompt sees her chunk accepted. Carol cannot see
+// agents.prompt.*, so a privileged tap records alice's prompt request and its reply subject. Last, every reply subject
+// carol saw in discovery and every prompt reply subject the tap captured must be the inbox prefix and 32 lowercase hex
+// characters, and none may repeat.
 func item3(w *world, it *Item) {
 	it.NotObservable = append(it.NotObservable,
 		"the caller's list of reply subjects it used (ReplySubjects) is internal; the observer attacks the subjects the server shows it")
@@ -1222,6 +1243,12 @@ func item3(w *world, it *Item) {
 		it.Error = err.Error()
 		return
 	}
+	tp, err := w.tap("agents.prompt.>")
+	if err != nil {
+		stopObs()
+		it.Error = err.Error()
+		return
+	}
 	pr, err := w.start("alice", "prompt", w.to("bob"), "ping")
 	if err != nil {
 		stopObs()
@@ -1249,13 +1276,20 @@ func item3(w *world, it *Item) {
 	it.check("prompt: the genuine answer arrived and nothing the observer sent was accepted", code == 0 && strings.TrimSpace(out) == "genuine" && !strings.Contains(out, "EVIL"),
 		fmt.Sprintf("exit %d, stdout %q, stderr %q", code, out, NormalStderr(errOut)))
 	it.check("prompt: the observer saw a discovery request and attacked", attacks() > 0, fmt.Sprintf("%d attacked request(s)", attacks()))
-	all := append(append([]string(nil), discovery...), seen()...)
+	_, promptReqs := tp.requestsFrom(w.addr["alice"])
+	var promptSubjects []string
+	for _, m := range promptReqs {
+		promptSubjects = append(promptSubjects, m.Reply)
+	}
+	it.check("reply subjects: the tap captured alice's prompt request", len(promptSubjects) > 0, fmt.Sprintf("%d prompt request(s) from alice", len(promptSubjects)))
+	discoverySubjects := append(append([]string(nil), discovery...), seen()...)
+	all := append(append([]string(nil), discoverySubjects...), promptSubjects...)
 	rerr := CheckReplySubjects(w.addr["alice"].InboxPrefix(), all)
-	detail := fmt.Sprintf("%d reply subject(s) seen", len(all))
+	detail := fmt.Sprintf("%d discovery and %d prompt reply subject(s) checked", len(discoverySubjects), len(promptSubjects))
 	if rerr != nil {
 		detail += ": " + rerr.Error()
 	}
-	it.check("reply subjects: every reply subject the observer saw has the inbox layout and none was reused", rerr == nil, detail)
+	it.check("reply subjects: every discovery and prompt reply subject has the inbox layout and none was reused", rerr == nil, detail)
 }
 
 // observe starts carol, who watches $SRV.> and, for each discovery request from alice, floods the guesses of Guesses
