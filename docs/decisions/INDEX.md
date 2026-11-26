@@ -168,4 +168,5 @@
 | [0189](0189-the-scorecard-workflow-is-the-one-job-that-runs-on-a-github-hosted-runner.md) | The Scorecard workflow is the one job that runs on a GitHub-hosted runner | accepted | 2026-11-26 |
 | [0190](0190-staticcheck-findings-fail-the-lint-job-in-ci.md) | Staticcheck findings fail the lint job in CI | accepted | 2026-11-26 |
 | [0191](0191-a-pinned-plugin-rechecks-its-cached-mash-once-per-session-and-doctor-shows-which-mash-runs.md) | A pinned plugin re-checks its cached mash once per session, and doctor shows which mash runs | accepted | 2026-11-26 |
+| [0192](0192-doctor-checks-every-installed-endpoint-when-none-is-chosen.md) | `mash doctor` checks every installed endpoint when none is chosen | accepted | 2026-11-26 |
 | [0193](0193-after-a-release-the-plugin-version-gets-a-pin-suffix-so-installed-plugins-receive-the-pin.md) | After a release the plugin version gets a `-pin.1` suffix, so installed plugins receive the pin | accepted | 2026-11-26 |
