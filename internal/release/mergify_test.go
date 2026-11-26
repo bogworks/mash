@@ -174,7 +174,11 @@ func TestMergify_entryNeedsNoApproval(t *testing.T) {
 		len(ors[1]) != 2 || ors[1][0] != "#files < 3000" || ors[1][1] != "label = lead-approved" {
 		t.Errorf("queue_conditions or groups = %v, want the exception-path group and the #files < 3000 group (ADR 0182)", ors)
 	}
-	if !strings.Contains(strings.Join(plain, "\n"), "check-success = "+actionsApp+"lint") {
+	hasLint := false
+	for _, c := range plain {
+		hasLint = hasLint || c == "check-success = "+actionsApp+"lint"
+	}
+	if !hasLint {
 		t.Error("the default queue lacks check-success = @github-actions/lint: a code pull request needs lint to pass, a skipped lint (a cancelled run skips the job) is not accepted")
 	}
 	for _, c := range plain {
