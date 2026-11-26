@@ -30,7 +30,7 @@ var ErrLeaseLost = errors.New("the run lease was lost: another run may have take
 // ErrUnknownSchema is returned when the status value carries a schema this code does not know.
 var ErrUnknownSchema = errors.New("the status value has an unknown schema")
 
-// ErrNoPolicyBucket is returned by NewKVLedger when the owner's policy bucket does not exist. Operations creates it;
+// ErrNoPolicyBucket is returned by NewKVLedger when the owner's policy bucket does not exist. The administrator creates it;
 // mash never does.
 var ErrNoPolicyBucket = errors.New("the policy bucket does not exist")
 

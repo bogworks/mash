@@ -27,7 +27,7 @@ import (
 
 // DocumentSchema is the schema value a document must carry. The seam has not fixed this value (D211 is pending): it is
 // kept here, in one place, and a document with any other value is refused.
-const DocumentSchema = "mash.listset/1"
+const DocumentSchema = "mash.listset/2"
 
 // Errors Decode returns, wrapped with detail.
 var (

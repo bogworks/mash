@@ -740,15 +740,15 @@ func TestPolicyBucket(t *testing.T) {
 		pattern, owner, want string
 		ok                   bool
 	}{
-		{"mgr_{owner}_policy", "r1", "mgr_r1_policy", true},
+		{"pol_{owner}_policy", "r1", "pol_r1_policy", true},
 		{"{owner}-{owner}", "a", "a-a", true},
 		{"fixed_policy", "", "fixed_policy", true},
 		{"fixed_policy", "ignored", "fixed_policy", true},
 		{"", "r1", "", false},
-		{"mgr_{owner}_policy", "", "", false},
-		{"mgr_{owner}_policy", "a.b", "", false},
-		{"mgr.{owner}", "r1", "", false},
-		{"mgr {owner}", "r1", "", false},
+		{"pol_{owner}_policy", "", "", false},
+		{"pol_{owner}_policy", "a.b", "", false},
+		{"pol.{owner}", "r1", "", false},
+		{"pol {owner}", "r1", "", false},
 	} {
 		got, err := PolicyBucket(c.pattern, c.owner)
 		if (err == nil) != c.ok || got != c.want {

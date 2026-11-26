@@ -44,7 +44,7 @@ func sameContentApplier(t *testing.T) (*Applier, policyintake.Doc) {
 			return []ServerInfo{{Name: "s1", Host: "127.0.0.1", Port: 4222}}, nil
 		},
 	}
-	raw := fmt.Sprintf(`{"schema":%q,"account":"A","owner":"foo","generation":2,"base_generation":1,"issued_at":"2026-11-14T10:00:00Z","groups":{},"senders":{}}`, "mash.listset/1")
+	raw := fmt.Sprintf(`{"schema":%q,"account":"A","owner":"foo","generation":2,"base_generation":1,"issued_at":"2026-11-14T10:00:00Z","groups":{},"senders":{}}`, "mash.listset/2")
 	return a, policyintake.Doc{Raw: []byte(raw)}
 }
 
@@ -104,7 +104,7 @@ func newAddressApplier(t *testing.T, inboxes InboxChecker) (*Applier, policyinta
 	a.Keys = makeKeys{memKeys{}}
 	d.Raw = []byte(fmt.Sprintf(`{"schema":%q,"account":"A","owner":"foo","generation":1,"base_generation":0,"issued_at":"2026-11-14T10:00:00Z",`+
 		`"groups":{"c":{"mail":"closed","prompt":"closed","status":"shared","heartbeat":"closed"}},`+
-		`"senders":{"foo.c.core":{"allow":[],"deny":[]}}}`, "mash.listset/1"))
+		`"senders":{"foo.c.core":{"allow":[],"deny":[]}}}`, "mash.listset/2"))
 	called := new(bool)
 	a.applyFn = func(_ context.Context, req policyapply.ApplyRequest, _ policyapply.ApplyDeps) (policyapply.Status, error) {
 		*called = true
@@ -151,7 +151,7 @@ func TestApplierDropsANonMashKeyOnTheFirstApplyWhenTheDropFieldsAreSet(t *testin
 	w := newDropWorld(t)
 	raw := []byte(fmt.Sprintf(`{"schema":%q,"account":%q,"owner":"foo","generation":1,"base_generation":0,"issued_at":"2026-11-14T10:00:00Z",`+
 		`"groups":{"c":{"mail":"closed","prompt":"closed","status":"shared","heartbeat":"closed"}},`+
-		`"senders":{"foo.c.core":{"allow":[],"deny":[]}}}`, "mash.listset/1", w.acct))
+		`"senders":{"foo.c.core":{"allow":[],"deny":[]}}}`, "mash.listset/2", w.acct))
 	exempt := map[string][]string{"UEXEMPT": {w.acct, w.otherRange}}
 	for _, set := range []bool{false, true} {
 		a := &Applier{

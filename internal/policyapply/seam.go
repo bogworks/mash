@@ -7,12 +7,12 @@ import (
 	"strings"
 )
 
-// The seam with the manager that writes list sets. Operations creates one KV bucket per owner, shared with that
-// manager, which writes listset.<account public key> there; mash writes one value per account at
-// status.<account public key> and nothing else, and only mash writes status.* keys.
+// The seam with whatever writes list sets: one KV bucket per owner, which the administrator creates. List sets are
+// written to listset.<account public key> there; mash writes one value per account at status.<account public key>
+// and nothing else, and only mash writes status.* keys.
 //
 // The bucket name is configuration, not a built-in name, because the seam (decision D211) is pending. The proposed
-// pattern is "<manager>_{owner}_policy", set by the operator in PolicyBucketEnv; {owner} is replaced by the owner
+// pattern is "<prefix>_{owner}_policy", set by the administrator in PolicyBucketEnv; {owner} is replaced by the owner
 // name. The key names below are the proposal too. A change of the key names is a one-line change in this file;
 // nothing else in the package spells a key.
 
