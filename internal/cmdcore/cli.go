@@ -87,6 +87,9 @@ func CLIWith[P any, R Result](c Command[P, R], env EnvFunc, frame Frame) CLIFunc
 			}
 		}
 		fmt.Fprintf(stdout, "%s\n", out)
+		if wn, ok := any(r).(Warner); ok && wn.Warning() != "" {
+			fmt.Fprintf(stderr, "%s\n", wn.Warning())
+		}
 		if h, ok := any(r).(Hinter); ok && h.Hint() != "" {
 			fmt.Fprintf(stderr, "hint: %s\n", h.Hint())
 		}

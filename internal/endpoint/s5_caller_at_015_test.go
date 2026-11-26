@@ -2,9 +2,9 @@ package endpoint
 
 // AT-015 (REQ-016): the caller refuses what it cannot verify. Run on main's own discovery through the S5 seam
 // (s5_caller_wire_test.go): presence (applyPresence) and the recipient discovery of prompt (discoverSubject), both
-// through mash's one verify step. The real-W-binary variant (mash who, mash send discovery, mash prompt; the warning
-// line, answers_not_verified in --json, the stored send) is W's: nothing is printed here (amendment 5, N10), and the
-// seam reports the count and the accepted registrations, which is what those views are built from.
+// through mash's one verify step. The views built from the count (mash who's warning line and answers_not_verified in
+// --json and the MCP who tool) are tested in internal/cmdcore/cmds/who_test.go; nothing is printed here, and the seam
+// reports the count and the accepted registrations, which is what those views are built from.
 
 import (
 	"context"

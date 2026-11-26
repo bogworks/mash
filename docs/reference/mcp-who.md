@@ -38,7 +38,8 @@ The structured content of a successful result. The values are an example.
         "team": "blue"
       }
     }
-  ]
+  ],
+  "answers_not_verified": 0
 }
 ```
 

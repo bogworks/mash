@@ -56,8 +56,8 @@ type dirView struct {
 }
 
 // AnswersNotVerified is how many discovery answers failed verification over this endpoint's life, each counted once
-// per discovery (TO-12, REQ-016). It is kept and not printed: no view shows it until W. It stays 0 while the S5
-// switch is off.
+// per discovery (TO-12, REQ-016). `mash who` and the MCP who tool show it (the warning line and
+// answers_not_verified). It stays 0 while the S5 switch is off.
 func (e *Endpoint) AnswersNotVerified() int { return int(e.notVerified.Load()) }
 
 // presenceInbox is the reply subject of a presence probe.

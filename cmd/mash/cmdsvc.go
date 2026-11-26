@@ -304,10 +304,10 @@ func whoEntries(ps []endpoint.Presence, owner string) []cmds.WhoEntry {
 
 // Who reads the whole directory and which endpoints answer a presence probe, in one open: over a slow link every
 // dependent request is a round trip.
-func (s *cliSvc) Who(ctx context.Context) ([]cmds.WhoEntry, error) {
+func (s *cliSvc) Who(ctx context.Context) ([]cmds.WhoEntry, int, error) {
 	cfg := s.cfg
 	if cfg.Inert() {
-		return nil, cmdcore.NoEndpoint(cmdcore.NoneInstalled, "who", nil)
+		return nil, 0, cmdcore.NoEndpoint(cmdcore.NoneInstalled, "who", nil)
 	}
 	ctx, cancel := context.WithTimeout(ctx, cliDeadline(cfg))
 	defer cancel()
@@ -315,15 +315,15 @@ func (s *cliSvc) Who(ctx context.Context) ([]cmds.WhoEntry, error) {
 	ep, err := endpoint.OpenClientWith(openCtx, cfg, endpoint.ClientOptions{FullDirectory: true, Presence: true})
 	openCancel()
 	if err != nil {
-		return nil, openFailure(cfg, err)
+		return nil, 0, openFailure(cfg, err)
 	}
 	defer ep.Close()
 	c, cc := context.WithTimeout(ctx, cfg.CallTimeout)
 	defer cc()
 	if err := ep.Refresh(c); err != nil {
-		return nil, refreshFailure(cfg, err)
+		return nil, 0, refreshFailure(cfg, err)
 	}
-	return whoEntries(ep.Who(), cfg.Owner), nil
+	return whoEntries(ep.Who(), cfg.Owner), ep.AnswersNotVerified(), nil
 }
 
 // refreshFailure words a failure of the wait for who is online. A wait that ran out is not a failure to connect: the
@@ -569,16 +569,18 @@ func (s *mcpSvc) Send(ctx context.Context, to, text string, o cmds.SendOptions) 
 }
 
 // Who asks every endpoint now whether it is there (the answer is reused for 30 seconds), then reads the directory.
-func (s *mcpSvc) Who(ctx context.Context) ([]cmds.WhoEntry, error) {
+func (s *mcpSvc) Who(ctx context.Context) ([]cmds.WhoEntry, int, error) {
 	ep, err := s.state.Load().usable(s.name)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	ctx, cancel := context.WithTimeout(ctx, s.callTimeout)
 	defer cancel()
+	// The endpoint lives as long as the server, so the count is of this call's answers, not of its whole life.
+	before := ep.AnswersNotVerified()
 	ps, err := ep.WhoFresh(ctx)
 	if err != nil {
-		return nil, s.frame(ep, fmt.Errorf("who: asking who is online: %w", err))
+		return nil, 0, s.frame(ep, fmt.Errorf("who: asking who is online: %w", err))
 	}
-	return whoEntries(ps, ep.Address().Owner), nil
+	return whoEntries(ps, ep.Address().Owner), max(ep.AnswersNotVerified()-before, 0), nil
 }

@@ -49,6 +49,13 @@ type Hinter interface {
 	Hint() string
 }
 
+// Warner is implemented by a result that has a warning for a person: the command line prints it once on standard error
+// (never with --json, whose object is the whole answer), and an MCP tool, which has no standard error, leaves it to the
+// result's own fields. An empty warning is none.
+type Warner interface {
+	Warning() string
+}
+
 // Env is what a command runs against. Svc is the command package's own service, asserted to the interface it needs, so
 // tests can fake it.
 type Env struct {
