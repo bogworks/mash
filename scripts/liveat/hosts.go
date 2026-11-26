@@ -69,7 +69,7 @@ type Hosts interface {
 
 var errSSHNotConfigured = errors.New("ssh hosts: not configured")
 
-// SSH is the real hosts of the contract: bf1, bf2 and dev1, each with a directory ~/mash-at005 and no sudo, the same
+// SSH is the three real hosts of the contract, each with a directory ~/mash-at005 and no sudo, the same
 // ports as above, binaries copied over.
 //
 // TODO: not implemented. A later change fills in Open (ssh to each host, copy the binaries, return Hosts whose Exec,

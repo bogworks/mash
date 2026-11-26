@@ -9,7 +9,7 @@ import (
 
 // A three-token sender is shown in the canonical agent.owner.name form on every human surface (ADR 0081); the
 // other senders are pinned by contract.txt and render_test.go and do not change.
-const tokKey, tokDisplay = "bogworks_x_sap-go-sdk", "bogworks.x.sap-go-sdk"
+const tokKey, tokDisplay = "acme_dev_build-bot", "acme.dev.build-bot"
 
 func tokMail(seq uint64) Mail {
 	m := mail(seq, tokKey, "hello")

@@ -202,7 +202,7 @@ func TestS5Today_WireOracle(t *testing.T) {
 
 // TestS5AT008_WireEqualsToday: main's own discovery and prompt sender, through the S5 seam, put the same request
 // subjects, headers (ts, nonce and sig masked as N8 says) and payloads on the wire as the reference with the clock and
-// nonce fixed. Any difference is listed and ruled by Randy (REQ-008), so the test fails on it rather than hiding it.
+// nonce fixed. Any difference is listed and ruled on by the maintainer (REQ-008), so the test fails on it rather than hiding it.
 func TestS5AT008_WireEqualsToday(t *testing.T) {
 	needS5Caller(t, "AT-008 wire equality")
 	z := newS5Fix(t)
