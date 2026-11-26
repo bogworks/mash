@@ -131,9 +131,9 @@ func TestMergify_waitsOnlyForChecksThatExist(t *testing.T) {
 	queuePlain, _ := splitConditions(t, q.QueueConditions)
 	for _, c := range append(append([]string{}, queuePlain...), q.MergeConditions...) {
 		mm := check.FindStringSubmatch(c)
-		// codex-review and lead-review are commit statuses posted outside the workflows (scripts/review-pr,
+		// codex-review, lead-review and medium-dispositions are commit statuses posted outside the workflows (scripts/review-pr,
 		// scripts/lead-approve), so no job carries their name.
-		if mm == nil || mm[1] == "codex-review" || mm[1] == "lead-review" {
+		if mm == nil || mm[1] == "codex-review" || mm[1] == "lead-review" || mm[1] == "medium-dispositions" {
 			continue
 		}
 		name := strings.TrimPrefix(mm[1], actionsApp)
@@ -146,7 +146,7 @@ func TestMergify_waitsOnlyForChecksThatExist(t *testing.T) {
 			t.Errorf("check %q is run by %q, want %q", c.check, names[c.check], c.file)
 		}
 	}
-	for _, want := range []string{"check-success = codex-review", "check-success = @github-actions/pr-check", "check-success = @github-actions/adr-lint", "check-success = @github-actions/label-reset", "label != hold", "-draft", "-conflict"} {
+	for _, want := range []string{"check-success = codex-review", "check-success = @github-actions/pr-check", "check-success = @github-actions/adr-lint", "check-success = @github-actions/label-reset", "check-success = medium-dispositions", "label != hold", "-draft", "-conflict"} {
 		if !strings.Contains(strings.Join(queuePlain, "\n"), want) {
 			t.Errorf("queue_conditions lack %q", want)
 		}
@@ -475,16 +475,16 @@ func TestMergify_actionsChecksAreAppQualified(t *testing.T) {
 			continue
 		}
 		seen[mm[1]] = true
-		if mm[1] == "codex-review" || mm[1] == "lead-review" {
+		if mm[1] == "codex-review" || mm[1] == "lead-review" || mm[1] == "medium-dispositions" {
 			continue
 		}
 		if jobs[mm[1]] {
 			t.Errorf("%q names a GitHub Actions job without the app: write check-success = %s%s", c, actionsApp, mm[1])
 		} else if !strings.HasPrefix(mm[1], actionsApp) {
-			t.Errorf("%q is neither a known status (codex-review, lead-review) nor app-qualified", c)
+			t.Errorf("%q is neither a known status (codex-review, lead-review, medium-dispositions) nor app-qualified", c)
 		}
 	}
-	for _, s := range []string{"codex-review"} {
+	for _, s := range []string{"codex-review", "medium-dispositions"} {
 		if !seen[s] {
 			t.Errorf("queue_conditions lack the plain `check-success = %s`", s)
 		}
@@ -545,7 +545,7 @@ func TestMergify_docsQueue(t *testing.T) {
 	}
 	re := docsQueueRegex(t, m)
 	want := []string{"base = main", "-draft", "-conflict", "label != hold", `#files >= 1`, `#files < 300`, "-files ~= " + re,
-		"check-success = @github-actions/pr-check", "check-success = @github-actions/adr-lint", "check-success = @github-actions/label-reset"}
+		"check-success = @github-actions/pr-check", "check-success = @github-actions/adr-lint", "check-success = @github-actions/label-reset", "check-success = medium-dispositions"}
 	got := append([]string{}, plain...)
 	sort.Strings(got)
 	sort.Strings(want)
