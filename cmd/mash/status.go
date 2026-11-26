@@ -40,6 +40,16 @@ func (s *statusSource) mailHeld() bool {
 	return st.ep.StorageState() == endpoint.StorageFailing
 }
 
+// scanning is whether the session is checking the stored mail before it delivers any (the first start of the
+// switched-on build, once).
+func (s *statusSource) scanning() bool {
+	if s.state == nil {
+		return false
+	}
+	st := s.state.Load()
+	return st != nil && st.ep != nil && st.ep.StoredScanRunning()
+}
+
 // hookState is the session's hook state (endpoint.HookRan and the others): not_run until a spool is bound.
 func (s *statusSource) hookState() string {
 	if s.state != nil {
@@ -96,7 +106,7 @@ type sessionSvc struct {
 }
 
 func (s sessionSvc) Health(ctx context.Context) (cmds.HealthReport, error) {
-	rep, err := (&healthSvc{cfg: s.src.cfg, cfgErr: s.src.cfgErr, session: true, mailHeld: s.src.mailHeld, lease: s.src.lease, hooks: s.src.hookState}).Health(ctx)
+	rep, err := (&healthSvc{cfg: s.src.cfg, cfgErr: s.src.cfgErr, session: true, mailHeld: s.src.mailHeld, scanning: s.src.scanning, lease: s.src.lease, hooks: s.src.hookState}).Health(ctx)
 	if err == nil {
 		rep.Session = s.src.sessionNow(rep.Lease == "")
 	}

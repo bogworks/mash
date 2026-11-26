@@ -98,7 +98,7 @@ func TestUnverifiedMailIsRefusedByDefault(t *testing.T) {
 	if b, err := os.ReadFile(filepath.Join(dir, RefusedFile)); err != nil || string(b) != "4\n" {
 		t.Fatalf("count file %q %v", b, err)
 	}
-	if ents, _ := os.ReadDir(dir); len(ents) != 2 { // the count and its sequences: no temporary file left behind
+	if ents, _ := os.ReadDir(dir); len(ents) != 3 { // the count, its sequences and the malformed list (written by the stored scan): no temporary file left behind
 		t.Fatalf("spool dir holds %v", ents)
 	}
 	// The sender is told nothing: b has no reply in its own inbox.

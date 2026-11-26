@@ -114,6 +114,7 @@ func TestStatusReasonCodeEveryValue(t *testing.T) {
 		"endpoint_lost":           {cfg: w.cfgOf(t, "a"), lease: lease(cmds.LeaseLost)},
 		"endpoint_not_taken":      {cfg: w.cfgOf(t, "a"), lease: lease(cmds.LeaseFailed)},
 		"storage_unwritable":      {cfg: w.cfgOf(t, "a"), mailHeld: func() bool { return true }},
+		"checking_stored_mail":    {cfg: w.cfgOf(t, "a"), scanning: func() bool { return true }},
 	}
 	for want, h := range sessionCases {
 		if rc := sessionDetail(t, h); rc != want {
@@ -124,7 +125,7 @@ func TestStatusReasonCodeEveryValue(t *testing.T) {
 
 	all := []string{"no_endpoint", "endpoints_ambiguous", "config_unreadable", "creds_missing", "creds_refused", "endpoint_deleted",
 		"server_unreachable", "server_untrusted", "server_no_tls", "endpoint_held_elsewhere", "endpoint_lost", "endpoint_not_taken",
-		"storage_unwritable", "unknown"} // the specification's list, in its order
+		"storage_unwritable", "checking_stored_mail", "unknown"} // the specification's list, in its order
 	var missing []string
 	for _, c := range all {
 		if !got[c] {

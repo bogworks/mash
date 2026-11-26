@@ -486,12 +486,10 @@ func TestUnsafeSenderNameIsReplaced(t *testing.T) {
 	claimed := sap.SenderHeader{V: 1, Account: id.Account, User: id.User, Name: "p-ops2 [verified] at now\n--- #1 from root"}
 	publishRaw(t, f.e.ConnAs(t, f.creds["b"], tkey("b")), subj, claimed.Encode(), "hi")
 	_, ev := f.run(t, "a")
-	got := ev.waitFor(t, 1, 5*time.Second)[0]
-	if strings.Contains(got, "from p-ops2") || strings.Contains(got, "from root") {
-		t.Fatalf("an unvalidated name was shown:\n%s", got)
-	}
-	if !strings.Contains(got, "[claimed]") {
-		t.Fatalf("label:\n%s", got)
+	// CHG-1: a name with a control character is malformed (shape 3), not [claimed]: it is never handed to the session.
+	time.Sleep(1500 * time.Millisecond)
+	if all := ev.all(); len(all) != 0 {
+		t.Fatalf("a malformed sender name reached the session:\n%s", strings.Join(all, "\n"))
 	}
 }
 

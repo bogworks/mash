@@ -87,7 +87,7 @@ func TestClassifyKeys(t *testing.T) {
 	}
 	for _, c := range cases {
 		hdr, subj, data := signedHeader(t, c.id, c.name)
-		from, trust, _, ok := e.classify(subj, hdr, data, time.Now())
+		from, trust, _, ok := e.classify(subj, hdr.Values(sap.HeaderName), data, time.Now())
 		if !ok || trust != c.trust || (c.from != "" && from != c.from) || (c.trust == sap.TrustUnknownSigner && (from == key || from == other)) {
 			t.Errorf("%s: got (%q,%s,%v) want (%q,%s)", c.desc, from, trust, ok, c.from, c.trust)
 		}

@@ -69,6 +69,7 @@ func TestSessionStatusAnotherSessionHolds(t *testing.T) {
 
 	freeLease(t, kv, tAddr("a").Flat())
 	s.awaitOnline(t)
+	waitStoredScan(t, w.env["a"])
 	text, sc = toolObject(t, s, 12, "status")
 	if text != tTo("a")+": ready, online" || sc["ready"] != true || sc["online"] != true || sc["reason"] != nil {
 		t.Fatalf("status after taking it: %q %v", text, sc)
@@ -90,6 +91,7 @@ func TestSessionStatusLostToANewerOne(t *testing.T) {
 	old := startServe(t, w.env["a"])
 	old.initialize(t)
 	old.tools(t)
+	waitStoredScan(t, w.env["a"])
 	eventually(t, 5*time.Second, "old online", func() bool { return runMash(w.env["a"], "status").out == tTo("a")+": ready, online\n" })
 	if text, _ := toolObject(t, old, 9, "status"); text != tTo("a")+": ready, online" {
 		t.Fatalf("old serve while it holds: %q", text)

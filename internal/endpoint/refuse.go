@@ -1,7 +1,6 @@
 package endpoint
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -143,6 +142,7 @@ func (e *Endpoint) bindRefusals(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	e.bindInfo.Store(st.CachedInfo())
 	return e.bindRefusalsTo(streamIdentity(st.CachedInfo()))
 }
 
@@ -155,6 +155,15 @@ func (e *Endpoint) bindRefusalsTo(id string) (string, error) {
 		}
 		refusedMu.Lock()
 		defer refusedMu.Unlock()
+		// The malformed list belongs to a stream identity too: another stream's list, its scanned line with it, is
+		// replaced by a header alone, so the new stream is scanned.
+		if mp := filepath.Join(dir, malformedSeqsFile); readSeqList(mp).ID != id {
+			if _, err := os.Stat(mp); err == nil {
+				if err := replaceFile(mp, []byte(refusedSeqsHeader+id+"\n")); err != nil {
+					return "", err
+				}
+			}
+		}
 		p := filepath.Join(dir, refusedSeqsFile)
 		if have, _ := readRefusedSeqs(p); have != id {
 			_, seenFile := os.Stat(p)
@@ -212,15 +221,7 @@ func (e *Endpoint) refusedFirstSeq(ctx context.Context) (uint64, error) {
 // writeRefusedSeqs replaces the sequences file with the stream identity id, the pruned marker (only when pruned is
 // above 0) and seqs.
 func writeRefusedSeqs(p, id string, pruned int, seqs []uint64) error {
-	var b strings.Builder
-	b.WriteString(refusedSeqsHeader + id + "\n")
-	if pruned > 0 {
-		b.WriteString(refusedSeqsPruned + strconv.Itoa(pruned) + "\n")
-	}
-	for _, s := range seqs {
-		b.WriteString(strconv.FormatUint(s, 10) + "\n")
-	}
-	return replaceFile(p, []byte(b.String()))
+	return writeSeqList(p, seqList{ID: id, Pruned: pruned, Entries: entriesOf(seqs)})
 }
 
 // repairRefusedCountLocked raises the count file to pruned plus the number of recorded sequences when it is lower
@@ -298,41 +299,8 @@ func (e *Endpoint) recordRefusalNew(seq uint64) (n int, added bool, err error) {
 	if slices.Contains(seqs, seq) {
 		return have, false, rerr
 	}
-	if _, err := os.Stat(p); err != nil { // a new file starts with its stream's identity
-		if err := replaceFile(p, []byte(refusedSeqsHeader+id+"\n")); err != nil {
-			return 0, false, err
-		}
-	}
-	wrote := false
-	if len(seqs) >= 2*refusedSeqsKeep {
-		// Only sequences the stream no longer holds are dropped: every one it still holds stays refused.
-		if first, err := e.refusedFirstSeq(ctx); err == nil {
-			kept := make([]uint64, 0, len(seqs)+1)
-			for _, s := range seqs {
-				if s >= first {
-					kept = append(kept, s)
-				}
-			}
-			if len(kept) < len(seqs) {
-				if err := writeRefusedSeqs(p, id, pruned+len(seqs)-len(kept), append(kept, seq)); err != nil {
-					return 0, false, err
-				}
-				wrote = true // written whole, seq included
-			}
-		}
-	}
-	if !wrote {
-		f, err := os.OpenFile(p, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
-		if err != nil {
-			return 0, false, err
-		}
-		_, werr := fmt.Fprintf(f, "%d\n", seq)
-		if cerr := f.Close(); werr == nil {
-			werr = cerr
-		}
-		if werr != nil {
-			return 0, false, werr
-		}
+	if err := e.appendListEntry(ctx, p, seqList{ID: id, Pruned: pruned, Entries: entriesOf(seqs)}, seqEntry{Seq: seq}); err != nil {
+		return 0, false, err
 	}
 	n = have + 1
 	if err := replaceFile(filepath.Join(dir, RefusedFile), []byte(strconv.Itoa(n)+"\n")); err != nil {
@@ -377,32 +345,15 @@ func readRefusedSeqs(path string) (string, []uint64) {
 // is malformed; the last marker wins).
 func readRefusedFile(path string) (id string, seqs []uint64, pruned int) {
 	refusedFileReads.Add(1)
-	f, err := os.Open(path)
-	if err != nil {
-		return "", nil, 0
-	}
-	defer f.Close()
+	l := readSeqList(path)
 	seen := map[uint64]bool{}
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		if rest, ok := strings.CutPrefix(sc.Text(), refusedSeqsPruned); ok {
-			n, err := strconv.Atoi(strings.TrimSpace(rest))
-			if err != nil || n < 0 {
-				n = 0
-			}
-			pruned = n
-			continue
-		}
-		if rest, ok := strings.CutPrefix(sc.Text(), refusedSeqsHeader); ok {
-			id = strings.TrimSpace(rest)
-			continue
-		}
-		if n, err := strconv.ParseUint(strings.TrimSpace(sc.Text()), 10, 64); err == nil && !seen[n] {
-			seen[n] = true
-			seqs = append(seqs, n)
+	for _, en := range l.Entries {
+		if !seen[en.Seq] {
+			seen[en.Seq] = true
+			seqs = append(seqs, en.Seq)
 		}
 	}
-	return id, seqs, pruned
+	return l.ID, seqs, l.Pruned
 }
 
 // refusedStored is how many of the refused messages the inbox stream, whose sequences run from first to last, may still

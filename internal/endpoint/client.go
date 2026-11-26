@@ -16,6 +16,7 @@ import (
 
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/sap"
+	"github.com/bogworks/mash/internal/sapsdk"
 	"github.com/bogworks/mash/internal/store"
 )
 
@@ -436,7 +437,7 @@ func (e *Endpoint) loadSenders(ctx context.Context, raws []*jetstream.RawStreamM
 	}
 	need := map[string]bool{}
 	for _, raw := range raws {
-		h, trust := sap.VerifyStored(raw.Header.Get(sap.HeaderName), raw.Subject, raw.Data)
+		h, trust := sapsdk.VerifyStored(raw.Header.Values(sap.HeaderName), raw.Subject, raw.Data)
 		switch trust {
 		case sap.TrustForged, sap.TrustMalformed, sap.TrustAbsent, sap.TrustClaimed:
 			continue // never looked up

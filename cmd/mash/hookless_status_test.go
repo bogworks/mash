@@ -24,6 +24,7 @@ func hooklessWorld(t *testing.T, grace time.Duration) (*world, *session) {
 	w.env["a"]["MASH_SPOOL_FROM_START"] = "1"
 	s := startServe(t, w.env["a"])
 	s.initialize(t)
+	waitStoredScan(t, w.env["a"])
 	return w, s
 }
 
