@@ -110,7 +110,7 @@ func TestBuiltBinaryWhoCountsForgedDiscoveryAnswers(t *testing.T) {
 			t.Fatalf("who --json is not JSON: %v: %q", err, out)
 		}
 		if w.AnswersNotVerified == nil {
-			t.Skip("who --json carries no answers_not_verified yet (pr/core/who-answers-not-verified)")
+			t.Fatalf("who --json carries no answers_not_verified: %q", out)
 		}
 		return w
 	}
