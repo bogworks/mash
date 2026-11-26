@@ -78,7 +78,7 @@ hint: mashctl doctor
 Stream: stderr. Exit code: 0.
 
 ```text
-(two warning lines before the result, for an account that allows 5 streams and 100 MiB of disk: "warning: the account allows 5 streams; one endpoint needs 6, one more each" and "warning: the account has 100MiB of disk; one endpoint needs 109MiB"; an account that allows 6 streams and 109 MiB gets neither)
+(two warning lines before the result, for an account that allows 4 streams and 100 MiB of disk: "warning: the account allows 4 streams; one endpoint needs 5, one more each" and "warning: the account has 100MiB of disk; one endpoint needs 108MiB"; an account that allows 5 streams and 108 MiB gets neither)
 ```
 
 ### A strict operator and no signing_key

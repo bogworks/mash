@@ -124,20 +124,19 @@ mash makes these on the mash account. All use file storage and one replica.
 | `KV_mash-leases` | once, by `init` | 4 MiB | who is online; entries expire after 90 seconds |
 | `KV_mash-retired` | once, by `init` | 64 MiB | one small marker per deleted address, kept for good |
 | `KV_mash-issued` | once, by `init` | 8 MiB | a record of every credential mash issued |
-| `KV_mash-adoption` | once, by `init` | 1 MiB | a small marker |
 | `inbox-<owner>_<group>_<name>` | per endpoint | 16 MiB (default) | 30 days of mail at most, oldest dropped first; one durable consumer; messages up to 1 MiB |
 
 (`inbox-acme_demo_bob` is what we saw for the endpoint `acme.demo.bob`.)
 
 So, for N endpoints with the defaults, the account needs at least:
 
-- **Streams:** 5 + N. Each KV bucket is a stream.
+- **Streams:** 4 + N. Each KV bucket is a stream.
 - **Consumers:** 1 per stream (the inbox's durable consumer). The account's consumer limit applies to each stream.
-- **Disk:** 93 MiB + 16 MiB x N. For example, 20 endpoints: 413 MiB.
+- **Disk:** 92 MiB + 16 MiB x N. For example, 20 endpoints: 412 MiB.
 
-Round up. The script's account is given 2 GiB of disk, 1024 streams and 1024 consumers. Disk binds first: 93 + 16 x N must fit in 2048 MiB, which gives N = 122 endpoints. The stream limit (5 + N) and the consumer limit of 1024 are no longer the binding ones. Servers set up earlier keep their old limits (64 streams and 128 consumers). To raise the stream and consumer limits of such a server, use the steps in [Account limits](operations.md#account-limits): `nats auth account edit` and `nats auth account push` with the system credentials, no restart. To host more endpoints, raise the account's disk limit by 16 MiB per endpoint: on an `nsc`-managed server that is the `JS_DISK` variable in the `nsc` steps in [operations.md](operations.md#the-account), and on a script-made server it is `--js-disk BYTES` on the same `nats auth account edit` (the script itself fixes the disk at 2147483648 bytes and has no such variable). Some of these numbers differ from what older text says; the table above is what the 0.5.6 code creates. The inbox cap and the three bucket caps can be raised in `config.json` under `limits` (`inbox_max_bytes`, `inbox_max_age`, `directory_max_bytes`, `lease_max_bytes`, `inbox_max_consumers`); `mashctl limits show` prints what is in force and `mashctl limits apply` raises existing inboxes. mash never lowers a cap.
+Round up. The script's account is given 2 GiB of disk, 1024 streams and 1024 consumers. Disk binds first: 92 + 16 x N must fit in 2048 MiB, which gives N = 122 endpoints. The stream limit (4 + N) and the consumer limit of 1024 are no longer the binding ones. Servers set up earlier keep their old limits (64 streams and 128 consumers). To raise the stream and consumer limits of such a server, use the steps in [Account limits](operations.md#account-limits): `nats auth account edit` and `nats auth account push` with the system credentials, no restart. To host more endpoints, raise the account's disk limit by 16 MiB per endpoint: on an `nsc`-managed server that is the `JS_DISK` variable in the `nsc` steps in [operations.md](operations.md#the-account), and on a script-made server it is `--js-disk BYTES` on the same `nats auth account edit` (the script itself fixes the disk at 2147483648 bytes and has no such variable). Some of these numbers differ from what older text says; the table above is what the 0.5.6 code creates. The inbox cap and the three bucket caps can be raised in `config.json` under `limits` (`inbox_max_bytes`, `inbox_max_age`, `directory_max_bytes`, `lease_max_bytes`, `inbox_max_consumers`); `mashctl limits show` prints what is in force and `mashctl limits apply` raises existing inboxes. mash never lowers a cap.
 
-If you use a smaller account limit than the table, `init` prints a warning. The warning uses the table's numbers: one endpoint needs 6 streams, 1 consumer and 109 MiB of disk (the 5 buckets, 93 MiB, and one inbox, 16 MiB), and each further endpoint adds 1 stream and 16 MiB. It follows the caps in `config.json` under `limits`; on a re-init, a bucket whose cap was raised earlier counts at its live cap, since `init` never lowers a cap.
+If you use a smaller account limit than the table, `init` prints a warning. The warning uses the table's numbers: one endpoint needs 5 streams, 1 consumer and 108 MiB of disk (the 4 buckets, 92 MiB, and one inbox, 16 MiB), and each further endpoint adds 1 stream and 16 MiB. It follows the caps in `config.json` under `limits`; on a re-init, a bucket whose cap was raised earlier counts at its live cap, since `init` never lowers a cap.
 
 ## Connect mash to your server
 

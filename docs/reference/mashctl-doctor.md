@@ -288,13 +288,13 @@ None. Administration. There are no MCP tools for mashctl.
 ## Notes
 
 What is a warning and what is a problem. Warnings: a lease with no endpoint, a
-retired name seen in use, and a missing record store (issued, adoption or
-retired) on the storage row; the fix for a missing store is to run mashctl
-init --config &lt;file&gt; again, which is safe. A missing issue store also
-fails the keys row (no issue record; mashctl cannot tell its users from
-others), with or without --audit-users. A problem: an endpoint whose
-credentials were being cancelled and never finished; the fix is to run that
-mashctl endpoint delete again.
+retired name seen in use, and a missing record store (issued or retired) on
+the storage row; the fix for a missing store is to run mashctl init --config
+&lt;file&gt; again, which is safe. A missing issue store also fails the keys
+row (no issue record; mashctl cannot tell its users from others), with or
+without --audit-users. A problem: an endpoint whose credentials were being
+cancelled and never finished; the fix is to run that mashctl endpoint delete
+again.
 
 ## What it replaces
 

@@ -802,20 +802,20 @@ func TestShownFolder(t *testing.T) {
 	}
 }
 
-// TestLimitWarnings: one endpoint needs 6 streams (5 buckets and the inbox), 1 consumer and 109 MiB (93 MiB of
+// TestLimitWarnings: one endpoint needs 5 streams (4 buckets and the inbox), 1 consumer and 108 MiB (92 MiB of
 // buckets and a 16 MiB inbox) with the defaults (docs/nats-server.md, Sizing).
 func TestLimitWarnings(t *testing.T) {
 	def := store.DefaultLimits()
-	small := limitWarnings(jwt.JetStreamLimits{Streams: 5, Consumer: 1, DiskStorage: 100 << 20}, def)
+	small := limitWarnings(jwt.JetStreamLimits{Streams: 4, Consumer: 1, DiskStorage: 100 << 20}, def)
 	want := []string{
-		"the account allows 5 streams; one endpoint needs 6, one more each",
-		"the account has 100MiB of disk; one endpoint needs 109MiB",
+		"the account allows 4 streams; one endpoint needs 5, one more each",
+		"the account has 100MiB of disk; one endpoint needs 108MiB",
 	}
 	if !reflect.DeepEqual(small, want) {
-		t.Errorf("5 streams, 100 MiB: got %q, want %q", small, want)
+		t.Errorf("4 streams, 100 MiB: got %q, want %q", small, want)
 	}
-	if got := limitWarnings(jwt.JetStreamLimits{Streams: 6, Consumer: 1, DiskStorage: 109 << 20}, def); len(got) != 0 {
-		t.Errorf("6 streams, 109 MiB: %q", got)
+	if got := limitWarnings(jwt.JetStreamLimits{Streams: 5, Consumer: 1, DiskStorage: 108 << 20}, def); len(got) != 0 {
+		t.Errorf("5 streams, 108 MiB: %q", got)
 	}
 	if got := limitWarnings(jwt.JetStreamLimits{Streams: -1, Consumer: -1, DiskStorage: -1}, def); len(got) != 0 {
 		t.Errorf("unlimited: %q", got)
@@ -823,10 +823,10 @@ func TestLimitWarnings(t *testing.T) {
 	if got := limitWarnings(jwt.JetStreamLimits{Consumer: 0, DiskStorage: 1 << 30, Streams: 1024}, def); len(got) != 0 {
 		t.Errorf("roomy: %q", got)
 	}
-	// The configured caps count: a 32 MiB inbox cap makes one endpoint need 125 MiB.
+	// The configured caps count: a 32 MiB inbox cap makes one endpoint need 124 MiB.
 	big := def
 	big.InboxMaxBytes = 32 << 20
-	if got := limitWarnings(jwt.JetStreamLimits{Streams: 6, DiskStorage: 109 << 20}, big); len(got) != 1 || !strings.Contains(got[0], "needs 125MiB") {
+	if got := limitWarnings(jwt.JetStreamLimits{Streams: 5, DiskStorage: 108 << 20}, big); len(got) != 1 || !strings.Contains(got[0], "needs 124MiB") {
 		t.Errorf("configured inbox cap: %q", got)
 	}
 	// Every printed line, the "warning: " prefix of init included, keeps to 80 columns, also with 4-digit numbers:
@@ -836,7 +836,7 @@ func TestLimitWarnings(t *testing.T) {
 	wide.DirectoryMaxBytes = 1000 << 20
 	cases := map[string][]string{
 		"defaults": small,
-		"4 digits": limitWarnings(jwt.JetStreamLimits{Streams: 5, Consumer: 1, DiskStorage: 1000 << 20}, wide),
+		"4 digits": limitWarnings(jwt.JetStreamLimits{Streams: 4, Consumer: 1, DiskStorage: 1000 << 20}, wide),
 	}
 	if got := cases["4 digits"]; len(got) != 2 {
 		t.Fatalf("4-digit case: %q", got)
@@ -870,7 +870,7 @@ func TestInitPrintsLimitsWarnings(t *testing.T) {
 			t.Fatal(err)
 		}
 		lim := ac.Limits.JetStreamLimits
-		lim.Streams, lim.DiskStorage, lim.Consumer = 5, 100<<20, -1
+		lim.Streams, lim.DiskStorage, lim.Consumer = 4, 100<<20, -1
 		ac.Limits.JetStreamLimits = lim
 		tok, err := ac.Encode(opKP)
 		if err != nil {
@@ -886,8 +886,8 @@ func TestInitPrintsLimitsWarnings(t *testing.T) {
 		t.Fatalf("init: %d\n%s", code, errb)
 	}
 	for _, w := range []string{
-		"warning: the account allows 5 streams; one endpoint needs 6, one more each\n",
-		"warning: the account has 100MiB of disk; one endpoint needs 109MiB\n",
+		"warning: the account allows 4 streams; one endpoint needs 5, one more each\n",
+		"warning: the account has 100MiB of disk; one endpoint needs 108MiB\n",
 	} {
 		if !strings.Contains(errb, w) {
 			t.Errorf("stderr lacks %q:\n%s", w, errb)
@@ -907,7 +907,7 @@ func TestIsUnreachable_aDisconnectedRequestIsUnreachable(t *testing.T) {
 	}
 }
 
-// limitsEnv is newApplyEnvTweak with the MASH account limited to 140 MiB of disk (the configured need is 109 MiB).
+// limitsEnv is newApplyEnvTweak with the MASH account limited to 140 MiB of disk (the configured need is 108 MiB).
 func limitsEnv(t *testing.T) *applyEnv {
 	return newApplyEnvTweak(t, func(e *applyEnv) {
 		opKP, _, err := e.ks.Operator()
@@ -959,10 +959,10 @@ func raiseDirectoryCap(t *testing.T, e *applyEnv) {
 	}
 }
 
-const liveDiskWarning = "warning: the account has 140MiB of disk; one endpoint needs 143MiB\n"
+const liveDiskWarning = "warning: the account has 140MiB of disk; one endpoint needs 142MiB\n"
 
 // TestInitDiskWarningCountsLiveCaps: a re-init over a bucket whose cap was raised above the config warns with the live
-// need (143 MiB), though the configured need (109 MiB) fits the account's 140 MiB; a first init warns nothing; a failed
+// need (142 MiB), though the configured need (108 MiB) fits the account's 140 MiB; a first init warns nothing; a failed
 // live read falls back to the configured caps without failing init.
 func TestInitDiskWarningCountsLiveCaps(t *testing.T) {
 	e := limitsEnv(t)
@@ -988,11 +988,11 @@ func TestInitDiskWarningCountsLiveCaps(t *testing.T) {
 
 func TestDiskNeed(t *testing.T) {
 	def := store.DefaultLimits()
-	if got := diskNeed(def, nil); got != 109<<20 {
+	if got := diskNeed(def, nil); got != 108<<20 {
 		t.Errorf("configured: %d", got)
 	}
 	live := map[string]int64{store.DirectoryBucket: 50 << 20, store.LeaseBucket: 1 << 20}
-	if got := diskNeed(def, live); got != 143<<20 {
+	if got := diskNeed(def, live); got != 142<<20 {
 		t.Errorf("live: %d", got)
 	}
 }
