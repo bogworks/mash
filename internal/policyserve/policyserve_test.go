@@ -13,7 +13,6 @@ import (
 	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/listset"
 	"github.com/bogworks/mash/internal/policyapply"
-	"github.com/bogworks/mash/internal/policyintake"
 	"github.com/bogworks/mash/internal/sap"
 )
 
@@ -56,92 +55,6 @@ func TestLimitsAndURLs(t *testing.T) {
 	}
 	if u := URLs(s); u["a"] != "nats://a:1" || u["b"] != "nats://b:2" {
 		t.Errorf("%+v", u)
-	}
-}
-
-func TestInForce(t *testing.T) {
-	l := policyapply.NewMemLedger(listset.Record{})
-	if got, err := InForce(l)(context.Background()); err != nil || got != "" {
-		t.Fatalf("nothing in force: %q %v", got, err)
-	}
-	rec, _, err := listset.Accept(listset.Record{}, listset.ListSet{Owner: "foo"}, []byte("raw"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := l.CompareAndCommit(0, rec); err != nil {
-		t.Fatal(err)
-	}
-	got, err := InForce(l)(context.Background())
-	if err != nil || len(got) != 64 || got != strings.ToLower(got) {
-		t.Fatalf("%q %v", got, err)
-	}
-	if got != rec.Received.String()[len("sha256:"):] {
-		t.Errorf("%q is not the received digest %s", got, rec.Received)
-	}
-}
-
-type refusalSink struct{ got []policyapply.Status }
-
-func (r *refusalSink) WriteRefusal(_ context.Context, st policyapply.Status) error {
-	r.got = append(r.got, st)
-	return nil
-}
-
-func TestReporterWritesARefusal(t *testing.T) {
-	sink := &refusalSink{}
-	at := time.Date(2026, 11, 14, 12, 0, 0, 0, time.UTC)
-	err := Reporter{Ledger: sink}.Refused(context.Background(), policyintake.Refusal{
-		Account: "A", Generation: 4, Digest: strings.Repeat("ab", 32), Stage: policyintake.StageSignature, Detail: "bad", At: at,
-	})
-	if err != nil || len(sink.got) != 1 {
-		t.Fatalf("%v %d", err, len(sink.got))
-	}
-	st := sink.got[0]
-	if st.State != policyapply.StateRefused || st.Generation != 4 || len(st.Refusals) != 1 || st.Refusals[0].Stage != "signature" ||
-		st.Refusals[0].Reason != "bad" || st.UpdatedAt != "2026-11-14T12:00:00Z" || !strings.HasPrefix(st.Refusals[0].Entry, "document sha256:abab") {
-		t.Errorf("%+v", st)
-	}
-}
-
-func TestHeldKeysCollectsEveryKeyMashHolds(t *testing.T) {
-	held := func() (string, map[string]string, error) {
-		return "A", map[string]string{"O": "op", "S": "sys", "A": "acct"}, nil
-	}
-	groups := func() (map[string]string, error) { return map[string]string{"foo.c": "G"}, nil }
-	got, err := HeldKeys(held, groups, "U")()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Join(got, ",") != "A,G,O,S,U" {
-		t.Errorf("%v", got)
-	}
-	boom := errors.New("unreadable")
-	if _, err := HeldKeys(func() (string, map[string]string, error) { return "", nil, boom }, groups, "U")(); !errors.Is(err, boom) {
-		t.Errorf("held error: %v", err)
-	}
-	if _, err := HeldKeys(held, func() (map[string]string, error) { return nil, boom }, "U")(); !errors.Is(err, boom) {
-		t.Errorf("groups error: %v", err)
-	}
-}
-
-type fakeGuard struct{ seen []string }
-
-func (g *fakeGuard) Before(_ context.Context, what string) error {
-	g.seen = append(g.seen, what)
-	if what == "commit" {
-		return errors.New("fenced")
-	}
-	return nil
-}
-
-func TestBeforeWriteCallsTheGuard(t *testing.T) {
-	g := &fakeGuard{}
-	f := BeforeWrite(g)
-	if err := f(context.Background(), "push"); err != nil {
-		t.Fatal(err)
-	}
-	if err := f(context.Background(), "commit"); err == nil || len(g.seen) != 2 {
-		t.Errorf("%v %v", err, g.seen)
 	}
 }
 

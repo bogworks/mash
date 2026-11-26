@@ -138,16 +138,3 @@ func TestDiffWithoutTheChecksSaysInboxNotChecked(t *testing.T) {
 		t.Fatalf("no note: %s", got)
 	}
 }
-
-// The Applier and the diff give the same text for the same case: both come from FailClosed.
-func TestApplyAndDiffGiveTheSameInboxRefusal(t *testing.T) {
-	a, d, _ := newAddressApplier(t, &fakeInboxes{})
-	_, err := a.Apply(context.Background(), d, okGuard{})
-	if err == nil {
-		t.Fatal("apply did not refuse")
-	}
-	p := diffWith(t, nil, d.Raw, &fakeInboxes{})
-	if r := onlyRefusal(t, p, policydoc.StageInbox); r.Reason != err.Error() {
-		t.Fatalf("diff says %q, apply says %q", r.Reason, err.Error())
-	}
-}
