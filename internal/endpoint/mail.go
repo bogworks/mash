@@ -1110,10 +1110,11 @@ func (e *Endpoint) readInbox(ctx context.Context, q InboxQuery) (InboxRead, erro
 		ci := cons.CachedInfo()
 		st.Waiting = int(ci.NumPending) + ci.NumAckPending
 		st.AckFloor = ci.AckFloor.Stream
-		// The consumer counts the refused mail still above its floor as pending, but it is never delivered, so it is
-		// not waiting.
+		// The consumer counts refused mail it has not yet delivered as pending, but a refused message is never shown
+		// as waiting. One at or below the delivered mark was handed to serve, which acknowledges it once recorded
+		// (possibly out of order, above the floor): the server no longer counts it, so it is not taken off again.
 		for seq := range classes {
-			if seq > st.AckFloor {
+			if seq > ci.Delivered.Stream {
 				st.Waiting--
 			}
 		}

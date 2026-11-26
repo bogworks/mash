@@ -3,8 +3,10 @@ package endpoint
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/bogworks/mash/internal/store"
+	"github.com/nats-io/nats.go/jetstream"
 )
 
 // A refused message is never new: the inbox lists it without OnlyNew, and with OnlyNew leaves it out of the listed
@@ -120,5 +122,52 @@ func TestInboxWaitingLeavesOutARefusedPendingMessage(t *testing.T) {
 	}
 	if fresh.State.Waiting != 1 || len(fresh.Mail) != 1 || fresh.Mail[0].Seq != 2 {
 		t.Fatalf("waiting %d, listed %+v: want 1 waiting and only seq 2 listed", fresh.State.Waiting, fresh.Mail)
+	}
+}
+
+// A refused message already delivered to serve is acknowledged after it is recorded, possibly out of order above the
+// ack floor; the server then no longer counts it, so the waiting count must not subtract it a second time.
+func TestInboxWaitingCountsAMessageBehindARefusedOneAckedOutOfOrder(t *testing.T) {
+	f := newFixture(t, "a", "c")
+	ctx := context.Background()
+	cc := f.client(t, "c")
+	for _, body := range []string{"normal one", "refused two"} {
+		if _, err := cc.Send(ctx, tdot("a"), body, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ep, err := Open(ctx, f.cfgState("a", t.TempDir(), false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(ep.Close)
+	if _, err := ep.recordRefusal(2); err != nil {
+		t.Fatal(err)
+	}
+	cons, err := ep.js.Consumer(ctx, ep.ident.InboxStream(), store.Consumer)
+	if err != nil {
+		t.Fatalf("the consumer must exist for this test: %v", err)
+	}
+	batch, err := cons.Fetch(2, jetstream.FetchMaxWait(5*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for m := range batch.Messages() {
+		md, err := m.Metadata()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if md.Sequence.Stream == 2 { // ack only the refused one: #1 stays pending, above no floor
+			if err := m.DoubleAck(ctx); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	r, err := ep.readInbox(ctx, InboxQuery{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.State.Waiting != 1 {
+		t.Fatalf("waiting %d: want 1 (seq 1 still waits behind the acked refused #2)", r.State.Waiting)
 	}
 }
