@@ -61,7 +61,7 @@ type job struct {
 	Outputs         map[string]string `yaml:"outputs"`
 	TimeoutMinutes  int               `yaml:"timeout-minutes"`
 	RunsOn          runsOn            `yaml:"runs-on"`
-	Permissions     map[string]string `yaml:"permissions"`
+	Permissions     permissions       `yaml:"permissions"`
 	Env             map[string]string `yaml:"env"`
 	Strategy        struct {
 		Matrix   map[string]any `yaml:"matrix"`
@@ -70,9 +70,26 @@ type job struct {
 	Steps []step `yaml:"steps"`
 }
 
+// permissions is a permissions: mapping of scope to access. The scalar forms (read-all, write-all) decode to the one entry
+// "*" with that value, so a workflow that uses one (scorecard.yml, ADR 0189) still loads and fails any exact-map check.
+type permissions map[string]string
+
+func (p *permissions) UnmarshalYAML(n *yaml.Node) error {
+	if n.Kind == yaml.ScalarNode {
+		*p = permissions{"*": n.Value}
+		return nil
+	}
+	m := map[string]string{}
+	if err := n.Decode(&m); err != nil {
+		return err
+	}
+	*p = m
+	return nil
+}
+
 type workflow struct {
 	On          any               `yaml:"on"`
-	Permissions map[string]string `yaml:"permissions"`
+	Permissions permissions       `yaml:"permissions"`
 	Env         map[string]string `yaml:"env"`
 	Jobs        map[string]job    `yaml:"jobs"`
 }

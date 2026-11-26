@@ -224,14 +224,14 @@ func TestWorkflows_labelResetRemovesApprovalLabels(t *testing.T) {
 	// contents: read is for gh pr view and the fetch of rule A, checks: read for the old head's label-reset run (ADR 0178);
 	// all are read or label-edit scopes, no write to code.
 	wantPerms := map[string]string{"pull-requests": "write", "contents": "read", "checks": "read"}
-	if !reflect.DeepEqual(w.Permissions, wantPerms) {
+	if !reflect.DeepEqual(map[string]string(w.Permissions), wantPerms) {
 		t.Errorf("workflow permissions = %v, want exactly %v", w.Permissions, wantPerms)
 	}
 	if len(w.Jobs) != 1 || w.Jobs["label-reset"].Name != "label-reset" {
 		t.Errorf("jobs = %v, want the single job label-reset named label-reset (the check name)", w.Jobs)
 	}
 	for id, j := range w.Jobs {
-		if j.Permissions != nil && !reflect.DeepEqual(j.Permissions, wantPerms) {
+		if j.Permissions != nil && !reflect.DeepEqual(map[string]string(j.Permissions), wantPerms) {
 			t.Errorf("job %s permissions = %v, want exactly %v", id, j.Permissions, wantPerms)
 		}
 	}
