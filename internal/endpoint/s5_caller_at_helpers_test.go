@@ -686,7 +686,12 @@ const (
 	s5None   s5RaceMode = "invalid-only"         // no valid answer at all
 )
 
-const s5RacePause = 250 * time.Millisecond // inside the discovery's stall, past any delivery delay on one server
+// s5RacePause separates the two publishes of a race. pub flushes, so the server has the first answer before the second
+// is published and delivers them in that order; the pause only has to keep the second out of the same read. It must be
+// well inside PresenceQuiet (300 ms): the presence window closes that long after the last answer it has received, and
+// a pause near it (it was 250 ms) lets a loaded -race run close the window before the second answer lands, so the
+// probe never counts it.
+const s5RacePause = 40 * time.Millisecond
 
 // race starts carol (the same-owner peer) answering every discovery request with invalid, in one publish each ("one
 // at a time", the caller picks the slice) or all together, and bob's connection answering with valid per mode. It
