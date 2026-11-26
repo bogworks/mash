@@ -154,8 +154,9 @@ func TestKnownIssueCheck(t *testing.T) {
 		detail                  string
 	}{
 		{"launcher verified", url, "open, label known-0.6.0", "launcher", true, "verified by the launcher"},
-		{"form only", url, "", "form only", true, "form only"},
-		{"blank verified is form only", url, "  ", "form only", true, "label not confirmed"},
+		{"form only fails", url, "", "not verified", false, "-known-issue-verified"},
+		{"blank verified fails", url, "  ", "not verified", false, "not verified"},
+		{"gh result text passes", url, "state OPEN, labels known-0.6.0", "launcher", true, "state OPEN"},
 		{"bad form even if verified", "https://github.com/zeta/mash/issues/1", "open, label known-0.6.0", "", false, "expected exactly"},
 		{"no url", "", "open", "", false, "EMPTY"},
 	} {

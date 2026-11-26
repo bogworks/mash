@@ -179,8 +179,9 @@ func ParseSums(text string) (map[string]string, error) {
 type KnownIssue struct {
 	URL    string `json:"url"`
 	Status string `json:"status"`
-	// VerifiedBy says how the entry was checked: "launcher" (the issue exists and carries the label, checked on the
-	// host with gh), "form only" (the URL's form; no token in this venue), or "" when no URL is given.
+	// VerifiedBy says how the entry was checked: "launcher" (the issue exists and carries the label, confirmed
+	// with gh on the host that prepared the run), "not verified" (the URL's form is fine but nothing confirmed the issue;
+	// the assertion fails), or "" when no URL is given or its form is wrong.
 	VerifiedBy string `json:"verified_by,omitempty"`
 }
 
@@ -193,7 +194,7 @@ func NewKnownIssue(url string) KnownIssue {
 }
 
 // KnownIssueFormProblem returns "" when url is exactly https://github.com/<repo>/issues/<positive integer>, otherwise
-// a sentence saying which form is expected. Only the form is checked: the issue's label needs the network and a token.
+// a sentence saying which form is expected. Only the form is checked here; KnownIssueCheck also needs the host's confirmation.
 func KnownIssueFormProblem(url, repo string) string {
 	prefix := "https://github.com/" + repo + "/issues/"
 	n := strings.TrimPrefix(url, prefix)
@@ -209,8 +210,9 @@ func KnownIssueFormProblem(url, repo string) string {
 	return "expected exactly " + prefix + "<positive integer>, got " + fmt.Sprintf("%q", url)
 }
 
-// KnownIssueCheck sets ki.VerifiedBy from the launcher's verified text (empty in a venue with no token) and returns the
-// assertion's pass flag and detail. The pass rule is the form of the URL; the label check only changes what is recorded.
+// KnownIssueCheck sets ki.VerifiedBy from the verified text (what the host that prepared the run confirmed with gh) and
+// returns the assertion's pass flag and detail. A pass needs both a URL of the right form and non-empty verified text:
+// a URL that only looks like an issue URL never passes.
 func KnownIssueCheck(ki *KnownIssue, repo, verified string) (bool, string) {
 	if ki.URL == "" {
 		return false, ki.Status + " " + ki.URL
@@ -222,6 +224,8 @@ func KnownIssueCheck(ki *KnownIssue, repo, verified string) (bool, string) {
 		ki.VerifiedBy = "launcher"
 		return true, ki.Status + " " + ki.URL + " (verified by the launcher: " + v + ")"
 	}
-	ki.VerifiedBy = "form only"
-	return true, ki.Status + " " + ki.URL + " (checked for form only: label not confirmed in this venue)"
+	ki.VerifiedBy = "not verified"
+	return false, ki.Status + " " + ki.URL + " (not verified: the issue and its known-<version> label were not confirmed; " +
+		"run scripts/replayproof/at023.sh, which confirms them with gh on the host, or in a VM guest have the host that " +
+		"prepared the run confirm with `gh issue view <n> -R <repo> --json state,labels` and pass the result as -known-issue-verified)"
 }

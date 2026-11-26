@@ -153,7 +153,7 @@ func run() int {
 	work := flag.String("work", "", "scratch directory for servers, state and binaries (default: a new temp directory)")
 	known := flag.String("known-issue", "", "URL of the known-0.6.0 entry (REQ-022); empty fails the run")
 	repo := flag.String("release-repo", "bogworks/mash", "the GitHub repository OWNER/REPO whose releases hold the oracle")
-	knownVerified := flag.String("known-issue-verified", "", "text from the launcher saying it confirmed on the host that the -known-issue entry exists and carries the label; empty means form only")
+	knownVerified := flag.String("known-issue-verified", "", "text from the launcher saying it confirmed on the host that the -known-issue entry exists and carries the label; empty fails the known-issue assertion (run at023.sh, or have the host confirm with gh issue view)")
 	venue := flag.String("venue", "", "a line describing where this runs (container image, VM), for the record")
 	ownerFlag := flag.String("owner", "acme", "the SAP owner of the proof's endpoints")
 	flag.Parse()
@@ -232,7 +232,7 @@ func execute(rec *Record, src, commit, version, oracleVer, repo, wd string) bool
 	if !rec.check("oracle v"+oracleVer+" binary downloaded and matches the release's SHA256SUMS", err == nil, errText(err)) {
 		return false
 	}
-	lg.f("oracle mash-linux-%s sha256 %s (matches SHA256SUMS)", arch, oracleSum)
+	lg.f("oracle mash-%s-%s sha256 %s (matches SHA256SUMS)", runtime.GOOS, arch, oracleSum)
 	candBin := filepath.Join(wd, "candidate", "mash")
 	candSum, err := buildCandidate(src, commit, version, arch, candBin)
 	if !rec.check("candidate "+version+" built by scripts/buildrelease at "+commit[:12], err == nil, errText(err)) {
@@ -243,7 +243,7 @@ func execute(rec *Record, src, commit, version, oracleVer, repo, wd string) bool
 	ok := true
 	var builds [2]*Build
 	for i, bc := range []struct{ role, ver, bin, sum, source string }{
-		{"oracle", oracleVer, oracleBin, oracleSum, releaseBase(repo) + "v" + oracleVer + "/mash-linux-" + arch},
+		{"oracle", oracleVer, oracleBin, oracleSum, releaseBase(repo) + "v" + oracleVer + "/mash-" + runtime.GOOS + "-" + arch},
 		{"candidate", version, candBin, candSum, "scripts/buildrelease at " + commit},
 	} {
 		lg.f("=== build %s %s ===", bc.role, bc.ver)
@@ -306,7 +306,7 @@ func httpGet(url string) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(resp.Body, 200<<20))
 }
 
-// fetchOracle downloads the release's SHA256SUMS and mash-linux-<arch>, and checks the binary against the sums.
+// fetchOracle downloads the release's SHA256SUMS and mash-<os>-<arch> for the OS it runs on, and checks the binary against the sums.
 func fetchOracle(repo, ver, arch, dir string) (path, sum string, err error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", "", err
@@ -320,7 +320,7 @@ func fetchOracle(repo, ver, arch, dir string) (path, sum string, err error) {
 	if err != nil {
 		return "", "", err
 	}
-	name := "mash-linux-" + arch
+	name := "mash-" + runtime.GOOS + "-" + arch
 	want := m[name]
 	if want == "" {
 		return "", "", fmt.Errorf("SHA256SUMS of v%s has no %s", ver, name)
@@ -346,7 +346,7 @@ func buildCandidate(src, commit, version, arch, out string) (string, error) {
 	if err := os.MkdirAll(filepath.Dir(out), 0o700); err != nil {
 		return "", err
 	}
-	cmd := exec.Command("go", "run", "./scripts/buildrelease", "-src", ".", "-out", out, "-goos", "linux", "-goarch", arch,
+	cmd := exec.Command("go", "run", "./scripts/buildrelease", "-src", ".", "-out", out, "-goos", runtime.GOOS, "-goarch", arch,
 		"-version", version, "-commit", commit)
 	cmd.Dir = src
 	var o, e bytes.Buffer
