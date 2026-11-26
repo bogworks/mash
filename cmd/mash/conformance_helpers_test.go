@@ -222,10 +222,9 @@ func confHelpProblems(spec confSpec, env map[string]string, path string, c confC
 	if len(c.Arguments) > 0 {
 		want = append(want, "Arguments:")
 	}
-	if len(c.Options) > 0 {
+	if len(c.Commands) == 0 { // its own options and the global options that apply to it, in one section; -h is always among them
 		want = append(want, "Options:")
 	}
-	want = append(want, "Global options:")
 	if strings.Join(l.order, ",") != strings.Join(want, ",") {
 		p = append(p, fmt.Sprintf("headings: want %v in this order, got %v", want, l.order))
 	}
@@ -258,11 +257,8 @@ func confHelpProblems(spec confSpec, env map[string]string, path string, c confC
 			p = append(p, fmt.Sprintf("option: want %q in Options:", w))
 		}
 	}
-	globals := confFlat(strings.Join(l.sections["Global options:"], " "))
-	for _, o := range spec.Root.Options {
-		if w := confOptLabel(o) + " " + confFlat(o.Description); !strings.Contains(globals, w) {
-			p = append(p, fmt.Sprintf("global option: want %q in Global options:", w))
-		}
+	if len(c.Commands) == 0 && !strings.Contains(opts, "-h, --help Show help for the command.") {
+		p = append(p, "option: want -h, --help in Options:")
 	}
 	return p
 }

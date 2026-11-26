@@ -515,11 +515,12 @@
        },
        {
         "case": "No server is configured",
-        "text": "config     FAIL  no server is configured\nserver     skip  needs the config\nsign-in    skip  needs the server\nstorage    skip  needs sign-in\nendpoints  skip  needs the storage\nkeys       skip  needs sign-in\n\n1 problem.\nhint: mashctl init --config <file>",
-        "stream": "stdout, then the hint on stderr",
+        "text": "config     FAIL  no server is configured\nserver     skip  needs the config\nsign-in    skip  needs the server\nstorage    skip  needs sign-in\nendpoints  skip  needs the storage\nkeys       skip  needs sign-in\n\n1 problem.",
+        "stream": "stdout",
         "exit": 1,
-        "issue": "#1097",
-        "note": "The rows after the config row are skipped, each saying what it needs."
+        "issue": "#1100",
+        "note": "The hint goes. Today: the same rows and 1 problem., then hint: mashctl init --config <file> on stderr. The setup file does not exist yet for a person who has not made one, and what makes it depends: mash-local-nats-setup.sh writes mash-setup.yaml for a server on this machine and prints the init command with the real path (mash-setup/skills/setup/SKILL.md, step 3; docs/guide/by-hand.md step 3); with a server you already run the person writes the file by hand (docs/operations.md, Setting mash up); and docs/mashctl.md's error table names a third fix for this very row, a server given with --server or MASH_SERVER. Three first steps, none a single command to print, so no hint. mashctl init --config <file> is the command once the file exists; if a placeholder hint is allowed (as for the signing refusals), keep today's.",
+        "verbatim": true
        },
        {
         "case": "--json, a row with nothing to say",
@@ -889,9 +890,12 @@
         "value": [
          {
           "case": "Created, credentials installed on this machine",
-          "text": "Created endpoint acme.demo.bob\nCredentials: <config dir>/acme.demo.bob.creds",
+          "text": "Created endpoint acme.demo.bob\nCredentials: <config dir>/acme.demo.bob.creds\nNext: MASH_ENDPOINT=acme.demo.bob claude",
           "stream": "stdout",
-          "exit": 0
+          "exit": 0,
+          "issue": "#1100",
+          "note": "One line is added: the next step, a command to run as printed. Today: the first two lines. With no --out the creds are installed on this machine, so the endpoint can run here at once (docs/operations.md, Adding an endpoint). What a person does with a new endpoint is start a session as it: docs/guide/by-hand.md step 6 (MASH_ENDPOINT=acme.demo.bob claude), docs/install.md section 5 (Launch a session) and the setup skill's last steps (it writes a one-word launcher with the same MASH_ENDPOINT export). The setup skill also checks MASH_ENDPOINT=acme.demo.bob mash status first (it expects ready, offline); that is a check, not a use, so it is not the line. The line is not printed for --out (the join file is for another machine, where mash join <file> is the step; a case for it can follow) or for --dry-run. The one-line rule \"An action prints one line\" allows the file location; this is a second addition and is for the lead to rule on.",
+          "verbatim": true
          },
          {
           "case": "Created, with a join file",
@@ -1043,7 +1047,7 @@
           "case": "No terminal and no --yes",
           "text": "error: mashctl endpoint delete needs a terminal to type the address\nhint: mashctl endpoint delete --help",
           "stream": "stderr",
-          "exit": 2,
+          "exit": 1,
           "issue": "#1161",
           "note": "The error does not mention --yes, so an agent does not skip the confirmation; --help documents it. Nothing is attempted."
          },
@@ -1336,6 +1340,15 @@
           "stream": "stdout",
           "exit": 0,
           "note": "--json is shown as it prints at a terminal (indented); piped it is one compact line (rule \"--json prints one object\"). Unset fields are null, never \"\" and never left out. The list key is plural: capabilities, not capability. An empty list is [] and an empty map is {}. online and suspended replace state, as in endpoint list (#1041).",
+          "verbatim": true
+         },
+         {
+          "case": "mashctl endpoint show --help",
+          "text": "Usage: mashctl endpoint show <address> [--json]\n  address  the endpoint, as owner.group.name\n  --json   print the endpoint as JSON\nExample:\n  mashctl endpoint show acme.demo.bob",
+          "stream": "stdout",
+          "exit": 0,
+          "issue": "#1100",
+          "note": "Only usage: becomes Usage: (the same as mash). show already writes <address> in its own help; ADDRESS survives only in mashctl --help's verb lines (item help-mashctl-top-usage-footer), in the --wide text of endpoint list --help (show ADDRESS in place of NAME, which becomes show the address in place of NAME) and in one hint, mashctl endpoint unset ADDRESS key (cmd/mashctl/endpoint_meta.go:74), which becomes mashctl endpoint unset <address> key. The ADDRESS column header of endpoint list --wide stays: it is a column name. The rest of this help is not laid out to the rule (no description line, Examples: or Arguments:); that comes with the generated help in the build PR. Same Usage: change in mashctl endpoint --help and every mashctl command's help.",
           "verbatim": true
          }
         ]
@@ -1929,7 +1942,7 @@
         "value": [
          {
           "case": "Messages",
-          "text": "2 messages for acme.demo.bob, 1 not delivered.\n\nNUMBER  FROM   WHEN    TRUST     DELIVERED  KIND  SIZE\n7       alice  1m ago  verified  yes        task  48 B\n8       ?      1m ago  absent    no         task  61 B",
+          "text": "2 messages for acme.demo.bob, 1 not delivered.\n\nNUMBER  FROM   SENT    TRUST     DELIVERED  KIND  SIZE\n7       alice  1m ago  verified  yes        task  48 B\n8       ?      1m ago  absent    no         task  61 B",
           "stream": "stdout",
           "exit": 0
          }
@@ -2113,11 +2126,11 @@
       "value": [
        {
         "case": "mashctl endpoint --help",
-        "text": "usage: mashctl endpoint <command> [args]\ncommands:\n  list [prefix] [--wide]      list the endpoints\n  show <address>              show one endpoint\n  create <address> ...        make an endpoint and its credentials\n  reissue <address> ...       give an endpoint new credentials\n  delete <address> ...        remove an endpoint\n  set <address> key=value...  set role, description, host, capability, labels\n  unset <address> key...      remove those values\n  suspend <address>           refuse new mail to an endpoint\n  resume <address>            take new mail again, undoing suspend\n  inbox <address>             list what is in an inbox, without the text\n  permissions <address>       print the NATS permissions an endpoint needs\nRun mashctl endpoint <command> --help for a command's options.",
+        "text": "Usage: mashctl endpoint <command> [args]\ncommands:\n  list [prefix] [--wide]      list the endpoints\n  show <address>              show one endpoint\n  create <address> ...        make an endpoint and its credentials\n  reissue <address> ...       give an endpoint new credentials\n  delete <address> ...        remove an endpoint\n  set <address> key=value...  set role, description, host, capability, labels\n  unset <address> key...      remove those values\n  suspend <address>           refuse new mail to an endpoint\n  resume <address>            take new mail again, undoing suspend\n  inbox <address>             list what is in an inbox, without the text\n  permissions <address>       print the NATS permissions an endpoint needs\nRun mashctl endpoint <command> --help for a command's options.",
         "stream": "stdout",
         "exit": 0,
-        "issue": "#1048",
-        "note": "Only the resume line changes: the one description of resume, the same as in mashctl --help. The specification's own description of resume (\"Undo suspend.\") changes to it, so mashctl endpoint resume --help says the same (today \"take new mail again\" here and \"undo suspend\" in mashctl --help).",
+        "issue": "#1100",
+        "note": "help-mashctl-endpoint's planned text with one change and nothing else: usage: becomes Usage: (capital U, as mash and every other help). The usage line is mashctl endpoint <command> [args], which has no address in it, so no ADDRESS becomes <address> here; the command lines already write <address>. The last line, Run mashctl endpoint <command> --help for a command's options., is the footer the other help items use, and stays.",
         "verbatim": true
        }
       ]
@@ -2294,11 +2307,11 @@
     "value": [
      {
       "case": "mashctl --help",
-      "text": "usage: mashctl <verb> [args]\n\nSAP is the Synadia Agent Protocol, NATS is the message server mash\ntalks to, and creds are the file that signs an endpoint in to it.\n\n  mashctl init --config path [--dry-run] [--json]\n      set mash up on a NATS server you already have, from a setup file; safe to\n      run again\n  mashctl status [--json]\n      one line per server: whether it works, how many endpoints it has, how many\n      are online\n  mashctl limits show [--json]\n      print the limits in force\n  mashctl doctor [--strict] [--json]\n      check the server, mash's storage on it and every endpoint's records, and\n      say how to fix what is wrong; changes nothing\n  mashctl limits apply [prefix] [--dry-run] [--json]\n      raise existing inboxes to the configured limits (never lowers); prefix is\n      an owner, owner.group or one address\n  mashctl endpoint list [prefix] [--wide] [--json]\n      the endpoints in the directory\n  mashctl endpoint show ADDRESS [--json]\n      one endpoint: its state, labels and public key\n  mashctl endpoint create ADDRESS [--out PATH] [--public-key PATH] [--dry-run]\n          [--json]\n      make an endpoint and its credentials, for example acme.demo.bob\n  mashctl endpoint reissue ADDRESS [--out PATH] [--public-key PATH] [--dry-run]\n          [--json]\n      give an endpoint new credentials and cancel the old ones\n  mashctl endpoint delete ADDRESS [--yes] [--dry-run] [--json]\n      revoke the endpoint's user key, remove its record and inbox, burn the\n      address, rename its creds file\n  mashctl endpoint set ADDRESS key=value... [--dry-run] [--json]\n      set role, description, host, capability or label.NAME\n  mashctl endpoint unset ADDRESS key... [--dry-run] [--json]\n      remove those values\n  mashctl endpoint suspend ADDRESS [--json]\n      refuse new mail to an endpoint; its stored mail and credentials stay\n  mashctl endpoint resume ADDRESS [--json]\n      take new mail again, undoing suspend\n  mashctl endpoint inbox ADDRESS [--after number] [--limit n] [--json]\n      what is in an endpoint's inbox, without any message text\n  mashctl endpoint permissions ADDRESS [--json]\n      the NATS permissions an endpoint's user needs\n  mashctl version [--json]\n      print the version and the commit\n\nGlobal options (before or after the verb):\n  --server <url>       The server address. May be given more than once.\n  --creds <path>       The administrator's creds file.\n  --ca <path>          The certificate authority's certificate, when the server\n                       uses its own.\n  --config-dir <path>  The configuration folder. Default: ~/.config/mash.\n  --detail             Print the fuller answer: after the usual line, more as\n                       'label: value' lines; with --json, the fuller object.\n  --json               Print the result as JSON.\n  --no-color           Never use color.\n  -h, --help           Show help for the command.",
+      "text": "Usage: mashctl <verb> [args]\n\nAn endpoint is one agent's mailbox, addressed owner.group.name; the owner, the\nfirst part, is the account that holds it. SAP is the Synadia Agent Protocol,\nNATS is the message server mash talks to, creds are the file that signs an\nendpoint in to it, and a trust label ([verified] and the others) says whether a\nmessage's sender is proven.\n\n  mashctl init --config path [--dry-run] [--json]\n      set mash up on a NATS server you already have, from a setup file; safe to\n      run again\n  mashctl status [--json]\n      one line per server: whether it works, how many endpoints it has, how many\n      are online\n  mashctl limits show [--json]\n      print the limits in force\n  mashctl doctor [--strict] [--json]\n      check the server, mash's storage on it and every endpoint's records, and\n      say how to fix what is wrong; changes nothing\n  mashctl limits apply [prefix] [--dry-run] [--json]\n      raise existing inboxes to the configured limits (never lowers); prefix is\n      an owner, owner.group or one address\n  mashctl endpoint list [prefix] [--wide] [--json]\n      the endpoints in the directory\n  mashctl endpoint show <address> [--json]\n      one endpoint: its state, labels and public key\n  mashctl endpoint create <address> [--out PATH] [--public-key PATH] [--dry-run]\n          [--json]\n      make an endpoint and its credentials, for example acme.demo.bob\n  mashctl endpoint reissue <address> [--out PATH] [--public-key PATH]\n          [--dry-run] [--json]\n      give an endpoint new credentials and cancel the old ones\n  mashctl endpoint delete <address> [--yes] [--dry-run] [--json]\n      revoke the endpoint's user key, remove its record and inbox, burn the\n      address, rename its creds file\n  mashctl endpoint set <address> key=value... [--dry-run] [--json]\n      set role, description, host, capability or label.NAME\n  mashctl endpoint unset <address> key... [--dry-run] [--json]\n      remove those values\n  mashctl endpoint suspend <address> [--json]\n      refuse new mail to an endpoint; its stored mail and credentials stay\n  mashctl endpoint resume <address> [--json]\n      take new mail again, undoing suspend\n  mashctl endpoint inbox <address> [--after number] [--limit n] [--json]\n      what is in an endpoint's inbox, without any message text\n  mashctl endpoint permissions <address> [--json]\n      the NATS permissions an endpoint's user needs\n  mashctl version [--json]\n      print the version and the commit\n\nGlobal options (before or after the verb):\n  --server <url>       The server address. May be given more than once.\n  --creds <path>       The administrator's creds file.\n  --ca <path>          The certificate authority's certificate, when the server\n                       uses its own.\n  --config-dir <path>  The configuration folder. Default: ~/.config/mash.\n  --detail             Print the fuller answer: after the usual line, more as\n                       'label: value' lines; with --json, the fuller object.\n  --json               Print the result as JSON.\n  --no-color           Never use color.\n  -h, --help           Show help for the command.\n\nRun mashctl <command> --help for a command's options.",
       "stream": "stdout",
       "exit": 0,
       "issue": "#1048 / #1100",
-      "note": "Four changes and nothing else. (1) The same one-sentence explanation of SAP, NATS and creds as mash --help. (2) A Global options block (the options the specification lists for mashctl, said to work before or after the verb). (3) --json is listed for every verb that has it: endpoint list, show, set, unset, suspend, resume, inbox and permissions, as it is for the other verbs. (4) resume has the one description it has in endpoint --help. Today the block and the eight --json flags are missing and resume reads \"undo suspend\" here and \"take new mail again\" in endpoint --help.",
+      "note": "help-mashctl-top's planned text with three changes and nothing else. (1) usage: becomes Usage: (capital U, as mash). (2) ADDRESS becomes <address> in every verb line, as mash writes it; the create and reissue synopses are the 80-column wrap with the longer word (create still fits on one line, reissue wraps the same way). (3) One footer as the last line after a blank line: Run mashctl <command> --help for a command's options. Today: usage: mashctl <verb> [args], ADDRESS, no footer. Other placeholders (prefix, path, number, n) are not changed here. help-mashctl-top-usage-footer with the same glossary sentence as mash --help (the rule says the sentence is one, in the top-level help of both tools). \"mash talks to\" is as in mash's text: mashctl's own server is the same NATS server.",
       "verbatim": true
      }
     ]

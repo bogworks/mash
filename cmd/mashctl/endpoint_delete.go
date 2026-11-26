@@ -14,7 +14,7 @@ import (
 	"github.com/bogworks/mash/internal/sap"
 )
 
-const endpointDeleteUsage = `usage: mashctl endpoint delete <address> [--yes] [--dry-run] [--json]
+const endpointDeleteUsage = `Usage: mashctl endpoint delete <address> [--yes] [--dry-run] [--json]
   address    the endpoint, as owner.group.name
   --yes      do not ask
   --dry-run  print what would change, and change nothing
@@ -68,7 +68,7 @@ type deleteJSON struct {
 // before anything changes. The question goes to prompt (stderr with --json, so stdout stays one object).
 func confirmDelete(prompt io.Writer, addr sap.Address, messages uint64) error {
 	if !stdinIsTerminal() {
-		return cliframe.Usagef("mashctl endpoint delete needs a terminal to type the address").WithHint("mashctl endpoint delete --help")
+		return cliframe.Failf("mashctl endpoint delete needs a terminal to type the address").WithHint("mashctl endpoint delete --help")
 	}
 	fmt.Fprintf(prompt, "This deletes %s and %s.\nMail that arrives before it is gone is lost too. It cannot be undone.\nType the address to confirm: ", addr, inboxWords(messages))
 	line, err := bufio.NewReader(confirmStdin()).ReadString('\n')

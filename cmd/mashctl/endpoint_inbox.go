@@ -13,7 +13,7 @@ import (
 	"github.com/bogworks/mash/internal/sap"
 )
 
-const endpointInboxUsage = `usage: mashctl endpoint inbox <address> [--after number] [--limit n] [--json]
+const endpointInboxUsage = `Usage: mashctl endpoint inbox <address> [--after number] [--limit n] [--json]
   address  the endpoint, as owner.group.name
   --after  only messages after this message number, oldest first
   --limit  how many messages to list (default 20)
@@ -49,7 +49,7 @@ var endpointInboxSpec = epSpec{
 	},
 }
 
-// inboxNow is the clock the WHEN column counts from; a test replaces it.
+// inboxNow is the clock the SENT column counts from; a test replaces it.
 var inboxNow = time.Now
 
 // inboxMessageJSON is one message of the JSON list. It carries no message text.
@@ -168,7 +168,7 @@ func runEndpointInbox(args []string, g cliframe.Global, env func(string) string,
 func writeInboxTable(stdout io.Writer, addr sap.Address, msgs []inboxMessageJSON, raw []admin.InspectedMessage, now time.Time) error {
 	fmt.Fprintln(stdout)
 	tw := tabwriter.NewWriter(stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(tw, "NUMBER\tFROM\tWHEN\tTRUST\tDELIVERED\tKIND\tSIZE")
+	fmt.Fprintln(tw, "NUMBER\tFROM\tSENT\tTRUST\tDELIVERED\tKIND\tSIZE")
 	for i, m := range msgs {
 		from := config.Clean(m.From)
 		if a, err := sap.ParseAddress(m.From); err == nil && a.Owner == addr.Owner && a.Group == addr.Group {

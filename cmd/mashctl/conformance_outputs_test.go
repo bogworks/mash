@@ -275,6 +275,7 @@ func init() {
 	dead := "nats://127.0.0.1:1"
 
 	reg("endpoint mashctl endpoint --help", func(t *testing.T) confOutRun { return confOutRun{ran: confRun(t, "endpoint", "--help")} })
+	reg("endpoint show mashctl endpoint show --help", func(t *testing.T) confOutRun { return confOutRun{ran: confRun(t, "endpoint", "show", "--help")} })
 	reg("endpoint inbox Messages", func(t *testing.T) confOutRun { return confInboxMessagesRun(t) })
 	reg("init Set up", func(t *testing.T) confOutRun {
 		w := newConfWorld(t, false)

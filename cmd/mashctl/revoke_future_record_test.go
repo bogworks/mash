@@ -133,7 +133,7 @@ func TestCheckNotFutureIssuedLookupErrorRefuses(t *testing.T) {
 	cancel()
 	var errb strings.Builder
 	err = ctl.CheckNotFutureIssued(ctx, adm, []ctl.RevokeTarget{{Key: key}}, time.Now(), &errb)
-	if err == nil || !strings.Contains(err.Error(), "user key "+ctl.ShortKey(key)+"...: its issue record could not be read") || !strings.Contains(err.Error(), "mashctl endpoint reissue ADDRESS") || !strings.Contains(err.Error(), "nothing was changed") || errb.String() != "" {
+	if err == nil || !strings.Contains(err.Error(), "user key "+ctl.ShortKey(key)+"...: its issue record could not be read") || !strings.Contains(err.Error(), "mashctl endpoint reissue <address>") || !strings.Contains(err.Error(), "nothing was changed") || errb.String() != "" {
 		t.Fatalf("failed lookup: %v %q", err, errb.String())
 	}
 }
@@ -164,7 +164,7 @@ func TestEndpointDeleteRefusesAMalformedIssueTime(t *testing.T) {
 		calls := fakeRevoke(t, nil)
 		recs := h.records()
 		out, errb, code := h.run("endpoint", "delete", "o.g.n", "--yes")
-		if code != 1 || out != "" || !strings.Contains(errb, "user key "+ctl.ShortKey(pub)+"...") || !strings.Contains(errb, "missing or malformed issued_at") || !strings.Contains(errb, "mashctl endpoint reissue ADDRESS") || !strings.Contains(errb, "nothing was changed") {
+		if code != 1 || out != "" || !strings.Contains(errb, "user key "+ctl.ShortKey(pub)+"...") || !strings.Contains(errb, "missing or malformed issued_at") || !strings.Contains(errb, "mashctl endpoint reissue <address>") || !strings.Contains(errb, "nothing was changed") {
 			t.Fatalf("%q: %d %q %q", bad, code, out, errb)
 		}
 		if len(*calls) != 0 || len(h.records()) != len(recs) || h.issued()[pub].RevokedAt != "" {

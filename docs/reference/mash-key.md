@@ -2,7 +2,8 @@ Generated from spec/*.json by go run ./scripts/refgen. Do not edit.
 
 # mash key
 
-Make your own key pair, for when the seed must never leave this machine.
+Make a key pair: a secret seed and its public key. For when the seed must
+never leave this machine.
 
 Release: 0.5.9. Group: Setup.
 
@@ -26,4 +27,4 @@ The global options of `mash` also apply: see [mash](mash.md#global-options).
 
 | Command | Description |
 | --- | --- |
-| [`mash key create`](mash-key-create.md) | Make a seed and its public key. |
+| [`mash key create`](mash-key-create.md) | Make a key pair: a secret seed and its public key. For when the seed must never leave this machine. |

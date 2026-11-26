@@ -178,7 +178,7 @@ func credsText(j joinfile.File, req cmds.JoinRequest) ([]byte, error) {
 		return nil, wrongJWTName(req.File, claims.Name, j.Address)
 	}
 	if req.Key == "" {
-		return nil, cliframe.Usagef("this join file holds no seed; it was made for your own key").
+		return nil, cliframe.Failf("this join file holds no seed; it was made for your own key").
 			WithHint("mash join " + req.File + " --key <your seed file>")
 	}
 	seed, kp, err := readSeed(req.Key)

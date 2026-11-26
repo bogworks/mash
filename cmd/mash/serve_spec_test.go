@@ -89,6 +89,8 @@ func TestServeMatchesSpec(t *testing.T) {
 				if code != oc.Exit || out.Len() != 0 || errb.String() != oc.Text+"\n" {
 					t.Errorf("exit %d stdout %q stderr %q, spec exit %d stderr %q", code, out.String(), errb.String(), oc.Exit, oc.Text+"\n")
 				}
+			case "mash serve --help":
+				specCase{Case: oc.Case, Text: oc.Text, Stream: oc.Stream, Exit: oc.Exit}.check(t, runMash(env, "serve", "--help")) // also compared, with every other --help case, in help_cases_test.go
 			default:
 				t.Errorf("serve case %q is not tested", oc.Case)
 			}

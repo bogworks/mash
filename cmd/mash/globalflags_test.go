@@ -70,7 +70,7 @@ func TestGlobalFlagErrorIsUsageExit2(t *testing.T) {
 func TestGlobalVerboseAndNoColorAreStripped(t *testing.T) {
 	env := map[string]string{"HOME": t.TempDir()}
 	for _, args := range [][]string{{"--detail", "status"}, {"status", "--detail", "--no-color"}} {
-		if out, errb, code := statusOut(t, env, args...); code != 2 || out != "" || errb != "error: no endpoint is installed here\nhint: mash join <file>\n" {
+		if out, errb, code := statusOut(t, env, args...); code != 1 || out != "" || errb != "error: no endpoint is installed here\n" {
 			t.Errorf("%v: %d %s %s", args, code, out, errb)
 		}
 	}
@@ -98,7 +98,7 @@ func TestGlobalJSONStillReachesTheVerbsThatParseIt(t *testing.T) {
 func TestOldEnvironmentNamesAreNotRead(t *testing.T) {
 	env := map[string]string{"HOME": t.TempDir(), "MASH_OWNER": "alice", "MASH_GROUP": "dev", "MASH_NAME": "design", "MASH_URL": "tls://old:4222", "MASH_TLS_CA": "/old.pem"}
 	out, errb, code := statusOut(t, env, "status")
-	if code != 2 || out != "" || errb != "error: no endpoint is installed here\nhint: mash join <file>\n" {
+	if code != 1 || out != "" || errb != "error: no endpoint is installed here\n" {
 		t.Fatalf("%d %s %s", code, out, errb)
 	}
 }

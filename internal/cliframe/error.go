@@ -119,10 +119,6 @@ func Report(stdout, stderr io.Writer, err error, jsonOut bool) int {
 			code = 2
 		}
 	}
-	var xc interface{ ExitCode() int } // an error that carries its own code (a refused plain URL is 2)
-	if errors.As(err, &xc) && xc.ExitCode() == 2 {
-		code = 2
-	}
 	msg = strings.TrimPrefix(msg, "error: ")
 	if jsonOut {
 		out := struct {

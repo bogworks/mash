@@ -183,13 +183,10 @@ func plainRefusal(scheme, host string) error {
 }
 
 // PlainRefusalError is RequireTLS's refusal of a plain URL. It is a configuration error: a command that reports it
-// exits 2 (ExitCode), found with errors.As, never by matching its text.
+// exits 1 like any failure, found with errors.As, never by matching its text.
 type PlainRefusalError struct{ msg string }
 
 func (e *PlainRefusalError) Error() string { return e.msg }
-
-// ExitCode is 2, the code of a usage or configuration error (cliframe.Report reads it).
-func (e *PlainRefusalError) ExitCode() int { return 2 }
 
 // RequireTLS is the one rule for every connection mash and mashctl make (admin, system and endpoint), applied to url (a
 // comma-separated server list) before anything is connected. Every entry must be tls:// or wss://, to any host

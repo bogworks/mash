@@ -170,7 +170,7 @@ keys       FAIL  the signing key is not listed in the account
 
 ### No server is configured
 
-Stream: stdout, then the hint on stderr. Exit code: 1.
+Stream: stdout. Exit code: 1.
 
 ```text
 config     FAIL  no server is configured
@@ -181,7 +181,6 @@ endpoints  skip  needs the storage
 keys       skip  needs sign-in
 
 1 problem.
-hint: mashctl init --config <file>
 ```
 
 ### --json, a row with nothing to say

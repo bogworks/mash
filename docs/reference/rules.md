@@ -9,9 +9,9 @@ The rules every mash command and tool follows.
    never in output.
 
 2. An action prints one line. Past tense, naming the thing: 'Created endpoint
-   acme.demo.bob', 'Mail sent (number 42).' It does not print what another
-   command already shows; it does print an identifier the person can get
-   nowhere else.
+   acme.demo.bob', "Mail sent (number 42 in acme.demo.alice's inbox)". It does
+   not print what another command already shows; it does print an identifier
+   the person can get nowhere else.
 
 3. Minimal by default, in text and in JSON alike; --detail gives the fuller
    answer in both. A command's usual answer is the least that answers the
@@ -76,8 +76,14 @@ The rules every mash command and tool follows.
 12. Text read from a file or standard input loses one trailing newline. As the
    shell's own $(...) does. Nothing else in the text is changed.
 
-13. Three exit codes. 0 it worked, 1 it failed, 2 the command line was wrong.
-   In 0.5.5 the same failure exited 2, 3 or 6 depending on the command. A
+13. One exit rule, the same in both tools. 0 it worked, 1 it failed, 2 the
+   command line was wrong and nothing was attempted. This holds for every
+   command of mash and mashctl. A command that needs another code is named
+   here as an exception; none is left implicit. There is one exception today:
+   mash hook exits 0 whatever happens, so that a bad configuration or a failed
+   check never fails the session that runs it. No command exits with a code
+   above 2. status and doctor are not exceptions: they exit 1 when they found
+   a problem (a warning alone is 0, or 1 with --strict), as a failure does. A
    command that did part of its work exits 1, says what is left, and is safe
    to run again.
 
@@ -138,12 +144,12 @@ The rules every mash command and tool follows.
 
 20. Having no endpoint reads the same in every mash command. Three wordings,
    by where it is asked. At a shell with none installed: 'error: no endpoint
-   is installed here' and 'hint: mash join &lt;file&gt;', exit 2. At a shell
-   with several installed and none chosen: 'error: more than one endpoint is
-   installed here: &lt;addresses&gt;' and 'hint: mash &lt;command&gt;
-   --endpoint &lt;the first, alphabetically&gt;', exit 2. As an MCP tool in a
-   session with none named: 'No endpoint is chosen for this session.' and
-   'hint: start the session with MASH_ENDPOINT=&lt;address&gt;'.
+   is installed here', no hint, exit 1. At a shell with several installed and
+   none chosen: 'error: more than one endpoint is installed here:
+   &lt;addresses&gt;' and 'hint: mash &lt;command&gt; --endpoint &lt;the
+   first, alphabetically&gt;', exit 2. As an MCP tool in a session with none
+   named: 'No endpoint is chosen for this session.' and 'hint: start the
+   session with MASH_ENDPOINT=&lt;address&gt;'.
 
 21. --json when a command fails. Prints {"error": ..., "hint": ...} on stdout
    and nothing on stderr, with the same exit code.

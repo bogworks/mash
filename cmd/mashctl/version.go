@@ -16,7 +16,7 @@ var commit string
 // readBuildInfo is debug.ReadBuildInfo, replaceable in tests.
 var readBuildInfo = debug.ReadBuildInfo
 
-const versionUsage = `usage: mashctl version [--json]
+const versionUsage = `Usage: mashctl version [--json]
   --json  print the version as JSON
 Example:
   mashctl version

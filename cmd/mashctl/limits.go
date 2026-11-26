@@ -13,7 +13,7 @@ import (
 	"github.com/bogworks/mash/internal/store"
 )
 
-const limitsHelp = `usage: mashctl limits <command>
+const limitsHelp = `Usage: mashctl limits <command>
 commands:
   show                   print the limits in force
   apply [prefix]         raise existing inboxes to the configured limits

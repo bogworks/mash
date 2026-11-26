@@ -77,7 +77,7 @@ func TestEndpointDeleteWrongTextDeletesNothing(t *testing.T) {
 	}
 }
 
-func TestEndpointDeleteNoTerminalAndNoYesIsUsage(t *testing.T) {
+func TestEndpointDeleteNoTerminalAndNoYesIsFailure(t *testing.T) {
 	h := newFleetEnv(t)
 	s := stubRevoke(t)
 	a := ad("q")
@@ -89,7 +89,7 @@ func TestEndpointDeleteNoTerminalAndNoYesIsUsage(t *testing.T) {
 		if len(extra) > 0 {
 			wantOut, wantErr = `{"error":"mashctl endpoint delete needs a terminal to type the address","hint":"mashctl endpoint delete --help"}`+"\n", ""
 		}
-		if code != 2 || out != wantOut || errb != wantErr {
+		if code != 1 || out != wantOut || errb != wantErr {
 			t.Errorf("%v: %d %q %q", extra, code, out, errb)
 		}
 		if strings.Contains(out+errb, "--yes") {

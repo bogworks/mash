@@ -240,7 +240,7 @@ func confParseHelp(path, help string) confHelp {
 				continue
 			}
 		}
-		syn := strings.HasPrefix(t, "usage: mashctl") || strings.HasPrefix(t, "mashctl ") || strings.HasPrefix(t, "Example: mashctl")
+		syn := strings.HasPrefix(t, "Usage: mashctl") || strings.HasPrefix(t, "mashctl ") || strings.HasPrefix(t, "Example: mashctl")
 		if syn {
 			inSyn, skip = true, false
 			if rest, ok := strings.CutPrefix(t[strings.Index(t, "mashctl"):], "mashctl "+path+" "); ok {

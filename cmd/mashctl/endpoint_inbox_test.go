@@ -139,7 +139,7 @@ func TestEndpointInboxTable(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := "\n" +
-		"NUMBER  FROM             WHEN    TRUST     DELIVERED  KIND  SIZE\n" +
+		"NUMBER  FROM             SENT    TRUST     DELIVERED  KIND  SIZE\n" +
 		"1       alice            2m ago  verified  no         task  48 B\n" +
 		"2       acme.lab.mallet  1m ago  forged    no         task  61 B\n" +
 		"3       acme.lab.mallet  1m ago  forged    no         task  5 B\n" +

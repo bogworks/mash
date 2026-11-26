@@ -22,12 +22,6 @@ The global options of `mash` also apply: see [mash](mash.md#global-options).
 | `address` | yes | Who to ask. |
 | `text` | yes | The question. |
 
-## Examples
-
-```text
-mash prompt acme.demo.alice "are you there?"
-```
-
 ## Exit codes
 
 | Code | Meaning |
@@ -44,6 +38,33 @@ Stream: stdout. Exit code: 0.
 
 ```text
 (what it prints today; unchanged in 0.5.6)
+```
+
+### mash prompt --help
+
+Stream: stdout. Exit code: 0.
+
+```text
+Ask an endpoint a live question and wait for its answer. Not stored: if the
+recipient is not there, it fails.
+
+Usage:
+  mash prompt <address> <text>
+
+Arguments:
+  address  Who to ask.
+  text     The question.
+
+Options:
+  --endpoint <address>  Which endpoint to act as, as owner.group.name. Not
+                        needed when only one is installed here.
+  --creds <path>        The creds file to sign in with. Default: <config
+                        folder>/<address>.creds.
+  --server <url>        The server address. May be given more than once.
+  --ca <path>           The certificate authority's certificate, when the server
+                        uses its own.
+  --config-dir <path>   The configuration folder. Default: ~/.config/mash.
+  -h, --help            Show help for the command.
 ```
 
 ## MCP tool

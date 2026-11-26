@@ -45,7 +45,7 @@ func connectSys(cfg config.Config, flagVal string, env func(string) string) (*na
 	}
 	tlsReq, _, err := natsauth.RequireTLS(cfg.URL, cfg.SkipEncryption)
 	if err != nil {
-		return nil, withPlainCode(fmt.Errorf("connect %s with the system account credentials: %v", config.RedactURL(cfg.URL), config.RedactErr(err, cfg.URL)), err)
+		return nil, fmt.Errorf("connect %s with the system account credentials: %v", config.RedactURL(cfg.URL), config.RedactErr(err, cfg.URL))
 	}
 	opts := append(append(natsauth.TLSOptions(cfg.TLSCA, cfg.TLSCert, cfg.TLSKey), tlsReq...),
 		natsauth.UserCredentialBytes(raw), nats.Name("mashctl-sys"), nats.Timeout(connectTimeout), nats.MaxReconnects(0))

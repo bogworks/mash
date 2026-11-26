@@ -187,7 +187,7 @@ func TestEndpointCreateDefaultInstalls(t *testing.T) {
 	h := newFleetEnv(t)
 	a := ad("same")
 	so, se, code := h.run("endpoint", "create", a.String())
-	if code != 0 || so != "Created endpoint "+a.String()+"\nCredentials: "+h.creds(a)+"\n" {
+	if code != 0 || so != "Created endpoint "+a.String()+"\nCredentials: "+h.creds(a)+"\nNext: MASH_ENDPOINT="+a.String()+" claude\n" {
 		t.Fatalf("code %d %q %q", code, so, se)
 	}
 	p := h.creds(a)
@@ -239,7 +239,7 @@ func TestEndpointCreateDefaultInstalls(t *testing.T) {
 	}
 	// --verbose
 	so, _, code = h.run("endpoint", "create", ad("same3").String(), "--detail")
-	if code != 0 || so != "Created endpoint "+ad("same3").String()+"\nCredentials: "+h.creds(ad("same3"))+"\n" { // --detail adds nothing to create
+	if code != 0 || so != "Created endpoint "+ad("same3").String()+"\nCredentials: "+h.creds(ad("same3"))+"\nNext: MASH_ENDPOINT="+ad("same3").String()+" claude\n" { // --detail adds nothing to create
 		t.Errorf("verbose %d %q", code, so)
 	}
 }
@@ -628,7 +628,7 @@ func TestEndpointCreateCredentialsLine(t *testing.T) {
 	a := ad("cl1")
 	so, se, code := h.run("endpoint", "create", a.String(), "--config-dir", other)
 	want := other + string(filepath.Separator) + a.String() + ".creds"
-	if code != 0 || so != "Created endpoint "+a.String()+"\nCredentials: "+want+"\n" {
+	if code != 0 || so != "Created endpoint "+a.String()+"\nCredentials: "+want+"\nNext: MASH_ENDPOINT="+a.String()+" claude\n" {
 		t.Fatalf("config-dir: %d %q %q", code, so, se)
 	}
 	if _, err := os.Stat(want); err != nil {

@@ -116,7 +116,7 @@ func leaseReason(lease, cause string) string {
 }
 
 // ErrNoEndpointInstalled is what Health returns at a shell where no endpoint is chosen and none is installed. The
-// command turns it into the usage error "no endpoint is installed here" (hint "mash join <file>"), exit 2.
+// command turns it into the failure "no endpoint is installed here" (no hint), exit 1.
 var ErrNoEndpointInstalled = errors.New(cmdcore.NoEndpoint(cmdcore.NoneInstalled, "", nil).Msg)
 
 // The checks of doctor, in the order it reports them.
@@ -348,6 +348,7 @@ var Status = cmdcore.Command[StatusParams, StatusResult]{
 	Group:       "Everyday",
 	Summary:     "Say in one line whether mail works for this endpoint, and whether it is online.",
 	Description: "Say in one line whether mail works for this endpoint, and whether it is online.",
+	Globals:     cmdcore.GlobalsAll,
 	Examples:    []string{"mash status", "mash status --endpoint acme.demo.alice"},
 	Run: func(ctx context.Context, env *cmdcore.Env, _ StatusParams) (StatusResult, error) {
 		rep, err := healthOf(ctx, env, "status")
@@ -483,6 +484,7 @@ var Doctor = cmdcore.Command[DoctorParams, DoctorResult]{
 	Group:       "Everyday",
 	Summary:     "Check everything mail depends on for this endpoint, and say how to fix what is wrong. Changes nothing.",
 	Description: "Check everything mail depends on for this endpoint, and say how to fix what is wrong. Changes nothing.",
+	Globals:     cmdcore.GlobalsAll,
 	Examples:    []string{"mash doctor", "mash doctor --strict"},
 	Run: func(ctx context.Context, env *cmdcore.Env, p DoctorParams) (DoctorResult, error) {
 		rep, err := healthOf(ctx, env, "doctor")

@@ -36,7 +36,7 @@ var endpointVerbTable = []struct {
 }
 
 // endpointHelp is the text of `mashctl endpoint --help`.
-const endpointHelp = `usage: mashctl endpoint <command> [args]
+const endpointHelp = `Usage: mashctl endpoint <command> [args]
 commands:
   list [prefix] [--wide]      list the endpoints
   show <address>              show one endpoint

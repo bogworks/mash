@@ -23,7 +23,7 @@ import (
 	"github.com/bogworks/mash/internal/sap"
 )
 
-const endpointCreateUsage = `usage: mashctl endpoint create <address> [--out PATH] [--public-key PATH]
+const endpointCreateUsage = `Usage: mashctl endpoint create <address> [--out PATH] [--public-key PATH]
        [--dry-run] [--json]
   address            the endpoint, as owner.group.name
   --out PATH         write a join file for another machine and install
@@ -255,6 +255,7 @@ func epPrint(w io.Writer, verb string, t epTarget, res epResult, detail, jsonOut
 		rows = append(rows, cliframe.Row{Label: "Join file", Value: t.outPath})
 	} else if verb == "create" {
 		fmt.Fprintf(w, "Credentials: %s\n", t.outPath)
+		fmt.Fprintf(w, "Next: MASH_ENDPOINT=%s claude\n", name) // the creds are installed here: the next step is a session as this endpoint
 	}
 	if verb == "reissue" && detail {
 		rows = append(rows, cliframe.Row{Label: "servers acknowledged", Value: strconv.Itoa(res.acked)})
@@ -338,8 +339,7 @@ func epCreate(in *epInput, env func(string) string, lookup config.Lookup, stderr
 	announceTarget(cfg, env, stderr)
 	adm, ctx, closeAdmin, err := ctl.OpenAdmin("mashctl", cfg)
 	if err != nil {
-		e := epErrOf(addr, "server", admin.RewordUnavailable(err.Error())+"; nothing was changed")
-		return t, epResult{}, withPlainCode(e, err)
+		return t, epResult{}, epErrOf(addr, "server", admin.RewordUnavailable(err.Error())+"; nothing was changed")
 	}
 	defer closeAdmin()
 	servers := serverCount(cfg)

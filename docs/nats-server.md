@@ -88,7 +88,7 @@ Check where the package put the program and whether it started a service. For ex
 
 Every connection mash makes needs TLS, to any host, including `127.0.0.1`. That covers `mashctl`, the `mash` commands and a session's own connection.
 
-- The URL must start with `tls://` or `wss://`. A `nats://`, `ws://` or scheme-less URL is refused before any connection is made, with exit code 2.
+- The URL must start with `tls://` or `wss://`. A `nats://`, `ws://` or scheme-less URL is refused before any connection is made, with exit code 1.
 - For reference only: the environment variable `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1` turns this check off, and every command then warns that encryption is off. It exists for mash's own tests. Do not set it: anyone on the network could then read your mail.
 - **A private CA is supported.** Set `ca` in the setup file to the PEM file of the CA that signed the server's certificate. `init` saves that value in `config.json`, so later commands use it. `MASH_CA` and `--ca` override it for one command only and are never saved, so don't rely on them at `init`. When you set it, it replaces the system trust store; it does not add to it. Without it, the server's certificate must chain to your system's trusted roots.
 - A server that requires client certificates: set `tls_cert` and `tls_key` (or `MASH_TLS_CERT` and `MASH_TLS_KEY`) together, in `config.json` or the environment. The setup file does not carry them.

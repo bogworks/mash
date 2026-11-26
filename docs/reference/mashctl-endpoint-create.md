@@ -54,6 +54,7 @@ Stream: stdout. Exit code: 0.
 ```text
 Created endpoint acme.demo.bob
 Credentials: <config dir>/acme.demo.bob.creds
+Next: MASH_ENDPOINT=acme.demo.bob claude
 ```
 
 ### Created, with a join file

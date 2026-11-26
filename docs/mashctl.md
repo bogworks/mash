@@ -94,7 +94,7 @@ The text form prints a line with the count, then a table:
 ```text
 2 messages for acme.demo.bob, 1 not delivered.
 
-NUMBER  FROM             WHEN    TRUST     DELIVERED  KIND  SIZE
+NUMBER  FROM             SENT    TRUST     DELIVERED  KIND  SIZE
 7       alice            2m ago  verified  no         task  48 B
 8       acme.lab.mallet  1m ago  absent    yes        task  61 B
 ```
@@ -208,7 +208,7 @@ Two `mashctl` machines must not reissue the same endpoint at the same moment. Th
 mashctl endpoint delete ADDRESS [--yes] [--dry-run] [--json]
 ```
 
-Deletes an endpoint, its inbox and its credentials. The address can never be used again. Without `--yes` it prints `This deletes <address> and the <N> messages in its inbox.`, then `Mail that arrives before it is gone is lost too. It cannot be undone.`, and asks you to type the address; any other text deletes nothing and exits 1. That needs a terminal: with no terminal and no `--yes` it prints `error: mashctl endpoint delete needs a terminal to type the address` and exits 2; `--yes` skips the question for a script. The question comes after the endpoint is found and its messages counted, and before anything changes. In order, it:
+Deletes an endpoint, its inbox and its credentials. The address can never be used again. Without `--yes` it prints `This deletes <address> and the <N> messages in its inbox.`, then `Mail that arrives before it is gone is lost too. It cannot be undone.`, and asks you to type the address; any other text deletes nothing and exits 1. That needs a terminal: with no terminal and no `--yes` it prints `error: mashctl endpoint delete needs a terminal to type the address` and exits 1; `--yes` skips the question for a script. The question comes after the endpoint is found and its messages counted, and before anything changes. In order, it:
 
 1. revokes the endpoint's user key in the account JWT, on every server (see [Revocation](#revocation)); a revocation that some server did not confirm stops the command with nothing removed (`error: ADDRESS was not deleted: K of N servers did not confirm its key was cancelled`, with the same command as the hint);
 2. removes the directory record and the inbox, so unread mail is lost;
@@ -317,7 +317,7 @@ Because revocation is by key and time, a new credential for an endpoint needs a 
 
 ## Exit codes and arguments
 
-mashctl exits with 0, 1 or 2 only: 0 it worked, 1 it failed (one line on standard error says why), 2 the command line was wrong or the command cannot run here, and nothing was attempted. Every verb exits 0 on success, 2 for a usage error (a wrong or missing argument, an unknown flag, a stray argument, an argument that fails validation) and 1 for any failure; `doctor` exits 1 for a problem, and for a warning too with `--strict` (see [doctor.md](doctor.md#exit-codes)). An argument that fails validation is named in the message but never printed back, so a secret pasted into the wrong place is not echoed. `mashctl endpoint permissions ADDRESS` prints the permission set of the endpoint's NATS user as JSON, and nothing else, on stdout; it reads no server. The keys are `pub` and `sub`, each with `allow` and `deny`; `deny` is always printed, as `[]` when it is empty. Errors are `error: WHAT` on standard error, then an optional `hint: COMMAND`; with `--json` the commands of this form print `{"error": ..., "hint": ...}` on standard output instead.
+mashctl exits with 0, 1 or 2 only: 0 it worked, 1 it failed (one line on standard error says why), 2 the command line was wrong, and nothing was attempted. Every verb exits 0 on success, 2 for a usage error (a wrong or missing argument, an unknown flag, a stray argument, an argument that fails validation) and 1 for any failure; `doctor` exits 1 for a problem, and for a warning too with `--strict` (see [doctor.md](doctor.md#exit-codes)). An argument that fails validation is named in the message but never printed back, so a secret pasted into the wrong place is not echoed. `mashctl endpoint permissions ADDRESS` prints the permission set of the endpoint's NATS user as JSON, and nothing else, on stdout; it reads no server. The keys are `pub` and `sub`, each with `allow` and `deny`; `deny` is always printed, as `[]` when it is empty. Errors are `error: WHAT` on standard error, then an optional `hint: COMMAND`; with `--json` the commands of this form print `{"error": ..., "hint": ...}` on standard output instead.
 
 ## Before you push with nsc
 

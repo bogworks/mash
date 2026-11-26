@@ -244,7 +244,7 @@ func TestVersionOutput(t *testing.T) {
 	if out, errb, code := h.run("version", "--bogus"); code != 2 || out != "" || !strings.HasPrefix(errb, "error: unknown flag") {
 		t.Errorf("--bogus: %d %q %q", code, out, errb)
 	}
-	if out, _, code := h.run("version", "--help"); code != 0 || !strings.HasPrefix(out, "usage: mashctl version") {
+	if out, _, code := h.run("version", "--help"); code != 0 || !strings.HasPrefix(out, "Usage: mashctl version") {
 		t.Errorf("--help: %d %q", code, out)
 	}
 }

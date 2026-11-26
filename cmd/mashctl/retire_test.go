@@ -198,7 +198,7 @@ func TestRetireConsequencesAndUsage(t *testing.T) {
 		}
 	}
 	u, _, _ := h.run("help")
-	for _, v := range []string{"mashctl endpoint delete ADDRESS", "mashctl endpoint show ADDRESS", "mashctl endpoint set ADDRESS key=value...", "mashctl endpoint unset ADDRESS key...", "mashctl endpoint suspend ADDRESS", "mashctl endpoint resume ADDRESS", "mashctl endpoint inbox ADDRESS", "mashctl endpoint permissions ADDRESS", "mashctl version"} {
+	for _, v := range []string{"mashctl endpoint delete <address>", "mashctl endpoint show <address>", "mashctl endpoint set <address> key=value...", "mashctl endpoint unset <address> key...", "mashctl endpoint suspend <address>", "mashctl endpoint resume <address>", "mashctl endpoint inbox <address>", "mashctl endpoint permissions <address>", "mashctl version"} {
 		if !strings.Contains(u, v) {
 			t.Errorf("usage lacks %q", v)
 		}

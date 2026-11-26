@@ -63,7 +63,7 @@ func TestSessionStatusAnotherSessionHolds(t *testing.T) {
 	if r := runMash(w.env["a"], "status"); r.out != tTo("a")+": ready, online\n" || r.code != 0 {
 		t.Fatalf("shell status: %+v", r)
 	}
-	if r := runMash(w.env["a"], "doctor"); !strings.Contains(r.out, "delivery  skip  needs a session\n") || r.code != 0 {
+	if r := runMash(w.env["a"], "doctor"); !strings.Contains(r.out, "delivery  skip  checked only inside a Claude Code session\n") || r.code != 0 {
 		t.Fatalf("shell doctor: %+v", r)
 	}
 

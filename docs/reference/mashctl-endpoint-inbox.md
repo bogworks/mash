@@ -51,7 +51,7 @@ Stream: stdout. Exit code: 0.
 ```text
 2 messages for acme.demo.bob, 1 not delivered.
 
-NUMBER  FROM   WHEN    TRUST     DELIVERED  KIND  SIZE
+NUMBER  FROM   SENT    TRUST     DELIVERED  KIND  SIZE
 7       alice  1m ago  verified  yes        task  48 B
 8       ?      1m ago  absent    no         task  61 B
 ```

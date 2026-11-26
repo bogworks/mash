@@ -87,6 +87,7 @@ var Join = cmdcore.Command[JoinParams, JoinResult]{
 	NoMCP:       true,
 	Summary:     "Install an endpoint's credentials on this machine from a join file.",
 	Description: "Install an endpoint's credentials on this machine from a join file.",
+	Globals:     cmdcore.GlobalsLocal,
 	Examples:    []string{"mash join acme.demo.bob.join", "mash join acme.demo.bob.join --key bob.seed"},
 	Run: func(ctx context.Context, env *cmdcore.Env, p JoinParams) (JoinResult, error) {
 		if env == nil {

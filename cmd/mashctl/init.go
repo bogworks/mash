@@ -382,7 +382,7 @@ func doInit(setupPath string, dry, jsonOut, detail bool, env func(string) string
 	// that is refused for that is refused before any connection is made.
 	tlsReq, _, err := natsauth.RequireTLS(cfg.URL, cfg.SkipEncryption)
 	if err != nil {
-		return withPlainCode(cliframe.Failf("%v (nothing was changed)", err), err)
+		return cliframe.Failf("%v (nothing was changed)", err)
 	}
 	unreachable := func() error {
 		return cliframe.Failf("cannot reach %s", first).WithHint("mashctl doctor")

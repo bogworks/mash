@@ -83,15 +83,15 @@ func plainURLs(c *connectCounter) map[string]string { // url -> host named in th
 	}
 }
 
-// serve stops at session start, exit 2, with the refusal on stderr and nothing on stdout (the MCP stream); it
+// serve stops at session start, exit 1, with the refusal on stderr and nothing on stdout (the MCP stream); it
 // connects to nothing.
-func TestServeRefusesPlainURLAndExitsTwo(t *testing.T) {
+func TestServeRefusesPlainURLAndExitsOne(t *testing.T) {
 	c := newConnectCounter(t)
 	for url, host := range plainURLs(c) {
 		var out, errb bytes.Buffer
 		code := run([]string{"serve"}, envStrict(plainEnv(t, url)), strings.NewReader(""), &out, &errb)
-		if code != 2 {
-			t.Errorf("%s: serve exited %d, want 2 (stderr %q)", url, code, errb.String())
+		if code != 1 {
+			t.Errorf("%s: serve exited %d, want 1 (stderr %q)", url, code, errb.String())
 		}
 		if out.Len() != 0 {
 			t.Errorf("%s: stdout %q", url, out.String())
@@ -128,16 +128,16 @@ func TestHookRefusesPlainURLSaysSoAndExitsZero(t *testing.T) {
 	}
 }
 
-// The CLI commands refuse before connecting, exit 2, and print the refusal.
-func TestCLIRefusesPlainURLExitTwo(t *testing.T) {
+// The CLI commands refuse before connecting, exit 1, and print the refusal.
+func TestCLIRefusesPlainURLExitOne(t *testing.T) {
 	c := newConnectCounter(t)
 	for url, host := range plainURLs(c) {
 		for _, cmd := range [][]string{{"inbox"}, {"who"}, {"read", "1"}, {"send", tTo("b"), "hi"}} {
 			var out, errb bytes.Buffer
 			code := run(cmd, envStrict(plainEnv(t, url)), strings.NewReader(""), &out, &errb)
 			got := out.String() + errb.String()
-			if code != 2 {
-				t.Errorf("%s %v: exit %d, want 2: %q", url, cmd, code, got)
+			if code != 1 {
+				t.Errorf("%s %v: exit %d, want 1: %q", url, cmd, code, got)
 			}
 			wantAllIn(t, url+" "+strings.Join(cmd, " ")+": output", got, refusalWant(host))
 			if strings.Contains(got, "s3cret") {
@@ -159,7 +159,7 @@ func TestUnsupportedSchemeRefusedEvenWithTheOverride(t *testing.T) {
 		for _, cmd := range [][]string{{"serve"}, {"inbox"}} {
 			var out, errb bytes.Buffer
 			code := run(cmd, envStrict(env), strings.NewReader(""), &out, &errb)
-			if code != 2 || !strings.Contains(errb.String(), `unsupported scheme "foo"`) {
+			if code != 1 || !strings.Contains(errb.String(), `unsupported scheme "foo"`) {
 				t.Errorf("override %q %v: exit %d, stderr %q", override, cmd, code, errb.String())
 			}
 		}

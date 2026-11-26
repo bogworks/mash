@@ -63,7 +63,7 @@ func TestMashctlUsageAndErrors(t *testing.T) {
 		t.Fatalf("no args: %d %q %q", code, out, errb)
 	}
 	for _, h := range []string{"help", "-h", "--help"} {
-		if out, errb, code := ctlRun(t, e, h); code != 0 || errb != "" || !strings.Contains(out, "mashctl endpoint set ADDRESS key=value...") || strings.Contains(out, "set-meta") {
+		if out, errb, code := ctlRun(t, e, h); code != 0 || errb != "" || !strings.Contains(out, "mashctl endpoint set <address> key=value...") || strings.Contains(out, "set-meta") {
 			t.Fatalf("%s: %d %q %q", h, code, out, errb)
 		}
 	}

@@ -47,7 +47,7 @@ Stream: stdout. Exit code: 0.
 ```text
 2 messages for acme.demo.alice, 2 new, 1 urgent.
 
-NUMBER  FROM           WHEN     STATE  URGENT  KIND      MESSAGE
+NUMBER  FROM           SENT     STATE  URGENT  KIND      MESSAGE
 1       acme.demo.bob  10s ago  new    no      task      lunch at noon?
 2       acme.demo.bob  8s ago   new    yes     question  ready?
 ```
@@ -57,7 +57,7 @@ NUMBER  FROM           WHEN     STATE  URGENT  KIND      MESSAGE
 Stream: stdout. Exit code: 0.
 
 ```text
-NUMBER  FROM           WHEN    STATE  URGENT  KIND    MESSAGE
+NUMBER  FROM           SENT    STATE  URGENT  KIND    MESSAGE
 3       acme.demo.bob  1m ago  new    no      result  The build passed on all …
 ```
 
@@ -68,7 +68,7 @@ Stream: stdout. Exit code: 0.
 ```text
 2 messages for acme.demo.alice, 2 new, 1 urgent.
 
-NUMBER  FROM           WHEN     STATE  URGENT  KIND      TRUST     SIZE  MESSAGE
+NUMBER  FROM           SENT     STATE  URGENT  KIND      TRUST     SIZE  MESSAGE
 1       acme.demo.bob  10s ago  new    no      task      verified  14 B  lunch at noon?
 2       acme.demo.bob  8s ago   new    yes     question  verified  6 B   ready?
 ```
@@ -89,7 +89,7 @@ Stream: stdout. Exit code: 0.
 3 messages for acme.demo.alice, 3 new, 0 urgent.
 The oldest has waited 1h 12m.
 
-NUMBER  FROM           WHEN  STATE  URGENT  KIND  MESSAGE
+NUMBER  FROM           SENT  STATE  URGENT  KIND  MESSAGE
 ...
 ```
 
@@ -101,7 +101,7 @@ Stream: stdout. Exit code: 0.
 17 messages for acme.demo.alice, 17 new, 0 urgent.
 More than 15 are waiting.
 
-NUMBER  FROM  WHEN  STATE  URGENT  KIND  MESSAGE
+NUMBER  FROM  SENT  STATE  URGENT  KIND  MESSAGE
 ...
 ```
 
@@ -110,7 +110,7 @@ NUMBER  FROM  WHEN  STATE  URGENT  KIND  MESSAGE
 Stream: stdout. Exit code: 0.
 
 ```text
-NUMBER  FROM            WHEN    STATE  URGENT  KIND  MESSAGE
+NUMBER  FROM            SENT    STATE  URGENT  KIND  MESSAGE
 3       acme.ops.carol  2m ago  new    no      fyi   deploy finished
 ```
 
@@ -131,7 +131,7 @@ Stream: stdout. Exit code: 0.
 About 2 messages for acme.demo.alice, about 1 new, about 1 urgent.
 exact: no (mail read out of order may still be counted as urgent)
 
-NUMBER  FROM           WHEN     STATE  URGENT  KIND      MESSAGE
+NUMBER  FROM           SENT     STATE  URGENT  KIND      MESSAGE
 1       acme.demo.bob  10s ago  new    no      task      lunch at noon?
 2       acme.demo.bob  8s ago   new    yes     question  ready?
 ```
@@ -143,7 +143,7 @@ Stream: stdout. Exit code: 0.
 ```text
 About 2 messages for acme.demo.alice, about 2 new, about 1 urgent.
 
-NUMBER  FROM           WHEN     STATE  URGENT  KIND      MESSAGE
+NUMBER  FROM           SENT     STATE  URGENT  KIND      MESSAGE
 1       acme.demo.bob  10s ago  new    no      task      lunch at noon?
 2       acme.demo.bob  8s ago   new    yes     question  ready?
 ```
@@ -164,7 +164,7 @@ Stream: stdout. Exit code: 0.
 About 2 messages for acme.demo.alice, about 2 new, about 1 urgent.
 exact: no (mash serve is not running, so unverified mail is counted)
 
-NUMBER  FROM           WHEN     STATE  URGENT  KIND      MESSAGE
+NUMBER  FROM           SENT     STATE  URGENT  KIND      MESSAGE
 1       acme.demo.bob  10s ago  new    no      task      lunch at noon?
 2       acme.demo.bob  8s ago   new    yes     question  ready?
 ```
@@ -177,7 +177,7 @@ Stream: stdout. Exit code: 0.
 About 1000 messages for acme.demo.alice, about 90 new, about 4 urgent.
 exact: no (only the oldest 1000 messages were checked)
 
-NUMBER  FROM           WHEN     STATE  URGENT  KIND      MESSAGE
+NUMBER  FROM           SENT     STATE  URGENT  KIND      MESSAGE
 1       acme.demo.bob  10s ago  new    no      task      lunch at noon?
 2       acme.demo.bob  8s ago   new    yes     question  ready?
 ```
@@ -191,7 +191,7 @@ About 1000 messages for acme.demo.alice, about 90 new, about 4 urgent.
 exact: no (only the oldest 1000 messages were checked)
 exact: no (mash serve is not running, so unverified mail is counted)
 
-NUMBER  FROM           WHEN     STATE  URGENT  KIND      MESSAGE
+NUMBER  FROM           SENT     STATE  URGENT  KIND      MESSAGE
 1       acme.demo.bob  10s ago  new    no      task      lunch at noon?
 2       acme.demo.bob  8s ago   new    yes     question  ready?
 ```

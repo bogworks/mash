@@ -69,7 +69,7 @@ func TestVerbUsagePicksOwnLines(t *testing.T) {
 		args      []string
 		want, not string
 	}{
-		{[]string{"version"}, "usage: mashctl version", ""},
+		{[]string{"version"}, "Usage: mashctl version", ""},
 		{[]string{"limits", "show"}, "mashctl limits show", "mashctl limits apply"},
 		{[]string{"limits", "apply"}, "mashctl limits apply", "mashctl limits show"},
 	}
@@ -160,7 +160,7 @@ func TestEndpointSubcommandHelp(t *testing.T) {
 		if rc := runEnv([]string{"endpoint", s.name, "--help"}, env, &out, &errb); rc != 0 || errb.Len() != 0 {
 			t.Fatalf("endpoint %s --help: rc %d stderr %q", s.name, rc, errb.String())
 		}
-		if !strings.HasPrefix(out.String(), "usage: mashctl endpoint "+s.name) || !strings.Contains(out.String(), "\nExample:\n") {
+		if !strings.HasPrefix(out.String(), "Usage: mashctl endpoint "+s.name) || !strings.Contains(out.String(), "\nExample:\n") {
 			t.Errorf("endpoint %s --help: %q", s.name, out.String())
 		}
 		for _, l := range strings.Split(out.String(), "\n") {

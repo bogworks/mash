@@ -56,7 +56,7 @@ git log -1 | mash send acme.demo.alice --kind fyi --file -
 Stream: stdout. Exit code: 0.
 
 ```text
-Mail sent (number 42)
+Mail sent (number 42 in acme.demo.alice's inbox)
 ```
 
 ### Sent, urgent, with a kind
@@ -64,7 +64,7 @@ Mail sent (number 42)
 Stream: stdout. Exit code: 0.
 
 ```text
-Urgent question mail sent (number 43)
+Urgent question mail sent (number 43 in acme.demo.alice's inbox)
 ```
 
 ### With --detail
@@ -72,7 +72,7 @@ Urgent question mail sent (number 43)
 Stream: stdout. Exit code: 0.
 
 ```text
-Mail sent (number 42)
+Mail sent (number 42 in acme.demo.alice's inbox)
 to:     acme.demo.alice
 kind:   task
 urgent: no
@@ -154,6 +154,64 @@ Stream: stderr. Exit code: 1.
 ```text
 error: acme.dev.bob: this endpoint was deleted; its address cannot be used again
 hint: mash doctor
+```
+
+### mash send --help
+
+Stream: stdout. Exit code: 0.
+
+```text
+Send a message to an endpoint.
+
+Usage:
+  mash send <address> [<message>] [options]
+
+Examples:
+  mash send acme.demo.alice "lunch at noon?"
+  mash send acme.demo.alice --urgent --kind question "ready?"
+  mash send acme.demo.alice --reply-to 2 "yes"
+  git log -1 | mash send acme.demo.alice --kind fyi --file -
+
+Arguments:
+  address  Who to send to, as owner.group.name.
+  message  The text. Leave it out to read the text from --file or from standard
+           input.
+
+Options:
+  --kind <kind>         What sort of message this is. blocker, question and task
+                        wake an idle recipient that has mash's wake channel on;
+                        otherwise, and for result and fyi, the message arrives
+                        with its next turn. Default: task. One exception: a
+                        reply (--reply-to) marked question whose text has no
+                        question mark and is at most 280 characters asks
+                        nothing, so it is sent as fyi and the output says so.
+  --urgent              Deliver at once, into a running turn where the agent
+                        host allows it.
+  --reply-to <number>   The number of the message in your inbox that this
+                        answers. Signed, so the recipient can trust the link.
+  --relay <number>      The number of a message in your inbox that this passes
+                        on. Signed, so the recipient can trust the link.
+  --id <key>            A key of your own. A second send with the same key to
+                        the same address within two minutes stores nothing new,
+                        so a retry cannot deliver twice.
+  --file <path>         Read the message text from a file. Use - for standard
+                        input; if nothing arrives there within 15 minutes the
+                        command gives up.
+  --endpoint <address>  Which endpoint to act as, as owner.group.name. Not
+                        needed when only one is installed here.
+  --creds <path>        The creds file to sign in with. Default: <config
+                        folder>/<address>.creds.
+  --server <url>        The server address. May be given more than once.
+  --ca <path>           The certificate authority's certificate, when the server
+                        uses its own.
+  --config-dir <path>   The configuration folder. Default: ~/.config/mash.
+  --detail              Print the fuller answer: after the usual line, more as
+                        'label: value' lines; with --json, the fuller object.
+  --json                Print the result as JSON: the same object the matching
+                        MCP tool returns.
+  --no-color            Never use color. Color is used only on a terminal, and
+                        NO_COLOR is honored.
+  -h, --help            Show help for the command.
 ```
 
 ## JSON

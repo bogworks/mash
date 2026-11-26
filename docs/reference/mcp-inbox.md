@@ -55,7 +55,7 @@ The call returns this text.
 ```text
 2 messages for acme.demo.alice, 2 new, 1 urgent.
 
-NUMBER  FROM  WHEN     STATE  URGENT  KIND      MESSAGE
+NUMBER  FROM  SENT     STATE  URGENT  KIND      MESSAGE
 1       bob   10s ago  new    no      task      lunch at noon?
 2       bob   8s ago   new    yes     question  ready?
 ```

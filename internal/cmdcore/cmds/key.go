@@ -14,7 +14,7 @@ import (
 const KeyDefaultOut = "mash.seed"
 
 // KeyParent is the specification's description of the key command, which holds key create.
-const KeyParent = "Make your own key pair, for when the seed must never leave this machine."
+const KeyParent = "Make a key pair: a secret seed and its public key. For when the seed must never leave this machine."
 
 // KeyCreateParams are the arguments of mash key create. It has no MCP tool.
 type KeyCreateParams struct {
@@ -39,8 +39,10 @@ var KeyCreate = cmdcore.Command[KeyCreateParams, KeyCreateResult]{
 	Name:        "key create",
 	Group:       "Setup",
 	NoMCP:       true,
-	Summary:     "Make a seed and its public key.",
-	Description: "Make a seed and its public key.",
+	Summary:     KeyParent,
+	Description: KeyParent,
+	Globals:     cmdcore.GlobalsJSON,
+	GlobalDescs: map[string]string{"--json": "Print the result as JSON."},
 	Examples:    []string{"mash key create --out bob.seed"},
 	Run: func(_ context.Context, _ *cmdcore.Env, p KeyCreateParams) (KeyCreateResult, error) {
 		out := p.Out

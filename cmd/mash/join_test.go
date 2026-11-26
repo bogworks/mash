@@ -298,8 +298,10 @@ func TestKeyCreateMatchesSpec(t *testing.T) {
 	c.check(t, runMash(env, "key", "create", "--out", "bob.seed"))
 	c = cases["File exists"]
 	c.check(t, runMash(env, "key", "create", "--out", "bob.seed"))
-	if len(cases) != 2 {
-		t.Errorf("spec/mash.json has %d key create cases, this test runs 2", len(cases))
+	c = cases["mash key create --help"]
+	c.check(t, runMash(env, "key", "create", "--help"))
+	if len(cases) != 3 {
+		t.Errorf("spec/mash.json has %d key create cases, this test runs 3", len(cases))
 	}
 }
 

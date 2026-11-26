@@ -18,12 +18,6 @@ mash hook [options]
 
 The global options of `mash` also apply: see [mash](mash.md#global-options).
 
-## Examples
-
-```text
-mash hook
-```
-
 ## Exit codes
 
 | Code | Meaning |
@@ -46,6 +40,30 @@ Stream: stdout. Exit code: 0.
 
 ```text
 (nothing)
+```
+
+### mash hook --help
+
+Stream: stdout. Exit code: 0.
+
+```text
+Print mail waiting for this session, in the form the agent host expects. Run by
+the host after each tool call and with each prompt.
+
+Usage:
+  mash hook
+
+Options:
+  --endpoint <address>  Which endpoint to act as, as owner.group.name. Always
+                        needed: a session becomes an endpoint only because
+                        someone chose that.
+  --creds <path>        The creds file to sign in with. Default: <config
+                        folder>/<address>.creds.
+  --server <url>        The server address. May be given more than once.
+  --ca <path>           The certificate authority's certificate, when the server
+                        uses its own.
+  --config-dir <path>   The configuration folder. Default: ~/.config/mash.
+  -h, --help            Show help for the command.
 ```
 
 ## MCP tool

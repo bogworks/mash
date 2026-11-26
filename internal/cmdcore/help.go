@@ -2,6 +2,7 @@ package cmdcore
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 
 	"github.com/bogworks/mash/internal/cmdcore/render"
@@ -15,7 +16,43 @@ type HelpOption struct {
 	Flag  string // "--endpoint"
 	Short string // "-v", or ""
 	Value string // placeholder for the value, "address", or "" for a switch
-	Desc  string
+	Desc  string // in the tool's own help
+	// CmdDesc is the text in a command's own help when that differs from Desc (the tool's help says which commands need
+	// the option, a command's help says only what it does); "" means Desc.
+	CmdDesc string
+}
+
+// The global options that apply to a command, named by flag, for Command.Globals and StaticCommand.Globals. A command's
+// help lists them under Options, after its own; the tool's own help is the only one with a Global options block.
+var (
+	// GlobalsAll are the connection options, --detail, --json, --no-color and --help: a command that reads the
+	// configuration, talks to the server and prints an answer.
+	GlobalsAll = []string{"--endpoint", "--creds", "--server", "--ca", "--config-dir", "--detail", "--json", "--no-color", "--help"}
+	// GlobalsConnect are the connection options and --help: a command that has no --json form and nothing fuller to say
+	// (prompt, serve, hook).
+	GlobalsConnect = []string{"--endpoint", "--creds", "--server", "--ca", "--config-dir", "--help"}
+	// GlobalsLocal are --config-dir, --detail, --json, --no-color and --help: a command that works on the configuration
+	// folder and takes no connection option (join).
+	GlobalsLocal = []string{"--config-dir", "--detail", "--json", "--no-color", "--help"}
+	// GlobalsJSON are --json and --help: a command that reads no configuration (version, key create).
+	GlobalsJSON = []string{"--json", "--help"}
+)
+
+// PickOptions are the rows (label, description) of the global options of fr named by flags, in fr's order, as a
+// command's own help words them.
+func PickOptions(fr Frame, flags []string) [][2]string {
+	var rows [][2]string
+	for _, g := range fr.Globals {
+		if !slices.Contains(flags, g.Flag) {
+			continue
+		}
+		d := g.CmdDesc
+		if d == "" {
+			d = g.Desc
+		}
+		rows = append(rows, [2]string{optionLabel(g.Short, g.Flag, g.Value), d})
+	}
+	return rows
 }
 
 // Frame is what --help prints around a command: the tool's name and its global options.
@@ -46,9 +83,9 @@ func wantsHelp(fields []field, args []string) bool {
 	return false
 }
 
-// helpText is the generated --help of c, in the one layout: the description, Usage, Examples, Arguments, Options and
-// Global options, each section after a blank line, no line wider than 80 columns. A section with nothing in it is left
-// out.
+// helpText is the generated --help of c, in the one layout: the description, Usage, Examples, Arguments and Options (its
+// own, then the global options that apply to it), each section after a blank line, no line wider than 80 columns. A
+// section with nothing in it is left out.
 func helpText[P any, R Result](c Command[P, R], fields []field, fr Frame) string {
 	tool := fr.Tool
 	if tool == "" {
@@ -79,23 +116,24 @@ func helpText[P any, R Result](c Command[P, R], fields []field, fr Frame) string
 		}
 		sections = append(sections, "Arguments:\n"+table(rows))
 	}
-	if len(opts) > 0 {
-		var rows [][2]string
-		for _, o := range opts {
-			v := o.value
-			if v == "" && o.typ.Kind() != reflect.Bool {
-				v = strings.TrimLeft(o.flag, "-")
-			}
-			rows = append(rows, [2]string{optionLabel(o.short, o.flag, v), o.desc})
+	var rows [][2]string
+	for _, o := range opts {
+		v := o.value
+		if v == "" && o.typ.Kind() != reflect.Bool {
+			v = strings.TrimLeft(o.flag, "-")
 		}
-		sections = append(sections, "Options:\n"+table(rows))
+		rows = append(rows, [2]string{optionLabel(o.short, o.flag, v), o.desc})
 	}
-	if len(fr.Globals) > 0 {
-		var rows [][2]string
-		for _, g := range fr.Globals {
-			rows = append(rows, [2]string{optionLabel(g.Short, g.Flag, g.Value), g.Desc})
+	for _, r := range PickOptions(fr, c.Globals) {
+		for flag, d := range c.GlobalDescs {
+			if strings.Contains(r[0], flag) {
+				r[1] = d
+			}
 		}
-		sections = append(sections, "Global options:\n"+table(rows))
+		rows = append(rows, r)
+	}
+	if len(rows) > 0 {
+		sections = append(sections, "Options:\n"+table(rows))
 	}
 	return strings.Join(sections, "\n\n") + "\n"
 }
@@ -175,17 +213,10 @@ func wrap(s string, width int) []string {
 	return lines
 }
 
-// ParentHelp is the --help of a command that only holds others (mash key): its description, Usage with one line per
-// command under it, and the Global options, in the same layout and width as a command's own.
-func ParentHelp(fr Frame, description string, usages []string) string {
+// ParentHelp is the --help of a command that only holds others (mash key): its description and Usage with one line per
+// command under it, in the same layout and width as a command's own. The options are the subcommands'.
+func ParentHelp(description string, usages []string) string {
 	sections := []string{strings.Join(wrap(description, helpWidth), "\n"), "Usage:\n  " + strings.Join(usages, "\n  ")}
-	var rows [][2]string
-	for _, g := range fr.Globals {
-		rows = append(rows, [2]string{optionLabel(g.Short, g.Flag, g.Value), g.Desc})
-	}
-	if len(rows) > 0 {
-		sections = append(sections, "Global options:\n"+table(rows))
-	}
 	return strings.Join(sections, "\n\n") + "\n"
 }
 
@@ -199,10 +230,15 @@ type StaticCommand struct {
 	Examples    []string
 	Arguments   [][2]string
 	Options     [][2]string
+	// Globals are the global options that apply (flag names); they are listed under Options after its own, worded as
+	// PickOptions words them, except any row of Options already given for the same flag.
+	Globals []string
+	// Override replaces the text of a global option's row, by flag ("--endpoint").
+	Override map[string]string
 }
 
-// StaticHelp is the --help of c in the layout of helpText: description, Usage, Examples, Arguments, Options and Global
-// options, each after a blank line, no line wider than 80 columns.
+// StaticHelp is the --help of c in the layout of helpText: description, Usage, Examples, Arguments and Options (its own,
+// then the global options that apply), each after a blank line, no line wider than 80 columns.
 func StaticHelp(fr Frame, c StaticCommand) string {
 	sections := []string{strings.Join(wrap(c.Description, helpWidth), "\n"), "Usage:\n  " + c.Usage}
 	if len(c.Examples) > 0 {
@@ -211,16 +247,28 @@ func StaticHelp(fr Frame, c StaticCommand) string {
 	if len(c.Arguments) > 0 {
 		sections = append(sections, "Arguments:\n"+table(c.Arguments))
 	}
-	if len(c.Options) > 0 {
-		sections = append(sections, "Options:\n"+table(c.Options))
+	rows := slices.Clone(c.Options)
+	for _, r := range PickOptions(fr, c.Globals) {
+		for flag, d := range c.Override {
+			if strings.Contains(r[0], flag) {
+				r[1] = d
+			}
+		}
+		rows = append(rows, r)
 	}
-	sections = append(sections, GlobalOptions(fr))
+	if len(rows) > 0 {
+		sections = append(sections, "Options:\n"+table(rows))
+	}
 	return strings.Join(sections, "\n\n") + "\n"
 }
 
-// Glossary is the one sentence of the tool's own help, in mash and in mashctl and nowhere else, that says what the
-// three words a newcomer meets first are. Already wrapped to 80 columns.
-const Glossary = "SAP is the Synadia Agent Protocol, NATS is the message server mash\ntalks to, and creds are the file that signs an endpoint in to it."
+// Glossary is the one paragraph of the tool's own help, in mash and in mashctl and nowhere else, that says what the
+// words a newcomer meets first are. Already wrapped to 80 columns.
+const Glossary = "An endpoint is one agent's mailbox, addressed owner.group.name; the owner, the\n" +
+	"first part, is the account that holds it. SAP is the Synadia Agent Protocol,\n" +
+	"NATS is the message server mash talks to, creds are the file that signs an\n" +
+	"endpoint in to it, and a trust label ([verified] and the others) says whether a\n" +
+	"message's sender is proven."
 
 // GlobalOptions is the "Global options:" section of fr: the heading and the table (no trailing newline), "" when fr has none.
 func GlobalOptions(fr Frame) string { return GlobalOptionsUnder(fr, "Global options:") }

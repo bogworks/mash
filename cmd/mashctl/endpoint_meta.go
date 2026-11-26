@@ -12,7 +12,7 @@ import (
 	"github.com/bogworks/mash/internal/store"
 )
 
-const endpointSetUsage = `usage: mashctl endpoint set <address> key=value... [--dry-run] [--json]
+const endpointSetUsage = `Usage: mashctl endpoint set <address> key=value... [--dry-run] [--json]
   address    the endpoint, as owner.group.name
   key=value  one or more of: role, description, host, note, capability,
              label.<name>
@@ -24,7 +24,7 @@ Example:
   mashctl endpoint set acme.demo.bob role=reviewer label.team=blue
 `
 
-const endpointUnsetUsage = `usage: mashctl endpoint unset <address> key... [--dry-run] [--json]
+const endpointUnsetUsage = `Usage: mashctl endpoint unset <address> key... [--dry-run] [--json]
   address    the endpoint, as owner.group.name
   key        one or more of: role, description, host, note, capability,
              label.<name>
@@ -71,7 +71,7 @@ func parseMetaPairs(args []string) ([]metaPair, error) {
 			return nil, cliframe.Usagef("argument %d has a key that cannot be set (the key is not shown): the keys are %s; a label name is a letter, then up to 31 of a-z 0-9 _ . -", i+2, metaKeys).WithHint("mashctl endpoint set --help")
 		}
 		if v == "" {
-			return nil, cliframe.Usagef("%s has no value", k).WithHint("to remove it: mashctl endpoint unset ADDRESS " + k)
+			return nil, cliframe.Usagef("%s has no value", k).WithHint("to remove it: mashctl endpoint unset <address> " + k)
 		}
 		if k == "capability" {
 			for _, c := range strings.Split(v, ",") {

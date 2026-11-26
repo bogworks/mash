@@ -2,7 +2,8 @@ Generated from spec/*.json by go run ./scripts/refgen. Do not edit.
 
 # mash serve
 
-Run as an MCP server for an agent host. Started by the host, not by hand.
+Run as an MCP server, which is how an agent host such as Claude Code calls
+mash's tools. Started by the host, not by hand.
 
 Release: 0.5.9. Group: Integration.
 
@@ -24,12 +25,6 @@ mash serve [options]
 | `--accept-unverified` |  | Deliver mail that is not verified, with its trust label. Default: off; such mail is refused. | MASH_ACCEPT_UNVERIFIED, or "accept_unverified" |
 
 The global options of `mash` also apply: see [mash](mash.md#global-options).
-
-## Examples
-
-```text
-mash serve
-```
 
 ## Exit codes
 
@@ -56,6 +51,36 @@ Stream: stderr. Exit code: 2.
 ```text
 error: mash serve is started by an agent host, not by hand
 hint: mash serve --help
+```
+
+### mash serve --help
+
+Stream: stdout. Exit code: 0.
+
+```text
+Run as an MCP server, which is how an agent host such as Claude Code calls
+mash's tools. Started by the host, not by hand.
+
+Usage:
+  mash serve [options]
+
+Options:
+  --wake-count <n>       Wake the session when more than this many messages are
+                         waiting. Default 15; 0 turns it off.
+  --wake-age <duration>  Wake the session when the oldest waiting message is
+                         older than this. Default 1h; 0 turns it off.
+  --accept-unverified    Deliver mail that is not verified, with its trust
+                         label. Default: off; such mail is refused.
+  --endpoint <address>   Which endpoint to act as, as owner.group.name. Always
+                         needed: a session becomes an endpoint only because
+                         someone chose that.
+  --creds <path>         The creds file to sign in with. Default: <config
+                         folder>/<address>.creds.
+  --server <url>         The server address. May be given more than once.
+  --ca <path>            The certificate authority's certificate, when the
+                         server uses its own.
+  --config-dir <path>    The configuration folder. Default: ~/.config/mash.
+  -h, --help             Show help for the command.
 ```
 
 ## MCP tool
