@@ -374,6 +374,21 @@ func (tp *s5Tap) requestsFrom(asker sap.Address) (discovery, prompt []s5Msg) {
 	return
 }
 
+// waitRequestsFrom is requestsFrom for a caller that knows how many requests it expects: the tap is its own
+// connection and may not have received the last request when the traffic's reply returns, so it polls until at
+// least wantDiscovery and wantPrompt are there (5 s at most) and returns what it has, for the caller's count check.
+func (tp *s5Tap) waitRequestsFrom(t *testing.T, asker sap.Address, wantDiscovery, wantPrompt int) (discovery, prompt []s5Msg) {
+	t.Helper()
+	end := time.Now().Add(5 * time.Second)
+	for {
+		discovery, prompt = tp.requestsFrom(asker)
+		if (len(discovery) >= wantDiscovery && len(prompt) >= wantPrompt) || time.Now().After(end) {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 // replySubjectsFrom is every reply subject asker used, in the order the server saw them.
 func (tp *s5Tap) replySubjectsFrom(asker sap.Address) []string {
 	d, p := tp.requestsFrom(asker)
