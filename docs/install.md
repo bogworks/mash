@@ -59,6 +59,17 @@ less install.sh && bash install.sh
 
 When the attestation check passes, `gh attestation verify` can print nothing and exits 0; on a failure it prints an error and exits 1, and the `&&` stops everything after it.
 
+To check a binary's SBOM (a CycloneDX list of what it was built from), which the release workflow also attests, verify it against the same workflow and tag. The binary here is `mash` for Linux on amd64; use the file for your platform:
+
+```sh
+TAG=v0.5.9   # the tag of the release you want
+curl -fsSLO https://github.com/bogworks/mash/releases/download/$TAG/mash-linux-amd64 &&
+gh attestation verify mash-linux-amd64 -R bogworks/mash --predicate-type https://cyclonedx.org/bom \
+  --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/$TAG
+```
+
+At a terminal it prints `Verification succeeded!` and the attestation it matched, and exits 0 (captured or piped, it prints nothing and still exits 0); on a failure it prints an error and exits 1. The SBOM check applies to the binaries only: the scripts have no SBOM.
+
 If `gh` is missing or older than 2.102.0, skip the `gh attestation verify` lines: the `grep` line still shows the script is the release's own file, and the TLS caveat above applies. Any failure of a check: stop and run nothing.
 
 An agent does not pipe a download into a shell: the setup skill downloads each script, checks it against `SHA256SUMS`, shows you what it is about to run and runs it after a yes. Both scripts are also the repository's own `scripts/` files at the release commit, byte for byte; the release check compares them ([ADR 0150](decisions/0150-releases-carry-install-and-local-nats-setup-scripts-as-attested-assets.md)).
