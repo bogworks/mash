@@ -24,14 +24,17 @@ type Directory struct {
 
 // Verify returns the address name the registration vouches for and whether it is verified. It is verified when
 // the id_sig verifies over the user_nkey, account, agent, owner and prompt subject; a record exists for the subject's
-// address; the user_nkey is the record's own User key; the record has an account and it is the registration's (a record with no account verifies nothing); and
+// address and its verb is prompt; the user_nkey is the record's own User key; the record has an account and it is the registration's (a record with no account verifies nothing); and
 // metadata.owner is the record's owner. An agent that is not in the directory has no record and is not verified here.
 func Verify(reg Registration, d Directory) (name string, ok bool) {
-	a, _, found := sap.AddressFromSubject(reg.Subject)
+	a, verb, found := sap.AddressFromSubject(reg.Subject)
 	if !found {
 		return "", false
 	}
 	name = a.Flat()
+	if verb != "prompt" { // a signed status, heartbeat or mail subject is not a prompt endpoint
+		return name, false
+	}
 	md := reg.Metadata
 	if !sap.VerifyIDSig(md["user_nkey"], md["account"], md["agent"], md["owner"], reg.Subject, md["id_sig"]) {
 		return name, false

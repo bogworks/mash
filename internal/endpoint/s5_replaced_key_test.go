@@ -93,3 +93,36 @@ func TestS5ReplacedKeyDoesNotVerify(t *testing.T) {
 		t.Errorf("after presence the count is %d, want 2", n)
 	}
 }
+
+// The verify step runs outside e.mu and the record is read again before lastSeen is set: a record replaced while the
+// step runs is not marked seen, and the registration counts as not verified. A verify step that ran under the lock
+// would deadlock on the replace below.
+func TestS5PresenceRechecksTheRecordAfterVerify(t *testing.T) {
+	k1, k2 := rkIdentity(t), rkIdentity(t)
+	data, _ := rkAnswer(t, k1)
+	e := rkEndpoint()
+	e.learn(map[string]recordResult{"acme_ops_bob": {rec: rkRecord(k1.User)}})
+	base := s5On()
+	h := &s5Hooks{secretPresence: true, promptDirectory: true,
+		verify: func(reg registration, d *dirView) (string, bool) {
+			name, ok := base.verify(reg, d)
+			e.learn(map[string]recordResult{"acme_ops_bob": {rec: rkRecord(k2.User)}}) // replaced mid-verify
+			return name, ok
+		}}
+	done := make(chan int, 1)
+	go func() { done <- e.applyPresenceS5(h, &nats.Msg{Data: data}) }()
+	select {
+	case got := <-done:
+		if got != 0 {
+			t.Errorf("a record replaced during verify was recorded as seen (%d)", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("applyPresenceS5 held e.mu while the verify step ran")
+	}
+	if _, seen := e.lastSeen["acme_ops_bob"]; seen {
+		t.Error("lastSeen holds bob after the record was replaced during verify")
+	}
+	if n := e.AnswersNotVerified(); n != 1 {
+		t.Errorf("counted %d, want 1", n)
+	}
+}

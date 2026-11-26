@@ -101,17 +101,31 @@ func (e *Endpoint) viewOfLocked(reg registration) *dirView {
 
 // applyPresenceS5 is applyPresence with the S5 verify step: it records the agents the step accepts as seen now,
 // and counts once, in AnswersNotVerified, an answer that carried a registration the step refused. It returns how many
-// registrations it recorded.
+// registrations it recorded. The step runs outside e.mu, on a copy of the directory view taken under the read lock;
+// the write lock is taken only to record a verified registration, and then the record is read again: if the name's
+// record was replaced or removed while the step ran, the registration is not recorded and counts as not verified.
 func (e *Endpoint) applyPresenceS5(h *s5Hooks, m *nats.Msg) (counted int) {
+	regs := parseAnswer(m.Data)
+	views := make([]*dirView, len(regs))
+	e.mu.RLock()
+	for i, reg := range regs {
+		views[i] = e.viewOfLocked(reg)
+	}
+	e.mu.RUnlock()
 	failed := false
-	for _, reg := range parseAnswer(m.Data) {
-		e.mu.Lock()
-		name, ok := h.verify(reg, e.viewOfLocked(reg))
+	for i, reg := range regs {
+		name, ok := h.verify(reg, views[i])
 		if ok {
-			e.lastSeen[name] = time.Now()
-			counted++
+			e.mu.Lock()
+			cur, has := e.dir[name]
+			if has && views[i].hasRec && cur.User == views[i].rec.User {
+				e.lastSeen[name] = time.Now()
+				counted++
+			} else {
+				ok = false
+			}
+			e.mu.Unlock()
 		}
-		e.mu.Unlock()
 		if !ok {
 			failed = true
 		}

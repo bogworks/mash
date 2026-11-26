@@ -65,6 +65,9 @@ func TestVerify(t *testing.T) {
 		{"no record for the address", good, Directory{User: bob.User, Owner: "acme", Account: "ACCT"}},
 		{"the record holds another key", good, Directory{User: carol.User, HasRecord: true, Owner: "acme", Account: "ACCT"}},
 		{"the record holds no key", good, Directory{HasRecord: true, Owner: "acme", Account: "ACCT"}},
+		{"a signed status subject", reg(t, bob, "acme", "agents.status.acme.ops.bob"), dir},
+		{"a signed heartbeat subject", reg(t, bob, "acme", "agents.hb.acme.ops.bob"), dir},
+		{"a signed mail subject", reg(t, bob, "acme", "agents.mail.acme.ops.bob"), dir},
 		{"not a prompt subject", Registration{Subject: "nonsense", Metadata: good.Metadata}, dir},
 	} {
 		if _, ok := Verify(c.reg, c.dir); ok {
