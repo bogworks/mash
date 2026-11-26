@@ -27,11 +27,7 @@ func cli(cfg config.Config, args []string, stdin io.Reader, stdout, stderr io.Wr
 	ctx, cancel := context.WithTimeout(context.Background(), cliDeadline(cfg))
 	defer cancel()
 	openCtx, openCancel := context.WithTimeout(ctx, cfg.OpenTimeout)
-	var recipient []string // a prompt reads the recipient's record with the open, to check the answers against it
-	if args[0] == "prompt" && len(args) >= 2 {
-		recipient = []string{args[1]}
-	}
-	ep, err := endpoint.OpenClientWith(openCtx, cfg, endpoint.ClientOptions{Records: recipient})
+	ep, err := endpoint.OpenClientWith(openCtx, cfg, endpoint.ClientOptions{})
 	openCancel()
 	fail = func(err error) int {
 		if f := framedIn(cfg, cfg.DisplayName(), err); f != err {

@@ -16,10 +16,34 @@ import (
 
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/sap"
+	"github.com/bogworks/mash/internal/sapsdk/discovery"
 	"github.com/bogworks/mash/internal/store"
 )
 
 func init() { newS5Caller = newS5Main }
+
+// s5On is the S5 switch-on: the verify step of internal/sapsdk/discovery, the secret presence reply subject, and the
+// directory check in the recipient discovery of prompt. The endpoint package cannot import that package (0.5.x
+// commands do not link it), so a test hands it in.
+func s5On() *s5Hooks {
+	return &s5Hooks{
+		verify: func(reg registration, d *dirView) (string, bool) {
+			return discovery.Verify(discovery.Registration{Subject: reg.Subject, Metadata: reg.Metadata},
+				discovery.Directory{Holder: d.holder, HasRecord: d.hasRec, Owner: d.rec.Owner, Account: d.rec.Account})
+		},
+		secretPresence:  true,
+		promptDirectory: true,
+	}
+}
+
+// setS5Hook sets the switch for the test and restores what it was when the test ends. None of these tests, nor the
+// 0.5.x tests of the same package, runs in parallel, so the plain variable is safe.
+func setS5Hook(t *testing.T, h *s5Hooks) {
+	t.Helper()
+	prev := s5Switch
+	s5Switch = h
+	t.Cleanup(func() { s5Switch = prev })
+}
 
 // s5Main drives main's discovery, presence and prompt sender over env.NC.
 type s5Main struct {
@@ -29,6 +53,9 @@ type s5Main struct {
 
 func newS5Main(t *testing.T, env s5Env) s5Caller {
 	t.Helper()
+	if s5Switch == nil { // a test that set the switch itself (the mutation of AT-010) keeps its own
+		setS5Hook(t, s5On())
+	}
 	ep := &Endpoint{cfg: config.Config{Owner: env.Asker.Owner}, ident: env.Asker, nc: env.NC,
 		log: log.New(io.Discard, "", 0), dir: map[string]store.Record{}, byUser: map[string]string{},
 		lastSeen: map[string]time.Time{}}
@@ -44,11 +71,12 @@ func newS5Main(t *testing.T, env s5Env) s5Caller {
 // last answer, PresenceCap after the request), and the answers are applied. The target is accepted when the probe
 // counted a verified registration for it.
 func (c *s5Main) Discover(ctx context.Context, target sap.Address) (s5Discovery, error) {
+	before := c.ep.AnswersNotVerified()
 	p := c.ep.startPresence()
 	if err := c.ep.awaitPresence(ctx, p); err != nil {
 		return s5Discovery{}, err
 	}
-	out := s5Discovery{NotVerified: p.rejected}
+	out := s5Discovery{NotVerified: c.ep.AnswersNotVerified() - before}
 	for _, pr := range c.ep.Who() {
 		if flatOf(pr.Record) == target.Flat() && pr.Online {
 			out.Accepted = append(out.Accepted, s5Registration{Address: target, PromptSubject: mustSubj(target).Prompt, UserNKey: pr.Record.User})

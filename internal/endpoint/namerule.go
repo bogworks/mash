@@ -79,28 +79,10 @@ func (e *Endpoint) DiscoverRecipient(ctx context.Context, arg string) (string, e
 	if err := e.checkKey(pointPromptRecipient, arg); err != nil {
 		return "", err
 	}
-	a, err := parseRecipient(arg)
-	if err != nil {
-		return "", err
+	if h := s5Switch; h != nil && h.promptDirectory {
+		return e.discoverRecipientS5(ctx, h, arg)
 	}
-	s, err := a.Subjects()
-	if err != nil {
-		return "", err
-	}
-	e.ensureRecord(ctx, a.Flat())
-	return discoverSubject(ctx, e.nc, s.Prompt, a.Flat(), e)
-}
-
-// ensureRecord reads the directory record of key when this endpoint does not hold it yet (a one-shot client reads only
-// the records it was asked for), so the answers to a recipient discovery can be checked against it. A record that
-// cannot be read is left out: no answer then verifies, and the discovery finds nothing.
-func (e *Endpoint) ensureRecord(ctx context.Context, key string) {
-	e.mu.RLock()
-	_, ok := e.dir[key]
-	e.mu.RUnlock()
-	if !ok {
-		e.learn(e.fetchRecords(ctx, []string{key}))
-	}
+	return DiscoverRecipient(ctx, e.nc, arg)
 }
 
 // viaAllowed applies the rule to the origin named by a verified relay declaration ("<origin> #<seq>"). Mail from a

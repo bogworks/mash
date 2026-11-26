@@ -6,8 +6,8 @@ package endpoint
 // (zero today). The mutation test removes mash's one verify step in discovery and AT-015's negative cases must then
 // show the regression.
 //
-// The mutation mechanism: the verify step is called through the package-level pointer verifyStep (directory.go), by both
-// discoveries, and the test swaps it for a step that accepts every registration. The mutated build still builds and
+// The mutation mechanism: the verify step is called through the S5 switch (s5Switch, s5hook.go), by both
+// discoveries, and the test swaps the switch's verify for a step that accepts every registration. The mutated build still builds and
 // starts (it is this same test binary), and the cases that fail closed today then accept the forged answers.
 //
 // The release check (scripts/releasecheck/unlinked.go) also refuses the SDK's caller and host packages in the built
@@ -145,18 +145,18 @@ func TestS5AT010_MutationRemovingTheVerifyStepIsCaught(t *testing.T) {
 			if got.Err != nil || len(got.Accepted) != 0 || got.NotVerified != 1 {
 				t.Fatalf("unmutated: %+v, want the answer refused and counted once", got)
 			}
-			if ep.judgeAnswer(f.Data, s5PromptSubjectOf(t, f.Data)) {
+			if ep.judgeAnswerS5(s5Switch, f.Data, s5PromptSubjectOf(t, f.Data)) {
 				t.Fatalf("unmutated: the recipient discovery vouched for the %s answer", f.Name)
 			}
 		})
 	}
 
-	accept := verifyFunc(func(reg registration, _ *dirView) (string, bool) {
+	mutated := s5On()
+	mutated.verify = func(reg registration, _ *dirView) (string, bool) {
 		a, _, ok := sap.AddressFromSubject(reg.Subject)
 		return a.Flat(), ok
-	})
-	prev := verifyStep.Swap(&accept)
-	t.Cleanup(func() { verifyStep.Store(prev) })
+	}
+	setS5Hook(t, mutated)
 
 	for _, f := range refused {
 		t.Run("mutated/"+f.Name, func(t *testing.T) {
@@ -170,7 +170,7 @@ func TestS5AT010_MutationRemovingTheVerifyStepIsCaught(t *testing.T) {
 			if f.Name != "subject" && (len(got.Accepted) != 1 || got.Accepted[0].Address != z.bob) {
 				t.Fatalf("mutated: the %s answer was not attributed to bob: %+v", f.Name, got.Accepted)
 			}
-			if !ep.judgeAnswer(f.Data, s5PromptSubjectOf(t, f.Data)) {
+			if !ep.judgeAnswerS5(s5Switch, f.Data, s5PromptSubjectOf(t, f.Data)) {
 				t.Fatalf("mutated: the recipient discovery did not vouch for the %s answer", f.Name)
 			}
 		})

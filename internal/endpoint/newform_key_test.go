@@ -115,7 +115,7 @@ func TestApplyPresenceKey(t *testing.T) {
 		other: {Owner: "acme", Group: "team1", Instance: "ops2", User: b.User},
 	})
 	// An answer for a subject marks only that endpoint's record.
-	if n, _ := e.applyPresence(presenceMsg(t, a, sap.AgentName, "agents.prompt.acme.team1.ops1")); n != 1 {
+	if n := e.applyPresence(presenceMsg(t, a, sap.AgentName, "agents.prompt.acme.team1.ops1")); n != 1 {
 		t.Fatalf("answer counted %d", n)
 	}
 	if e.lastSeen[key].IsZero() || !e.lastSeen[other].IsZero() {
@@ -123,11 +123,11 @@ func TestApplyPresenceKey(t *testing.T) {
 	}
 	// One endpoint's user answering for another's subject is not that record's user.
 	e.lastSeen = map[string]time.Time{}
-	if n, _ := e.applyPresence(presenceMsg(t, a, sap.AgentName, "agents.prompt.acme.team1.ops2")); n != 0 {
+	if n := e.applyPresence(presenceMsg(t, a, sap.AgentName, "agents.prompt.acme.team1.ops2")); n != 0 {
 		t.Fatalf("a user on another endpoint's subject counted %d", n)
 	}
 	// A subject that is not of the address shape counts for nothing.
-	if n, _ := e.applyPresence(presenceMsg(t, a, sap.AgentName, "agents.prompt.cc.acme.ops1")); n != 0 {
+	if n := e.applyPresence(presenceMsg(t, a, sap.AgentName, "agents.prompt.cc.acme.ops1")); n != 0 {
 		t.Fatalf("a subject of the removed form counted %d", n)
 	}
 }
@@ -150,17 +150,17 @@ func TestApplyPresenceIgnoresMetadataOwner(t *testing.T) {
 		})
 		return &nats.Msg{Data: d}
 	}
-	if n, _ := e.applyPresence(with(a, "someone-else", subj, subj)); n != 1 {
+	if n := e.applyPresence(with(a, "someone-else", subj, subj)); n != 1 {
 		t.Fatalf("a verified registration with another metadata owner counted %d", n)
 	}
 	e.lastSeen = map[string]time.Time{}
-	if n, _ := e.applyPresence(with(a, "acme", "agents.prompt.acme.team1.zzz", subj)); n != 0 {
+	if n := e.applyPresence(with(a, "acme", "agents.prompt.acme.team1.zzz", subj)); n != 0 {
 		t.Fatalf("a bad id_sig counted %d", n)
 	}
-	if n, _ := e.applyPresence(with(b, "acme", subj, subj)); n != 0 {
+	if n := e.applyPresence(with(b, "acme", subj, subj)); n != 0 {
 		t.Fatalf("another key on the subject counted %d", n)
 	}
-	if n, _ := e.applyPresence(with(a, "acme", "agents.prompt.acme.team1.ops2", "agents.prompt.acme.team1.ops2")); n != 0 || !e.lastSeen[key].IsZero() {
+	if n := e.applyPresence(with(a, "acme", "agents.prompt.acme.team1.ops2", "agents.prompt.acme.team1.ops2")); n != 0 || !e.lastSeen[key].IsZero() {
 		t.Fatalf("a subject that is not the directory key's counted %d", n)
 	}
 }
@@ -194,7 +194,7 @@ func TestApplyPresenceRefusesOtherCredential(t *testing.T) {
 		{"other credential, no id_sig", b, false},
 		{"the directory's own key, no id_sig", a, false},
 	} {
-		if n, _ := e.applyPresence(answer(c.id, c.sign)); n != 0 || !e.lastSeen[key].IsZero() {
+		if n := e.applyPresence(answer(c.id, c.sign)); n != 0 || !e.lastSeen[key].IsZero() {
 			t.Errorf("%s: counted %d, lastSeen %v", c.desc, n, e.lastSeen[key])
 		}
 	}

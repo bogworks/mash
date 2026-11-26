@@ -14,8 +14,8 @@ package endpoint
 //     nonce and sig from byte equality only, checks ts and the nonce for form, verifies the signature over the
 //     captured bytes, and compares everything else byte for byte (amendment 5, N8);
 //   - main's discovery verification (REQ-016): a registration is accepted only when its id_sig verifies and its
-//     prompt subject, address, account and user_nkey agree with env.Directory's record. The owner is not compared, see
-//     s5OwnerCheckRuled;
+//     prompt subject, address, account, user_nkey and owner agree with env.Directory's record, through the S5 switch
+//     (s5Switch, set by newS5Main for the test and restored with t.Cleanup);
 //   - the presence window of main (PresenceQuiet, PresenceCap), which env.Window does not shorten.
 //
 // The random tokens are not injected: the tests fix crypto/rand for the whole process with
@@ -590,26 +590,11 @@ func (z *s5Fix) forgeries(t *testing.T, genuine []byte) []s5Answer {
 	return all
 }
 
-// s5OwnerCheckRuled says whether main compares an answer's metadata owner with the directory record's owner.
-// REQ-016 asks for it. Main does not: applyPresence has always counted a verified registration whatever its metadata
-// owner says, because an SDK host registers under another token (the comment on verifyRegistration;
-// TestApplyPresenceIgnoresMetadataOwner), and S5 does not change 0.5.x behaviour for a registration main accepts
-// today. So the owner forgery is accepted, and it is not in the refused set while this is false. The lead rules it;
-// when the check is added, set this to true and TestS5AT015_OwnerDifferenceRefused runs.
-const s5OwnerCheckRuled = false
-
-// refused is the forgeries of AT-015's negative list that main's discovery refuses and counts: all of them, except
-// the owner forgery while s5OwnerCheckRuled is false.
+// refused is the forgeries of AT-015's negative list: the discovery refuses and counts every one, the owner forgery
+// included (REQ-016, behind the S5 switch).
 func (z *s5Fix) refused(t *testing.T, genuine []byte) []s5Answer {
 	t.Helper()
-	var out []s5Answer
-	for _, f := range z.forgeries(t, genuine) {
-		if f.Name == "owner" && !s5OwnerCheckRuled {
-			continue
-		}
-		out = append(out, f)
-	}
-	return out
+	return z.forgeries(t, genuine)
 }
 
 func s5PromptSubjectOf(t *testing.T, data []byte) string {

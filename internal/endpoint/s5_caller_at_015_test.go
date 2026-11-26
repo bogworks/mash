@@ -99,14 +99,9 @@ func TestS5AT015_NegativesEachRejectedNeverAttributed(t *testing.T) {
 }
 
 // TestS5AT015_OwnerDifferenceRefused is the owner case of the negative list: a registration validly signed by bob's
-// key whose metadata owner differs from the directory record's owner. REQ-016 refuses it. Main accepts it today and
-// this PR does not change that, so the test runs only when s5OwnerCheckRuled is true.
+// key whose metadata owner differs from the directory record's owner. REQ-016 refuses it, behind the S5 switch.
 func TestS5AT015_OwnerDifferenceRefused(t *testing.T) {
 	needS5Caller(t, "AT-015 negatives, owner")
-	if !s5OwnerCheckRuled {
-		t.Skip("AT-015 negatives, owner: REQ-016 refuses a registration whose metadata owner differs from the directory record's, " +
-			"but main accepts it (an SDK host registers under another token, TestApplyPresenceIgnoresMetadataOwner); the lead rules it")
-	}
 	z := newS5Fix(t)
 	genuine := z.genuineRegistration(t, z.bob)
 	tp := z.tap(t, "agents.prompt.>")
@@ -228,13 +223,11 @@ func TestS5AT015_AnswerNamingOfflineEndpointDoesNotStopMail(t *testing.T) {
 	s5SendToOfflineBobAndAssertStored(t, z, "hello offline bob, after forged answers")
 }
 
-// TestS5Today_PresenceVerdictOnTheNegativeList pins what main's presence check (applyPresence) does with each answer
-// of AT-015's negative list. Main counts the answer as presence when the id_sig verifies, the key is the directory's
-// key for the address in the prompt subject, and the account is the record's. So it refuses the unsigned, forged-sig,
-// wrong-key, subject, user-nkey and account answers, counting each once as not verified, and it ACCEPTS the owner
-// difference: it does not compare metadata owner with the directory record's owner (an SDK host registers under another
-// token). REQ-016 asks for that comparison; it is not added here (s5OwnerCheckRuled).
-func TestS5Today_PresenceVerdictOnTheNegativeList(t *testing.T) {
+// TestS5Presence_VerdictOnTheNegativeList pins what presence does with each answer of AT-015's negative list under the
+// S5 switch: it refuses every one, the owner difference included, counting each once as not verified, and counts the
+// genuine answer as presence.
+func TestS5Presence_VerdictOnTheNegativeList(t *testing.T) {
+	setS5Hook(t, s5On())
 	z := newS5Fix(t)
 	forged := z.forgeries(t, z.genuineRegistration(t, z.bob))
 	alice, err := OpenClientWith(context.Background(), z.cfgAt(z.alice), ClientOptions{FullDirectory: true})
@@ -242,22 +235,17 @@ func TestS5Today_PresenceVerdictOnTheNegativeList(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(alice.Close)
-	today := map[string]int{"unsigned": 0, "forged-sig": 0, "wrong-key": 0, "subject": 0, "user-nkey": 0, "account": 0, "owner": 1}
 	for _, f := range forged {
-		want, ok := today[f.Name]
-		if !ok {
-			t.Fatalf("no recorded verdict for %s", f.Name)
-		}
-		got, rejected := alice.applyPresence(&nats.Msg{Data: f.Data})
-		if got != want || rejected != 1-want {
-			t.Errorf("main's presence check counted %d and rejected %d for the %s answer, recorded %d and %d", got, rejected, f.Name, want, 1-want)
+		before := alice.AnswersNotVerified()
+		if got := alice.applyPresence(&nats.Msg{Data: f.Data}); got != 0 || alice.AnswersNotVerified() != before+1 {
+			t.Errorf("the %s answer counted %d and rejected %d, want 0 and 1", f.Name, got, alice.AnswersNotVerified()-before)
 		}
 	}
-	// the valid answer is counted, and not rejected
-	if got, rejected := alice.applyPresence(&nats.Msg{Data: z.genuineRegistration(t, z.bob)}); got != 1 || rejected != 0 {
-		t.Errorf("main's presence check counted %d and rejected %d for the genuine answer, want 1 and 0", got, rejected)
+	before := alice.AnswersNotVerified()
+	if got := alice.applyPresence(&nats.Msg{Data: z.genuineRegistration(t, z.bob)}); got != 1 || alice.AnswersNotVerified() != before {
+		t.Errorf("the genuine answer counted %d and rejected %d, want 1 and 0", got, alice.AnswersNotVerified()-before)
 	}
-	if n := alice.AnswersNotVerified(); n != len(forged)-1 {
-		t.Errorf("the endpoint's total is %d, want %d (every refused answer once)", n, len(forged)-1)
+	if n := alice.AnswersNotVerified(); n != len(forged) {
+		t.Errorf("the endpoint's total is %d, want %d (every refused answer once)", n, len(forged))
 	}
 }

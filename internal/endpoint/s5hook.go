@@ -1,0 +1,206 @@
+package endpoint
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"time"
+
+	"github.com/nats-io/nats.go"
+
+	"github.com/bogworks/mash/internal/sap"
+	"github.com/bogworks/mash/internal/store"
+)
+
+// The S5 checks of discovery (REQ-016, TO-12) sit behind a switch that is off in 0.5.x. s5Switch is nil by default,
+// and while it is nil every discovery path is main's own: presence uses the client's NewInbox and counts an answer
+// whose id_sig verifies and whose user_nkey is the directory's for the subject's address; the recipient discovery of
+// prompt returns on the first answer that names the prompt subject; nothing is counted. The switch-on (W) sets it, and
+// until then only the tests do. The verify step itself lives in internal/sapsdk/discovery, which the 0.5.x commands
+// must not link (scripts/releasecheck), so the hook receives it as a function and this package never imports it.
+//
+// The hook is a plain variable: it is set before a test starts its discovery and restored after, and no test that
+// sets it, or that reads what it changes, runs in parallel. A discovery that returns early keeps reading its window in
+// the background; it holds the hook it started with.
+
+// s5Hooks is the S5 switch-on.
+type s5Hooks struct {
+	// verify is the one verify step: it returns the address name the registration vouches for and whether it is
+	// verified against the directory's view.
+	verify func(reg registration, d *dirView) (name string, ok bool)
+	// secretPresence makes the presence probe use secretInbox (128 random bits) for its reply subject.
+	secretPresence bool
+	// promptDirectory makes the recipient discovery of prompt verify the answers against the directory record, which
+	// it reads on demand, and count those that fail.
+	promptDirectory bool
+}
+
+// s5Switch is the switch: nil in 0.5.x.
+var s5Switch *s5Hooks
+
+// registration is one prompt endpoint of a $SRV.INFO answer, with the metadata that vouches for it.
+type registration struct {
+	Subject  string
+	Metadata map[string]string
+}
+
+// dirView is what the directory says about one registration: the endpoint that holds its user_nkey, and the record of
+// the address its prompt subject names.
+type dirView struct {
+	holder string
+	rec    store.Record
+	hasRec bool
+}
+
+// AnswersNotVerified is how many discovery answers failed verification over this endpoint's life, each counted once
+// per discovery (TO-12, REQ-016). It is kept and not printed: no view shows it until W. It stays 0 while the S5
+// switch is off.
+func (e *Endpoint) AnswersNotVerified() int { return int(e.notVerified.Load()) }
+
+// presenceInbox is the reply subject of a presence probe.
+func (e *Endpoint) presenceInbox() string {
+	if h := s5Switch; h != nil && h.secretPresence {
+		return secretInbox(e.nc)
+	}
+	return e.nc.NewInbox()
+}
+
+// parseAnswer is the prompt registrations a $SRV.INFO answer carries. An answer that is not JSON, or names no prompt
+// endpoint, carries none: it is not a registration to verify, and is not counted.
+func parseAnswer(data []byte) []registration {
+	var info struct {
+		Metadata  map[string]string `json:"metadata"`
+		Endpoints []struct {
+			Name    string `json:"name"`
+			Subject string `json:"subject"`
+		} `json:"endpoints"`
+	}
+	if json.Unmarshal(data, &info) != nil {
+		return nil
+	}
+	var regs []registration
+	for _, ep := range info.Endpoints {
+		if ep.Name == "prompt" {
+			regs = append(regs, registration{Subject: ep.Subject, Metadata: info.Metadata})
+		}
+	}
+	return regs
+}
+
+// viewOfLocked reads the directory for reg. The caller holds e.mu.
+func (e *Endpoint) viewOfLocked(reg registration) *dirView {
+	d := &dirView{holder: e.byUser[reg.Metadata["user_nkey"]]}
+	if a, _, ok := sap.AddressFromSubject(reg.Subject); ok {
+		d.rec, d.hasRec = e.dir[a.Flat()]
+	}
+	return d
+}
+
+// applyPresenceS5 is applyPresence with the S5 verify step: it records the agents the step accepts as seen now,
+// and counts once, in AnswersNotVerified, an answer that carried a registration the step refused. It returns how many
+// registrations it recorded.
+func (e *Endpoint) applyPresenceS5(h *s5Hooks, m *nats.Msg) (counted int) {
+	failed := false
+	for _, reg := range parseAnswer(m.Data) {
+		e.mu.Lock()
+		name, ok := h.verify(reg, e.viewOfLocked(reg))
+		if ok {
+			e.lastSeen[name] = time.Now()
+			counted++
+		}
+		e.mu.Unlock()
+		if !ok {
+			failed = true
+		}
+	}
+	if failed {
+		e.notVerified.Add(1)
+	}
+	return counted
+}
+
+// judgeAnswerS5 reports whether an answer carries a verified registration at the prompt subject want, and counts once
+// an answer that carries a registration that fails verification. An invalid answer never ends the discovery.
+func (e *Endpoint) judgeAnswerS5(h *s5Hooks, data []byte, want string) (vouched bool) {
+	failed := false
+	for _, reg := range parseAnswer(data) {
+		e.mu.RLock()
+		d := e.viewOfLocked(reg)
+		e.mu.RUnlock()
+		if _, ok := h.verify(reg, d); !ok {
+			failed = true
+			continue
+		}
+		if reg.Subject == want {
+			vouched = true
+		}
+	}
+	if failed {
+		e.notVerified.Add(1)
+	}
+	return vouched
+}
+
+// discoverRecipientS5 is the recipient discovery of prompt with the S5 checks: the recipient's directory record is
+// read when this endpoint does not hold it, and an answer is accepted only when the verify step accepts it.
+func (e *Endpoint) discoverRecipientS5(ctx context.Context, h *s5Hooks, arg string) (string, error) {
+	a, err := parseRecipient(arg)
+	if err != nil {
+		return "", err
+	}
+	s, err := a.Subjects()
+	if err != nil {
+		return "", err
+	}
+	e.ensureRecord(ctx, a.Flat())
+	return e.discoverSubjectS5(ctx, h, s.Prompt, a.Flat())
+}
+
+// ensureRecord reads the directory record of key when this endpoint does not hold it yet (a one-shot client reads only
+// the records it was asked for). A record that cannot be read is left out: no answer then verifies.
+func (e *Endpoint) ensureRecord(ctx context.Context, key string) {
+	e.mu.RLock()
+	_, ok := e.dir[key]
+	e.mu.RUnlock()
+	if !ok {
+		e.learn(e.fetchRecords(ctx, []string{key}))
+	}
+}
+
+// discoverSubjectS5 sends one discovery request and returns want when an answer carries a verified registration at
+// that prompt subject. On a valid answer the caller is not kept waiting: the rest of the window is read in the
+// background, so a late invalid answer is still counted.
+func (e *Endpoint) discoverSubjectS5(ctx context.Context, h *s5Hooks, want, name string) (string, error) {
+	inbox := secretInbox(e.nc)
+	sub, err := e.nc.SubscribeSync(inbox)
+	if err != nil {
+		return "", err
+	}
+	if err := e.nc.PublishRequest("$SRV.INFO."+sap.ServiceName, inbox, nil); err != nil {
+		_ = sub.Unsubscribe()
+		return "", err
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		m, err := sub.NextMsg(time.Until(deadline))
+		if err != nil {
+			break
+		}
+		if !e.judgeAnswerS5(h, m.Data, want) {
+			continue
+		}
+		go func() {
+			defer sub.Unsubscribe()
+			for time.Now().Before(deadline) {
+				m, err := sub.NextMsg(time.Until(deadline))
+				if err != nil {
+					return
+				}
+				e.judgeAnswerS5(h, m.Data, want)
+			}
+		}()
+		return want, nil
+	}
+	_ = sub.Unsubscribe()
+	return "", fmt.Errorf("mash: %s is not online (no SAP registration answered)", sap.Display(name))
+}
