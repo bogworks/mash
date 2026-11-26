@@ -64,10 +64,16 @@ type Kit struct {
 }
 
 // New starts a server under dir, provisions names and returns the kit. Close it when done.
-func New(dir, bin, tag string, names []Name) (*Kit, error) {
+func New(dir, bin, tag string, names []Name) (*Kit, error) { return NewOwner(dir, bin, tag, "", names) }
+
+// NewOwner is New with the SAP owner of the endpoints given ("" keeps the test environment's).
+func NewOwner(dir, bin, tag, owner string, names []Name) (*Kit, error) {
 	e, stop, err := testenv.Launch(filepath.Join(dir, "srv"))
 	if err != nil {
 		return nil, err
+	}
+	if owner != "" {
+		e.Owner = owner
 	}
 	k := &Kit{Tag: tag, E: e, Bin: bin, Dir: dir, Creds: map[string]string{}, Addrs: map[string]sap.Address{},
 		Env: map[string]map[string]string{}, stop: stop}
@@ -138,12 +144,7 @@ func (k *Kit) MashBin(bin, label, state, stdin string, args ...string) (string, 
 		return "", err
 	}
 	cmd := exec.Command(bin, args...)
-	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "MASH_STATE_DIR=" + state,
-		"MASH_ENDPOINT=" + k.To(label), "MASH_SERVER=" + k.E.URL, "MASH_CREDS=" + k.Creds[label],
-		"MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1"}
-	for n, v := range k.Env[label] {
-		cmd.Env = append(cmd.Env, n+"="+v)
-	}
+	cmd.Env = k.ProcEnv(label, state)
 	cmd.Stdin = strings.NewReader(stdin)
 	var out, errb strings.Builder
 	cmd.Stdout, cmd.Stderr = &out, &errb
@@ -163,6 +164,18 @@ func (k *Kit) MashBin(bin, label, state, stdin string, args ...string) (string, 
 		<-done
 		return "", fmt.Errorf("timed out")
 	}
+}
+
+// ProcEnv is the environment a `mash` process runs in as label with the given state directory: the label's home, endpoint,
+// server and creds, and the label's entries of Env. A caller that starts a long-running process (`mash serve`) uses it too.
+func (k *Kit) ProcEnv(label, state string) []string {
+	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + k.Home(label), "MASH_STATE_DIR=" + state,
+		"MASH_ENDPOINT=" + k.To(label), "MASH_SERVER=" + k.E.URL, "MASH_CREDS=" + k.Creds[label],
+		"MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1"}
+	for n, v := range k.Env[label] {
+		env = append(env, n+"="+v)
+	}
+	return env
 }
 
 // firstReason is the first line of a command's output that is not the warning about the missing encryption.
