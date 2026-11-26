@@ -15,8 +15,8 @@ const (
 	nextRelease = "0.6.0"
 	// closeRelease is the one release after the current one that a command may
 	// already carry: a command whose behaviour closed in it is documented with
-	// the rest, and its page says "Release: 0.5.9".
-	closeRelease = "0.5.9"
+	// the rest, and its page says "Release: 0.5.10".
+	closeRelease = "0.5.10"
 	comingPage   = "coming-in-0-6-0.md"
 	width        = 78
 )
