@@ -9,7 +9,7 @@ All notable user-facing changes to mash are recorded here. The format follows [K
 ### Summary
 
 0.5.10 changes what scripts read: some `--json` names, exit codes and wording. For people, `mash` and `mashctl`
-now read alike, and mail signed with a replaced key is no longer labelled verified.
+now read alike, and mail signed with a replaced key is no longer labelled verified. A 0.5.5 configuration folder is no longer migrated: upgrade through 0.5.9 first.
 
 ### Upgrading
 
