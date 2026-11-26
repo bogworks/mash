@@ -601,7 +601,7 @@
         "stream": "stdout",
         "exit": 1,
         "issue": "#1099",
-        "note": "Exit 1. The server row shows the address; the rule \"Both doctors work the same way\" says: \"A server row shows the address as configured.\" (today the row has no address). No hint: the one command that starts a local server is a script that is not on the PATH, and a hint is a command of ours (planner ruling on REQ-006). Wording as mash doctor's row. Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors."
+        "note": "Exit 1. The server row shows the address; the rule \"Both doctors work the same way\" says: \"A server row shows the address as configured.\" (today the row has no address). No hint: the one command that starts a local server is a script that is not on the PATH, and a hint is a command of ours (REQ-006). Wording as mash doctor's row. Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors."
        },
        {
         "case": "--audit-users finds a user mashctl did not issue",
@@ -894,7 +894,7 @@
           "stream": "stdout",
           "exit": 0,
           "issue": "#1100",
-          "note": "One line is added: the next step, a command to run as printed. Today: the first two lines. With no --out the creds are installed on this machine, so the endpoint can run here at once (docs/operations.md, Adding an endpoint). What a person does with a new endpoint is start a session as it: docs/guide/by-hand.md step 6 (MASH_ENDPOINT=acme.demo.bob claude), docs/install.md section 5 (Launch a session) and the setup skill's last steps (it writes a one-word launcher with the same MASH_ENDPOINT export). The setup skill also checks MASH_ENDPOINT=acme.demo.bob mash status first (it expects ready, offline); that is a check, not a use, so it is not the line. The line is not printed for --out (the join file is for another machine, where mash join <file> is the step; a case for it can follow) or for --dry-run. The one-line rule \"An action prints one line\" allows the file location; this is a second addition and is for the lead to rule on.",
+          "note": "One line is added: the next step, a command to run as printed. Today: the first two lines. With no --out the creds are installed on this machine, so the endpoint can run here at once (docs/operations.md, Adding an endpoint). What a person does with a new endpoint is start a session as it: docs/guide/by-hand.md step 6 (MASH_ENDPOINT=acme.demo.bob claude), docs/install.md section 5 (Launch a session) and the setup skill's last steps (it writes a one-word launcher with the same MASH_ENDPOINT export). The setup skill also checks MASH_ENDPOINT=acme.demo.bob mash status first (it expects ready, offline); that is a check, not a use, so it is not the line. The line is not printed for --out (the join file is for another machine, where mash join <file> is the step; a case for it can follow) or for --dry-run. The one-line rule \"An action prints one line\" allows the file location; this is a second addition and is open.",
           "verbatim": true
          },
          {
@@ -1963,7 +1963,7 @@
           "text": "2 messages for acme.demo.bob, 1 not delivered, 1 refused as malformed.\n\nNUMBER  FROM   SENT    TRUST     DELIVERED  KIND  SIZE  REASON\n7       alice  1m ago  verified  yes        task  48 B\n8       ?      1m ago  refused   no         -     61 B  two sender headers",
           "stream": "stdout",
           "exit": 0,
-          "note": "TO-6, REQ-006, CHG-9. The header counts only the messages mashctl itself finds malformed (a header fault), and says what it counts (ADR 0174, planner #3665); a message that was not verified is not in it. The endpoint's own count (`mash inbox`, `mash status --detail`) can be higher, because it also refuses mail it could not verify, by its own setting. The refused messages are among the not-delivered ones. TRUST is `refused` where 0.5.9 printed `forged` for a message with a header fault, and the class is the REASON. A message that was not verified keeps its trust label and gets `not verified` as its REASON. The REASON column is the last cell and the only one cut, with `…` at 79 columns, as a preview is, and is named in the header only when some message has one. `--json` carries the whole class."
+          "note": "TO-6, REQ-006, CHG-9. The header counts only the messages mashctl itself finds malformed (a header fault), and says what it counts (ADR 0174); a message that was not verified is not in it. The endpoint's own count (`mash inbox`, `mash status --detail`) can be higher, because it also refuses mail it could not verify, by its own setting. The refused messages are among the not-delivered ones. TRUST is `refused` where 0.5.9 printed `forged` for a message with a header fault, and the class is the REASON. A message that was not verified keeps its trust label and gets `not verified` as its REASON. The REASON column is the last cell and the only one cut, with `…` at 79 columns, as a preview is, and is named in the header only when some message has one. `--json` carries the whole class."
          }
         ]
        },

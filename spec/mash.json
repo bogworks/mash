@@ -500,7 +500,7 @@
         "text": "17 messages for o.dev.bob, 0 new, 0 urgent, 12 refused.\n\nNUMBER  FROM         SENT    STATE    URGENT  KIND  MESSAGE\n1       o.dev.alice  3m ago  read     no      task  verified: real mash send f…\n2       UCNY…4UHK    3m ago  read     no      task  claimed: header without a …\n3       UCVG…3VVW    3m ago  read     no      task  unknown-signer: signed by …\n4       ?            3m ago  read     no      task  absent: no Agent-Sender he…\n5       o.dev.frank  3m ago  read     no      task  stale: signed an hour befo…\n6       ?            2m ago  refused  -       -     not verified\n7       ?            2m ago  refused  -       -     header too long\n8       ?            2m ago  refused  -       -     time not in UTC\n9       ?            2m ago  refused  -       -     control character in name\n10      ?            2m ago  refused  -       -     name too long\n11      ?            2m ago  refused  -       -     broken character in name\n12      ?            1m ago  refused  -       -     a field appears twice\n13      ?            1m ago  refused  -       -     space in subject\n14      ?            1m ago  refused  -       -     signature unreadable\n15      ?            1m ago  refused  -       -     empty sender header\n16      ?            1m ago  refused  -       -     two sender headers\n17      ?            1m ago  refused  -       -     unreadable sender header",
         "stream": "stdout",
         "exit": 0,
-        "note": "TO-1, planner #3612: one state word. Rows 1 to 5 are the five trust kinds, which appear only on an endpoint that sets MASH_ACCEPT_UNVERIFIED=1; row 6 is a refused message that was not verified (an endpoint with the default when it arrived); rows 7 to 17 are one refused message for each header class, in the order of the frozen list. Every row is `refused` in STATE; the class is the MESSAGE cell. The narrow table has no TRUST column, so FROM is `?` on a refused row as on an absent one and the state tells them apart; --wide adds TRUST. The longest line is 79 columns."
+        "note": "TO-1: one state word. Rows 1 to 5 are the five trust kinds, which appear only on an endpoint that sets MASH_ACCEPT_UNVERIFIED=1; row 6 is a refused message that was not verified (an endpoint with the default when it arrived); rows 7 to 17 are one refused message for each header class, in the order of the frozen list. Every row is `refused` in STATE; the class is the MESSAGE cell. The narrow table has no TRUST column, so FROM is `?` on a refused row as on an absent one and the state tells them apart; --wide adds TRUST. The longest line is 79 columns."
        },
        {
         "case": "--json, a refused message",
@@ -573,7 +573,7 @@
         "stream": "stdout",
         "exit": 0,
         "issue": "#955",
-        "note": "From mash-core. The count pass stopped at its cap, so the counts are not exact; the word \"about\" before each count says so, with no extra line (v0.5.8 printed none for this case either). Same shape as \"Counts without serve running\". --json: \"exact\": false. --detail adds one line under the count line: \"exact: no (only the oldest 1000 messages were checked)\"; for a cap on bytes the reason reads \"only the oldest N MiB of message text was checked\". The code caps messages and bytes. The values are examples."
+        "note": "The count pass stopped at its cap, so the counts are not exact; the word \"about\" before each count says so, with no extra line (v0.5.8 printed none for this case either). Same shape as \"Counts without serve running\". --json: \"exact\": false. --detail adds one line under the count line: \"exact: no (only the oldest 1000 messages were checked)\"; for a cap on bytes the reason reads \"only the oldest N MiB of message text was checked\". The code caps messages and bytes. The values are examples."
        },
        {
         "case": "Counts without serve running, with --detail",
@@ -581,7 +581,7 @@
         "stream": "stdout",
         "exit": 0,
         "issue": "#958",
-        "note": "--detail adds the line \"exact: no (<reason>)\" under the count line; the table follows as in \"Counts without serve running\". The reason is core's exact wording for serve not running (core #1395). The table shows two rows here; it lists the waiting messages as in \"Messages\" with --detail."
+        "note": "--detail adds the line \"exact: no (<reason>)\" under the count line; the table follows as in \"Counts without serve running\". The reason is the exact wording for serve not running (#1395). The table shows two rows here; it lists the waiting messages as in \"Messages\" with --detail."
        },
        {
         "case": "Counts are capped, with --detail",
@@ -589,7 +589,7 @@
         "stream": "stdout",
         "exit": 0,
         "issue": "#955",
-        "note": "From mash-core (#1395). --detail adds the line \"exact: no (<reason>)\" under the count line. For a cap on bytes the reason reads \"only the oldest N MiB of message text was checked\". The table shows two rows here; it lists the waiting messages as in \"Messages\" with --detail."
+        "note": "--detail adds the line \"exact: no (<reason>)\" under the count line (#1395). For a cap on bytes the reason reads \"only the oldest N MiB of message text was checked\". The table shows two rows here; it lists the waiting messages as in \"Messages\" with --detail."
        },
        {
         "case": "Counts are capped and serve is not running, with --detail",
@@ -597,7 +597,7 @@
         "stream": "stdout",
         "exit": 0,
         "issue": "#958",
-        "note": "From mash-core (#1395). Both reasons apply: one About line, then one \"exact: no (<reason>)\" line per reason, the capped one first, then the serve one, each under the count line and within 80 columns. The table shows two rows here; it lists the waiting messages as in \"Messages\" with --detail."
+        "note": "Both reasons apply: one About line, then one \"exact: no (<reason>)\" line per reason, the capped one first, then the serve one, each under the count line and within 80 columns (#1395). The table shows two rows here; it lists the waiting messages as in \"Messages\" with --detail."
        },
        {
         "case": "The class strings",
@@ -1268,7 +1268,7 @@
         "stream": "stdout, then the hint on stderr",
         "exit": 1,
         "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   FAIL  the server refused these credentials\ndelivery  skip  needs sign-in\nrefused   ok    3 messages were refused\n                2 not verified\n                1 time not in UTC\n\n1 problem.\nhint: mash join <file> --replace",
-        "note": "REQ-006, core #1403. The hint is a command of ours that fixes the first problem: a new join file brings new credentials, and --replace because creds for this address are installed (mash join refuses them otherwise). v0.5.8 printed a sentence ('ask whoever runs your mesh to run: mashctl endpoint reissue ...'); ADR 0168 says a hint is a command or there is none. The refused row is ok whatever it counts (CHG-14, TO-5): a refused message cannot be fixed by anyone and cannot be removed before it ages out, so it never turns the verdict to warn and never changes the exit status. Today's warn row for not-verified mail is ok now."
+        "note": "REQ-006. The hint is a command of ours that fixes the first problem: a new join file brings new credentials, and --replace because creds for this address are installed (mash join refuses them otherwise). v0.5.8 printed a sentence ('ask whoever runs your mesh to run: mashctl endpoint reissue ...'); ADR 0168 says a hint is a command or there is none. The refused row is ok whatever it counts (CHG-14, TO-5): a refused message cannot be fixed by anyone and cannot be removed before it ages out, so it never turns the verdict to warn and never changes the exit status. Today's warn row for not-verified mail is ok now."
        },
        {
         "case": "Server not answering",
@@ -1276,7 +1276,7 @@
         "stream": "stdout",
         "exit": 1,
         "issue": "#1099",
-        "note": "Rows and exit 1 as today. No hint: no command of ours fixes a server that is down, and the rule says \"where no command does, there is no hint and the row's own text says what is wrong\". A hint is a command or there is none (planner ruling on REQ-006). The server row shows the address as configured, as the rule requires."
+        "note": "Rows and exit 1 as today. No hint: no command of ours fixes a server that is down, and the rule says \"where no command does, there is no hint and the row's own text says what is wrong\". A hint is a command or there is none (REQ-006). The server row shows the address as configured, as the rule requires."
        },
        {
         "case": "Claude Code is recent enough",
@@ -1396,7 +1396,7 @@
         "stream": "stdout, then the hint on stderr",
         "exit": 1,
         "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   FAIL  this endpoint was deleted; its address cannot be used again\ndelivery  skip  needs sign-in\nrefused   ok    no mail was refused\n\n1 problem.\nhint: mash join <file>",
-        "note": "REQ-006, core #1403. The hint is a command: a join file to a new endpoint. v0.5.8 printed the sentence 'ask whoever runs your mesh for a join file to a new endpoint'."
+        "note": "REQ-006. The hint is a command: a join file to a new endpoint. v0.5.8 printed the sentence 'ask whoever runs your mesh for a join file to a new endpoint'."
        },
        {
         "case": "The endpoint was deleted, on the machine that deleted it, with one hint",
@@ -1404,7 +1404,7 @@
         "stream": "stdout, then the hint on stderr",
         "exit": 1,
         "text": "config    ok\nclaude    skip  no claude command found\ncreds     FAIL  this endpoint was deleted; its address cannot be used again\nserver    ok    tls://myserver:4222\nsign-in   skip  needs the creds\ndelivery  skip  needs sign-in\nrefused   ok    no mail was refused\n\n1 problem.\nhint: mash join <file>",
-        "note": "REQ-006, core #1403. As on another machine: the hint is a join file to a new endpoint."
+        "note": "REQ-006. As on another machine: the hint is a join file to a new endpoint."
        },
        {
         "case": "The certificate is not trusted",
@@ -1436,7 +1436,7 @@
         "stream": "stdout, then the hint on stderr",
         "exit": 1,
         "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   FAIL  the server refused these credentials\ndelivery  skip  needs sign-in\nrefused   ok    no mail was refused\n\n1 problem.\nhint: mash join <file> --replace",
-        "note": "REQ-006, core #1403. Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors. Also the hint for a creds file that belongs to another endpoint. The person needs a new join file from whoever runs the mesh; --replace, because creds for this address are installed."
+        "note": "REQ-006. Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors. Also the hint for a creds file that belongs to another endpoint. The person needs a new join file from whoever runs the mesh; --replace, because creds for this address are installed."
        },
        {
         "case": "The creds file is not a creds file",
@@ -1444,7 +1444,7 @@
         "stream": "stdout, then the hint on stderr",
         "exit": 1,
         "text": "config    ok\nclaude    skip  no claude command found\ncreds     FAIL  ~/.config/mash/acme.demo.bob.creds is not a creds file\nserver    ok    tls://myserver:4222\nsign-in   skip  needs the creds\ndelivery  skip  needs sign-in\nrefused   ok    no mail was refused\n\n1 problem.\nhint: mash join <file> --replace",
-        "note": "REQ-006, core #1403. Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors. The file's content is never printed. Same shape as 'A creds file is missing' (the file, with ~, then what is wrong), so the row fits in 80 columns; status keeps its longer sentence as the reason. --replace, because a file is installed at the creds path."
+        "note": "REQ-006. Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors. The file's content is never printed. Same shape as 'A creds file is missing' (the file, with ~, then what is wrong), so the row fits in 80 columns; status keeps its longer sentence as the reason. --replace, because a file is installed at the creds path."
        },
        {
         "case": "The creds file can be read by others",
@@ -1452,7 +1452,7 @@
         "stream": "stdout",
         "exit": 1,
         "text": "config    ok\nclaude    skip  no claude command found\ncreds     FAIL  ~/.config/mash/acme.demo.bob.creds can be read by others\nserver    ok    tls://myserver:4222\nsign-in   skip  needs the creds\ndelivery  skip  needs sign-in\nrefused   ok    no mail was refused\n\n1 problem.",
-        "note": "REQ-006, core #1403. Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors. No hint: no command of ours changes a file's permissions (v0.5.8 printed 'hint: chmod 600 <file>'). Same shape as 'A creds file is missing', so the row fits in 80 columns."
+        "note": "REQ-006. Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors. No hint: no command of ours changes a file's permissions (v0.5.8 printed 'hint: chmod 600 <file>'). Same shape as 'A creds file is missing', so the row fits in 80 columns."
        },
        {
         "case": "The server address is not tls://",
@@ -1460,7 +1460,7 @@
         "stream": "stdout",
         "exit": 1,
         "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    FAIL  the server address is not tls://: nats://myserver:4222\nsign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no mail was refused\n\n1 problem.",
-        "note": "REQ-006, core #1403. Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors. A plain nats:// address without MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1. One short row; no hint, since no command of ours changes the address (v0.5.8 printed the whole refusal and a sentence hint). mash status keeps the whole refusal as its reason."
+        "note": "REQ-006. Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors. A plain nats:// address without MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1. One short row; no hint, since no command of ours changes the address (v0.5.8 printed the whole refusal and a sentence hint). mash status keeps the whole refusal as its reason."
        },
        {
         "case": "In a session with no endpoint chosen",
@@ -1468,7 +1468,7 @@
         "stream": "the doctor tool's result, an error",
         "exit": 1,
         "text": "No endpoint is chosen for this session.",
-        "note": "REQ-006, core #1403. The doctor tool's answer in a session whose mash serve has no endpoint (an error result; 1 is the exit code of the same answer from mash doctor). No hint: no command of ours names a session's endpoint. The status tool keeps 'hint: start the session with MASH_ENDPOINT=<address>'; mash serve's note changes to match when the code lands."
+        "note": "REQ-006. The doctor tool's answer in a session whose mash serve has no endpoint (an error result; 1 is the exit code of the same answer from mash doctor). No hint: no command of ours names a session's endpoint. The status tool keeps 'hint: start the session with MASH_ENDPOINT=<address>'; mash serve's note changes to match when the code lands."
        },
        {
         "case": "--json: the one hint is a field",
@@ -1476,7 +1476,7 @@
         "stream": "stdout",
         "exit": 1,
         "text": "{\n \"endpoint\": \"acme.demo.bob\",\n \"problems\": 1,\n \"warnings\": 0,\n \"checks\": [\n  {\n   \"name\": \"config\",\n   \"state\": \"ok\",\n   \"detail\": null,\n   \"fix\": null\n  },\n  {\n   \"name\": \"claude\",\n   \"state\": \"ok\",\n   \"detail\": \"2.1.320\",\n   \"fix\": null\n  },\n  {\n   \"name\": \"creds\",\n   \"state\": \"ok\",\n   \"detail\": null,\n   \"fix\": null\n  },\n  {\n   \"name\": \"server\",\n   \"state\": \"ok\",\n   \"detail\": \"tls://myserver:4222\",\n   \"fix\": null\n  },\n  {\n   \"name\": \"sign-in\",\n   \"state\": \"fail\",\n   \"detail\": \"the server refused these credentials\",\n   \"fix\": \"mash join <file> --replace\"\n  },\n  {\n   \"name\": \"delivery\",\n   \"state\": \"skip\",\n   \"detail\": \"needs sign-in\",\n   \"fix\": null\n  },\n  {\n   \"name\": \"refused\",\n   \"state\": \"ok\",\n   \"detail\": \"3 messages were refused\",\n   \"fix\": null\n  }\n ],\n \"refused\": 3,\n \"refused_by_class\": {\n  \"not verified\": 2,\n  \"time not in UTC\": 1\n },\n \"hint\": \"mash join <file> --replace\"\n}",
-        "note": "REQ-006, core #1403. The example above with the sign-in fix 'mash join <file> --replace' and a top-level \"hint\": the one hint the text prints, null when there is none. Each row's \"fix\" stays."
+        "note": "REQ-006. The example above with the sign-in fix 'mash join <file> --replace' and a top-level \"hint\": the one hint the text prints, null when there is none. Each row's \"fix\" stays."
        }
       ]
      },
