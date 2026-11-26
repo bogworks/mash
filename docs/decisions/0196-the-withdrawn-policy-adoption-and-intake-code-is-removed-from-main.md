@@ -27,7 +27,7 @@ staticcheck v0.8.2 (ADR 0190) now fails lint on the parts nothing calls.
 
 Chosen option: "remove it now", because nothing calls it and lint fails on it.
 
-The change removes the code of the withdrawn contract: `internal/policyintake`, `internal/requesterreg`, `internal/issue` and
+The change removes the code of the withdrawn contract, and the adoption code that no command calls: `internal/policyintake`, `internal/requesterreg`, `internal/issue` and
 `internal/reconcile`; in `internal/policyserve` the adapters, the applier with its tests, and the helpers only they
 used (`settled.go` and its test helpers). `internal/policyserve` stays with the signer, the server limits and the
 inbox and credential provisioning. Two comments that named `policyintake` are corrected.
@@ -55,5 +55,6 @@ Not changed here: the policy work is renaming `listset`, `policydoc`, `policyapp
 
 ## More Information
 
+* ADRs 0104, 0111, 0112, 0119, 0121 and 0124 are already superseded by ADR 0131 and are not touched.
 * Related: [ADR 0129](0129-the-policy-commands-are-not-part-of-v0-5-0-and-the-engine-stays-internal-until-it-works-standalone.md),
   ADR 0190.
