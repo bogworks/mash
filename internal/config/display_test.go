@@ -8,7 +8,7 @@ func TestDisplayName(t *testing.T) {
 		cfg  Config
 		want string
 	}{
-		{"three tokens", Config{Name: "sap-go-sdk", Owner: "x", Group: "bogworks"}, "x.bogworks.sap-go-sdk"},
+		{"three tokens", Config{Name: "build-bot", Owner: "dev", Group: "acme"}, "dev.acme.build-bot"},
 		{"no group falls back to the name", Config{Name: "team-a", Owner: "acme"}, "team-a"},
 		{"invalid tokens fall back to the name", Config{Name: "Bad", Owner: "x", Group: "bogworks"}, "Bad"},
 		{"unset", Config{}, ""},

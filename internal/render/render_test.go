@@ -41,11 +41,11 @@ func TestBatchSingularHeading(t *testing.T) {
 // The first line is what Claude Code shows in the terminal after "← mash:": a count and the senders, each by its
 // endpoint name (owner/name for another range's), with no seq, recipient, "---" or "mash:".
 func TestBatchFirstLine(t *testing.T) {
-	claimed := mail(9, "acme-lead", "forged")
+	claimed := mail(9, "acme-alice", "forged")
 	claimed.Trust = sap.TrustClaimed
 	other := func(m Mail, owner string) Mail { m.Owner = owner; return m }
 	var five []Mail
-	for i, from := range []string{"acme-lead", "acme-integ", "acme-lead", "acme-manager", "other-ops", "acme-core"} {
+	for i, from := range []string{"acme-alice", "acme-integ", "acme-alice", "acme-manager", "other-ops", "acme-core"} {
 		five = append(five, mail(uint64(i+1), from, "x"))
 	}
 	for _, tc := range []struct {
@@ -54,14 +54,14 @@ func TestBatchFirstLine(t *testing.T) {
 		max  int
 		want string
 	}{
-		{"same owner: the whole name", []Mail{mail(100, "acme-lead", "hi")}, 10, "1 message from acme-lead"},
+		{"same owner: the whole name", []Mail{mail(100, "acme-alice", "hi")}, 10, "1 message from acme-alice"},
 		{"another owner: owner/name", []Mail{other(mail(1, "nats-ops", "a"), "devops")}, 10, "1 message from devops/nats-ops"},
-		{"distinct, in arrival order", []Mail{mail(1, "acme-lead", "a"), mail(2, "acme-integ", "b"), mail(3, "other-ops", "c"), mail(4, "acme-lead", "d")}, 10,
-			"4 messages from acme-lead, acme-integ, other-ops"},
-		{"digest: two names and +N", five, 2, "6 messages, digest, from acme-lead, acme-integ +3"},
-		{"digest of three names: all of them", five[:4], 2, "4 messages, digest, from acme-lead, acme-integ, acme-manager"},
-		{"an unknown owner is whole, without an owner", []Mail{other(mail(1, "acme-lead", "a"), "")}, 10, "1 message from acme-lead"},
-		{"unverified keeps its label", []Mail{mail(1, "acme-lead", "a"), claimed}, 10, "2 messages from acme-lead, acme-lead [claimed]"},
+		{"distinct, in arrival order", []Mail{mail(1, "acme-alice", "a"), mail(2, "acme-integ", "b"), mail(3, "other-ops", "c"), mail(4, "acme-alice", "d")}, 10,
+			"4 messages from acme-alice, acme-integ, other-ops"},
+		{"digest: two names and +N", five, 2, "6 messages, digest, from acme-alice, acme-integ +3"},
+		{"digest of three names: all of them", five[:4], 2, "4 messages, digest, from acme-alice, acme-integ, acme-manager"},
+		{"an unknown owner is whole, without an owner", []Mail{other(mail(1, "acme-alice", "a"), "")}, 10, "1 message from acme-alice"},
+		{"unverified keeps its label", []Mail{mail(1, "acme-alice", "a"), claimed}, 10, "2 messages from acme-alice, acme-alice [claimed]"},
 	} {
 		out := Batch("acme-worker", "acme", tc.msgs, tc.max, 16384)
 		if first, _, _ := strings.Cut(out, "\n"); first != tc.want {
@@ -74,10 +74,10 @@ func TestSenderRules(t *testing.T) {
 	for _, tc := range []struct {
 		name, owner, from, from_owner, want string
 	}{
-		{"owner unknown: the name", "acme", "lead", "", "lead"},
+		{"owner unknown: the name", "acme", "alice", "", "alice"},
 		{"another owner: owner/name", "acme", "nats-ops", "devops", "devops/nats-ops"},
-		{"same owner: the name as is", "acme", "acme-lead", "acme", "acme-lead"},
-		{"receiver's owner unknown: the name", "", "lead", "devops", "lead"},
+		{"same owner: the name as is", "acme", "acme-alice", "acme", "acme-alice"},
+		{"receiver's owner unknown: the name", "", "alice", "devops", "alice"},
 		{"hyphenated names are never split", "acme", "acme-eu-ops3", "acme", "acme-eu-ops3"},
 	} {
 		m := Mail{From: tc.from, Owner: tc.from_owner}
@@ -207,13 +207,13 @@ func TestInstanceAbsentIsUnchanged(t *testing.T) {
 }
 
 func TestUrgentLeadsTheLineAndIsMarkedInTheMessage(t *testing.T) {
-	m := mail(4, "acme-lead", "now")
+	m := mail(4, "acme-alice", "now")
 	m.Urgent = true
 	out := Batch("acme-worker", "acme", []Mail{mail(3, "acme-integ", "x"), m}, 10, 16384)
-	if first, _, _ := strings.Cut(out, "\n"); first != "urgent, 2 messages from acme-integ, acme-lead" {
+	if first, _, _ := strings.Cut(out, "\n"); first != "urgent, 2 messages from acme-integ, acme-alice" {
 		t.Fatalf("first line %q", first)
 	}
-	if !strings.Contains(out, "--- #4 from acme-lead [verified] at 2026-10-22T10:00:00Z\nurgent: yes\nkind: fyi\n> now") {
+	if !strings.Contains(out, "--- #4 from acme-alice [verified] at 2026-10-22T10:00:00Z\nurgent: yes\nkind: fyi\n> now") {
 		t.Fatalf("no urgent line:\n%s", out)
 	}
 	if strings.Contains(Batch("a", "acme", []Mail{mail(1, "b", "x")}, 10, 16384), "urgent") {
@@ -242,7 +242,7 @@ func kinded(seq uint64, from string, k kind.Kind) Mail {
 
 // A message always shows its kind, fyi included (the zero kind reads as task).
 func TestOneShowsTheKind(t *testing.T) {
-	m := mail(4, "lead", "go")
+	m := mail(4, "alice", "go")
 	m.Kind = ""
 	if out := One(m); !strings.Contains(out, "at 2026-10-22T10:00:00Z\nkind: task\n> go") {
 		t.Fatalf("no task line:\n%s", out)

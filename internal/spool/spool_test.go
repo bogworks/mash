@@ -29,7 +29,7 @@ func mode(t *testing.T, p string) os.FileMode {
 	return fi.Mode().Perm()
 }
 
-// Spooled mail is the session's private mail: 0700 directories, 0600 files (lead's condition 2), also when the
+// Spooled mail is the session's private mail: 0700 directories, 0600 files, also when the
 // directory existed with looser modes.
 func TestPermissions(t *testing.T) {
 	s := Spool{Dir: filepath.Join(t.TempDir(), "a")}

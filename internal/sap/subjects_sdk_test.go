@@ -33,7 +33,7 @@ func TestSDKSubjectsByteIdenticalGoldens(t *testing.T) {
 	for _, c := range [][3]string{
 		{"o", "g", "a"}, {"acme", "ops", "alpha"}, {"acme", "ops", "p1"}, {"acme", "ops", "w-1"},
 		{"acme-corp", "build", "build-1"}, {"alice", "dev", "design"}, {"bob", "ops", "pager"},
-		{"a", "x", "sap-go-sdk"}, {"homerange", "x", "mash-sdk"},
+		{"a", "x", "build-bot"}, {"acme", "x", "sdk-tool"},
 	} {
 		a, err := NewAddress(c[0], c[1], c[2])
 		if err != nil {
