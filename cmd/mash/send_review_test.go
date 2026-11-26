@@ -83,7 +83,7 @@ func TestSendBadIDWithNoEndpoint(t *testing.T) {
 	}
 	o.Reset()
 	e.Reset()
-	if code := run([]string{"send", "o.dev.a", "x"}, env, strings.NewReader(""), &o, quiet(&e)); code != 1 || e.String() != "error: no endpoint is installed here\nhint: set mash up with the setup skill (see the quick start), or install a join file with mash join <file>\n" {
+	if code := run([]string{"send", "o.dev.a", "x"}, env, strings.NewReader(""), &o, quiet(&e)); code != 1 || e.String() != "error: no endpoint is installed here (set mash up with the setup skill: see the quick start)\nhint: mash join <file>\n" {
 		t.Fatalf("no endpoint: %d %q", code, e.String())
 	}
 }

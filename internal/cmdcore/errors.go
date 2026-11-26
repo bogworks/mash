@@ -67,7 +67,7 @@ const (
 )
 
 // NoneInstalledHint is the hint of NoneInstalled.
-const NoneInstalledHint = "set mash up with the setup skill (see the quick start), or install a join file with mash join <file>"
+const NoneInstalledHint = "mash join <file>"
 
 // SessionNoEndpointHint is the hint of NoneForSession.
 const SessionNoEndpointHint = "start the session with MASH_ENDPOINT=<address>"
@@ -89,5 +89,5 @@ func NoEndpoint(kind NoEndpointKind, command string, addresses []string) *clifra
 	case NoneForSession:
 		return cliframe.Failf("No endpoint is chosen for this session.").WithHint(SessionNoEndpointHint)
 	}
-	return cliframe.Failf("no endpoint is installed here").WithHint(NoneInstalledHint)
+	return cliframe.Failf("no endpoint is installed here (set mash up with the setup skill: see the quick start)").WithHint(NoneInstalledHint)
 }

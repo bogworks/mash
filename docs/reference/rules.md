@@ -144,13 +144,13 @@ The rules every mash command and tool follows.
 
 20. Having no endpoint reads the same in every mash command. Three wordings,
    by where it is asked. At a shell with none installed: 'error: no endpoint
-   is installed here' and 'hint: set mash up with the setup skill (see the
-   quick start), or install a join file with mash join &lt;file&gt;', exit 1.
-   At a shell with several installed and none chosen: 'error: more than one
-   endpoint is installed here: &lt;addresses&gt;' and 'hint: mash
-   &lt;command&gt; --endpoint &lt;the first, alphabetically&gt;', exit 2. As
-   an MCP tool in a session with none named: 'No endpoint is chosen for this
-   session.' and 'hint: start the session with MASH_ENDPOINT=&lt;address&gt;'.
+   is installed here (set mash up with the setup skill: see the quick start)'
+   and 'hint: mash join &lt;file&gt;', exit 1. At a shell with several
+   installed and none chosen: 'error: more than one endpoint is installed
+   here: &lt;addresses&gt;' and 'hint: mash &lt;command&gt; --endpoint &lt;the
+   first, alphabetically&gt;', exit 2. As an MCP tool in a session with none
+   named: 'No endpoint is chosen for this session.' and 'hint: start the
+   session with MASH_ENDPOINT=&lt;address&gt;'.
 
 21. --json when a command fails. Prints {"error": ..., "hint": ...} on stdout
    and nothing on stderr, with the same exit code.

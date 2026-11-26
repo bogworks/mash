@@ -146,8 +146,8 @@ hint: mash status --endpoint acme.demo.alice
 Stream: stderr. Exit code: 1.
 
 ```text
-error: no endpoint is installed here
-hint: set mash up with the setup skill (see the quick start), or install a join file with mash join <file>
+error: no endpoint is installed here (set mash up with the setup skill: see the quick start)
+hint: mash join <file>
 ```
 
 ## JSON

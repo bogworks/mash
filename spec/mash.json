@@ -1143,7 +1143,7 @@
        },
        {
         "case": "No endpoint installed",
-        "text": "error: no endpoint is installed here\nhint: set mash up with the setup skill (see the quick start), or install a join file with mash join <file>",
+        "text": "error: no endpoint is installed here (set mash up with the setup skill: see the quick start)\nhint: mash join <file>",
         "stream": "stderr",
         "exit": 1
        }

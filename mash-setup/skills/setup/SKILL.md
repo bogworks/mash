@@ -155,8 +155,9 @@ I will:
   nats-server and nats              you choose how: the default is a download
                                     from their GitHub releases, checked against
                                     SHA256SUMS, into ~/.local/bin
-  checks                            checksums of every download [gh missing:
-                                    add "(install gh to also verify the
+  checks                            checksums of every download [gh missing,
+                                    older than 2.102.0 or not running: add
+                                    "(install gh to also verify the
                                     signature)"]
   use no sudo                       unless you choose a system route and say
                                     yes to that exact command
@@ -308,9 +309,9 @@ before anything is unpacked or installed. Each checksum line should end in `OK`
 prints `0.5.2`. `BIN` must be on the PATH: if it is not, give them the line
 for their shell (`echo $SHELL` says which): for bash
 `echo 'export PATH="<BIN>:$PATH"' >> ~/.bashrc`, for zsh the same with
-`~/.zshrc`, then a new terminal. Write the install folder the person chose in
-place of `<BIN>` (`$HOME/.local/bin` by default; never assume it). They run it
-themselves (do not edit
+`${ZDOTDIR:-$HOME}/.zshrc`, then a new terminal. Write the install folder
+the person chose in place of `<BIN>` (`$HOME/.local/bin` by default; never
+assume it). They run it themselves (do not edit
 their shell files); for this session use the full path, or put
 `PATH="$BIN:$PATH"` in front of a command. Both programs are explained at
 https://github.com/bogworks/mash/blob/main/docs/nats-server.md#getting-nats-server-and-the-nats-command
@@ -389,9 +390,9 @@ Expected: `Installed mash v<version> (<commit>) in <folder>` and the same for
 `mashctl`. If it says the folder is not on the PATH, give them the line for
 their shell (`echo $SHELL` says which): for bash
 `echo 'export PATH="<BIN>:$PATH"' >> ~/.bashrc`, for zsh the same with
-`~/.zshrc`, then a new terminal. Write the install folder the person chose in
-place of `<BIN>` (`$HOME/.local/bin` by default; never assume it). They run it
-themselves (do not edit
+`${ZDOTDIR:-$HOME}/.zshrc`, then a new terminal. Write the install folder
+the person chose in place of `<BIN>` (`$HOME/.local/bin` by default; never
+assume it). They run it themselves (do not edit
 their shell files): for this session use the full path the line
 printed. The folder is the one in the output; take it from there. If it says
 the folder `is writable by its group or other users`, see the table at the
