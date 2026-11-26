@@ -14,7 +14,7 @@ This amends the command-line parts of those three decisions for v0.5.0. Their de
 
 The v0.5.0 branch carried a policy command line. It was built for an outside owner of the account's policy: `mashctl policy adopt` registers one submitter key, `mashctl policy serve` takes a signed document from that submitter and applies it, `mashctl policy reconcile` revokes credentials the document does not name, `mashctl issue serve` and `mashctl wrangler` sign credentials for a wrangler's request, and `mash policy show` and `mash policy explain` answer an endpoint about its own reach. Once an account is adopted, `mashctl add`, `reissue`, `retire` and `label` refuse, and nothing undoes it.
 
-The maintainer's rule is: "ALL functionality works first for mash in isolation WITHOUT homerange or any other upwards dependency. You MUST NOT implement functionality that has been designed for homerange without first having the functionality work without homerange."
+The maintainer's rule is that mash works alone; a layer above may wrap `mashctl` through its documented interface. A feature designed for a layer above mash is built only once the same capability works with nothing above mash ([ADR 0131](0131-mash-stands-alone-everything-works-without-homerange-or-any-upward-dependency-first.md)).
 
 An audit of the branch found that the engine (the list-set compile, the apply gate, generations and the explain library) is driven by one path only: the outside-owner path above. Nothing lets an operator who runs mash alone set or read a policy. The commands are therefore functionality designed for an outside system, shipped before a standalone form exists.
 

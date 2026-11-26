@@ -1,10 +1,11 @@
 ---
-status: accepted
+status: superseded by ADR-0131
 date: 2026-11-12
 decision-makers: Randy Bias (mash maintainer)
 ---
 
 # An issue service signs a credential for a public key a wrangler countersigned
+Superseded by [0131](0131-mash-stands-alone-everything-works-without-homerange-or-any-upward-dependency-first.md).
 
 ## Context and Problem Statement
 
