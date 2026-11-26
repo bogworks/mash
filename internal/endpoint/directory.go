@@ -207,6 +207,11 @@ func (e *Endpoint) installDirectory(got map[string]recordResult) (failed int) {
 			}
 		}
 	}
+	for n, r := range dir {
+		if old, ok := e.dir[n]; ok && old.User != r.User {
+			delete(e.lastSeen, n) // an answer the old key signed is not presence for the new key
+		}
+	}
 	e.dir = dir
 	e.byUser = make(map[string]string, len(dir))
 	for n, r := range dir {
@@ -272,6 +277,9 @@ func (e *Endpoint) reloadSender(h sap.SenderHeader) bool {
 	}
 	if old, ok := e.dir[h.Name]; ok && e.byUser[old.User] == h.Name {
 		delete(e.byUser, old.User)
+	}
+	if old, ok := e.dir[h.Name]; ok && old.User != r.rec.User {
+		delete(e.lastSeen, h.Name) // an answer the old key signed is not presence for the new key
 	}
 	e.dir[h.Name] = r.rec
 	if e.byUser == nil {
