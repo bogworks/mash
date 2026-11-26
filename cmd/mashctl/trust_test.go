@@ -107,8 +107,8 @@ func TestAdminAndSystemConnectionsRequireTLS(t *testing.T) {
 	refused := func(t *testing.T, label string, code int, out, errb string) {
 		t.Helper()
 		all := out + errb
-		if code != 2 || !strings.Contains(all, "refusing a plain nats://") || !strings.Contains(all, "MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1") || !strings.Contains(all, "tls://") {
-			t.Fatalf("%s: exit %d, want 2 naming the override and tls://\n%s\n%s", label, code, out, errb)
+		if code != 1 || !strings.Contains(all, "refusing a plain nats://") || !strings.Contains(all, "MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1") || !strings.Contains(all, "tls://") {
+			t.Fatalf("%s: exit %d, want 1 naming the override and tls://\n%s\n%s", label, code, out, errb)
 		}
 	}
 	// a plain loopback server without the override: every admin verb and the system connection are refused
@@ -140,8 +140,8 @@ func TestAdminAndSystemConnectionsRequireTLS(t *testing.T) {
 	// the same for init, which names its servers in the setup file
 	a := newIniter(t, newApplyEnv(t))
 	a.env["MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION"] = ""
-	a.refuses(2, []string{"refusing a plain nats://", "MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1", "tls://"}, nil)
-	a.refuses(2, []string{"refusing a plain nats://", "MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1"}, map[string]any{"servers": []string{"nats://192.0.2.1:4222"}})
+	a.refuses(1, []string{"refusing a plain nats://", "MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1", "tls://"}, nil)
+	a.refuses(1, []string{"refusing a plain nats://", "MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1"}, map[string]any{"servers": []string{"nats://192.0.2.1:4222"}})
 	a.env["MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION"] = "1"
 	a.vals["servers"] = []string{"nats://192.0.2.1:4222"}
 	if out, errb, code := runWithProcessStderr(a.t, a.init, "--dry-run"); code == 0 || !strings.Contains(errb, skipWarning) {
@@ -185,10 +185,10 @@ func TestAdminVerbsAcceptATLSServer(t *testing.T) {
 	}
 }
 
-// TestPlainURLRefusalExitsTwoEverywhere: every verb that connects exits 2, naming the override and tls://, when it
+// TestPlainURLRefusalExitsOneEverywhere: every verb that connects exits 1, naming the override and tls://, when it
 // is given a plain nats:// URL without the override, whatever exit code its own error path would have used. An
 // ordinary connection failure with the override keeps its own exit code.
-func TestPlainURLRefusalExitsTwoEverywhere(t *testing.T) {
+func TestPlainURLRefusalExitsOneEverywhere(t *testing.T) {
 	e := newApplyEnv(t).withDirectory()
 	e.env["MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION"] = ""
 	for _, args := range [][]string{
@@ -205,8 +205,8 @@ func TestPlainURLRefusalExitsTwoEverywhere(t *testing.T) {
 	} {
 		out, errb, code := e.run(args...)
 		all := out + errb
-		if code != 2 || !strings.Contains(all, "MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1") || !strings.Contains(all, "tls://") {
-			t.Errorf("%v: exit %d, want 2 naming the override and tls://\n%s\n%s", args, code, out, errb)
+		if code != 1 || !strings.Contains(all, "MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1") || !strings.Contains(all, "tls://") {
+			t.Errorf("%v: exit %d, want 1 naming the override and tls://\n%s\n%s", args, code, out, errb)
 		}
 	}
 	// with the override and an address nothing listens on, the failure is an ordinary one, not a refusal

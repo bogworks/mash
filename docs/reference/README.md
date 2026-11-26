@@ -27,11 +27,13 @@ from the spec.
     as --version.
   - [`mash join`](mash-join.md): Install an endpoint's credentials on this
     machine from a join file.
-  - [`mash key`](mash-key.md): Make your own key pair, for when the seed must
-    never leave this machine.
-    - [`mash key create`](mash-key-create.md): Make a seed and its public key.
-  - [`mash serve`](mash-serve.md): Run as an MCP server for an agent host.
-    Started by the host, not by hand.
+  - [`mash key`](mash-key.md): Make a key pair: a secret seed and its public
+    key. For when the seed must never leave this machine.
+    - [`mash key create`](mash-key-create.md): Make a key pair: a secret seed
+      and its public key. For when the seed must never leave this machine.
+  - [`mash serve`](mash-serve.md): Run as an MCP server, which is how an agent
+    host such as Claude Code calls mash's tools. Started by the host, not by
+    hand.
   - [`mash hook`](mash-hook.md): Print mail waiting for this session, in the
     form the agent host expects. Run by the host after each tool call and with
     each prompt.

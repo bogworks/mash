@@ -12,7 +12,7 @@ import (
 
 // keyHelp is `mash key --help`: key only holds key create, so its help is the description and that one usage line.
 func keyHelp() string {
-	return cmdcore.ParentHelp(helpFrame, cmds.KeyParent, []string{"mash key create [options]"})
+	return cmdcore.ParentHelp(cmds.KeyParent, []string{"mash key create [options]"})
 }
 
 // keyCmd runs `mash key ...`. args[0] is "key"; the only command under it is create, which is on the command table.

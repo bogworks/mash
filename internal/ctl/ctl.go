@@ -39,7 +39,7 @@ func TopHelp(prog, intro, tail string) string { return usage(prog, intro, tail) 
 
 func usage(prog, intro, tail string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "usage: %s <verb> [args]\n\n", prog)
+	fmt.Fprintf(&b, "Usage: %s <verb> [args]\n\n", prog)
 	if intro != "" {
 		b.WriteString(intro + "\n\n")
 	}
@@ -117,16 +117,16 @@ func wrapTokens(toks []string, first, indent string) []string {
 
 func endpointLines(line func(left, right string)) {
 	line("endpoint list [prefix] [--wide] [--json]", "the endpoints in the directory")
-	line("endpoint show ADDRESS [--json]", "one endpoint: its state, labels and public key")
-	line("endpoint create ADDRESS [--out PATH] [--public-key PATH] [--dry-run] [--json]", "make an endpoint and its credentials, for example acme.demo.bob")
-	line("endpoint reissue ADDRESS [--out PATH] [--public-key PATH] [--dry-run] [--json]", "give an endpoint new credentials and cancel the old ones")
-	line("endpoint delete ADDRESS [--yes] [--dry-run] [--json]", "revoke the endpoint's user key, remove its record and inbox, burn the address, rename its creds file")
-	line("endpoint set ADDRESS key=value... [--dry-run] [--json]", "set role, description, host, capability or label.NAME")
-	line("endpoint unset ADDRESS key... [--dry-run] [--json]", "remove those values")
-	line("endpoint suspend ADDRESS [--json]", "refuse new mail to an endpoint; its stored mail and credentials stay")
-	line("endpoint resume ADDRESS [--json]", "take new mail again, undoing suspend")
-	line("endpoint inbox ADDRESS [--after number] [--limit n] [--json]", "what is in an endpoint's inbox, without any message text")
-	line("endpoint permissions ADDRESS [--json]", "the NATS permissions an endpoint's user needs")
+	line("endpoint show <address> [--json]", "one endpoint: its state, labels and public key")
+	line("endpoint create <address> [--out PATH] [--public-key PATH] [--dry-run] [--json]", "make an endpoint and its credentials, for example acme.demo.bob")
+	line("endpoint reissue <address> [--out PATH] [--public-key PATH] [--dry-run] [--json]", "give an endpoint new credentials and cancel the old ones")
+	line("endpoint delete <address> [--yes] [--dry-run] [--json]", "revoke the endpoint's user key, remove its record and inbox, burn the address, rename its creds file")
+	line("endpoint set <address> key=value... [--dry-run] [--json]", "set role, description, host, capability or label.NAME")
+	line("endpoint unset <address> key... [--dry-run] [--json]", "remove those values")
+	line("endpoint suspend <address> [--json]", "refuse new mail to an endpoint; its stored mail and credentials stay")
+	line("endpoint resume <address> [--json]", "take new mail again, undoing suspend")
+	line("endpoint inbox <address> [--after number] [--limit n] [--json]", "what is in an endpoint's inbox, without any message text")
+	line("endpoint permissions <address> [--json]", "the NATS permissions an endpoint's user needs")
 }
 
 // OpenAdmin connects to the server with the admin credentials and returns the admin handle, a context carrying the
@@ -254,14 +254,14 @@ func CheckNotFutureIssued(ctx context.Context, a *madmin.Admin, targets []Revoke
 		times, found, err := a.IssuedHistoryByKey(ctx, t.Key)
 		var bad *madmin.MalformedIssuedAtError
 		if errors.As(err, &bad) {
-			return fmt.Errorf("user key %s...: its issue record has a missing or malformed issued_at (%q) in revision %d, so a future-dated credential cannot be ruled out; restore the record with `mashctl endpoint reissue ADDRESS --out FILE --public-key FILE`, giving the endpoint's current public key file (the same key is recorded again) and run again; nothing was changed", ShortKey(t.Key), bad.Value, bad.Revision)
+			return fmt.Errorf("user key %s...: its issue record has a missing or malformed issued_at (%q) in revision %d, so a future-dated credential cannot be ruled out; restore the record with `mashctl endpoint reissue <address> --out FILE --public-key FILE`, giving the endpoint's current public key file (the same key is recorded again) and run again; nothing was changed", ShortKey(t.Key), bad.Value, bad.Revision)
 		}
 		var incomplete *madmin.IncompleteHistoryError
 		if errors.As(err, &incomplete) {
 			return fmt.Errorf("user key %s...: a future-dated credential cannot be ruled out: its issued history cannot be shown to be complete (%d revisions are kept and the record may have dropped older ones before its history limit was raised); revoke the key by hand in the account JWT, only after checking where it was issued; nothing was changed", ShortKey(t.Key), incomplete.Retained)
 		}
 		if err != nil {
-			return fmt.Errorf("user key %s...: its issue record could not be read (%v), so a future-dated credential cannot be ruled out; retry, and if the record is damaged restore it with `mashctl endpoint reissue ADDRESS` (the same key is recorded again); nothing was changed", ShortKey(t.Key), err)
+			return fmt.Errorf("user key %s...: its issue record could not be read (%v), so a future-dated credential cannot be ruled out; retry, and if the record is damaged restore it with `mashctl endpoint reissue <address>` (the same key is recorded again); nothing was changed", ShortKey(t.Key), err)
 		}
 		if !found {
 			fmt.Fprintf(stderr, "warning: user key %s... has no issue record, so a future-dated credential cannot be ruled out; revoking anyway\n", ShortKey(t.Key))

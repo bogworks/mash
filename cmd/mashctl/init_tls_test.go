@@ -117,5 +117,5 @@ func TestInitPlainWithoutSkipEncryptionRefused(t *testing.T) {
 	// to the loopback address of a TLS server is not refused: nats.Secure upgrades it to TLS.)
 	a, _, ca := newTLSIniter(t)
 	a.vals["ca"] = ca
-	a.refuses(2, []string{"refusing a plain nats://", "MASH_CA", "nothing was changed"}, map[string]any{"servers": []string{"nats://example.invalid:4222"}})
+	a.refuses(1, []string{"refusing a plain nats://", "MASH_CA", "nothing was changed"}, map[string]any{"servers": []string{"nats://example.invalid:4222"}})
 }

@@ -53,8 +53,8 @@ func TestSkipEncryptionMashctlRefusesOldNamesAndBadValues(t *testing.T) {
 		e.env[tc.key] = tc.val
 		for _, args := range [][]string{{"endpoint", "list"}, {"doctor"}, {"status"}} {
 			out, errb, code := e.run(args...)
-			if code != 2 || !strings.Contains(strings.ReplaceAll(out+errb, `\"`, `"`), tc.want) {
-				t.Errorf("%s=%s %v: exit %d, want 2 with %q: %q %q", tc.key, tc.val, args, code, tc.want, out, errb)
+			if code != 1 || !strings.Contains(strings.ReplaceAll(out+errb, `\"`, `"`), tc.want) {
+				t.Errorf("%s=%s %v: exit %d, want 1 with %q: %q %q", tc.key, tc.val, args, code, tc.want, out, errb)
 			}
 		}
 		delete(e.env, tc.key)
@@ -67,8 +67,8 @@ func TestSkipEncryptionMashctlRefusesOldNamesAndBadValues(t *testing.T) {
 	}
 	e.env["MASH_CONFIG_DIR"] = dir
 	_, errb, code := e.run("endpoint", "list")
-	if want := "error: insecure_plaintext in config.json is no longer read; set " + skipVar + "=1 instead"; code != 2 || !strings.Contains(errb, want) {
-		t.Errorf("old config key: exit %d, want 2 with %q: %q", code, want, errb)
+	if want := "error: insecure_plaintext in config.json is no longer read; set " + skipVar + "=1 instead"; code != 1 || !strings.Contains(errb, want) {
+		t.Errorf("old config key: exit %d, want 1 with %q: %q", code, want, errb)
 	}
 }
 
@@ -97,18 +97,16 @@ func TestSkipEncryptionMashctlEntryPoint(t *testing.T) {
 		e.env[tc.key] = tc.val
 		for _, args := range [][]string{{"version"}, {"version", "--json"}, {"help"}, {"--help"}, {"-h"}, {"limits", "--help"}} {
 			out, errb, code := e.run(args...)
-			if code != 2 || !strings.Contains(strings.ReplaceAll(out+errb, `\"`, `"`), tc.want) {
-				t.Errorf("%s=%s %v: exit %d, want 2 with %q: %q %q", tc.key, tc.val, args, code, tc.want, out, errb)
+			if code != 1 || !strings.Contains(strings.ReplaceAll(out+errb, `\"`, `"`), tc.want) {
+				t.Errorf("%s=%s %v: exit %d, want 1 with %q: %q %q", tc.key, tc.val, args, code, tc.want, out, errb)
 			}
 		}
 		delete(e.env, tc.key)
 	}
 }
 
-// The exit code 2 of a refused plain URL comes from the error (natsauth.PlainRefusalError, found with errors.As),
-// never from output text: an ordinary failure whose message merely contains the refusal's words stays at 1.
+// A refused plain URL is a failure, exit 1, like any other; the code never depends on output text.
 func TestExitCodeIsNotDecidedByOutputText(t *testing.T) {
-	const marker = "every mash connection requires TLS, to any host"
 	_, _, refusal := natsauth.RequireTLS("nats://192.0.2.1:4222", false)
 	if refusal == nil {
 		t.Fatal("RequireTLS accepted a plain URL")
@@ -116,18 +114,14 @@ func TestExitCodeIsNotDecidedByOutputText(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		err  error
-		want int
 	}{
-		{"text only", errors.New("connect: " + marker), 1},
-		{"text only, cliframe failure", cliframe.Failf("%s", marker), 1},
-		{"text only, withPlainCode of another cause", withPlainCode(cliframe.Failf("%s", marker), errors.New(marker)), 1},
-		{"the refusal, as a framed failure", withPlainCode(cliframe.Failf("%v", refusal), refusal), 2},
-		{"the refusal, wrapped", fmt.Errorf("mashctl: %w", refusal), 2},
-		{"the refusal, flattened to text and recoded", withPlainCode(fmt.Errorf("connect: %v", refusal), refusal), 2},
+		{"text only", errors.New("connect: every mash connection requires TLS, to any host")},
+		{"the refusal, as a framed failure", cliframe.Failf("%v", refusal)},
+		{"the refusal, wrapped", fmt.Errorf("mashctl: %w", refusal)},
 	} {
 		var out, errb strings.Builder
-		if code := cliframe.Report(&out, &errb, tc.err, false); code != tc.want {
-			t.Errorf("%s: exit %d, want %d (%q)", tc.name, code, tc.want, errb.String())
+		if code := cliframe.Report(&out, &errb, tc.err, false); code != 1 {
+			t.Errorf("%s: exit %d, want 1 (%q)", tc.name, code, errb.String())
 		}
 	}
 }
@@ -158,8 +152,8 @@ func TestSkipEncryptionMashctlWarnsBeforeArgumentHandling(t *testing.T) {
 		e.env[tc.key] = tc.val
 		for _, args := range [][]string{{}, {removed}, {"--no-such-flag"}} {
 			_, errb, code := e.run(args...)
-			if code != 2 || !strings.HasSuffix(errb, tc.hint) || strings.Contains(errb, "mash doctor") {
-				t.Errorf("%s=%s %v: exit %d, stderr %q, want 2 ending %q", tc.key, tc.val, args, code, errb, tc.hint)
+			if code != 1 || !strings.HasSuffix(errb, tc.hint) || strings.Contains(errb, "mash doctor") {
+				t.Errorf("%s=%s %v: exit %d, stderr %q, want 1 ending %q", tc.key, tc.val, args, code, errb, tc.hint)
 			}
 		}
 		delete(e.env, tc.key)
@@ -196,7 +190,7 @@ func TestSkipEncryptionMashctlWarnsOnARefusedCommandToo(t *testing.T) {
 	e.env["MASH_INSECURE_PLAINTEXT"] = "1"
 	for _, args := range [][]string{{"version"}, {"help"}, {"endpoint", "list"}} {
 		out, errb, code := e.run(args...)
-		if code != 2 || !strings.HasPrefix(errb, skipWarning+"\n") || strings.Count(errb, skipWarning) != 1 || strings.Contains(out, "no encryption to the server") {
+		if code != 1 || !strings.HasPrefix(errb, skipWarning+"\n") || strings.Count(errb, skipWarning) != 1 || strings.Contains(out, "no encryption to the server") {
 			t.Errorf("removed name %v: exit %d, stderr %q, stdout %q", args, code, errb, out)
 		}
 	}
@@ -207,7 +201,7 @@ func TestSkipEncryptionMashctlWarnsOnARefusedCommandToo(t *testing.T) {
 	}
 	e.env["MASH_CONFIG_DIR"] = dir
 	_, errb, code := e.run("endpoint", "list")
-	if code != 2 || !strings.HasPrefix(errb, skipWarning+"\n") || strings.Count(errb, skipWarning) != 1 {
+	if code != 1 || !strings.HasPrefix(errb, skipWarning+"\n") || strings.Count(errb, skipWarning) != 1 {
 		t.Errorf("removed key: exit %d, stderr %q", code, errb)
 	}
 }

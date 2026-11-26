@@ -29,7 +29,7 @@ func ok(name, detail string) cmds.HealthCheck {
 // allWell is the report of the specification's "All well" case.
 func allWell() *fakeHealth {
 	return &fakeHealth{rep: cmds.HealthReport{Endpoint: "acme.demo.bob", Checks: []cmds.HealthCheck{
-		ok("config", ""), ok("creds", ""), ok("server", "tls://myserver:4222"), ok("sign-in", ""), ok("delivery", ""), ok("refused", "no unverified mail was refused")}}}
+		ok("config", ""), ok("creds", ""), ok("server", "tls://myserver:4222"), ok("sign-in", ""), ok("delivery", ""), ok("refused", "no message was refused for lacking its sender's signature")}}}
 }
 
 // refusedSignIn is the report of the specification's "A problem and a warning" case.
@@ -46,7 +46,7 @@ func deletedEndpoint() *fakeHealth {
 	return report("acme.demo.bob", false, ok("config", ""), ok("creds", ""), ok("server", "tls://myserver:4222"),
 		cmds.HealthCheck{Name: "sign-in", State: cmds.CheckFail, Detail: cmds.ReasonEndpointDeleted, Fix: cmds.EndpointDeletedFix, Code: cmds.CodeEndpointDeleted},
 		cmds.HealthCheck{Name: "delivery", State: cmds.CheckSkip, Detail: "needs sign-in"},
-		cmds.HealthCheck{Name: "refused", State: cmds.CheckOK, Detail: "no unverified mail was refused"})
+		cmds.HealthCheck{Name: "refused", State: cmds.CheckOK, Detail: "no message was refused for lacking its sender's signature"})
 }
 
 // deletedOnThisMachine is the report of the specification's "The endpoint was deleted, on the machine that deleted it" case.
@@ -55,14 +55,14 @@ func deletedOnThisMachine() *fakeHealth {
 		cmds.HealthCheck{Name: "creds", State: cmds.CheckFail, Detail: cmds.ReasonEndpointDeleted, Fix: cmds.EndpointDeletedFix, Code: cmds.CodeEndpointDeleted},
 		ok("server", "tls://myserver:4222"), skip("sign-in", "creds"),
 		cmds.HealthCheck{Name: "delivery", State: cmds.CheckSkip, Detail: "needs sign-in"},
-		cmds.HealthCheck{Name: "refused", State: cmds.CheckOK, Detail: "no unverified mail was refused"})
+		cmds.HealthCheck{Name: "refused", State: cmds.CheckOK, Detail: "no message was refused for lacking its sender's signature"})
 }
 
 // skippedAfterServer is the report of the specification's "A check that could not run" case.
 func skippedAfterServer() *fakeHealth {
 	return report("acme.demo.bob", false, ok("config", ""), ok("creds", ""),
 		cmds.HealthCheck{Name: "server", State: cmds.CheckFail, Detail: "the server did not answer: tls://myserver:4222"},
-		skip("sign-in", "server"), skip("delivery", "server"), ok("refused", "no unverified mail was refused"))
+		skip("sign-in", "server"), skip("delivery", "server"), ok("refused", "no message was refused for lacking its sender's signature"))
 }
 
 func healthEnv(svc any) cmdcore.EnvFunc {
@@ -190,7 +190,7 @@ func TestStatusMatchesSpec(t *testing.T) {
 			continue
 		case "No endpoint installed":
 			code, out, errs = runStatus(&fakeHealth{err: cmds.ErrNoEndpointInstalled}, cliframe.Global{})
-			if code != 2 || out != "" || errs != text+"\n" || code != int(oc["exit"].(float64)) {
+			if code != 1 || out != "" || errs != text+"\n" || code != int(oc["exit"].(float64)) {
 				t.Errorf("%s: %d %q %q, spec %q", oc["case"], code, out, errs, text)
 			}
 			continue
@@ -395,7 +395,7 @@ func TestDoctorMatchesSpec(t *testing.T) {
 			continue
 		case "At a shell, where there is no session to deliver to":
 			_, out, _ := runDoctor(report("acme.demo.bob", false, ok("config", ""),
-				cmds.HealthCheck{Name: "delivery", State: cmds.CheckSkip, Detail: "needs a session"}), cliframe.Global{})
+				cmds.HealthCheck{Name: "delivery", State: cmds.CheckSkip, Detail: "checked only inside a Claude Code session"}), cliframe.Global{})
 			if !strings.Contains(out, oc["text"].(string)+"\n") {
 				t.Errorf("%s: %q lacks %q", oc["case"], out, oc["text"])
 			}
@@ -468,7 +468,7 @@ func TestDoctorMatchesSpec(t *testing.T) {
 	// skipped rows are in the object with state skip and the detail, and are neither a problem nor a warning
 	_, sk, _ := runDoctor(skippedAfterServer(), cliframe.Global{JSON: true})
 	if !strings.Contains(sk, `"problems":1,"warnings":0`) || !strings.Contains(sk, `{"name":"sign-in","state":"skip","detail":"needs the server","fix":null}`) ||
-		!strings.Contains(sk, `{"name":"refused","state":"ok","detail":"no unverified mail was refused","fix":null}`) {
+		!strings.Contains(sk, `{"name":"refused","state":"ok","detail":"no message was refused for lacking its sender's signature","fix":null}`) {
 		t.Errorf("skipped rows: %s", sk)
 	}
 	if !sameJSON(t, string(mustJSON(meta["x-json"])), string(mustJSON(specTool(t, "doctor")["structured"]))) {
@@ -493,12 +493,12 @@ func TestDoctorNoSessionEndpoint(t *testing.T) {
 	if !strings.HasPrefix(out, `{"endpoint":null,"problems":1,"warnings":0,"checks":[{"name":"config","state":"fail",`) || strings.Count(out, `"name"`) != 6 {
 		t.Errorf("object %s", out)
 	}
-	if code, out, errs := runDoctor(&fakeHealth{err: cmds.ErrNoEndpointInstalled}, cliframe.Global{}); code != 2 || out != "" ||
-		errs != "error: no endpoint is installed here\nhint: mash join <file>\n" {
+	if code, out, errs := runDoctor(&fakeHealth{err: cmds.ErrNoEndpointInstalled}, cliframe.Global{}); code != 1 || out != "" ||
+		errs != "error: no endpoint is installed here\n" {
 		t.Errorf("none installed: %d %q %q", code, out, errs)
 	}
-	if code, out, errs := runDoctor(&fakeHealth{err: cmds.ErrNoEndpointInstalled}, cliframe.Global{JSON: true}); code != 2 || errs != "" ||
-		out != `{"error":"no endpoint is installed here","hint":"mash join <file>"}`+"\n" {
+	if code, out, errs := runDoctor(&fakeHealth{err: cmds.ErrNoEndpointInstalled}, cliframe.Global{JSON: true}); code != 1 || errs != "" ||
+		out != `{"error":"no endpoint is installed here"}`+"\n" {
 		t.Errorf("none installed, json: %d %q %q", code, out, errs)
 	}
 }

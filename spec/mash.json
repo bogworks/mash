@@ -287,19 +287,19 @@
       "value": [
        {
         "case": "Sent",
-        "text": "Mail sent (number 42)",
+        "text": "Mail sent (number 42 in acme.demo.alice's inbox)",
         "stream": "stdout",
         "exit": 0
        },
        {
         "case": "Sent, urgent, with a kind",
-        "text": "Urgent question mail sent (number 43)",
+        "text": "Urgent question mail sent (number 43 in acme.demo.alice's inbox)",
         "stream": "stdout",
         "exit": 0
        },
        {
         "case": "With --detail",
-        "text": "Mail sent (number 42)\nto:     acme.demo.alice\nkind:   task\nurgent: no",
+        "text": "Mail sent (number 42 in acme.demo.alice's inbox)\nto:     acme.demo.alice\nkind:   task\nurgent: no",
         "stream": "stdout",
         "exit": 0
        },
@@ -356,6 +356,15 @@
         "text": "error: acme.dev.bob: this endpoint was deleted; its address cannot be used again\nhint: mash doctor",
         "stream": "stderr",
         "exit": 1
+       },
+       {
+        "case": "mash send --help",
+        "text": "Send a message to an endpoint.\n\nUsage:\n  mash send <address> [<message>] [options]\n\nExamples:\n  mash send acme.demo.alice \"lunch at noon?\"\n  mash send acme.demo.alice --urgent --kind question \"ready?\"\n  mash send acme.demo.alice --reply-to 2 \"yes\"\n  git log -1 | mash send acme.demo.alice --kind fyi --file -\n\nArguments:\n  address  Who to send to, as owner.group.name.\n  message  The text. Leave it out to read the text from --file or from standard\n           input.\n\nOptions:\n  --kind <kind>         What sort of message this is. blocker, question and task\n                        wake an idle recipient that has mash's wake channel on;\n                        otherwise, and for result and fyi, the message arrives\n                        with its next turn. Default: task. One exception: a\n                        reply (--reply-to) marked question whose text has no\n                        question mark and is at most 280 characters asks\n                        nothing, so it is sent as fyi and the output says so.\n  --urgent              Deliver at once, into a running turn where the agent\n                        host allows it.\n  --reply-to <number>   The number of the message in your inbox that this\n                        answers. Signed, so the recipient can trust the link.\n  --relay <number>      The number of a message in your inbox that this passes\n                        on. Signed, so the recipient can trust the link.\n  --id <key>            A key of your own. A second send with the same key to\n                        the same address within two minutes stores nothing new,\n                        so a retry cannot deliver twice.\n  --file <path>         Read the message text from a file. Use - for standard\n                        input; if nothing arrives there within 15 minutes the\n                        command gives up.\n  --endpoint <address>  Which endpoint to act as, as owner.group.name. Not\n                        needed when only one is installed here.\n  --creds <path>        The creds file to sign in with. Default: <config\n                        folder>/<address>.creds.\n  --server <url>        The server address. May be given more than once.\n  --ca <path>           The certificate authority's certificate, when the server\n                        uses its own.\n  --config-dir <path>   The configuration folder. Default: ~/.config/mash.\n  --detail              Print the fuller answer: after the usual line, more as\n                        'label: value' lines; with --json, the fuller object.\n  --json                Print the result as JSON: the same object the matching\n                        MCP tool returns.\n  --no-color            Never use color. Color is used only on a terminal, and\n                        NO_COLOR is honored.\n  -h, --help            Show help for the command.",
+        "stream": "stdout",
+        "exit": 0,
+        "issue": "#1100",
+        "note": "No Global options: block: per-command help lists the options that apply to it, among its own. send reads the connection (--endpoint, --creds, --server, --ca, --config-dir), prints a fuller answer with --detail and a JSON object with --json, and honours --no-color, so all of them are listed; send's own options are today's, unchanged, with the labels re-padded to the longest. The --endpoint text drops the sentence about serve and hook, which are not this command. Today the help ends with the Global options block, the same text as mash --help, nine entries. Which options apply was read from cmd/mash/main.go: the connection options feed config.Load; the verbs without a --json form are prompt, serve and hook.",
+        "verbatim": true
        }
       ]
      },
@@ -490,19 +499,19 @@
       "value": [
        {
         "case": "Messages",
-        "text": "2 messages for acme.demo.alice, 2 new, 1 urgent.\n\nNUMBER  FROM           WHEN     STATE  URGENT  KIND      MESSAGE\n1       acme.demo.bob  10s ago  new    no      task      lunch at noon?\n2       acme.demo.bob  8s ago   new    yes     question  ready?",
+        "text": "2 messages for acme.demo.alice, 2 new, 1 urgent.\n\nNUMBER  FROM           SENT     STATE  URGENT  KIND      MESSAGE\n1       acme.demo.bob  10s ago  new    no      task      lunch at noon?\n2       acme.demo.bob  8s ago   new    yes     question  ready?",
         "stream": "stdout",
         "exit": 0
        },
        {
         "case": "A long message, or one of several lines",
-        "text": "NUMBER  FROM           WHEN    STATE  URGENT  KIND    MESSAGE\n3       acme.demo.bob  1m ago  new    no      result  The build passed on all …",
+        "text": "NUMBER  FROM           SENT    STATE  URGENT  KIND    MESSAGE\n3       acme.demo.bob  1m ago  new    no      result  The build passed on all …",
         "stream": "stdout",
         "exit": 0
        },
        {
         "case": "With --wide",
-        "text": "2 messages for acme.demo.alice, 2 new, 1 urgent.\n\nNUMBER  FROM           WHEN     STATE  URGENT  KIND      TRUST     SIZE  MESSAGE\n1       acme.demo.bob  10s ago  new    no      task      verified  14 B  lunch at noon?\n2       acme.demo.bob  8s ago   new    yes     question  verified  6 B   ready?",
+        "text": "2 messages for acme.demo.alice, 2 new, 1 urgent.\n\nNUMBER  FROM           SENT     STATE  URGENT  KIND      TRUST     SIZE  MESSAGE\n1       acme.demo.bob  10s ago  new    no      task      verified  14 B  lunch at noon?\n2       acme.demo.bob  8s ago   new    yes     question  verified  6 B   ready?",
         "stream": "stdout",
         "exit": 0
        },
@@ -514,19 +523,19 @@
        },
        {
         "case": "The oldest has waited longer than the wake age",
-        "text": "3 messages for acme.demo.alice, 3 new, 0 urgent.\nThe oldest has waited 1h 12m.\n\nNUMBER  FROM           WHEN  STATE  URGENT  KIND  MESSAGE\n...",
+        "text": "3 messages for acme.demo.alice, 3 new, 0 urgent.\nThe oldest has waited 1h 12m.\n\nNUMBER  FROM           SENT  STATE  URGENT  KIND  MESSAGE\n...",
         "stream": "stdout",
         "exit": 0
        },
        {
         "case": "More waiting than the wake count",
-        "text": "17 messages for acme.demo.alice, 17 new, 0 urgent.\nMore than 15 are waiting.\n\nNUMBER  FROM  WHEN  STATE  URGENT  KIND  MESSAGE\n...",
+        "text": "17 messages for acme.demo.alice, 17 new, 0 urgent.\nMore than 15 are waiting.\n\nNUMBER  FROM  SENT  STATE  URGENT  KIND  MESSAGE\n...",
         "stream": "stdout",
         "exit": 0
        },
        {
         "case": "A sender outside your group",
-        "text": "NUMBER  FROM            WHEN    STATE  URGENT  KIND  MESSAGE\n3       acme.ops.carol  2m ago  new    no      fyi   deploy finished",
+        "text": "NUMBER  FROM            SENT    STATE  URGENT  KIND  MESSAGE\n3       acme.ops.carol  2m ago  new    no      fyi   deploy finished",
         "stream": "stdout",
         "exit": 0
        },
@@ -538,7 +547,7 @@
        },
        {
         "case": "Counts include mail read out of order, with --detail",
-        "text": "About 2 messages for acme.demo.alice, about 1 new, about 1 urgent.\nexact: no (mail read out of order may still be counted as urgent)\n\nNUMBER  FROM           WHEN     STATE  URGENT  KIND      MESSAGE\n1       acme.demo.bob  10s ago  new    no      task      lunch at noon?\n2       acme.demo.bob  8s ago   new    yes     question  ready?",
+        "text": "About 2 messages for acme.demo.alice, about 1 new, about 1 urgent.\nexact: no (mail read out of order may still be counted as urgent)\n\nNUMBER  FROM           SENT     STATE  URGENT  KIND      MESSAGE\n1       acme.demo.bob  10s ago  new    no      task      lunch at noon?\n2       acme.demo.bob  8s ago   new    yes     question  ready?",
         "stream": "stdout",
         "exit": 0,
         "issue": "#1399",
@@ -546,7 +555,7 @@
        },
        {
         "case": "Counts without serve running",
-        "text": "About 2 messages for acme.demo.alice, about 2 new, about 1 urgent.\n\nNUMBER  FROM           WHEN     STATE  URGENT  KIND      MESSAGE\n1       acme.demo.bob  10s ago  new    no      task      lunch at noon?\n2       acme.demo.bob  8s ago   new    yes     question  ready?",
+        "text": "About 2 messages for acme.demo.alice, about 2 new, about 1 urgent.\n\nNUMBER  FROM           SENT     STATE  URGENT  KIND      MESSAGE\n1       acme.demo.bob  10s ago  new    no      task      lunch at noon?\n2       acme.demo.bob  8s ago   new    yes     question  ready?",
         "stream": "stdout",
         "exit": 0,
         "issue": "#958",
@@ -562,7 +571,7 @@
        },
        {
         "case": "Counts without serve running, with --detail",
-        "text": "About 2 messages for acme.demo.alice, about 2 new, about 1 urgent.\nexact: no (mash serve is not running, so unverified mail is counted)\n\nNUMBER  FROM           WHEN     STATE  URGENT  KIND      MESSAGE\n1       acme.demo.bob  10s ago  new    no      task      lunch at noon?\n2       acme.demo.bob  8s ago   new    yes     question  ready?",
+        "text": "About 2 messages for acme.demo.alice, about 2 new, about 1 urgent.\nexact: no (mash serve is not running, so unverified mail is counted)\n\nNUMBER  FROM           SENT     STATE  URGENT  KIND      MESSAGE\n1       acme.demo.bob  10s ago  new    no      task      lunch at noon?\n2       acme.demo.bob  8s ago   new    yes     question  ready?",
         "stream": "stdout",
         "exit": 0,
         "issue": "#958",
@@ -570,7 +579,7 @@
        },
        {
         "case": "Counts are capped, with --detail",
-        "text": "About 1000 messages for acme.demo.alice, about 90 new, about 4 urgent.\nexact: no (only the oldest 1000 messages were checked)\n\nNUMBER  FROM           WHEN     STATE  URGENT  KIND      MESSAGE\n1       acme.demo.bob  10s ago  new    no      task      lunch at noon?\n2       acme.demo.bob  8s ago   new    yes     question  ready?",
+        "text": "About 1000 messages for acme.demo.alice, about 90 new, about 4 urgent.\nexact: no (only the oldest 1000 messages were checked)\n\nNUMBER  FROM           SENT     STATE  URGENT  KIND      MESSAGE\n1       acme.demo.bob  10s ago  new    no      task      lunch at noon?\n2       acme.demo.bob  8s ago   new    yes     question  ready?",
         "stream": "stdout",
         "exit": 0,
         "issue": "#955",
@@ -578,7 +587,7 @@
        },
        {
         "case": "Counts are capped and serve is not running, with --detail",
-        "text": "About 1000 messages for acme.demo.alice, about 90 new, about 4 urgent.\nexact: no (only the oldest 1000 messages were checked)\nexact: no (mash serve is not running, so unverified mail is counted)\n\nNUMBER  FROM           WHEN     STATE  URGENT  KIND      MESSAGE\n1       acme.demo.bob  10s ago  new    no      task      lunch at noon?\n2       acme.demo.bob  8s ago   new    yes     question  ready?",
+        "text": "About 1000 messages for acme.demo.alice, about 90 new, about 4 urgent.\nexact: no (only the oldest 1000 messages were checked)\nexact: no (mash serve is not running, so unverified mail is counted)\n\nNUMBER  FROM           SENT     STATE  URGENT  KIND      MESSAGE\n1       acme.demo.bob  10s ago  new    no      task      lunch at noon?\n2       acme.demo.bob  8s ago   new    yes     question  ready?",
         "stream": "stdout",
         "exit": 0,
         "issue": "#958",
@@ -1134,9 +1143,9 @@
        },
        {
         "case": "No endpoint installed",
-        "text": "error: no endpoint is installed here\nhint: mash join <file>",
+        "text": "error: no endpoint is installed here",
         "stream": "stderr",
-        "exit": 2
+        "exit": 1
        }
       ]
      },
@@ -1267,7 +1276,7 @@
       "value": [
        {
         "case": "All well",
-        "text": "config    ok\nclaude    ok    2.1.320\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   ok\ndelivery  ok\nrefused   ok    no unverified mail was refused\n\nNo problems.",
+        "text": "config    ok\nclaude    ok    2.1.320\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   ok\ndelivery  ok\nrefused   ok    no message was refused for lacking its sender's signature\n\nNo problems.",
         "stream": "stdout",
         "exit": 0
        },
@@ -1281,7 +1290,7 @@
        },
        {
         "case": "Server not answering",
-        "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    FAIL  the server did not answer: tls://myserver:4222\nsign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no unverified mail was refused\n\n1 problem.",
+        "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    FAIL  the server did not answer: tls://myserver:4222\nsign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no message was refused for lacking its sender's signature\n\n1 problem.",
         "stream": "stdout",
         "exit": 1,
         "issue": "#1099",
@@ -1332,12 +1341,12 @@
         "issue": "#1099",
         "stream": "stdout",
         "exit": 1,
-        "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   ok\ndelivery  FAIL  cannot write ~/.local/state/mash/acme.demo.bob\nrefused   ok    no unverified mail was refused\n\n1 problem.",
+        "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   ok\ndelivery  FAIL  cannot write ~/.local/state/mash/acme.demo.bob\nrefused   ok    no message was refused for lacking its sender's signature\n\n1 problem.",
         "note": "REQ-006. The count line follows the rows and any hint goes to stderr. Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors. No hint: no command of ours fixes a folder that cannot be written, and the row names the folder. Today the row wraps and reads \"mail is held: its folder cannot be written\"."
        },
        {
         "case": "At a shell, where there is no session to deliver to",
-        "text": "delivery  skip  needs a session",
+        "text": "delivery  skip  checked only inside a Claude Code session",
         "stream": "stdout",
         "exit": 0
        },
@@ -1346,7 +1355,7 @@
         "issue": "#1099",
         "stream": "stdout",
         "exit": 1,
-        "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   ok\ndelivery  FAIL  another session holds this endpoint\nrefused   ok    no unverified mail was refused\n\n1 problem.",
+        "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   ok\ndelivery  FAIL  another session holds this endpoint\nrefused   ok    no message was refused for lacking its sender's signature\n\n1 problem.",
         "note": "REQ-006. The count line follows the rows and any hint goes to stderr. Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors. No hint: the row says what is wrong, and closing the other session is not a command of ours."
        },
        {
@@ -1366,7 +1375,7 @@
         "issue": "#1099",
         "stream": "stdout",
         "exit": 1,
-        "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   ok\ndelivery  FAIL  this session lost this endpoint to a newer one\nrefused   ok    no unverified mail was refused\n\n1 problem.",
+        "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   ok\ndelivery  FAIL  this session lost this endpoint to a newer one\nrefused   ok    no message was refused for lacking its sender's signature\n\n1 problem.",
         "note": "REQ-006. The count line follows the rows and any hint goes to stderr. Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors. No hint: the row says what is wrong."
        },
        {
@@ -1374,7 +1383,7 @@
         "issue": "#1099",
         "stream": "stdout, then the hint on stderr",
         "exit": 1,
-        "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   FAIL  this endpoint was deleted; its address cannot be used again\ndelivery  skip  needs sign-in\nrefused   ok    no unverified mail was refused\n\n1 problem.\nhint: mash join <file>",
+        "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   FAIL  this endpoint was deleted; its address cannot be used again\ndelivery  skip  needs sign-in\nrefused   ok    no message was refused for lacking its sender's signature\n\n1 problem.\nhint: mash join <file>",
         "note": "REQ-006, core #1403. The hint is a command: a join file to a new endpoint. v0.5.8 printed the sentence 'ask whoever runs your mesh for a join file to a new endpoint'."
        },
        {
@@ -1382,7 +1391,7 @@
         "issue": "#1099",
         "stream": "stdout, then the hint on stderr",
         "exit": 1,
-        "text": "config    ok\nclaude    skip  no claude command found\ncreds     FAIL  this endpoint was deleted; its address cannot be used again\nserver    ok    tls://myserver:4222\nsign-in   skip  needs the creds\ndelivery  skip  needs sign-in\nrefused   ok    no unverified mail was refused\n\n1 problem.\nhint: mash join <file>",
+        "text": "config    ok\nclaude    skip  no claude command found\ncreds     FAIL  this endpoint was deleted; its address cannot be used again\nserver    ok    tls://myserver:4222\nsign-in   skip  needs the creds\ndelivery  skip  needs sign-in\nrefused   ok    no message was refused for lacking its sender's signature\n\n1 problem.\nhint: mash join <file>",
         "note": "REQ-006, core #1403. As on another machine: the hint is a join file to a new endpoint."
        },
        {
@@ -1390,7 +1399,7 @@
         "issue": "#1099",
         "stream": "stdout",
         "exit": 1,
-        "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    FAIL  the server's certificate is not trusted: tls://myserver:4222\nsign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no unverified mail was refused\n\n1 problem.",
+        "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    FAIL  the server's certificate is not trusted: tls://myserver:4222\nsign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no message was refused for lacking its sender's signature\n\n1 problem.",
         "note": "REQ-006. The count line follows the rows and any hint goes to stderr. Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors. No hint: mash join cannot change the folder's certificate authority, even with --replace, and no other command of ours does. The server row is fixed wording (rule: \"The server not answering reads the same everywhere\"), so its 76 columns stay; it is under the 80 limit."
        },
        {
@@ -1398,7 +1407,7 @@
         "issue": "#1099",
         "stream": "stdout",
         "exit": 1,
-        "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    FAIL  the server did not offer TLS: tls://myserver:4222\nsign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no unverified mail was refused\n\n1 problem.",
+        "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    FAIL  the server did not offer TLS: tls://myserver:4222\nsign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no message was refused for lacking its sender's signature\n\n1 problem.",
         "note": "REQ-006. The count line follows the rows and any hint goes to stderr. Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors. No hint: nothing the reader can run fixes a server that offers no TLS."
        },
        {
@@ -1406,7 +1415,7 @@
         "issue": "#1099",
         "stream": "stdout, then the hint on stderr",
         "exit": 1,
-        "text": "config    ok\nclaude    skip  no claude command found\ncreds     FAIL  ~/.config/mash/acme.demo.bob.creds is missing\nserver    ok    tls://myserver:4222\nsign-in   skip  needs the creds\ndelivery  skip  needs sign-in\nrefused   ok    no unverified mail was refused\n\n1 problem.\nhint: mash join <file>",
+        "text": "config    ok\nclaude    skip  no claude command found\ncreds     FAIL  ~/.config/mash/acme.demo.bob.creds is missing\nserver    ok    tls://myserver:4222\nsign-in   skip  needs the creds\ndelivery  skip  needs sign-in\nrefused   ok    no message was refused for lacking its sender's signature\n\n1 problem.\nhint: mash join <file>",
         "note": "REQ-006. The count line follows the rows and any hint goes to stderr. Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors. The hint is the command that installs new creds (<file> is the join file the person is given)."
        },
        {
@@ -1414,7 +1423,7 @@
         "issue": "#1099",
         "stream": "stdout, then the hint on stderr",
         "exit": 1,
-        "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   FAIL  the server refused these credentials\ndelivery  skip  needs sign-in\nrefused   ok    no unverified mail was refused\n\n1 problem.\nhint: mash join <file> --replace",
+        "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   FAIL  the server refused these credentials\ndelivery  skip  needs sign-in\nrefused   ok    no message was refused for lacking its sender's signature\n\n1 problem.\nhint: mash join <file> --replace",
         "note": "REQ-006, core #1403. Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors. Also the hint for a creds file that belongs to another endpoint. The person needs a new join file from whoever runs the mesh; --replace, because creds for this address are installed."
        },
        {
@@ -1422,7 +1431,7 @@
         "issue": "#1099",
         "stream": "stdout, then the hint on stderr",
         "exit": 1,
-        "text": "config    ok\nclaude    skip  no claude command found\ncreds     FAIL  ~/.config/mash/acme.demo.bob.creds is not a creds file\nserver    ok    tls://myserver:4222\nsign-in   skip  needs the creds\ndelivery  skip  needs sign-in\nrefused   ok    no unverified mail was refused\n\n1 problem.\nhint: mash join <file> --replace",
+        "text": "config    ok\nclaude    skip  no claude command found\ncreds     FAIL  ~/.config/mash/acme.demo.bob.creds is not a creds file\nserver    ok    tls://myserver:4222\nsign-in   skip  needs the creds\ndelivery  skip  needs sign-in\nrefused   ok    no message was refused for lacking its sender's signature\n\n1 problem.\nhint: mash join <file> --replace",
         "note": "REQ-006, core #1403. Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors. The file's content is never printed. Same shape as 'A creds file is missing' (the file, with ~, then what is wrong), so the row fits in 80 columns; status keeps its longer sentence as the reason. --replace, because a file is installed at the creds path."
        },
        {
@@ -1430,7 +1439,7 @@
         "issue": "#1099",
         "stream": "stdout",
         "exit": 1,
-        "text": "config    ok\nclaude    skip  no claude command found\ncreds     FAIL  ~/.config/mash/acme.demo.bob.creds can be read by others\nserver    ok    tls://myserver:4222\nsign-in   skip  needs the creds\ndelivery  skip  needs sign-in\nrefused   ok    no unverified mail was refused\n\n1 problem.",
+        "text": "config    ok\nclaude    skip  no claude command found\ncreds     FAIL  ~/.config/mash/acme.demo.bob.creds can be read by others\nserver    ok    tls://myserver:4222\nsign-in   skip  needs the creds\ndelivery  skip  needs sign-in\nrefused   ok    no message was refused for lacking its sender's signature\n\n1 problem.",
         "note": "REQ-006, core #1403. Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors. No hint: no command of ours changes a file's permissions (v0.5.8 printed 'hint: chmod 600 <file>'). Same shape as 'A creds file is missing', so the row fits in 80 columns."
        },
        {
@@ -1438,7 +1447,7 @@
         "issue": "#1099",
         "stream": "stdout",
         "exit": 1,
-        "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    FAIL  the server address is not tls://: nats://myserver:4222\nsign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no unverified mail was refused\n\n1 problem.",
+        "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    FAIL  the server address is not tls://: nats://myserver:4222\nsign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no message was refused for lacking its sender's signature\n\n1 problem.",
         "note": "REQ-006, core #1403. Exit code changes from 0 (v0.5.8) to 1: release notes and CHANGELOG say so under a heading for script authors. A plain nats:// address without MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1. One short row; no hint, since no command of ours changes the address (v0.5.8 printed the whole refusal and a sentence hint). mash status keeps the whole refusal as its reason."
        },
        {
@@ -1770,7 +1779,7 @@
         "case": "The join file needs your seed",
         "text": "error: this join file holds no seed; it was made for your own key\nhint: mash join acme.demo.bob.join --key <your seed file>",
         "stream": "stderr",
-        "exit": 2
+        "exit": 1
        },
        {
         "case": "The join file's user JWT is named for another address",
@@ -1843,11 +1852,11 @@
    },
    {
     "name": "key",
-    "description": "Make your own key pair, for when the seed must never leave this machine.",
+    "description": "Make a key pair: a secret seed and its public key. For when the seed must never leave this machine.",
     "commands": [
      {
       "name": "create",
-      "description": "Make a seed and its public key.",
+      "description": "Make a key pair: a secret seed and its public key. For when the seed must never leave this machine.",
       "options": [
        {
         "name": "--out",
@@ -1904,6 +1913,15 @@
           "text": "error: bob.seed already exists; nothing was written",
           "stream": "stderr",
           "exit": 1
+         },
+         {
+          "case": "mash key create --help",
+          "text": "Make a key pair: a secret seed and its public key. For when the seed must never\nleave this machine.\n\nUsage:\n  mash key create [options]\n\nExamples:\n  mash key create --out bob.seed\n\nOptions:\n  --out <path>  Where to write the seed. The public key goes beside it with .pub\n                added. Default: mash.seed in the current folder.\n  --json        Print the result as JSON.\n  -h, --help    Show help for the command.",
+          "stream": "stdout",
+          "exit": 0,
+          "issue": "#1100",
+          "note": "Three changes. (1) The description says what a seed is where the word first appears: Make a key pair: a secret seed and its public key. For when the seed must never leave this machine. Today the command has two descriptions, Make a seed and its public key. here and Make your own key pair, for when the seed must never leave this machine. in mash --help; the rule says one, so this is the one, used in both. (2) The Examples: entry stays: mash key create --out bob.seed names an option, so it adds something. (3) No Global options: block. key create reads no configuration (it needs no endpoint, server or creds), so no connection option applies; --json does (it prints {\"seed\",\"public_key\"}, run here) and is listed. --detail is accepted and prints nothing more, so it is not listed.",
+          "verbatim": true
          }
         ]
        },
@@ -1959,7 +1977,7 @@
    },
    {
     "name": "serve",
-    "description": "Run as an MCP server for an agent host. Started by the host, not by hand.",
+    "description": "Run as an MCP server, which is how an agent host such as Claude Code calls mash's tools. Started by the host, not by hand.",
     "options": [
      {
       "name": "--wake-count",
@@ -2012,9 +2030,6 @@
       ]
      }
     ],
-    "examples": [
-     "mash serve"
-    ],
     "exitCodes": [
      {
       "code": 0,
@@ -2052,6 +2067,15 @@
         "text": "error: mash serve is started by an agent host, not by hand\nhint: mash serve --help",
         "stream": "stderr",
         "exit": 2
+       },
+       {
+        "case": "mash serve --help",
+        "text": "Run as an MCP server, which is how an agent host such as Claude Code calls\nmash's tools. Started by the host, not by hand.\n\nUsage:\n  mash serve [options]\n\nOptions:\n  --wake-count <n>       Wake the session when more than this many messages are\n                         waiting. Default 15; 0 turns it off.\n  --wake-age <duration>  Wake the session when the oldest waiting message is\n                         older than this. Default 1h; 0 turns it off.\n  --accept-unverified    Deliver mail that is not verified, with its trust\n                         label. Default: off; such mail is refused.\n  --endpoint <address>   Which endpoint to act as, as owner.group.name. Always\n                         needed: a session becomes an endpoint only because\n                         someone chose that.\n  --creds <path>         The creds file to sign in with. Default: <config\n                         folder>/<address>.creds.\n  --server <url>         The server address. May be given more than once.\n  --ca <path>            The certificate authority's certificate, when the\n                         server uses its own.\n  --config-dir <path>    The configuration folder. Default: ~/.config/mash.\n  -h, --help             Show help for the command.",
+        "stream": "stdout",
+        "exit": 0,
+        "issue": "#1100",
+        "note": "Three changes. (1) The description says what MCP is, in the word's first place in the help: Run as an MCP server, which is how an agent host such as Claude Code calls mash's tools. Started by the host, not by hand. Today: Run as an MCP server for an agent host. Started by the host, not by hand. The same text is mash serve's line in mash --help (help-mash-top-glossary). (2) The Examples: entry goes (it only repeated the usage line). (3) No Global options: block; --endpoint (always needed, LoadNamedOnly), --creds, --server, --ca and --config-dir are listed under Options: with serve's own three, which are unchanged. No --json (refused), --detail (nothing to detail) or --no-color (serve runs behind an agent host, not a terminal).",
+        "verbatim": true
        }
       ]
      },
@@ -2079,9 +2103,6 @@
    {
     "name": "hook",
     "description": "Print mail waiting for this session, in the form the agent host expects. Run by the host after each tool call and with each prompt.",
-    "examples": [
-     "mash hook"
-    ],
     "exitCodes": [
      {
       "code": 0,
@@ -2111,6 +2132,15 @@
         "text": "(nothing)",
         "stream": "stdout",
         "exit": 0
+       },
+       {
+        "case": "mash hook --help",
+        "text": "Print mail waiting for this session, in the form the agent host expects. Run by\nthe host after each tool call and with each prompt.\n\nUsage:\n  mash hook\n\nOptions:\n  --endpoint <address>  Which endpoint to act as, as owner.group.name. Always\n                        needed: a session becomes an endpoint only because\n                        someone chose that.\n  --creds <path>        The creds file to sign in with. Default: <config\n                        folder>/<address>.creds.\n  --server <url>        The server address. May be given more than once.\n  --ca <path>           The certificate authority's certificate, when the server\n                        uses its own.\n  --config-dir <path>   The configuration folder. Default: ~/.config/mash.\n  -h, --help            Show help for the command.",
+        "stream": "stdout",
+        "exit": 0,
+        "issue": "#1100",
+        "note": "Two changes. (1) The Examples: entry goes: its one line, mash hook, only repeats the usage line. (2) The Global options: block goes; Options: lists what applies. hook loads the endpoint by name only (config.LoadNamedOnly), so --endpoint is listed, and it says it is always needed; --creds, --server, --ca and --config-dir feed the connection. --json is refused for hook (mash hook has no --json form) and --detail changes nothing it prints, so neither is listed; hook prints context for the host, not a terminal line, so --no-color is not either. Today: the same description, an Examples: entry and the full nine-entry Global options block.",
+        "verbatim": true
        }
       ]
      },
@@ -2158,9 +2188,6 @@
       }
      }
     ],
-    "examples": [
-     "mash prompt acme.demo.alice \"are you there?\""
-    ],
     "exitCodes": [
      {
       "code": 0,
@@ -2192,6 +2219,15 @@
         "text": "(what it prints today; unchanged in 0.5.6)",
         "stream": "stdout",
         "exit": 0
+       },
+       {
+        "case": "mash prompt --help",
+        "text": "Ask an endpoint a live question and wait for its answer. Not stored: if the\nrecipient is not there, it fails.\n\nUsage:\n  mash prompt <address> <text>\n\nArguments:\n  address  Who to ask.\n  text     The question.\n\nOptions:\n  --endpoint <address>  Which endpoint to act as, as owner.group.name. Not\n                        needed when only one is installed here.\n  --creds <path>        The creds file to sign in with. Default: <config\n                        folder>/<address>.creds.\n  --server <url>        The server address. May be given more than once.\n  --ca <path>           The certificate authority's certificate, when the server\n                        uses its own.\n  --config-dir <path>   The configuration folder. Default: ~/.config/mash.\n  -h, --help            Show help for the command.",
+        "stream": "stdout",
+        "exit": 0,
+        "issue": "#1100",
+        "note": "Same two changes as hook: the Examples: entry goes (mash prompt acme.demo.alice \"are you there?\" only restates the usage line with values) and the Global options: block becomes the options that apply. prompt has no --json form (refused), so --json is not listed; the connection options and --endpoint are. --detail is left out: prompt prints the answer and nothing fuller (not verified against a live answer here). Today: the full nine-entry block and the Examples: line.",
+        "verbatim": true
        }
       ]
      },
@@ -2319,11 +2355,11 @@
     "value": [
      {
       "case": "mash --help",
-      "text": "Trusted mail between agents. Speaks as one endpoint.\n\nSAP is the Synadia Agent Protocol, NATS is the message server mash\ntalks to, and creds are the file that signs an endpoint in to it.\n\nEveryday:\n  mash send <address> [<message>] [options]    Send a message to an endpoint.\n  mash inbox [options]                         List the messages this endpoint\n                                               has received.\n  mash read <number>                           Show one message in full.\n  mash who [<prefix>] [options]                List the endpoints you can see,\n                                               and which are online.\n  mash status                                  Say in one line whether mail\n                                               works for this endpoint, and\n                                               whether it is online.\n  mash doctor [options]                        Check everything mail depends on\n                                               for this endpoint, and say how to\n                                               fix what is wrong. Changes\n                                               nothing.\n  mash version                                 Print the version. It can also be\n                                               run as --version.\n\nSetup:\n  mash join <file> [options]                   Install an endpoint's credentials\n                                               on this machine from a join file.\n  mash key create [options]                    Make your own key pair, for when\n                                               the seed must never leave this\n                                               machine.\n\nIntegration:\n  mash serve [options]                         Run as an MCP server for an agent\n                                               host. Started by the host, not by\n                                               hand.\n  mash hook                                    Print mail waiting for this\n                                               session, in the form the agent\n                                               host expects. Run by the host\n                                               after each tool call and with\n                                               each prompt.\n\nRaw SAP:\n  mash prompt <address> <text>                 Ask an endpoint a live question\n                                               and wait for its answer. Not\n                                               stored: if the recipient is not\n                                               there, it fails.\n\nGlobal options:\n  --endpoint <address>  Which endpoint to act as, as owner.group.name. Not\n                        needed for the everyday and setup commands when only one\n                        is installed here. mash serve and mash hook always need\n                        it said: a session becomes an endpoint only because\n                        someone chose that.\n  --creds <path>        The creds file to sign in with. Default: <config\n                        folder>/<address>.creds.\n  --server <url>        The server address. May be given more than once.\n  --ca <path>           The certificate authority's certificate, when the server\n                        uses its own.\n  --config-dir <path>   The configuration folder. Default: ~/.config/mash.\n  --detail              Print the fuller answer: after the usual line, more as\n                        'label: value' lines; with --json, the fuller object.\n  --json                Print the result as JSON: the same object the matching\n                        MCP tool returns.\n  --no-color            Never use color. Color is used only on a terminal, and\n                        NO_COLOR is honored.\n  -h, --help            Show help for the command.\n\nAn endpoint is addressed owner.group.name: MASH_ENDPOINT (or config.json\n\"endpoint\", or --endpoint). With none set, the one endpoint whose creds file\n(owner.group.name.creds, mode 0600) is in the config directory is used; with\nseveral, name one.\nA global option may stand anywhere in the command. A flag beats its environment\nvariable, which beats config.json.\nConfiguration: config.json {\"servers\",\"endpoint\",\"ca\"} in $MASH_CONFIG_DIR\n(default ~/.config/mash, or $XDG_CONFIG_HOME/mash), overridden by MASH_SERVER\n(commas between several), MASH_ENDPOINT, MASH_CA, MASH_CREDS, MASH_ADMIN_CREDS,\nMASH_HOST (see docs/install.md).\nState (spool, hook.log): $MASH_STATE_DIR (default $XDG_STATE_HOME/mash, else\n~/.local/state/mash).\nSlow link: \"open_timeout\" (default 20s) and \"call_timeout\" (default 15s), or\nMASH_OPEN_TIMEOUT and MASH_CALL_TIMEOUT.\nAlso tunable: lease_retry, transient_budget, transient_max, cli_timeout,\nadmin_timeout (MASH_LEASE_RETRY, MASH_TRANSIENT_BUDGET, MASH_TRANSIENT_MAX,\nMASH_CLI_TIMEOUT, MASH_ADMIN_TIMEOUT).",
+      "text": "Trusted mail between agents. Speaks as one endpoint.\n\nUsage: mash <command> [options]\n\nAn endpoint is one agent's mailbox, addressed owner.group.name; the owner, the\nfirst part, is the account that holds it. SAP is the Synadia Agent Protocol,\nNATS is the message server mash talks to, creds are the file that signs an\nendpoint in to it, and a trust label ([verified] and the others) says whether a\nmessage's sender is proven.\n\nEveryday:\n  mash send <address> [<message>] [options]    Send a message to an endpoint.\n  mash inbox [options]                         List the messages this endpoint\n                                               has received.\n  mash read <number>                           Show one message in full.\n  mash who [<prefix>] [options]                List the endpoints you can see,\n                                               and which are online.\n  mash status                                  Say in one line whether mail\n                                               works for this endpoint, and\n                                               whether it is online.\n  mash doctor [options]                        Check everything mail depends on\n                                               for this endpoint, and say how to\n                                               fix what is wrong. Changes\n                                               nothing.\n  mash version                                 Print the version. It can also be\n                                               run as --version.\n\nSetup:\n  mash join <file> [options]                   Install an endpoint's credentials\n                                               on this machine from a join file.\n  mash key create [options]                    Make a key pair: a secret seed\n                                               and its public key. For when the\n                                               seed must never leave this\n                                               machine.\n\nIntegration:\n  mash serve [options]                         Run as an MCP server, which is\n                                               how an agent host such as Claude\n                                               Code calls mash's tools. Started\n                                               by the host, not by hand.\n  mash hook                                    Print mail waiting for this\n                                               session, in the form the agent\n                                               host expects. Run by the host\n                                               after each tool call and with\n                                               each prompt.\n\nRaw SAP:\n  mash prompt <address> <text>                 Ask an endpoint a live question\n                                               and wait for its answer. Not\n                                               stored: if the recipient is not\n                                               there, it fails.\n\nGlobal options:\n  --endpoint <address>  Which endpoint to act as, as owner.group.name. Not\n                        needed for the everyday and setup commands when only one\n                        is installed here. mash serve and mash hook always need\n                        it said: a session becomes an endpoint only because\n                        someone chose that.\n  --creds <path>        The creds file to sign in with. Default: <config\n                        folder>/<address>.creds.\n  --server <url>        The server address. May be given more than once.\n  --ca <path>           The certificate authority's certificate, when the server\n                        uses its own.\n  --config-dir <path>   The configuration folder. Default: ~/.config/mash.\n  --detail              Print the fuller answer: after the usual line, more as\n                        'label: value' lines; with --json, the fuller object.\n  --json                Print the result as JSON: the same object the matching\n                        MCP tool returns.\n  --no-color            Never use color. Color is used only on a terminal, and\n                        NO_COLOR is honored.\n  -h, --help            Show help for the command.\n\nAn endpoint is addressed owner.group.name: MASH_ENDPOINT (or config.json\n\"endpoint\", or --endpoint). With none set, the one endpoint whose creds file\n(owner.group.name.creds, mode 0600) is in the config directory is used; with\nseveral, name one.\nA global option may stand anywhere in the command. A flag beats its environment\nvariable, which beats config.json.\nConfiguration: config.json {\"servers\",\"endpoint\",\"ca\"} in $MASH_CONFIG_DIR\n(default ~/.config/mash, or $XDG_CONFIG_HOME/mash), overridden by MASH_SERVER\n(commas between several), MASH_ENDPOINT, MASH_CA, MASH_CREDS, MASH_ADMIN_CREDS,\nMASH_HOST (see docs/install.md).\nState (spool, hook.log): $MASH_STATE_DIR (default $XDG_STATE_HOME/mash, else\n~/.local/state/mash).\nSlow link: \"open_timeout\" (default 20s) and \"call_timeout\" (default 15s), or\nMASH_OPEN_TIMEOUT and MASH_CALL_TIMEOUT.\nAlso tunable: lease_retry, transient_budget, transient_max, cli_timeout,\nadmin_timeout (MASH_LEASE_RETRY, MASH_TRANSIENT_BUDGET, MASH_TRANSIENT_MAX,\nMASH_CLI_TIMEOUT, MASH_ADMIN_TIMEOUT).\n\nRun mash <command> --help for a command's options.",
       "stream": "stdout",
       "exit": 0,
-      "issue": "#1048",
-      "note": "Only the three lines after the first are new: one sentence that says what SAP, NATS and creds are, in the top-level help of both tools and nowhere else. The rest is today's help, unchanged. Same sentence in mashctl --help.",
+      "issue": "#1048 / #1100",
+      "note": "help-mash-top-usage-footer with the glossary sentence extended. Today (planned in help-mash-top): SAP, NATS and creds only. New: also what an endpoint is, what its owner is, and what a trust label is: An endpoint is one agent's mailbox, addressed owner.group.name; the owner, the first part, is the account that holds it. (The owner is described in docs/guide/by-hand.md as the first part of every address and in install.md as the fence a credential reaches.) Seed and MCP are not in the glossary; they are explained where they appear, in the one description of mash key create and of mash serve, which the rule says is used wherever the command is listed, so the two top-level lines change with them (items help-mash-key-create and help-mash-serve).",
       "verbatim": true
      },
      {

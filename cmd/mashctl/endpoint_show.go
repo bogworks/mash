@@ -9,7 +9,7 @@ import (
 	"github.com/bogworks/mash/internal/config"
 )
 
-const endpointShowUsage = `usage: mashctl endpoint show <address> [--json]
+const endpointShowUsage = `Usage: mashctl endpoint show <address> [--json]
   address  the endpoint, as owner.group.name
   --json   print the endpoint as JSON
 Example:

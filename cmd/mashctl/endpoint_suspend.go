@@ -11,7 +11,7 @@ import (
 	"github.com/bogworks/mash/internal/config"
 )
 
-const endpointSuspendUsage = `usage: mashctl endpoint suspend <address> [--json]
+const endpointSuspendUsage = `Usage: mashctl endpoint suspend <address> [--json]
   address  the endpoint, as owner.group.name
   --json   print the result as JSON
   Refuses new mail to the endpoint. Its stored mail and its credentials stay.
@@ -19,7 +19,7 @@ Example:
   mashctl endpoint suspend acme.demo.bob
 `
 
-const endpointResumeUsage = `usage: mashctl endpoint resume <address> [--json]
+const endpointResumeUsage = `Usage: mashctl endpoint resume <address> [--json]
   address  the endpoint, as owner.group.name
   --json   print the result as JSON
   Undoes suspend: the endpoint takes new mail again.
@@ -27,7 +27,7 @@ Example:
   mashctl endpoint resume acme.demo.bob
 `
 
-const endpointPermissionsUsage = `usage: mashctl endpoint permissions <address> [--json]
+const endpointPermissionsUsage = `Usage: mashctl endpoint permissions <address> [--json]
   address  the endpoint, as owner.group.name
   --json   accepted; the output is JSON either way
   Prints the NATS permissions the endpoint's user needs, as JSON, for someone

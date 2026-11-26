@@ -193,7 +193,7 @@ A batch of more than 10 messages or 16 KiB is shown as a digest: one line per me
 ## Mail from the recipient's side seems to be missing
 
 - The inbox keeps 30 days or 16 MiB and drops the oldest first, unread included. Run `mash inbox --after N --limit 50` and compare the NUMBER column.
-- If the sender saw `Mail sent (number N)` before a host crash of a self-hosted server, up to about 2 minutes may be lost without `sync_interval: always` ([operations.md](operations.md#durability-and-sync_interval)).
+- If the sender saw `Mail sent (number N in <recipient>'s inbox)` before a host crash of a self-hosted server, up to about 2 minutes may be lost without `sync_interval: always` ([operations.md](operations.md#durability-and-sync_interval)).
 - `mashctl limits show` prints the limits in force.
 
 ## `mashctl limits apply` refuses

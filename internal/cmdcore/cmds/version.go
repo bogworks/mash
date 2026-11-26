@@ -42,6 +42,7 @@ var Version = cmdcore.Command[VersionParams, VersionResult]{
 	Group:          "Everyday",
 	Summary:        "Print the version. It can also be run as --version.",
 	Description:    "Print the version. It can also be run as --version.",
+	Globals:        cmdcore.GlobalsJSON,
 	Examples:       []string{"mash version", "mash --version"},
 	MCPDescription: "Print the version.",
 	Run: func(_ context.Context, env *cmdcore.Env, _ VersionParams) (VersionResult, error) {

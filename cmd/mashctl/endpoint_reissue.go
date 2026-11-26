@@ -24,7 +24,7 @@ import (
 	"github.com/bogworks/mash/internal/sap"
 )
 
-const endpointReissueUsage = `usage: mashctl endpoint reissue <address> [--out PATH] [--public-key PATH]
+const endpointReissueUsage = `Usage: mashctl endpoint reissue <address> [--out PATH] [--public-key PATH]
        [--dry-run] [--json]
   address            the endpoint, as owner.group.name
   --out PATH         write a join file for another machine and install
@@ -119,7 +119,7 @@ func epReissue(in *epInput, env func(string) string, lookup config.Lookup, stder
 	announceTarget(cfg, env, stderr)
 	adm, ctx, closeAdmin, err := ctl.OpenAdmin("mashctl", cfg)
 	if err != nil {
-		return t, epResult{}, withPlainCode(epErrOf(addr, "server", admin.RewordUnavailable(err.Error())+"; nothing was changed"), err)
+		return t, epResult{}, epErrOf(addr, "server", admin.RewordUnavailable(err.Error())+"; nothing was changed")
 	}
 	defer closeAdmin()
 

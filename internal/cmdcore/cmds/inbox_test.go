@@ -99,7 +99,7 @@ func tablePart(s string) string {
 func TestInboxText(t *testing.T) {
 	code, out, errs := runInbox(specBox(), cliframe.Global{})
 	want := "2 messages for acme.demo.alice, 2 new, 1 urgent.\n\n" +
-		"NUMBER  FROM           WHEN     STATE  URGENT  KIND      MESSAGE\n" +
+		"NUMBER  FROM           SENT     STATE  URGENT  KIND      MESSAGE\n" +
 		"1       acme.demo.bob  10s ago  new    no      task      lunch at noon?\n" +
 		"2       acme.demo.bob  8s ago   new    yes     question  ready?\n"
 	if code != 0 || out != want || errs != "" {
@@ -107,7 +107,7 @@ func TestInboxText(t *testing.T) {
 	}
 	_, out, _ = runInbox(specBox(), cliframe.Global{}, "--wide")
 	want = "2 messages for acme.demo.alice, 2 new, 1 urgent.\n\n" +
-		"NUMBER  FROM           WHEN     STATE  URGENT  KIND      TRUST     SIZE  MESSAGE\n" +
+		"NUMBER  FROM           SENT     STATE  URGENT  KIND      TRUST     SIZE  MESSAGE\n" +
 		"1       acme.demo.bob  10s ago  new    no      task      verified  14 B  lunch at noon?\n" +
 		"2       acme.demo.bob  8s ago   new    yes     question  verified  6 B   ready?\n"
 	if out != want {
@@ -145,7 +145,7 @@ func TestInboxLongMessageAndOutsideGroup(t *testing.T) {
 	b := &fakeBox{view: cmds.InboxView{Endpoint: "acme.demo.alice", Total: 1, Waiting: 1, OldestWaiting: ago(time.Minute), WakeCount: 15, WakeAge: time.Hour, WakeAgeText: "1h",
 		Messages: []cmds.MailItem{{Number: 3, From: "acme.demo.bob", Sent: ago(time.Minute), New: true, Kind: "result", Trust: "verified", Body: long + "\nsecond line"}}}}
 	_, out, _ := runInbox(b, cliframe.Global{})
-	want := "NUMBER  FROM           WHEN    STATE  URGENT  KIND    MESSAGE\n3       acme.demo.bob  1m ago  new    no      result  The build passed on all \u2026"
+	want := "NUMBER  FROM           SENT    STATE  URGENT  KIND    MESSAGE\n3       acme.demo.bob  1m ago  new    no      result  The build passed on all \u2026"
 	if tablePart(out) != want {
 		t.Errorf("long: %q", tablePart(out))
 	}
@@ -164,7 +164,7 @@ func TestInboxLongMessageAndOutsideGroup(t *testing.T) {
 	b = &fakeBox{view: b.view}
 	b.view.Messages = []cmds.MailItem{{Number: 3, From: "acme.ops.carol", Sent: ago(2 * time.Minute), New: true, Kind: "fyi", Trust: "verified", Body: "deploy finished"}}
 	_, out, _ = runInbox(b, cliframe.Global{})
-	want = "NUMBER  FROM            WHEN    STATE  URGENT  KIND  MESSAGE\n3       acme.ops.carol  2m ago  new    no      fyi   deploy finished"
+	want = "NUMBER  FROM            SENT    STATE  URGENT  KIND  MESSAGE\n3       acme.ops.carol  2m ago  new    no      fyi   deploy finished"
 	if tablePart(out) != want {
 		t.Errorf("outside group: %q", tablePart(out))
 	}
@@ -610,7 +610,7 @@ func TestInboxCountExactness(t *testing.T) {
 	const capped = "only the oldest 1000 messages were checked"
 	const noServe = "mash serve is not running, so unverified mail is counted"
 	const outOfOrder = "mail read out of order may still be counted as urgent"
-	table := "\n\nNUMBER  FROM           WHEN     STATE  URGENT  KIND      MESSAGE\n" +
+	table := "\n\nNUMBER  FROM           SENT     STATE  URGENT  KIND      MESSAGE\n" +
 		"1       acme.demo.bob  10s ago  new    no      task      lunch at noon?\n" +
 		"2       acme.demo.bob  8s ago   new    yes     question  ready?\n"
 	for _, c := range []struct {

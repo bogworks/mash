@@ -23,7 +23,7 @@ func TestPreRunErrorsAreFramed(t *testing.T) {
 	}{
 		{"global flag without value", nil, []string{"status", "--endpoint"}, 2, "--endpoint needs a value", "mash --help",
 			`{"error":"--endpoint needs a value","hint":"mash --help"}`},
-		{"plain URL refused", map[string]string{"MASH_ENDPOINT": "o.dev.a", "MASH_SERVER": "nats://x:4222"}, []string{"send", "o.dev.a", "x"}, 2, "", "mash doctor", ""},
+		{"plain URL refused", map[string]string{"MASH_ENDPOINT": "o.dev.a", "MASH_SERVER": "nats://x:4222"}, []string{"send", "o.dev.a", "x"}, 1, "", "mash doctor", ""},
 		{"no command", nil, []string{}, 2, "mash needs a command", "mash --help", `{"error":"mash needs a command","hint":"mash --help"}`},
 	}
 	for _, c := range cases {

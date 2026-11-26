@@ -153,7 +153,7 @@ func TestKeyCreateMakesParentDirectory(t *testing.T) {
 func TestKeyHelp(t *testing.T) {
 	for _, args := range [][]string{{"key", "--help"}, {"help", "key"}} {
 		rc, out, errb := kcRun(t, args...)
-		if rc != 0 || errb != "" || !strings.HasPrefix(out, "Make your own key pair, for when the seed must never leave this machine.\n\nUsage:\n  mash key create [options]\n\nGlobal options:\n") {
+		if rc != 0 || errb != "" || !strings.HasPrefix(out, "Make a key pair: a secret seed and its public key. For when the seed must never\nleave this machine.\n\nUsage:\n  mash key create [options]\n") {
 			t.Errorf("%v: rc %d, stdout %q, stderr %q", args, rc, out, errb)
 		}
 	}

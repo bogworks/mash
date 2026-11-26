@@ -84,7 +84,7 @@ func TestSendArgv(t *testing.T) {
 			if code != 0 || errs != "" {
 				t.Fatalf("code %d stderr %q", code, errs)
 			}
-			if out != "Mail sent (number 42)\n" && !strings.HasSuffix(out, "mail sent (number 42)\n") {
+			if out != "Mail sent (number 42 in a.b.c's inbox)\n" && !strings.HasSuffix(out, "mail sent (number 42 in a.b.c's inbox)\n") {
 				t.Errorf("stdout %q", out)
 			}
 			if f.to != tc.to || f.text != tc.text || f.o != tc.o {
@@ -197,7 +197,7 @@ func TestSendText(t *testing.T) {
 		verbose bool
 		want    string
 	}{
-		{"sent", cmds.SendResult{To: "acme.demo.alice", Number: 42, Kind: "task"}, false, "Mail sent (number 42)"},
+		{"sent", cmds.SendResult{To: "acme.demo.alice", Number: 42, Kind: "task"}, false, "Mail sent (number 42 in acme.demo.alice's inbox)"},
 		{"no kind", cmds.SendResult{Number: 3}, false, "Mail sent (number 3)"},
 		{"urgent task", cmds.SendResult{Kind: "task", Urgent: true, Number: 5}, false, "Urgent mail sent (number 5)"},
 		{"question", cmds.SendResult{Kind: "question", Number: 6}, false, "Question mail sent (number 6)"},
@@ -209,9 +209,9 @@ func TestSendText(t *testing.T) {
 			"Mail sent as fyi (number 9): a reply marked question that asks nothing\nto:     acme.demo.alice\nkind:   fyi\nurgent: no"},
 		{"duplicate beats retagged", cmds.SendResult{Kind: "fyi", Duplicate: true, Retagged: true}, false, "Mail already sent; nothing new stored"},
 		{"verbose", cmds.SendResult{To: "acme.demo.alice", Number: 42, Kind: "task"}, true,
-			"Mail sent (number 42)\nto:     acme.demo.alice\nkind:   task\nurgent: no"},
+			"Mail sent (number 42 in acme.demo.alice's inbox)\nto:     acme.demo.alice\nkind:   task\nurgent: no"},
 		{"verbose urgent", cmds.SendResult{To: "acme.demo.alice", Number: 7, Kind: "fyi", Urgent: true}, true,
-			"Urgent fyi mail sent (number 7)\nto:     acme.demo.alice\nkind:   fyi\nurgent: yes"},
+			"Urgent fyi mail sent (number 7 in acme.demo.alice's inbox)\nto:     acme.demo.alice\nkind:   fyi\nurgent: yes"},
 	} {
 		if got := tc.r.Text(cmdcore.Opts{Detail: tc.verbose}); got != tc.want {
 			t.Errorf("%s: %q, want %q", tc.name, got, tc.want)
@@ -347,7 +347,7 @@ func TestSendTool(t *testing.T) {
 	f.err = nil
 	f.rc.Number = 5
 	got, _, err := tool.MCP().CallStructured(context.Background(), json.RawMessage(`{"address":"a.b.c","message":"m"}`))
-	if err != nil || got != "Mail sent (number 5)" {
+	if err != nil || got != "Mail sent (number 5 in a.b.c's inbox)" {
 		t.Errorf("MCP().CallStructured = %q, %v", got, err)
 	}
 }
@@ -572,7 +572,7 @@ func TestSendHelp(t *testing.T) {
 		for _, h := range []string{"Send a message to an endpoint.\n\nUsage:\n  mash send <address> [<message>] [options]\n\nExamples:\n  mash send acme.demo.alice \"lunch at noon?\"\n",
 			"\n\nArguments:\n  address  Who to send to, as owner.group.name.\n  message  The text. Leave it out to read the text from --file or from standard\n",
 			"\n\nOptions:\n  --kind <kind>", "\n  --urgent", "\n  --reply-to <number>", "\n  --relay <number>", "\n  --id <key>", "\n  --file <path>",
-			"\n\nGlobal options:\n  --endpoint <address>", "\n  -v, --verbose", "\n  -h, --help <"} {
+			"\n  --endpoint <address>", "\n  -h, --help <"} {
 			i := strings.Index(got, h)
 			if h == "\n  -h, --help <" {
 				h, i = "\n  -h, --help ", strings.Index(got, "\n  -h, --help ")
@@ -587,7 +587,7 @@ func TestSendHelp(t *testing.T) {
 		}
 	}
 	// wrapped descriptions line up under the first
-	if !strings.Contains(first, "\n  --kind <kind>        What sort of message this is. blocker, question and task\n"+"                       wake an idle recipient that") {
+	if !strings.Contains(first, "\n  --kind <kind>         What sort of message this is. blocker, question and task\n"+"                        wake an idle recipient that") {
 		t.Errorf("--kind not aligned and wrapped:\n%s", first)
 	}
 	// no help after "--": it is the message
@@ -598,7 +598,7 @@ func TestSendHelp(t *testing.T) {
 	// the version help has no Arguments or Options section
 	o.Reset()
 	cmdcore.CLIWith(cmds.Version, envOf(&fakeSvc{}, true, nil), fr)([]string{"--help"}, nil, &o, &e, cliframe.Global{})
-	if strings.Contains(o.String(), "Arguments:") || strings.Contains(o.String(), "\nOptions:") || !strings.HasPrefix(o.String(), "Print the version. It can also be run as --version.\n\nUsage:\n  mash version\n\nExamples:\n  mash version\n  mash --version\n\nGlobal options:\n") {
+	if strings.Contains(o.String(), "Arguments:") || strings.Contains(o.String(), "Global options:") || !strings.HasPrefix(o.String(), "Print the version. It can also be run as --version.\n\nUsage:\n  mash version\n\nExamples:\n  mash version\n  mash --version\n\nOptions:\n  -h, --help  Show help for the command.\n") {
 		t.Errorf("version help:\n%s", o.String())
 	}
 }
@@ -667,6 +667,7 @@ var sendCasesComparedInCmdMash = map[string]string{
 	"A deleted endpoint here":                   "cmd/mash/deleted_here_test.go (TestEverydayCommandsDeletedHereMatchSpec, reads the spec text)",
 	"No credentials here":                       "cmd/mash/spec_failures_test.go (TestMissingCredsMatchesSpec, reads the spec text)",
 	"Not signed in":                             "cmd/mash/frame_auth_test.go",
+	"mash send --help":                          "cmd/mash/help_cases_test.go (TestHelpCasesMatchSpec)",
 }
 
 // The descriptions, examples, tool description and objects are the specification's, word for word.
@@ -762,7 +763,7 @@ func TestMatchesSpec(t *testing.T) {
 	}
 	mb, _ := json.Marshal(specTool(t, "send"))
 	_ = json.Unmarshal(mb, &mt)
-	if len(mt.Text) == 0 || mt.Text[0].Text != (cmds.SendResult{Number: 42, Kind: "task"}).Text(cmdcore.Opts{}) {
+	if len(mt.Text) == 0 || mt.Text[0].Text != (cmds.SendResult{To: "acme.demo.alice", Number: 42, Kind: "task"}).Text(cmdcore.Opts{}) {
 		t.Errorf("mcp send text %v differs from the receipt", mt.Text)
 	}
 	// the MCP parameters

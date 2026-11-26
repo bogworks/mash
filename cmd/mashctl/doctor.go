@@ -30,7 +30,7 @@ import (
 )
 
 // doctorUsage is the text of `mashctl doctor --help`.
-const doctorUsage = `usage: mashctl doctor [--strict] [--audit-users] [--json]
+const doctorUsage = `Usage: mashctl doctor [--strict] [--audit-users] [--json]
 
 Check the server, mash's storage on it and every endpoint's records,
 and say how to fix what is wrong.
@@ -103,8 +103,6 @@ type doctorReport struct {
 	Problems int           `json:"problems"`
 	Warnings int           `json:"warnings"`
 	Checks   []doctorCheck `json:"checks"`
-
-	plainRefused bool // the server row failed on natsauth's refusal of a plain URL: exit 2
 }
 
 const initFix = "mashctl init --config <file>"
@@ -217,9 +215,6 @@ func runDoctor(args []string, g cliframe.Global, env func(string) string, lookup
 	} else {
 		rep.writeText(stdout, stderr)
 	}
-	if rep.plainRefused { // a plain URL without the override: a configuration error, whatever else failed
-		return 2
-	}
 	if rep.Problems > 0 || (in.flags["--strict"] && rep.Warnings > 0) {
 		return 1
 	}
@@ -240,18 +235,20 @@ func doctorChecks(rep *doctorReport, env func(string) string, lookup config.Look
 	// 1. config
 	cfg, err := loadCtlConfig(env, lookup, true)
 	why := ""
+	fix := initFix
 	switch {
 	case err != nil:
 		why = oneLine(err.Error())
 	case cfg.URL == "":
 		why = "no server is configured"
+		fix = "" // the setup file does not exist yet for a newcomer, and what makes it depends: no one command to print
 	case cfg.AdminCreds == "":
 		why = "no admin_creds in the configuration"
 	case cfg.Owner == "":
 		why = "no owner in the configuration"
 	}
 	if why != "" {
-		rep.add("config", stateFail, why, initFix)
+		rep.add("config", stateFail, why, fix)
 		return
 	}
 	rep.add("config", stateOK, "", "")
@@ -264,7 +261,6 @@ func doctorChecks(rep *doctorReport, env func(string) string, lookup config.Look
 		}
 	}
 	if why := probeServer(cfg, servers[0]); why != "" {
-		rep.plainRefused = anyPlainRefused(servers, cfg.SkipEncryption)
 		rep.add("server", stateFail, why, "mashctl status")
 		return
 	}
@@ -273,7 +269,6 @@ func doctorChecks(rep *doctorReport, env func(string) string, lookup config.Look
 	// 3. sign-in: the admin credentials connect
 	adm, ctx, closeAdmin, err := ctl.OpenAdmin("mashctl", cfg)
 	if err != nil {
-		rep.plainRefused = rep.plainRefused || anyPlainRefused(servers, cfg.SkipEncryption) // a later server in the list is a plain URL: also a configuration error
 		msg := oneLine(err.Error())
 		if strings.Contains(msg, "uthorization violation") {
 			msg = "the server refused the admin credentials"
@@ -1017,18 +1012,6 @@ func churnIsMashs(attempts []connScan, recs []store.Issued) bool {
 			if !maps.Equal(ids, next[k]) {
 				return true
 			}
-		}
-	}
-	return false
-}
-
-// anyPlainRefused reports whether any server in the list is a plain URL the encryption rule refuses: a configuration
-// error, whichever server answers.
-func anyPlainRefused(servers []string, skip bool) bool {
-	for _, s := range servers {
-		var p *natsauth.PlainRefusalError
-		if _, _, err := natsauth.RequireTLS(s, skip); errors.As(err, &p) {
-			return true
 		}
 	}
 	return false

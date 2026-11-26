@@ -119,7 +119,7 @@ Would join as acme.demo.bob
 
 ### The join file needs your seed
 
-Stream: stderr. Exit code: 2.
+Stream: stderr. Exit code: 1.
 
 ```text
 error: this join file holds no seed; it was made for your own key

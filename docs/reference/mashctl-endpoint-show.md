@@ -84,6 +84,18 @@ Stream: stdout. Exit code: 0.
 }
 ```
 
+### mashctl endpoint show --help
+
+Stream: stdout. Exit code: 0.
+
+```text
+Usage: mashctl endpoint show <address> [--json]
+  address  the endpoint, as owner.group.name
+  --json   print the endpoint as JSON
+Example:
+  mashctl endpoint show acme.demo.bob
+```
+
 ## JSON
 
 With `--json` the result is this shape. The values are an example.

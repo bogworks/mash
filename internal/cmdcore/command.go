@@ -84,5 +84,10 @@ type Command[P any, R Result] struct {
 	MCPDescription string
 	Description    string
 	Examples       []string
-	Run            func(ctx context.Context, env *Env, p P) (R, error)
+	// Globals are the global options that apply to the command, by flag (cmdcore.GlobalsAll and the others). They are
+	// listed under Options in its --help, after its own; the tool's own help is the only one with a Global options block.
+	Globals []string
+	// GlobalDescs replaces the text of a global option's row in this command's --help, by flag ("--json").
+	GlobalDescs map[string]string
+	Run         func(ctx context.Context, env *Env, p P) (R, error)
 }

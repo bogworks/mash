@@ -624,6 +624,7 @@ func TestHookLoopWithAFakeAdapter(t *testing.T) {
 	})
 }
 
+// The hook says so on stderr and exits 0, whatever happens: it never fails the session. serve is a failure, exit 1.
 func TestUnknownHostIsRefused(t *testing.T) {
 	env := map[string]string{"HOME": t.TempDir(), "MASH_ENDPOINT": "o." + testGroup + ".a", "MASH_SERVER": "nats://127.0.0.1:1", "MASH_CREDS": "/none", "MASH_HOST": "nope"}
 	for _, cmd := range []string{"hook", "serve"} {
@@ -634,7 +635,11 @@ func TestUnknownHostIsRefused(t *testing.T) {
 		}()
 		select {
 		case code := <-done:
-			if code == 0 || !strings.Contains(errb.String(), "nope") || out.Len() != 0 {
+			want := 1
+			if cmd == "hook" {
+				want = 0
+			}
+			if code != want || !strings.Contains(errb.String(), "nope") || out.Len() != 0 {
 				t.Fatalf("%s: exit %d, stderr %q, stdout %q", cmd, code, errb.String(), out.String())
 			}
 		case <-time.After(5 * time.Second):

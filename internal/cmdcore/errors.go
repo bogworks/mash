@@ -58,7 +58,7 @@ func errNoEnv(name string) *cliframe.Error {
 type NoEndpointKind int
 
 const (
-	// NoneInstalled is a shell with no endpoint chosen and none installed (exit 2).
+	// NoneInstalled is a shell with no endpoint chosen and none installed (exit 1, no hint).
 	NoneInstalled NoEndpointKind = iota
 	// SeveralInstalled is a shell with no endpoint chosen and several installed (exit 2).
 	SeveralInstalled
@@ -86,5 +86,5 @@ func NoEndpoint(kind NoEndpointKind, command string, addresses []string) *clifra
 	case NoneForSession:
 		return cliframe.Failf("No endpoint is chosen for this session.").WithHint(SessionNoEndpointHint)
 	}
-	return cliframe.Usagef("no endpoint is installed here").WithHint("mash join <file>")
+	return cliframe.Failf("no endpoint is installed here")
 }

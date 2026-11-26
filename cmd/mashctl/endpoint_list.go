@@ -13,9 +13,10 @@ import (
 	"github.com/bogworks/mash/internal/store"
 )
 
-const endpointListUsage = `usage: mashctl endpoint list [prefix] [--wide] [--json]
+const endpointListUsage = `Usage: mashctl endpoint list [prefix] [--wide] [--json]
   prefix   only endpoints under this owner (acme) or owner.group (acme.demo)
-  --wide   show ADDRESS in place of NAME, and add CREATED, WAITING and LABELS
+  --wide   show the address in place of NAME, and add CREATED, WAITING and
+           LABELS
   --json   print the endpoints as JSON
 Example:
   mashctl endpoint list acme.demo

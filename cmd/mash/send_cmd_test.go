@@ -27,7 +27,7 @@ func TestSendCommandBothForms(t *testing.T) {
 		t.Fatalf("--json: %d %q %q", code, out, errb)
 	}
 	out, _, code = runSplit(t, w, "b", "send", tTo("a"), "--kind", "fyi", "--urgent", "second", "--detail")
-	if code != 0 || out != "Urgent fyi mail sent (number 2)\nto:     o.dev.a\nkind:   fyi\nurgent: yes\n" {
+	if code != 0 || out != "Urgent fyi mail sent (number 2 in o.dev.a's inbox)\nto:     o.dev.a\nkind:   fyi\nurgent: yes\n" {
 		t.Fatalf("-v: %d %q", code, out)
 	}
 	// reply-to and relay go out signed, and a short question reply is tagged fyi (the receipt says the kind sent)
@@ -111,12 +111,16 @@ func TestVersionCommand(t *testing.T) {
 // The generated help is 80 columns at most, in the layout of rules.json, for both commands on the table.
 func TestGeneratedHelpLayout(t *testing.T) {
 	for _, verb := range []string{"send", "version"} {
+		first := "\n  --endpoint <address>" // send takes every global option, version only --json
+		if verb == "version" {
+			first = "\n\nOptions:\n  --json"
+		}
 		var out, errb bytes.Buffer
 		if code := run([]string{verb, "--help"}, envFrom(nil), strings.NewReader(""), &out, &errb); code != 0 {
 			t.Fatalf("%s --help: %d", verb, code)
 		}
 		at := -1
-		for _, h := range []string{"\nUsage:\n  mash " + verb, "\n\nExamples:\n", "\n\nGlobal options:\n  --endpoint <address>"} {
+		for _, h := range []string{"\nUsage:\n  mash " + verb, "\n\nExamples:\n", first} {
 			i := strings.Index(out.String(), h)
 			if i <= at {
 				t.Errorf("%s help: %q missing or out of order:\n%s", verb, h, out.String())
@@ -202,11 +206,11 @@ func TestHelpCommandMatchesHelpFlag(t *testing.T) {
 	}
 }
 
-// isReceipt says s is a send receipt: lead, then " (number N)", then tail ("." unless given), and an optional newline.
+// isReceipt says s is a send receipt: lead, then " (number N in X's inbox)" (or " (number N)" and the tail, when one is given), and an optional newline.
 func isReceipt(s, lead string, tail ...string) bool {
-	t := ""
+	t := ` in \S+'s inbox\)`
 	if len(tail) > 0 {
-		t = regexp.QuoteMeta(tail[0])
+		t = `\)` + regexp.QuoteMeta(tail[0])
 	}
-	return regexp.MustCompile(`^` + regexp.QuoteMeta(lead) + ` \(number [0-9]+\)` + t + `\n?$`).MatchString(s)
+	return regexp.MustCompile(`^` + regexp.QuoteMeta(lead) + ` \(number [0-9]+` + t + `\n?$`).MatchString(s)
 }

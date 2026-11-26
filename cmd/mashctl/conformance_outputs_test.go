@@ -275,6 +275,7 @@ func init() {
 	dead := "nats://127.0.0.1:1"
 
 	reg("endpoint mashctl endpoint --help", func(t *testing.T) confOutRun { return confOutRun{ran: confRun(t, "endpoint", "--help")} })
+	reg("endpoint show mashctl endpoint show --help", func(t *testing.T) confOutRun { return confOutRun{ran: confRun(t, "endpoint", "show", "--help")} })
 	reg("endpoint inbox Messages", func(t *testing.T) confOutRun { return confInboxMessagesRun(t) })
 	reg("init Set up", func(t *testing.T) confOutRun {
 		w := newConfWorld(t, false)
@@ -491,6 +492,25 @@ func init() {
 	reg("endpoint create Created, credentials installed on this machine", func(t *testing.T) confOutRun {
 		w := newConfWorld(t, true)
 		return confOutRun{ran: w.run("endpoint", "create", "acme.demo.bob"), subs: []string{"<config dir>", w.a.env["MASH_CONFIG_DIR"]}}
+	})
+	reg("endpoint create Created with --config-dir: the next step names the folder", func(t *testing.T) confOutRun {
+		w := newConfWorld(t, true)
+		other := filepath.Join(t.TempDir(), "other")
+		if err := os.MkdirAll(other, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		cj, err := os.ReadFile(filepath.Join(w.a.env["MASH_CONFIG_DIR"], "config.json")) // the other folder holds the same settings
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(other, "config.json"), cj, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return confOutRun{ran: w.run("endpoint", "create", "acme.demo.bob", "--config-dir", other), subs: []string{"<config dir>", other}}
+	})
+	reg("endpoint create Created with --server: the next step names the server", func(t *testing.T) confOutRun {
+		w := newConfWorld(t, true)
+		return confOutRun{ran: w.run("endpoint", "create", "acme.demo.bob", "--server", w.url), subs: append(urlSub(w), "<config dir>", w.a.env["MASH_CONFIG_DIR"])}
 	})
 	reg("endpoint create Created, with a join file", func(t *testing.T) confOutRun {
 		w := newConfWorld(t, true)

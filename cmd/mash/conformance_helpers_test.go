@@ -222,10 +222,9 @@ func confHelpProblems(spec confSpec, env map[string]string, path string, c confC
 	if len(c.Arguments) > 0 {
 		want = append(want, "Arguments:")
 	}
-	if len(c.Options) > 0 {
+	if len(c.Commands) == 0 { // its own options and the global options that apply to it, in one section; -h is always among them
 		want = append(want, "Options:")
 	}
-	want = append(want, "Global options:")
 	if strings.Join(l.order, ",") != strings.Join(want, ",") {
 		p = append(p, fmt.Sprintf("headings: want %v in this order, got %v", want, l.order))
 	}
@@ -258,12 +257,88 @@ func confHelpProblems(spec confSpec, env map[string]string, path string, c confC
 			p = append(p, fmt.Sprintf("option: want %q in Options:", w))
 		}
 	}
-	globals := confFlat(strings.Join(l.sections["Global options:"], " "))
+	if len(c.Commands) == 0 && !strings.Contains(opts, "-h, --help Show help for the command.") {
+		p = append(p, "option: want -h, --help in Options:")
+	}
+	if len(c.Commands) == 0 {
+		p = append(p, confOptionSetProblems(spec, path, c, l.sections["Options:"])...)
+	}
+	return p
+}
+
+// confGlobalsOf is the global options of the specification's root that apply to each command, by the command's name:
+// the connection options and the answer options, the connection options alone, the configuration folder and the answer
+// options, or --json alone. A command's --help lists these after its own options and no other global option; the
+// tool's own help is the only one with a Global options block.
+var confGlobalsOf = func() map[string][]string {
+	all := []string{"--endpoint", "--creds", "--server", "--ca", "--config-dir", "--detail", "--json", "--no-color", "--help"}
+	connect := []string{"--endpoint", "--creds", "--server", "--ca", "--config-dir", "--help"}
+	local := []string{"--config-dir", "--detail", "--json", "--no-color", "--help"}
+	jsonOnly := []string{"--json", "--help"}
+	m := map[string][]string{}
+	for _, n := range []string{"send", "inbox", "read", "who", "status", "doctor"} {
+		m[n] = all
+	}
+	for _, n := range []string{"serve", "hook", "prompt"} {
+		m[n] = connect
+	}
+	m["join"] = local
+	m["version"], m["key create"] = jsonOnly, jsonOnly
+	return m
+}()
+
+// confOptionSetProblems checks that the Options: section of a command's --help lists exactly the options the command
+// applies: each of its own options in the specification, and the global options confGlobalsOf names for it, each once
+// and nothing else.
+func confOptionSetProblems(spec confSpec, path string, c confCmd, section []string) []string {
+	var p []string
+	globals, ok := confGlobalsOf[path]
+	if !ok {
+		return []string{fmt.Sprintf("options: no entry in confGlobalsOf for %q: say which global options it applies", path)}
+	}
+	root := map[string]bool{}
 	for _, o := range spec.Root.Options {
-		if w := confOptLabel(o) + " " + confFlat(o.Description); !strings.Contains(globals, w) {
-			p = append(p, fmt.Sprintf("global option: want %q in Global options:", w))
+		root[o.Name] = true
+	}
+	want := map[string]bool{}
+	for _, o := range c.Options {
+		want[o.Name] = true
+	}
+	for _, g := range globals {
+		if !root[g] {
+			p = append(p, fmt.Sprintf("options: confGlobalsOf lists %s for %q, which the root of the specification does not have", g, path))
+		}
+		want[g] = true
+	}
+	got := map[string]int{}
+	for _, line := range section {
+		if !strings.HasPrefix(line, "  -") { // a wrapped description is indented further
+			continue
+		}
+		label := strings.TrimSpace(line)
+		if i := strings.Index(label, "  "); i >= 0 {
+			label = label[:i]
+		}
+		for _, w := range strings.Fields(label) {
+			if strings.HasPrefix(w, "--") {
+				got[strings.TrimSuffix(w, ",")]++
+			}
 		}
 	}
+	for o := range want {
+		if got[o] == 0 {
+			p = append(p, fmt.Sprintf("options: %s applies to %q and is not in its Options:", o, path))
+		}
+	}
+	for o, n := range got {
+		if !want[o] {
+			p = append(p, fmt.Sprintf("options: %s is in the Options: of %q and does not apply to it", o, path))
+		}
+		if n > 1 {
+			p = append(p, fmt.Sprintf("options: %s is listed %d times in the Options: of %q", o, n, path))
+		}
+	}
+	sort.Strings(p)
 	return p
 }
 

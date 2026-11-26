@@ -167,6 +167,7 @@ var Who = cmdcore.Command[WhoParams, WhoResult]{
 	Group:       "Everyday",
 	Summary:     "List the endpoints you can see, and which are online.",
 	Description: "List the endpoints you can see, and which are online.",
+	Globals:     cmdcore.GlobalsAll,
 	Examples:    []string{"mash who", "mash who acme.demo --online", "mash who --capability review --online"},
 	Run: func(ctx context.Context, env *cmdcore.Env, p WhoParams) (WhoResult, error) {
 		if p.Online && p.Offline {

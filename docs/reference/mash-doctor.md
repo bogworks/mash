@@ -49,7 +49,7 @@ creds     ok
 server    ok    tls://myserver:4222
 sign-in   ok
 delivery  ok
-refused   ok    no unverified mail was refused
+refused   ok    no message was refused for lacking its sender's signature
 
 No problems.
 ```
@@ -82,7 +82,7 @@ creds     ok
 server    FAIL  the server did not answer: tls://myserver:4222
 sign-in   skip  needs the server
 delivery  skip  needs the server
-refused   ok    no unverified mail was refused
+refused   ok    no message was refused for lacking its sender's signature
 
 1 problem.
 ```
@@ -138,7 +138,7 @@ creds     ok
 server    ok    tls://myserver:4222
 sign-in   ok
 delivery  FAIL  cannot write ~/.local/state/mash/acme.demo.bob
-refused   ok    no unverified mail was refused
+refused   ok    no message was refused for lacking its sender's signature
 
 1 problem.
 ```
@@ -148,7 +148,7 @@ refused   ok    no unverified mail was refused
 Stream: stdout. Exit code: 0.
 
 ```text
-delivery  skip  needs a session
+delivery  skip  checked only inside a Claude Code session
 ```
 
 ### Another session holds the endpoint
@@ -162,7 +162,7 @@ creds     ok
 server    ok    tls://myserver:4222
 sign-in   ok
 delivery  FAIL  another session holds this endpoint
-refused   ok    no unverified mail was refused
+refused   ok    no message was refused for lacking its sender's signature
 
 1 problem.
 ```
@@ -199,7 +199,7 @@ creds     ok
 server    ok    tls://myserver:4222
 sign-in   ok
 delivery  FAIL  this session lost this endpoint to a newer one
-refused   ok    no unverified mail was refused
+refused   ok    no message was refused for lacking its sender's signature
 
 1 problem.
 ```
@@ -215,7 +215,7 @@ creds     ok
 server    ok    tls://myserver:4222
 sign-in   FAIL  this endpoint was deleted; its address cannot be used again
 delivery  skip  needs sign-in
-refused   ok    no unverified mail was refused
+refused   ok    no message was refused for lacking its sender's signature
 
 1 problem.
 hint: mash join <file>
@@ -232,7 +232,7 @@ creds     FAIL  this endpoint was deleted; its address cannot be used again
 server    ok    tls://myserver:4222
 sign-in   skip  needs the creds
 delivery  skip  needs sign-in
-refused   ok    no unverified mail was refused
+refused   ok    no message was refused for lacking its sender's signature
 
 1 problem.
 hint: mash join <file>
@@ -249,7 +249,7 @@ creds     ok
 server    FAIL  the server's certificate is not trusted: tls://myserver:4222
 sign-in   skip  needs the server
 delivery  skip  needs the server
-refused   ok    no unverified mail was refused
+refused   ok    no message was refused for lacking its sender's signature
 
 1 problem.
 ```
@@ -265,7 +265,7 @@ creds     ok
 server    FAIL  the server did not offer TLS: tls://myserver:4222
 sign-in   skip  needs the server
 delivery  skip  needs the server
-refused   ok    no unverified mail was refused
+refused   ok    no message was refused for lacking its sender's signature
 
 1 problem.
 ```
@@ -281,7 +281,7 @@ creds     FAIL  ~/.config/mash/acme.demo.bob.creds is missing
 server    ok    tls://myserver:4222
 sign-in   skip  needs the creds
 delivery  skip  needs sign-in
-refused   ok    no unverified mail was refused
+refused   ok    no message was refused for lacking its sender's signature
 
 1 problem.
 hint: mash join <file>
@@ -298,7 +298,7 @@ creds     ok
 server    ok    tls://myserver:4222
 sign-in   FAIL  the server refused these credentials
 delivery  skip  needs sign-in
-refused   ok    no unverified mail was refused
+refused   ok    no message was refused for lacking its sender's signature
 
 1 problem.
 hint: mash join <file> --replace
@@ -315,7 +315,7 @@ creds     FAIL  ~/.config/mash/acme.demo.bob.creds is not a creds file
 server    ok    tls://myserver:4222
 sign-in   skip  needs the creds
 delivery  skip  needs sign-in
-refused   ok    no unverified mail was refused
+refused   ok    no message was refused for lacking its sender's signature
 
 1 problem.
 hint: mash join <file> --replace
@@ -332,7 +332,7 @@ creds     FAIL  ~/.config/mash/acme.demo.bob.creds can be read by others
 server    ok    tls://myserver:4222
 sign-in   skip  needs the creds
 delivery  skip  needs sign-in
-refused   ok    no unverified mail was refused
+refused   ok    no message was refused for lacking its sender's signature
 
 1 problem.
 ```
@@ -348,7 +348,7 @@ creds     ok
 server    FAIL  the server address is not tls://: nats://myserver:4222
 sign-in   skip  needs the server
 delivery  skip  needs the server
-refused   ok    no unverified mail was refused
+refused   ok    no message was refused for lacking its sender's signature
 
 1 problem.
 ```

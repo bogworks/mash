@@ -152,7 +152,7 @@ func TestEndpointVerbsUsage(t *testing.T) {
 	for _, verb := range []string{"delete", "list", "show"} {
 		for _, flag := range []string{"--help", "-h"} {
 			out, errb, code := h.run("endpoint", verb, flag)
-			if code != 0 || !strings.Contains(out, "Example:") || !strings.Contains(out, "usage: mashctl endpoint "+verb) || errb != "" {
+			if code != 0 || !strings.Contains(out, "Example:") || !strings.Contains(out, "Usage: mashctl endpoint "+verb) || errb != "" {
 				t.Errorf("%s %s: %d %q %q", verb, flag, code, out, errb)
 			}
 		}

@@ -68,7 +68,7 @@
    "text": [
     {
      "case": "Sent",
-     "text": "Mail sent (number 42)",
+     "text": "Mail sent (number 42 in acme.demo.alice's inbox)",
      "stream": "stdout",
      "exit": 0
     }
@@ -172,7 +172,7 @@
    "text": [
     {
      "case": "Messages",
-     "text": "2 messages for acme.demo.alice, 2 new, 1 urgent.\n\nNUMBER  FROM  WHEN     STATE  URGENT  KIND      MESSAGE\n1       bob   10s ago  new    no      task      lunch at noon?\n2       bob   8s ago   new    yes     question  ready?",
+     "text": "2 messages for acme.demo.alice, 2 new, 1 urgent.\n\nNUMBER  FROM  SENT     STATE  URGENT  KIND      MESSAGE\n1       bob   10s ago  new    no      task      lunch at noon?\n2       bob   8s ago   new    yes     question  ready?",
      "stream": "stdout",
      "exit": 0
     }
@@ -490,7 +490,7 @@
    "text": [
     {
      "case": "All well",
-     "text": "config    ok\nclaude    ok    2.1.320\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   ok\ndelivery  ok\nrefused   ok    no unverified mail was refused\n\nNo problems.",
+     "text": "config    ok\nclaude    ok    2.1.320\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   ok\ndelivery  ok\nrefused   ok    no message was refused for lacking its sender's signature\n\nNo problems.",
      "stream": "stdout",
      "exit": 0
     }
@@ -504,7 +504,7 @@
     },
     {
      "case": "Server not answering",
-     "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    FAIL  the server did not answer: tls://myserver:4222\nsign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no unverified mail was refused\n\n1 problem.",
+     "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    FAIL  the server did not answer: tls://myserver:4222\nsign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no message was refused for lacking its sender's signature\n\n1 problem.",
      "stream": "stdout",
      "exit": 1
     },
@@ -516,13 +516,13 @@
     },
     {
      "case": "The endpoint was deleted, seen from another machine, with one hint",
-     "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   FAIL  this endpoint was deleted; its address cannot be used again\ndelivery  skip  needs sign-in\nrefused   ok    no unverified mail was refused\n\n1 problem.\nhint: mash join <file>",
+     "text": "config    ok\nclaude    skip  no claude command found\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   FAIL  this endpoint was deleted; its address cannot be used again\ndelivery  skip  needs sign-in\nrefused   ok    no message was refused for lacking its sender's signature\n\n1 problem.\nhint: mash join <file>",
      "stream": "stdout",
      "exit": 1
     },
     {
      "case": "The endpoint was deleted, on the machine that deleted it, with one hint",
-     "text": "config    ok\nclaude    skip  no claude command found\ncreds     FAIL  this endpoint was deleted; its address cannot be used again\nserver    ok    tls://myserver:4222\nsign-in   skip  needs the creds\ndelivery  skip  needs sign-in\nrefused   ok    no unverified mail was refused\n\n1 problem.\nhint: mash join <file>",
+     "text": "config    ok\nclaude    skip  no claude command found\ncreds     FAIL  this endpoint was deleted; its address cannot be used again\nserver    ok    tls://myserver:4222\nsign-in   skip  needs the creds\ndelivery  skip  needs sign-in\nrefused   ok    no message was refused for lacking its sender's signature\n\n1 problem.\nhint: mash join <file>",
      "stream": "stdout",
      "exit": 1
     },

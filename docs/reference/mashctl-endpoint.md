@@ -30,7 +30,7 @@ The global options of `mashctl` also apply: see
 Stream: stdout. Exit code: 0.
 
 ```text
-usage: mashctl endpoint <command> [args]
+Usage: mashctl endpoint <command> [args]
 commands:
   list [prefix] [--wide]      list the endpoints
   show <address>              show one endpoint

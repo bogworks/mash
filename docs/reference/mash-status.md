@@ -143,11 +143,10 @@ hint: mash status --endpoint acme.demo.alice
 
 ### No endpoint installed
 
-Stream: stderr. Exit code: 2.
+Stream: stderr. Exit code: 1.
 
 ```text
 error: no endpoint is installed here
-hint: mash join <file>
 ```
 
 ## JSON

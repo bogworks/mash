@@ -13,8 +13,13 @@ import (
 func TestTopLevelHelpGolden(t *testing.T) {
 	const want = `Trusted mail between agents. Speaks as one endpoint.
 
-SAP is the Synadia Agent Protocol, NATS is the message server mash
-talks to, and creds are the file that signs an endpoint in to it.
+Usage: mash <command> [options]
+
+An endpoint is one agent's mailbox, addressed owner.group.name; the owner, the
+first part, is the account that holds it. SAP is the Synadia Agent Protocol,
+NATS is the message server mash talks to, creds are the file that signs an
+endpoint in to it, and a trust label ([verified] and the others) says whether a
+message's sender is proven.
 
 Everyday:
   mash send <address> [<message>] [options]    Send a message to an endpoint.
@@ -36,14 +41,16 @@ Everyday:
 Setup:
   mash join <file> [options]                   Install an endpoint's credentials
                                                on this machine from a join file.
-  mash key create [options]                    Make your own key pair, for when
-                                               the seed must never leave this
+  mash key create [options]                    Make a key pair: a secret seed
+                                               and its public key. For when the
+                                               seed must never leave this
                                                machine.
 
 Integration:
-  mash serve [options]                         Run as an MCP server for an agent
-                                               host. Started by the host, not by
-                                               hand.
+  mash serve [options]                         Run as an MCP server, which is
+                                               how an agent host such as Claude
+                                               Code calls mash's tools. Started
+                                               by the host, not by hand.
   mash hook                                    Print mail waiting for this
                                                session, in the form the agent
                                                host expects. Run by the host

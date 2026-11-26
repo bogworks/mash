@@ -100,7 +100,7 @@ The same settings serve `mashctl`, `mash serve`, `mash hook` and the other `mash
 
 Every mash connection requires TLS, and the one override is the environment variable `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1`; the rules are on [TLS](nats-server.md#tls). The release's local setup script, `mash-local-nats-setup.sh` (see the [setup script reference](reference/setup.md)), makes a private certificate authority and a server certificate for 127.0.0.1, so the local quick start runs over TLS with no extra setting.
 
-A plain URL without it fails with exit code 2 and this text:
+A plain URL without it fails with exit code 1 and this text:
 
 ```
 mash: refusing a plain nats:// connection to "HOST": every mash connection requires TLS, to any host (loopback included); set MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1 to allow plain text; the fix is to use a tls:// URL with the server's certificate (MASH_CA or "ca" for a private CA)

@@ -2,7 +2,8 @@ Generated from spec/*.json by go run ./scripts/refgen. Do not edit.
 
 # mash key create
 
-Make a seed and its public key.
+Make a key pair: a secret seed and its public key. For when the seed must
+never leave this machine.
 
 Release: 0.5.9. Group: Setup.
 
@@ -50,6 +51,27 @@ Stream: stderr. Exit code: 1.
 
 ```text
 error: bob.seed already exists; nothing was written
+```
+
+### mash key create --help
+
+Stream: stdout. Exit code: 0.
+
+```text
+Make a key pair: a secret seed and its public key. For when the seed must never
+leave this machine.
+
+Usage:
+  mash key create [options]
+
+Examples:
+  mash key create --out bob.seed
+
+Options:
+  --out <path>  Where to write the seed. The public key goes beside it with .pub
+                added. Default: mash.seed in the current folder.
+  --json        Print the result as JSON.
+  -h, --help    Show help for the command.
 ```
 
 ## JSON

@@ -20,7 +20,7 @@ func TestDoctorNoServerConfigured(t *testing.T) {
 	r := w.run("doctor")
 	want := "config     FAIL  no server is configured\nserver     skip  needs the config\nsign-in    skip  needs the server\n" +
 		"storage    skip  needs sign-in\nendpoints  skip  needs the storage\nkeys       skip  needs sign-in\n\n1 problem.\n"
-	if r.out != want || r.errs != "hint: mashctl init --config <file>\n" || r.code != 1 {
+	if r.out != want || r.errs != "" || r.code != 1 {
 		t.Errorf("doctor: %d %q %q", r.code, r.out, r.errs)
 	}
 }

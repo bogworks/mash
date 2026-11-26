@@ -39,7 +39,7 @@ var commandEntries = []cmdcore.Entry{
 
 // helpFrame is what --help prints after a command's own options. The descriptions are the specification's.
 var helpFrame = cmdcore.Frame{Tool: "mash", Globals: []cmdcore.HelpOption{
-	{Flag: "--endpoint", Value: "address", Desc: "Which endpoint to act as, as owner.group.name. Not needed for the everyday and setup commands when only one is installed here. mash serve and mash hook always need it said: a session becomes an endpoint only because someone chose that."},
+	{Flag: "--endpoint", Value: "address", Desc: "Which endpoint to act as, as owner.group.name. Not needed for the everyday and setup commands when only one is installed here. mash serve and mash hook always need it said: a session becomes an endpoint only because someone chose that.", CmdDesc: "Which endpoint to act as, as owner.group.name. Not needed when only one is installed here."},
 	{Flag: "--creds", Value: "path", Desc: "The creds file to sign in with. Default: <config folder>/<address>.creds."},
 	{Flag: "--server", Value: "url", Desc: "The server address. May be given more than once."},
 	{Flag: "--ca", Value: "path", Desc: "The certificate authority's certificate, when the server uses its own."},

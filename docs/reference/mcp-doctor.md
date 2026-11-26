@@ -83,7 +83,7 @@ creds     ok
 server    ok    tls://myserver:4222
 sign-in   ok
 delivery  ok
-refused   ok    no unverified mail was refused
+refused   ok    no message was refused for lacking its sender's signature
 
 No problems.
 ```
@@ -118,7 +118,7 @@ creds     ok
 server    FAIL  the server did not answer: tls://myserver:4222
 sign-in   skip  needs the server
 delivery  skip  needs the server
-refused   ok    no unverified mail was refused
+refused   ok    no message was refused for lacking its sender's signature
 
 1 problem.
 ```
@@ -146,7 +146,7 @@ creds     ok
 server    ok    tls://myserver:4222
 sign-in   FAIL  this endpoint was deleted; its address cannot be used again
 delivery  skip  needs sign-in
-refused   ok    no unverified mail was refused
+refused   ok    no message was refused for lacking its sender's signature
 
 1 problem.
 hint: mash join <file>
@@ -163,7 +163,7 @@ creds     FAIL  this endpoint was deleted; its address cannot be used again
 server    ok    tls://myserver:4222
 sign-in   skip  needs the creds
 delivery  skip  needs sign-in
-refused   ok    no unverified mail was refused
+refused   ok    no message was refused for lacking its sender's signature
 
 1 problem.
 hint: mash join <file>

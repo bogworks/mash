@@ -165,7 +165,7 @@ func TestDoctorUsageAndRemovedVerbs(t *testing.T) {
 	}
 	for _, h := range []string{"--help", "-h"} {
 		out, _, code := ctlRun(t, f.e, "doctor", h)
-		if code != 0 || !strings.HasPrefix(out, "usage: mashctl doctor") {
+		if code != 0 || !strings.HasPrefix(out, "Usage: mashctl doctor") {
 			t.Errorf("doctor %s: %d %q", h, code, out)
 		}
 	}
@@ -185,7 +185,7 @@ func TestDoctorStopsAtTheFirstFailedCheck(t *testing.T) {
 		t.Fatalf("%v\n%s\n%s", err, out.String(), errb.String())
 	}
 	if code != 1 || rep.Problems != 1 || rep.Warnings != 0 || len(rep.Checks) != 6 || rep.Checks[0].Name != "config" || rep.Checks[0].State != "fail" ||
-		rep.Checks[0].Detail == "" || rep.Checks[0].Fix == nil || *rep.Checks[0].Fix != "mashctl init --config <file>" {
+		rep.Checks[0].Detail == "" || rep.Checks[0].Fix != nil {
 		t.Fatalf("%d %+v", code, rep)
 	}
 	for i, needs := range []string{"needs the config", "needs the server", "needs sign-in", "needs the storage", "needs sign-in"} {
@@ -196,7 +196,7 @@ func TestDoctorStopsAtTheFirstFailedCheck(t *testing.T) {
 	out.Reset()
 	code = runEnv([]string{"doctor"}, func(k string) string { return env[k] }, &out, &errb)
 	if code != 1 || !strings.HasPrefix(out.String(), "config     FAIL  ") || !strings.HasSuffix(out.String(), "\n\n1 problem.\n") ||
-		strings.Count(out.String(), "\n") != 8 || strings.Contains(out.String(), "hint:") || !strings.HasSuffix(errb.String(), "hint: mashctl init --config <file>\n") {
+		strings.Count(out.String(), "\n") != 8 || strings.Contains(out.String(), "hint:") || strings.Contains(errb.String(), "hint:") {
 		t.Fatalf("%d %q stderr %q", code, out.String(), errb.String())
 	}
 }
@@ -604,9 +604,9 @@ func TestDoctorSkipRowsInText(t *testing.T) {
 	}
 }
 
-// A plain URL anywhere in the list is refused by the sign-in step, and that is a configuration error (exit 2), as it is
+// A plain URL anywhere in the list is refused by the sign-in step, and that is a failure (exit 1), as it is
 // when the first server is the plain one.
-func TestDoctorPlainServerAfterReachableOneIsExit2(t *testing.T) {
+func TestDoctorPlainServerAfterReachableOneIsExit1(t *testing.T) {
 	ca, cert, key := writeTestPKI(t, t.TempDir())
 	e := newApplyEnvOpts(t, nil, func(o *server.Options) {
 		cfg, err := server.GenTLSConfig(&server.TLSConfigOpts{CertFile: cert, KeyFile: key})
@@ -620,13 +620,13 @@ func TestDoctorPlainServerAfterReachableOneIsExit2(t *testing.T) {
 	live := fmt.Sprintf("tls://127.0.0.1:%d", e.srv.Addr().(*net.TCPAddr).Port)
 	e.env["MASH_SERVER"] = live + ",nats://127.0.0.1:1"
 	out, errb, code := e.run("doctor")
-	if code != 2 {
-		t.Fatalf("exit %d, want 2: %q %q", code, out, errb)
+	if code != 1 {
+		t.Fatalf("exit %d, want 1: %q %q", code, out, errb)
 	}
 }
 
 // The same refusal when the first server cannot be reached: the result does not depend on which server answers.
-func TestDoctorPlainServerAfterUnreachableOneIsExit2(t *testing.T) {
+func TestDoctorPlainServerAfterUnreachableOneIsExit1(t *testing.T) {
 	ca, cert, key := writeTestPKI(t, t.TempDir())
 	e := newApplyEnvOpts(t, nil, func(o *server.Options) {
 		cfg, err := server.GenTLSConfig(&server.TLSConfigOpts{CertFile: cert, KeyFile: key})
@@ -639,8 +639,8 @@ func TestDoctorPlainServerAfterUnreachableOneIsExit2(t *testing.T) {
 	e.env["MASH_CA"] = ca
 	e.env["MASH_SERVER"] = "tls://127.0.0.1:1,nats://127.0.0.1:2"
 	out, errb, code := e.run("doctor")
-	if code != 2 {
-		t.Fatalf("exit %d, want 2: %q %q", code, out, errb)
+	if code != 1 {
+		t.Fatalf("exit %d, want 1: %q %q", code, out, errb)
 	}
 }
 

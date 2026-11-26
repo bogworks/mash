@@ -4,7 +4,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -15,7 +14,6 @@ import (
 	"github.com/bogworks/mash/internal/cmdcore"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/ctl"
-	"github.com/bogworks/mash/internal/natsauth"
 )
 
 // helpFrame is the global options `mashctl --help` lists. The descriptions are the specification's.
@@ -34,31 +32,8 @@ func main() {
 	os.Exit(run(os.Args[1:], os.Getenv, os.LookupEnv, os.Stdout, os.Stderr))
 }
 
-// codedError is an error that says its message and carries exit code 2.
-type codedError struct{ error }
-
-func (codedError) ExitCode() int { return 2 }
-
-func (e codedError) Unwrap() error { return e.error }
-
-// withPlainCode is out, made to exit 2 when its cause is natsauth's refusal of a plain URL. The code comes from the
-// error itself, never from the text a command printed.
-func withPlainCode(out, cause error) error {
-	var p *natsauth.PlainRefusalError
-	if !errors.As(cause, &p) {
-		return out
-	}
-	var e *cliframe.Error
-	if errors.As(out, &e) && e != nil {
-		c := *e
-		c.Code = 2
-		return &c
-	}
-	return codedError{out}
-}
-
 // run is main with its environment injected, for tests. The encryption override is checked once, here, before any
-// command dispatches: a removed name or a bad value is refused for every command (exit 2, help and version included),
+// command dispatches: a removed name or a bad value is refused for every command (exit 1, help and version included),
 // and while the override is on every command prints the warning on stderr, once.
 func run(args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
 	return runVerbs(args, env, lookup, stdout, stderr)
@@ -66,11 +41,11 @@ func run(args []string, env func(string) string, lookup config.Lookup, stdout, s
 
 func runVerbs(args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
 	// The encryption override is the very first thing checked, before any argument is read (bare `mashctl`, a removed
-	// command, a bad flag): a removed name or a bad value is refused (exit 2), and while the override is on every
+	// command, a bad flag): a removed name or a bad value is refused (exit 1), and while the override is on every
 	// invocation prints the warning on stderr, once.
 	config.WarnSkipEncryption(lookup, stderr)
 	if skipErr := config.CheckSkipEncryption(lookup, config.HomeDir(env)); skipErr != nil {
-		return cliframe.Report(stdout, stderr, cliframe.Usagef("%s", skipErr.Msg()).WithHint(skipErr.Hint()), slices.Contains(args, "--json"))
+		return cliframe.Report(stdout, stderr, cliframe.Failf("%s", skipErr.Msg()).WithHint(skipErr.Hint()), slices.Contains(args, "--json"))
 	}
 	if len(args) == 0 {
 		fmt.Fprint(stderr, ctl.Usage("mashctl"))
@@ -97,13 +72,13 @@ func runVerbs(args []string, env func(string) string, lookup config.Lookup, stdo
 	args = rest0
 	env, lookup = global.Shadow(spec, env, lookup)
 	if skipErr := config.CheckSkipEncryption(lookup, config.HomeDir(env)); skipErr != nil { // a --config-dir flag may point at a file with the removed key: refusal only, the warning is out
-		return cliframe.Report(stdout, stderr, cliframe.Usagef("%s", skipErr.Msg()).WithHint(skipErr.Hint()), jsonRequested(args[1:]) || global.JSON)
+		return cliframe.Report(stdout, stderr, cliframe.Failf("%s", skipErr.Msg()).WithHint(skipErr.Hint()), jsonRequested(args[1:]) || global.JSON)
 	}
 	switch args[0] {
 	case "version":
 		return runVersion(args[1:], stdout, stderr)
 	case "help", "-h", "--help":
-		fmt.Fprint(stdout, ctl.TopHelp("mashctl", cmdcore.Glossary, cmdcore.GlobalOptionsUnder(helpFrame, "Global options (before or after the verb):")))
+		fmt.Fprint(stdout, ctl.TopHelp("mashctl", cmdcore.Glossary, cmdcore.GlobalOptionsUnder(helpFrame, "Global options (before or after the verb):")+"\n\nRun mashctl <command> --help for a command's options."))
 		return 0
 	}
 	if args[0] == "doctor" && helpRequested(args[0], args[1:]) { // its usage is its own text
@@ -179,7 +154,7 @@ func verbUsage(args []string) string {
 			}
 		}
 		if b.Len() > 0 {
-			return "usage:\n" + b.String()
+			return "Usage:\n" + b.String()
 		}
 	}
 	return ctl.Usage("mashctl")

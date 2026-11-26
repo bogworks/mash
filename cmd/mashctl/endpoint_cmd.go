@@ -185,12 +185,7 @@ func failErr(err error) error {
 	for _, p := range []string{"mash: ", "mashctl: "} {
 		msg = strings.TrimPrefix(msg, p)
 	}
-	out := cliframe.Failf("%s", msg)
-	var xc interface{ ExitCode() int } // the error carries its own code (natsauth's refusal of a plain URL is 2)
-	if errors.As(err, &xc) && xc.ExitCode() == 2 {
-		out.Code = 2
-	}
-	return out
+	return cliframe.Failf("%s", msg)
 }
 
 // parseEpAddress reads an endpoint address: owner.group.name, dotted, exactly three parts.

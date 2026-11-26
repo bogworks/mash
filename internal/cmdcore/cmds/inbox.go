@@ -147,7 +147,7 @@ const previewCols = 79
 
 // inboxPrefixWidth is the display width of the columns before MESSAGE of the table without --wide, for the rows.
 func inboxPrefixWidth(rows []inboxRow) int {
-	w := [6]int{len("NUMBER"), len("FROM"), len("WHEN"), len("STATE"), len("URGENT"), len("KIND")}
+	w := [6]int{len("NUMBER"), len("FROM"), len("SENT"), len("STATE"), len("URGENT"), len("KIND")}
 	for _, r := range rows {
 		for i, c := range []string{r.number, r.from, r.when, r.state, r.urgent, r.kind} {
 			if l := render.DisplayWidth(c); l > w[i] {
@@ -196,7 +196,7 @@ func (r InboxResult) Text(o cmdcore.Opts) string {
 	if len(r.rows) == 0 {
 		return b.String()
 	}
-	cols := []string{"number", "from", "when", "state", "urgent", "kind"}
+	cols := []string{"number", "from", "sent", "state", "urgent", "kind"}
 	if r.wide {
 		cols = append(cols, "trust", "size")
 	}
@@ -226,6 +226,7 @@ var Inbox = cmdcore.Command[InboxParams, InboxResult]{
 	Group:       "Everyday",
 	Summary:     "List the messages this endpoint has received.",
 	Description: "List the messages this endpoint has received.",
+	Globals:     cmdcore.GlobalsAll,
 	Examples:    []string{"mash inbox", "mash inbox --new"},
 	Run: func(ctx context.Context, env *cmdcore.Env, p InboxParams) (InboxResult, error) {
 		limit := p.Limit
@@ -370,6 +371,7 @@ var Read = cmdcore.Command[ReadParams, ReadResult]{
 	Group:       "Everyday",
 	Summary:     "Show one message in full.",
 	Description: "Show one message in full.",
+	Globals:     cmdcore.GlobalsAll,
 	Examples:    []string{"mash read 2"},
 	Run: func(ctx context.Context, env *cmdcore.Env, p ReadParams) (ReadResult, error) {
 		if p.Number < 1 {

@@ -86,8 +86,8 @@ func TestSkipEncryptionRefusesTheOldVariableAndBadValues(t *testing.T) {
 		env[tc.key] = tc.val
 		for _, args := range [][]string{{"who"}, {"who", "--json"}} {
 			out, errb, code := runCapture(env, args...)
-			if code != 2 || !strings.Contains(strings.ReplaceAll(out+errb, `\"`, `"`), tc.want) {
-				t.Errorf("%s %v: exit %d, want 2 with %q: %q %q", tc.name, args, code, tc.want, out, errb)
+			if code != 1 || !strings.Contains(strings.ReplaceAll(out+errb, `\"`, `"`), tc.want) {
+				t.Errorf("%s %v: exit %d, want 1 with %q: %q %q", tc.name, args, code, tc.want, out, errb)
 			}
 		}
 		if _, errb, _ := runCapture(env, "inbox"); !strings.HasPrefix(errb, "error: ") {
@@ -106,8 +106,8 @@ func TestSkipEncryptionRefusesTheOldConfigKey(t *testing.T) {
 		env["MASH_CONFIG_DIR"] = dir
 		_, errb, code := runCapture(env, "inbox")
 		want := "error: insecure_plaintext in config.json is no longer read; set " + skipVar + "=1 instead"
-		if code != 2 || !strings.Contains(errb, want) {
-			t.Errorf("%s: exit %d, want 2 with %q: %q", v, code, want, errb)
+		if code != 1 || !strings.Contains(errb, want) {
+			t.Errorf("%s: exit %d, want 1 with %q: %q", v, code, want, errb)
 		}
 	}
 }
@@ -134,8 +134,8 @@ func TestSkipEncryptionRefusalReachesEveryCommand(t *testing.T) {
 		env[tc.key] = tc.val
 		for _, args := range [][]string{{"version"}, {"--help"}, {"help"}, {"plugin"}, {"key"}, {"credential"}, {"status"}, {"doctor"}, {"send", "--help"}} {
 			out, errb, code := runCapture(env, args...)
-			if code != 2 || !strings.Contains(out+errb, tc.want) {
-				t.Errorf("%s=%s %v: exit %d, want 2 with %q: %q %q", tc.key, tc.val, args, code, tc.want, out, errb)
+			if code != 1 || !strings.Contains(out+errb, tc.want) {
+				t.Errorf("%s=%s %v: exit %d, want 1 with %q: %q %q", tc.key, tc.val, args, code, tc.want, out, errb)
 			}
 		}
 	}
@@ -147,7 +147,7 @@ func TestSkipEncryptionRefusalReachesEveryCommand(t *testing.T) {
 	}
 	env["MASH_CONFIG_DIR"] = dir
 	for _, args := range [][]string{{"version"}, {"--help"}, {"plugin"}} {
-		if _, errb, code := runCapture(env, args...); code != 2 || !strings.Contains(errb, "insecure_plaintext in config.json is no longer read") {
+		if _, errb, code := runCapture(env, args...); code != 1 || !strings.Contains(errb, "insecure_plaintext in config.json is no longer read") {
 			t.Errorf("old config key %v: exit %d: %q", args, code, errb)
 		}
 	}
@@ -237,8 +237,8 @@ func TestSkipEncryptionWarnsBeforeArgumentHandling(t *testing.T) {
 		e[tc.key] = tc.val
 		for _, args := range [][]string{{}, {"--no-such-flag"}, {"version"}} {
 			_, errb, code := runCapture(e, args...)
-			if code != 2 || !strings.HasSuffix(errb, tc.hint) || strings.Contains(errb, "mash doctor") {
-				t.Errorf("%s=%s %v: exit %d, stderr %q, want 2 ending %q", tc.key, tc.val, args, code, errb, tc.hint)
+			if code != 1 || !strings.HasSuffix(errb, tc.hint) || strings.Contains(errb, "mash doctor") {
+				t.Errorf("%s=%s %v: exit %d, stderr %q, want 1 ending %q", tc.key, tc.val, args, code, errb, tc.hint)
 			}
 		}
 	}
@@ -249,7 +249,7 @@ func TestSkipEncryptionWarnsBeforeArgumentHandling(t *testing.T) {
 	}
 	e["MASH_CONFIG_DIR"] = dir
 	want := "hint: remove insecure_plaintext from config.json; use " + skipVar + "=1\n"
-	if _, errb, code := runCapture(e); code != 2 || !strings.HasSuffix(errb, want) {
+	if _, errb, code := runCapture(e); code != 1 || !strings.HasSuffix(errb, want) {
 		t.Errorf("old config key, bare: exit %d, stderr %q, want hint %q", code, errb, want)
 	}
 }
@@ -280,7 +280,7 @@ func TestSkipEncryptionRemovedKeyFoundWithoutHomeInEnv(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, args := range [][]string{{"version"}, {"--help"}} {
-		if _, errb, code := runCapture(map[string]string{}, args...); code != 2 || !strings.Contains(errb, "insecure_plaintext in config.json is no longer read") {
+		if _, errb, code := runCapture(map[string]string{}, args...); code != 1 || !strings.Contains(errb, "insecure_plaintext in config.json is no longer read") {
 			t.Errorf("%v: exit %d: %q", args, code, errb)
 		}
 	}
@@ -313,7 +313,7 @@ func TestSkipEncryptionWarnsOnARefusedCommandToo(t *testing.T) {
 	env["MASH_INSECURE_PLAINTEXT"] = "1"
 	for _, args := range [][]string{{"version"}, {"status"}, {"doctor"}} {
 		out, errb, code := runCapture(env, args...)
-		if code != 2 || !strings.HasPrefix(errb, skipWarning+"\n") || strings.Count(errb, skipWarning) != 1 || strings.Contains(out, "no encryption to the server") {
+		if code != 1 || !strings.HasPrefix(errb, skipWarning+"\n") || strings.Count(errb, skipWarning) != 1 || strings.Contains(out, "no encryption to the server") {
 			t.Errorf("removed name %v: exit %d, stderr %q, stdout %q", args, code, errb, out)
 		}
 	}
@@ -324,7 +324,7 @@ func TestSkipEncryptionWarnsOnARefusedCommandToo(t *testing.T) {
 	}
 	env["MASH_CONFIG_DIR"] = dir
 	_, errb, code := runCapture(env, "version")
-	if code != 2 || !strings.HasPrefix(errb, skipWarning+"\n") || strings.Count(errb, skipWarning) != 1 {
+	if code != 1 || !strings.HasPrefix(errb, skipWarning+"\n") || strings.Count(errb, skipWarning) != 1 {
 		t.Errorf("removed key: exit %d, stderr %q", code, errb)
 	}
 }

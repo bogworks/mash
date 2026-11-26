@@ -279,7 +279,7 @@ func confSpecTests(t *testing.T) []confTestFunc {
 }
 
 // noEndpoint is what rules.json says a shell with no endpoint installed gets, from any command that needs one.
-const confNoEndpoint = "error: no endpoint is installed here\nhint: mash join <file>\n"
+const confNoEndpoint = "error: no endpoint is installed here\n"
 
 func confRules(t *testing.T, spec confSpec) {
 	rules := map[string]bool{}
@@ -364,17 +364,17 @@ func confRules(t *testing.T, spec confSpec) {
 				t.Run("no endpoint", func(t *testing.T) {
 					r := runMash(env, append(append([]string{}, words...), pos...)...)
 					var p []string
-					if r.code != 2 || r.out != "" || r.errs != confNoEndpoint {
-						p = append(p, fmt.Sprintf("with no endpoint installed: want exit 2, no stdout, stderr %q; got exit %d, stdout %q, stderr %q", confNoEndpoint, r.code, r.out, r.errs))
+					if r.code != 1 || r.out != "" || r.errs != confNoEndpoint {
+						p = append(p, fmt.Sprintf("with no endpoint installed: want exit 1, no stdout, stderr %q; got exit %d, stdout %q, stderr %q", confNoEndpoint, r.code, r.out, r.errs))
 					}
 					confFail(t, "no-endpoint "+name, p)
 				})
 				t.Run("no endpoint as json", func(t *testing.T) {
 					r := runMash(env, append(append([]string{}, words...), append(pos, "--json")...)...)
-					want := `{"error":"no endpoint is installed here","hint":"mash join <file>"}` + "\n"
+					want := `{"error":"no endpoint is installed here"}` + "\n"
 					var p []string
-					if r.code != 2 || r.out != want || r.errs != "" {
-						p = append(p, fmt.Sprintf("with no endpoint installed and --json: want exit 2, stdout %q, no stderr; got exit %d, stdout %q, stderr %q", want, r.code, r.out, r.errs))
+					if r.code != 1 || r.out != want || r.errs != "" {
+						p = append(p, fmt.Sprintf("with no endpoint installed and --json: want exit 1, stdout %q, no stderr; got exit %d, stdout %q, stderr %q", want, r.code, r.out, r.errs))
 					}
 					confFail(t, "no-endpoint-json "+name, p)
 				})

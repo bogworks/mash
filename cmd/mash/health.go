@@ -238,7 +238,7 @@ func (h *healthSvc) refusedCheck() cmds.HealthCheck {
 	n := endpoint.RefusedCount(h.cfg)
 	switch n {
 	case 0:
-		return cmds.HealthCheck{Name: cmds.CheckRefused, State: cmds.CheckOK, Detail: "no unverified mail was refused"}
+		return cmds.HealthCheck{Name: cmds.CheckRefused, State: cmds.CheckOK, Detail: "no message was refused for lacking its sender's signature"}
 	case 1:
 		return cmds.HealthCheck{Name: cmds.CheckRefused, State: cmds.CheckWarn, Detail: "1 unverified message was refused"}
 	}
@@ -347,7 +347,7 @@ func (h *healthSvc) Health(ctx context.Context) (cmds.HealthReport, error) {
 	case !signedIn:
 		rep.Checks = append(rep.Checks, cmds.HealthCheck{Name: cmds.CheckDelivery, State: cmds.CheckSkip, Detail: "needs sign-in"})
 	case !h.session: // a shell has no session to deliver to
-		rep.Checks = append(rep.Checks, cmds.HealthCheck{Name: cmds.CheckDelivery, State: cmds.CheckSkip, Detail: "needs a session"})
+		rep.Checks = append(rep.Checks, cmds.HealthCheck{Name: cmds.CheckDelivery, State: cmds.CheckSkip, Detail: "checked only inside a Claude Code session"})
 	default:
 		rep.Checks = append(rep.Checks, h.deliveryCheck())
 	}

@@ -47,6 +47,12 @@ admin_timeout (MASH_LEASE_RETRY, MASH_TRANSIENT_BUDGET, MASH_TRANSIENT_MAX,
 MASH_CLI_TIMEOUT, MASH_ADMIN_TIMEOUT).
 `
 
+// helpFooter is the last line of the tool's own help.
+const helpFooter = "Run mash <command> --help for a command's options.\n"
+
+// endpointAlways is the --endpoint text in the help of the commands that always need an endpoint said.
+const endpointAlways = "Which endpoint to act as, as owner.group.name. Always needed: a session becomes an endpoint only because someone chose that."
+
 // helpCol is the column the commands' one-line descriptions start at.
 const helpCol = 47
 
@@ -67,9 +73,10 @@ var helpLayout = map[string][]string{
 var handHelp = map[string]cmdcore.StaticCommand{
 	"serve": {
 		Name:        "serve",
-		Description: "Run as an MCP server for an agent host. Started by the host, not by hand.",
+		Description: "Run as an MCP server, which is how an agent host such as Claude Code calls mash's tools. Started by the host, not by hand.",
 		Usage:       "mash serve [options]",
-		Examples:    []string{"mash serve"},
+		Globals:     cmdcore.GlobalsConnect,
+		Override:    map[string]string{"--endpoint": endpointAlways},
 		Options: [][2]string{
 			{"--wake-count <n>", "Wake the session when more than this many messages are waiting. Default 15; 0 turns it off."},
 			{"--wake-age <duration>", "Wake the session when the oldest waiting message is older than this. Default 1h; 0 turns it off."},
@@ -80,14 +87,15 @@ var handHelp = map[string]cmdcore.StaticCommand{
 		Name:        "hook",
 		Description: "Print mail waiting for this session, in the form the agent host expects. Run by the host after each tool call and with each prompt.",
 		Usage:       "mash hook",
-		Examples:    []string{"mash hook"},
+		Globals:     cmdcore.GlobalsConnect,
+		Override:    map[string]string{"--endpoint": endpointAlways},
 	},
 	"prompt": {
 		Name:        "prompt",
 		Description: "Ask an endpoint a live question and wait for its answer. Not stored: if the recipient is not there, it fails.",
 		Usage:       "mash prompt <address> <text>",
-		Examples:    []string{`mash prompt acme.demo.alice "are you there?"`},
 		Arguments:   [][2]string{{"address", "Who to ask."}, {"text", "The question."}},
+		Globals:     cmdcore.GlobalsConnect,
 	},
 }
 
@@ -104,7 +112,7 @@ var handCommands = map[string][2]string{
 // the table that the layout does not name is listed last under its own group.
 func usageFor(r *cmdcore.Registry) string {
 	var b strings.Builder
-	b.WriteString(helpIntro + "\n\n" + cmdcore.Glossary + "\n")
+	b.WriteString(helpIntro + "\n\nUsage: mash <command> [options]\n\n" + cmdcore.Glossary + "\n")
 	for _, g := range helpGroups {
 		b.WriteString("\n" + g + ":\n")
 		names := helpLayout[g]
@@ -121,7 +129,7 @@ func usageFor(r *cmdcore.Registry) string {
 			}
 		}
 	}
-	return b.String() + "\n" + cmdcore.GlobalOptions(helpFrame) + "\n\n" + helpTail
+	return b.String() + "\n" + cmdcore.GlobalOptions(helpFrame) + "\n\n" + helpTail + "\n" + helpFooter
 }
 
 // usage is the help of the command table.
@@ -211,7 +219,7 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 		endpoint.SetCommit(c)
 	}
 	// The encryption override is the very first thing checked, before any argument is read (bare `mash`, a bad flag,
-	// help and version included): a removed name or a bad value is refused (exit 2), and while the override is on
+	// help and version included): a removed name or a bad value is refused (exit 1), and while the override is on
 	// every invocation prints the warning on stderr, once. A hook never blocks the session: it says the refusal on
 	// stderr, exits 0, and reads and writes nothing.
 	config.WarnSkipEncryption(lookup, stderr)
@@ -220,7 +228,7 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 			fmt.Fprintf(stderr, "mash hook: %s\n", skipErr.Msg())
 			return 0
 		}
-		return cliframe.Report(stdout, stderr, cliframe.Usagef("%s", skipErr.Msg()).WithHint(skipErr.Hint()), slices.Contains(args, "--json"))
+		return cliframe.Report(stdout, stderr, cliframe.Failf("%s", skipErr.Msg()).WithHint(skipErr.Hint()), slices.Contains(args, "--json"))
 	}
 	// An error before a command runs is one framed error (cliframe.Report): "error: MSG" and a hint on stderr, or with
 	// --json {"error","hint"} on stdout and nothing on stderr. The code is the error's own (1 failure, 2 usage).
@@ -251,7 +259,7 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 			fmt.Fprintf(stderr, "mash hook: %s\n", skipErr.Msg())
 			return 0
 		}
-		return cliframe.Report(stdout, stderr, cliframe.Usagef("%s", skipErr.Msg()).WithHint(skipErr.Hint()), global.JSON)
+		return cliframe.Report(stdout, stderr, cliframe.Failf("%s", skipErr.Msg()).WithHint(skipErr.Hint()), global.JSON)
 	}
 	var serr error
 	if args, env, lookup, serr = serveFlags(args, env, lookup); serr != nil {
@@ -348,9 +356,9 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 		// drain mail into the wrong place.
 		var herr error
 		if adapter, herr = host.Select(cfg.Host); herr != nil {
-			if args[0] == "hook" { // as it was: the hook's own line, nothing framed
+			if args[0] == "hook" { // the hook's own line, nothing framed; it exits 0 whatever happens
 				fmt.Fprintln(stderr, herr)
-				return 1
+				return 0
 			}
 			return cliframe.Report(stdout, stderr, cliframe.Failf("%s", strings.TrimPrefix(herr.Error(), "mash: ")).WithHint("mash doctor"), jsonOut)
 		}
@@ -369,8 +377,8 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 		cfgFail = cliframe.Failf("%s", strings.TrimPrefix(err.Error(), "mash: ")).WithHint("mash doctor")
 	}
 	var skipErr *config.SkipEncryptionError
-	if errors.As(err, &skipErr) && args[0] != "hook" && !report { // the removed names or a bad value: a configuration error, exit 2
-		return cliframe.Report(stdout, stderr, cliframe.Usagef("%s", skipErr.Msg()).WithHint("mash doctor"), jsonOut)
+	if errors.As(err, &skipErr) && args[0] != "hook" && !report { // the removed names or a bad value: a configuration error, exit 1
+		return cliframe.Report(stdout, stderr, cliframe.Failf("%s", skipErr.Msg()).WithHint("mash doctor"), jsonOut)
 	}
 	if cfgFail != nil {
 		if slices.Contains([]string{"send", "who", "inbox", "read"}, args[0]) {
@@ -380,10 +388,10 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 		return cliframe.Report(stdout, stderr, cfgFail, jsonOut)
 	}
 	// A plain URL with no MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1 is refused before anything is connected (REQ-014): serve stops at session
-	// start and the commands that connect stop, exit 2, with the refusal on stderr.
+	// start and the commands that connect stop, exit 1, with the refusal on stderr.
 	if err == nil && !cfg.Inert() {
 		if _, perr := endpoint.EndpointTLS(cfg); perr != nil && !report { // a report says it as a row
-			return cliframe.Report(stdout, stderr, cliframe.Usagef("%s", strings.TrimPrefix(perr.Error(), "mash: ")).WithHint("mash doctor"), jsonOut)
+			return cliframe.Report(stdout, stderr, cliframe.Failf("%s", strings.TrimPrefix(perr.Error(), "mash: ")).WithHint("mash doctor"), jsonOut)
 		}
 	}
 	switch args[0] {

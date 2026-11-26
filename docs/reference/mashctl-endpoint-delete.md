@@ -74,7 +74,7 @@ error: that was not the address; nothing was deleted
 
 ### No terminal and no --yes
 
-Stream: stderr. Exit code: 2.
+Stream: stderr. Exit code: 1.
 
 ```text
 error: mashctl endpoint delete needs a terminal to type the address
