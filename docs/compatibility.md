@@ -38,7 +38,7 @@ Notes:
 This is how to move a machine that runs 0.5.10 to 0.6.0. Your endpoints, keys and mail stay where they are. The upgrade is one-way: there is no supported way back to 0.5.10. Do the steps in this order, on each machine that has endpoints, and then on the administrator's machine.
 
 1. Check what you run now. `mash version` shows the version. `mash doctor` should end with no problem and exit 0. As administrator, run `mashctl doctor` too. If one of them reports a problem, fix that first; see [troubleshooting](troubleshooting.md).
-2. Install both programs of 0.6.0 together, `mash` and `mashctl`, with the install script of the release. It checks each file before it installs anything.
+2. Install both programs of 0.6.0 together, `mash` and `mashctl`, with the install script of the release. It checks each file before it installs anything. It installs into `~/.local/bin`. If your current `mash` is in another folder (`command -v mash` shows where), add `MASH_INSTALL_DIR=<that folder>` before `bash install.sh`, so the new programs replace the old ones.
 
    ```sh
    BASE=https://github.com/bogworks/mash/releases/download/v0.6.0
