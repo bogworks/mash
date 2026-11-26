@@ -121,7 +121,7 @@ func (u unknownKey) describe() string {
 }
 
 // knownSigningKeys is the set of signing keys mashctl may find in the account JWT: the account identity key, the
-// configured account signing key (signing_key) and the public key of every owner group signer (the issue service's)
+// configured account signing key (signing_key) and the public key of every owner group signer
 // in the key store. There are no per-zone signing keys any
 // more (ADR 0091).
 func knownSigningKeys(ks *ctlkeys.Authority, acctPub string) (map[string]bool, error) {

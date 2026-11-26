@@ -23,7 +23,7 @@ const maxNamedAddresses = 3
 const (
 	// NewAddressDetail is what a refusal for an address with no inbox says after naming the addresses. It is the
 	// status text, so it is plain and, with the names, under the intake's 500 byte limit for a refusal.
-	NewAddressDetail = "A new address needs its endpoint provisioned first, with a credential from the issue service. " +
+	NewAddressDetail = "A new address needs its endpoint and credential made first, with `mashctl endpoint create`. " +
 		"The change was refused and nothing was pushed; submit it again once the endpoint exists."
 	// NarrowingDetail is the reason a change that narrows an existing sender by tags is refused. Same limits as above.
 	NarrowingDetail = "this change narrows what an existing sender may reach by tags, which needs a new credential for that sender. " +
@@ -68,13 +68,13 @@ var _ InboxChecker = (*admin.Admin)(nil)
 
 // Provisioner is the policyapply.Provisioner of the service. It creates no inbox and issues no credential: a list set
 // does not carry the endpoint's public key, and mash never holds an endpoint's private key (ADR 0104), so an
-// address's endpoint is made first, by the endpoint command or by the issue service, and applying a list set only checks it.
+// address's endpoint is made first, with `mashctl endpoint create`, and applying a list set only checks it.
 //
 // CreateInbox verifies, through Inboxes, that the address has its inbox stream and durable consumer, with the
 // configuration mail depends on. The Applier runs the same check for every added address before anything is pushed,
 // so a step reached here finds the inbox it found then.
 //
-// IssueCredential issues nothing: credentials come from the issue service on a requester's request (ADR 0104). It only
+// IssueCredential issues nothing: credentials come from `mashctl endpoint create` and `mashctl endpoint reissue` (ADR 0104). It only
 // checks that the address is issuable, so a step reached for an address that no list set in the run names, or whose
 // owner group has no scoped key, fails. It is idempotent.
 type Provisioner struct {
