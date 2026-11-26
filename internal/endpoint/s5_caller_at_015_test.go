@@ -1,6 +1,7 @@
 package endpoint
 
-// AT-015 (REQ-016): the caller refuses what it cannot verify. Run on the S5 constructor under a test driver. The
+// AT-015 (REQ-016): the caller refuses what it cannot verify. Run on the S5 constructor under a test driver; the
+// discovery under test is mash's own (presence, applyPresence, the $SRV.INFO answer handling), not the SDK's. The
 // real-W-binary variant (mash who, mash send discovery, mash prompt; the warning line, answers_not_verified in
 // --json, the stored send) is W's: the seam reports the count and the accepted registrations, which is what those
 // views are built from.
@@ -81,7 +82,9 @@ func TestS5AT015_NegativesEachRejectedNeverAttributed(t *testing.T) {
 // it. Every run: the valid discovery succeeds with bob found once, and every invalid answer is rejected and counted.
 // Then a prompt to bob works.
 func TestS5AT015_RaceInvalidNeverDeniesTheValidAnswer(t *testing.T) {
-	needS5Caller(t, "AT-015 race (SEC-12)")
+	needS5Caller(t, "AT-015 race (SEC-12; the late-invalid count: mash's discovery does not count rejected answers yet: REQ-016/TO-12, S5/W)")
+	// Why this is skipped today: mash's discovery does not count rejected answers yet (REQ-016/TO-12, S5/W). Main's
+	// applyPresence drops an invalid answer silently, before or after the valid one.
 	z := newS5Fix(t)
 	genuine := z.genuineRegistration(t, z.bob)
 	forged := z.forgeries(t, genuine)
@@ -111,11 +114,10 @@ func TestS5AT015_RaceInvalidNeverDeniesTheValidAnswer(t *testing.T) {
 				if len(got.Accepted) != 1 || got.Accepted[0].Address != z.bob {
 					t.Fatalf("the valid answer did not win: accepted %+v", got.Accepted)
 				}
-				// Counting (ruling, SEC-12): every invalid answer sent is counted exactly once, whether it arrives before
-				// or after the valid one, and the valid answer wins. The pinned SDK's ListAgents dedupes by instance id
-				// before it verifies, so an invalid answer that arrives after the valid one is dropped uncounted: that
-				// is an SDK bug for sdk to fix, and the after-order case fails on today's SDK until the dedupe order is
-				// fixed (the needS5Caller guard skips the test until then).
+				// Counting (REQ-016, SEC-12): every invalid answer sent is counted exactly once, whether it arrives
+				// before or after the valid one, and the valid answer wins. This is mash's own discovery's job. Main
+				// does not count rejected answers yet (applyPresence only returns the count it accepted), so the
+				// late-invalid count is skip-guarded until S5/W lands it (TO-12).
 				if got.NotVerified != len(s.set) {
 					t.Fatalf("counted %d answers as not verified, want %d (each once, %s the valid one)", got.NotVerified, len(s.set), mode)
 				}

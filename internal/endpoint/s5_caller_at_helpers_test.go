@@ -8,19 +8,22 @@ package endpoint
 //
 //	func init() { newS5Caller = func(t *testing.T, env s5Env) s5Caller { ... } }
 //
-// to return the mash caller constructor built on github.com/bogworks/synadia-agents.go/caller (the one construction
-// site of REQ-010, which always passes the verifying options of REQ-016) over env.NC, with:
+// to return the mash caller constructor S5 builds over env.NC. Under ruling (A), discovery, presence and the prompt
+// sender stay in mash's own code (internal/endpoint); the SDK caller is used only where sdk later decides (reply
+// inbox, stream). The constructor is whatever S5 builds around mash's discovery: these tests exercise mash's own
+// discovery path (presence, applyPresence, the $SRV.INFO answer handling), not the SDK's Discover. It has:
 //
 //   - the reply prefix env.Asker.InboxPrefix() (caller.WithInboxPrefix), so every reply subject is
 //     _INBOX.<owner>.<flat>.<client-id>.<route> (REQ-015, AT-016);
 //   - the identity env.Creds (the asker's creds file contents) signing the Agent-Sender header with display name
 //     env.Name. The header must be what main's promptMsg gives, byte for byte apart from the values of ts, nonce and
-//     sig. env.Inputs.Now and env.Inputs.Nonce are offered for a constructor that can fix them; SDK v0.1.1's caller
-//     has no clock or nonce option (it calls time.Now and draws the nonce from crypto/rand), so AT-008 masks those
-//     three values and checks instead that the new signature verifies over the payload. Leaving them unused is fine;
-//   - verification that accepts a registration only when its id_sig verifies and its prompt subject, owner, address,
-//     account and user_nkey all agree with env.Directory's record for the address asked for (REQ-016);
-//   - discovery windows no longer than env.Window (0 means the SDK defaults).
+//     sig, and the prompt payload must be main's bare text (SAP 0.3 section 5.1). env.Inputs.Now and env.Inputs.Nonce
+//     are offered for a constructor that can fix them; if it cannot (clock and nonce drawn inside), AT-008 masks
+//     those three values and checks instead that the new signature verifies over the payload;
+//   - mash's discovery verification: a registration is accepted only when its id_sig verifies and its prompt subject,
+//     owner, address, account and user_nkey all agree with env.Directory's record for the address asked for
+//     (REQ-016);
+//   - discovery windows no longer than env.Window (0 means the defaults).
 //
 // The random tokens (client id, route, nonce) are NOT injected through the seam. The SDK reads crypto/rand directly,
 // so the tests fix them with testing/cryptotest.SetGlobalRandom, which replaces crypto/rand for the whole process.
@@ -82,7 +85,7 @@ type s5Env struct {
 	Name      string                 // display name in Agent-Sender, as main passes it: the asker's flat key
 	Directory map[string]s5DirRecord // flat key -> directory record, every endpoint of the mesh
 	Inputs    s5Inputs
-	Window    time.Duration // longest a discovery waits; 0 means the SDK default
+	Window    time.Duration // longest a discovery waits; 0 means the default
 }
 
 // s5Registration is one registration the caller accepted.
@@ -113,7 +116,7 @@ type s5Caller interface {
 	Prompt(ctx context.Context, target sap.Address, text string) (chunks []string, err error)
 
 	// ReplySubjects lists the reply subjects this caller has used so far, in order of use, as far as it can tell
-	// (the SDK may not expose them: nil is allowed). Every one it lists must be a subject the server saw; the tests
+	// (it may not expose them: nil is allowed). Every one it lists must be a subject the server saw; the tests
 	// take the complete set from the server.
 	ReplySubjects() []string
 
@@ -124,7 +127,8 @@ type s5Caller interface {
 	Close() error
 }
 
-// newS5Caller is set by the sdk lane (see the comment at the top of this file). Nil until then.
+// newS5Caller is set by the sdk lane (see the comment at the top of this file): whatever S5 builds around mash's own
+// discovery. Nil until then.
 var newS5Caller func(t *testing.T, env s5Env) s5Caller
 
 // needS5Caller skips the test while the constructor has not landed. item names the AT item, so a skipped line says
@@ -656,7 +660,7 @@ const (
 	s5None   s5RaceMode = "invalid-only"         // no valid answer at all
 )
 
-const s5RacePause = 250 * time.Millisecond // inside the SDK's 750 ms stall, past any delivery delay on one server
+const s5RacePause = 250 * time.Millisecond // inside the discovery's stall, past any delivery delay on one server
 
 // race starts carol (the same-owner peer) answering every discovery request with invalid, in one publish each ("one
 // at a time", the caller picks the slice) or all together, and bob's connection answering with valid per mode. It

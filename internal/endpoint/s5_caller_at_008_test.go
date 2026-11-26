@@ -229,7 +229,7 @@ func TestS5AT008_WireEqualsToday(t *testing.T) {
 			t.Errorf("%s payload: %q, main %q", what, got.Data, exp.Data)
 		}
 		// Headers: byte-equal once the three values that depend on the clock, the nonce and the signature are masked
-		// (SDK v0.1.1 has no clock or nonce option, see the s5Env note), and ts and nonce are format-checked and the new signature must verify over the captured bytes.
+		// (the constructor may have no clock or nonce option, see the s5Env note), and ts and nonce are format-checked and the new signature must verify over the captured bytes.
 		gh, eh := s5MaskSender(got.Header), s5MaskSender(exp.Header)
 		if !reflect.DeepEqual(gh, eh) {
 			t.Errorf("%s headers: %v, main %v", what, gh, eh)
@@ -243,7 +243,10 @@ func TestS5AT008_WireEqualsToday(t *testing.T) {
 		}
 	}
 	same("discovery", d[0], want.Discovery)
-	same("prompt", p[0], want.Prompt)
+	same("prompt", p[0], want.Prompt) // payload byte-equal to main's bare text (SAP 0.3 section 5.1): main's sender stays
+	if string(p[0].Data) != "ping" {
+		t.Errorf("prompt payload %q, want main's bare text %q", p[0].Data, "ping")
+	}
 }
 
 // The four mixed-version cases. The old side is today's client code and today's service; the new side is the
@@ -356,6 +359,9 @@ func s5OverLimit(t *testing.T, z *s5Fix, prompt func(text string) (string, error
 		_ = ep.Reply(p.RequestID, "ok", true)
 	})
 	tp := z.tap(t, "agents.prompt.>")
+	// Listed difference, not a failure (REQ-008, #1536): the 32768-byte boundary (MaxPromptBytes versus the server's
+	// payload limit including headers) is main's behaviour and is kept; only equality with main is asserted below.
+	t.Logf("difference listed (#1536): the %d-byte prompt boundary is as on main, not changed here", MaxPromptBytes)
 	at := strings.Repeat("x", MaxPromptBytes)
 	if got, err := prompt(at); err != nil || got != "ok" {
 		t.Fatalf("a prompt of exactly %d bytes: %q, %v", MaxPromptBytes, got, err)
