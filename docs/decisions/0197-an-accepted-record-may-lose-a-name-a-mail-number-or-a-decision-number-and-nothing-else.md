@@ -105,4 +105,4 @@ pull request after this record is accepted.
 
 * Amends [ADR 0002](0002-record-architecture-decisions-as-madr-records.md), which says an accepted record is never
   rewritten; the rest of it stands.
-* Raised by the planner's re-audit of the public repository, round 2, item 11.
+* Raised by an audit of the public repository.
