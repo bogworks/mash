@@ -46,3 +46,42 @@ func TestInboxOnlyNewDoesNotListARefusedMessage(t *testing.T) {
 		t.Fatalf("OnlyNew true: listed %v, refused %d: want only seq 2 listed, 1 refused", l, fresh.Refused)
 	}
 }
+
+// The top-up read, reached when the first batch held gone messages, passes over a refused message with OnlyNew and
+// lists it without.
+func TestInboxOnlyNewTopUpDoesNotListARefusedMessage(t *testing.T) {
+	f := newFixture(t, "a", "b", "c")
+	ctx := context.Background()
+	for _, from := range []string{"c", "b", "b", "c"} { // #1 stays, #2 and #3 go, #4 is refused
+		if _, err := f.client(t, from).Send(ctx, tdot("a"), "from "+from, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cc := f.client(t, "c")
+	for i := 0; i < fillerCount; i++ { // newer mail, so the first batch does not reach #4
+		if _, err := cc.Send(ctx, tdot("a"), "filler", 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.adm.Deprovision(ctx, taddr("b")); err != nil {
+		t.Fatal(err)
+	}
+	ep := strict(t, f, "a")
+	if _, err := ep.recordRefusal(4); err != nil {
+		t.Fatal(err)
+	}
+	all, err := ep.readInbox(ctx, InboxQuery{After: 1, Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all.Mail) != 1 || all.Mail[0].Seq != 4 {
+		t.Fatalf("OnlyNew false: listed %+v: want the refused #4", all.Mail)
+	}
+	fresh, err := ep.readInbox(ctx, InboxQuery{After: 1, Limit: 1, OnlyNew: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fresh.Mail) != 1 || fresh.Mail[0].Seq != 5 {
+		t.Fatalf("OnlyNew true: listed %+v: want #5, the refused #4 passed over", fresh.Mail)
+	}
+}

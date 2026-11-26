@@ -137,7 +137,7 @@ func byteSize(n int) string {
 // buildInboxJSON is the list an inspection holds: the stream's message count, the messages the deliver consumer has not
 // delivered (all of them when there is no consumer), and the messages inspected. It carries no message text.
 func buildInboxJSON(addr sap.Address, in *admin.InboxInspection) inboxJSON {
-	rep := inboxJSON{Address: addr.String(), Total: in.Stream.Messages, Undelivered: in.Stream.Messages, Refused: in.Refused, Messages: make([]inboxMessageJSON, 0, len(in.Messages))}
+	rep := inboxJSON{Address: addr.String(), Total: in.Stream.Messages, Undelivered: in.Stream.Messages, Refused: in.Malformed, Messages: make([]inboxMessageJSON, 0, len(in.Messages))}
 	if in.Consumer != nil {
 		rep.Undelivered = in.Consumer.NumPending
 	}

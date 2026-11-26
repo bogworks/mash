@@ -2,7 +2,7 @@
   "address": "acme.team1.alpha",
   "total": 5,
   "undelivered": 1,
-  "refused": 3,
+  "refused": 1,
   "messages": [
     {
       "number": 1,
@@ -27,7 +27,8 @@
       "trust": "forged",
       "delivered": true,
       "kind": "message",
-      "size": 30
+      "size": 30,
+      "reason": "not verified"
     },
     {
       "number": 4,

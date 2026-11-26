@@ -1269,7 +1269,7 @@ func (e *Endpoint) readInbox(ctx context.Context, q InboxQuery) (InboxRead, erro
 		}
 	}
 	if len(out.Mail) < q.Limit && listSeqs.remaining() > 0 { // gone or forged ones in the way: read on
-		more, gone, err := e.collectDropped(ctx, s.GetMsg, listSeqs, q.Limit-len(out.Mail), classes)
+		more, gone, err := e.collectDropped(ctx, s.GetMsg, listSeqs, q.Limit-len(out.Mail), classes, q.OnlyNew)
 		if err != nil {
 			return InboxRead{}, err
 		}
@@ -1397,12 +1397,13 @@ type getMsg func(ctx context.Context, seq uint64, opts ...jetstream.GetMsgOpt) (
 // forged mail; any other read error ends the listing and is returned, so a
 // broken connection is not mistaken for an empty inbox.
 func (e *Endpoint) collect(ctx context.Context, get getMsg, seqs seqRange, limit int) ([]render.Mail, error) {
-	out, _, err := e.collectDropped(ctx, get, seqs, limit, nil)
+	out, _, err := e.collectDropped(ctx, get, seqs, limit, nil, false)
 	return out, err
 }
 
 // collectDropped is collect that also says which seqs it read and refused (toMail dropped them), for a caller that counts.
-func (e *Endpoint) collectDropped(ctx context.Context, get getMsg, seqs seqRange, limit int, classes map[uint64]string) ([]render.Mail, []uint64, error) {
+// With skipRefused a message recorded as refused is passed over, not listed (--new).
+func (e *Endpoint) collectDropped(ctx context.Context, get getMsg, seqs seqRange, limit int, classes map[uint64]string, skipRefused bool) ([]render.Mail, []uint64, error) {
 	var out []render.Mail
 	var dropped []uint64 // the seqs read that toMail refused
 	// Seqs are read a batch at a time, many requests in flight at once. A batch is no larger than what is still
@@ -1432,7 +1433,9 @@ func (e *Endpoint) collectDropped(ctx context.Context, get getMsg, seqs seqRange
 				return out, dropped, fmt.Errorf("mash: inbox: read #%s: %w", FormatMsgRef(MsgRef{Seq: seq}), errs[i])
 			}
 			if class, isRefused := classes[seq]; isRefused {
-				out = append(out, refusedMail(raws[i], class))
+				if !skipRefused { // a refused message is never new: --new passes skipRefused
+					out = append(out, refusedMail(raws[i], class))
+				}
 			} else if m, ok := e.toMailWith(raws[i], refused); ok {
 				out = append(out, m)
 			} else {

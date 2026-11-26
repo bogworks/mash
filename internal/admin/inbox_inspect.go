@@ -327,7 +327,7 @@ func (a *Admin) inspectSender(ctx context.Context, cache *senderCache, raw *jets
 		if shown == "" {
 			shown = "?"
 		}
-		return shown, trust, ""
+		return notVerified(shown, trust)
 	case sap.TrustClaimed:
 		if shown == "" {
 			shown = "?"

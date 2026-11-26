@@ -79,19 +79,20 @@ func TestInboxUsageAndOldVerb(t *testing.T) {
 func TestEndpointInboxJSONGolden(t *testing.T) {
 	atTerminal(t) // expects the terminal form of --json (#1043)
 	in := &admin.InboxInspection{
-		Refused:  3,
-		Stream:   admin.InspectedStream{Name: "inbox-acme_team1_alpha", FirstSeq: 1, LastSeq: 5, Messages: 5, Bytes: 812},
-		Consumer: &admin.InspectedConsumer{Name: "deliver", AckFloor: admin.Cursor{Stream: 1, Consumer: 1}, Delivered: admin.Cursor{Stream: 3, Consumer: 3}, NumPending: 1, NumRedelivered: 0, NumAckPending: 2},
+		Refused:   4,
+		Malformed: 1,
+		Stream:    admin.InspectedStream{Name: "inbox-acme_team1_alpha", FirstSeq: 1, LastSeq: 5, Messages: 5, Bytes: 812},
+		Consumer:  &admin.InspectedConsumer{Name: "deliver", AckFloor: admin.Cursor{Stream: 1, Consumer: 1}, Delivered: admin.Cursor{Stream: 3, Consumer: 3}, NumPending: 1, NumRedelivered: 0, NumAckPending: 2},
 	}
 	ts := time.Date(2026, 11, 12, 10, 0, 0, 0, time.UTC)
-	// claimed and unknown-signer mail was not verified, so each has that class as its reason; a header fault is shown as
-	// refused with its class and no sender (REQ-006, CHG-9); forged and verified mail have no reason
+	// claimed, forged and unknown-signer mail was not verified, so each has that class as its reason; a header fault is shown as
+	// refused with its class and no sender (REQ-006, CHG-9); verified mail has no reason
 	for i, tr := range []string{"verified", "claimed", "forged", "unknown-signer", "malformed"} {
 		seq := uint64(i + 1)
 		m := admin.InspectedMessage{Seq: seq, MsgID: fmt.Sprintf("id%d", seq), Sender: "acme_team1_bob", Trust: tr,
 			StoredAt: ts.Add(time.Duration(i) * time.Minute), Size: 10 * (i + 1), Kind: "message", State: admin.DeliveryState(seq, in.Consumer)}
 		switch tr {
-		case "claimed", "unknown-signer":
+		case "claimed", "forged", "unknown-signer":
 			m.Reason = "not verified"
 		case "malformed":
 			m.Sender, m.Reason = "?", "control character in name"
@@ -521,6 +522,9 @@ func TestInspectInboxCallKeepsTrustAndCursors(t *testing.T) {
 	if len(in.Messages) != 6 {
 		t.Fatalf("%d messages", len(in.Messages))
 	}
+	if got := in.Messages[2]; got.Trust != "forged" || got.Reason != "not verified" {
+		t.Errorf("forged message: trust %q, reason %q, want reason \"not verified\"", got.Trust, got.Reason)
+	}
 	for i, m := range in.Messages {
 		if m.Seq != uint64(i+1) || m.Trust != wantTrust[i] || m.State != wantState[i] || m.MsgID != fmt.Sprintf("msg-%d", i+1) {
 			t.Errorf("message %d: %+v, want trust %s state %s", i+1, m, wantTrust[i], wantState[i])
@@ -645,5 +649,17 @@ func TestInspectCountsRefusedPastTheWindow(t *testing.T) {
 	}
 	if past.Refused != whole.Refused {
 		t.Errorf("refused %d past the window, want the stream's %d", past.Refused, whole.Refused)
+	}
+}
+
+// The JSON refused count and the text header count only the mail mashctl finds malformed, not every message the endpoint
+// would refuse.
+func TestInboxRefusedCountIsMalformedOnly(t *testing.T) {
+	in := &admin.InboxInspection{Refused: 4, Malformed: 1, Stream: admin.InspectedStream{Name: "inbox-o_g_a", Messages: 5}}
+	if rep := buildInboxJSON(sap.Address{Owner: "o", Group: "g", Instance: "a"}, in); rep.Refused != 1 {
+		t.Errorf("refused %d, want 1 (the malformed count)", rep.Refused)
+	}
+	if got := malformedPart(in.Malformed); got != ", 1 refused as malformed" {
+		t.Errorf("header part %q", got)
 	}
 }
