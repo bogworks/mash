@@ -307,8 +307,10 @@ before anything is unpacked or installed. Each checksum line should end in `OK`
 `nats-server --version` prints `nats-server: v2.15.1` and `nats --version`
 prints `0.5.2`. `BIN` must be on the PATH: if it is not, give them the line
 for their shell (`echo $SHELL` says which): for bash
-`echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc`, for zsh the same
-with `~/.zshrc`, then a new terminal. They run it themselves (do not edit
+`echo 'export PATH="<BIN>:$PATH"' >> ~/.bashrc`, for zsh the same with
+`~/.zshrc`, then a new terminal. Write the install folder the person chose in
+place of `<BIN>` (`$HOME/.local/bin` by default; never assume it). They run it
+themselves (do not edit
 their shell files); for this session use the full path, or put
 `PATH="$BIN:$PATH"` in front of a command. Both programs are explained at
 https://github.com/bogworks/mash/blob/main/docs/nats-server.md#getting-nats-server-and-the-nats-command
@@ -386,8 +388,10 @@ Replace `vX.Y.Z` with the tag from step 3.
 Expected: `Installed mash v<version> (<commit>) in <folder>` and the same for
 `mashctl`. If it says the folder is not on the PATH, give them the line for
 their shell (`echo $SHELL` says which): for bash
-`echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc`, for zsh the same
-with `~/.zshrc`, then a new terminal. They run it themselves (do not edit
+`echo 'export PATH="<BIN>:$PATH"' >> ~/.bashrc`, for zsh the same with
+`~/.zshrc`, then a new terminal. Write the install folder the person chose in
+place of `<BIN>` (`$HOME/.local/bin` by default; never assume it). They run it
+themselves (do not edit
 their shell files): for this session use the full path the line
 printed. The folder is the one in the output; take it from there. If it says
 the folder `is writable by its group or other users`, see the table at the
