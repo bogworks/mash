@@ -11,7 +11,7 @@
 #
 # Environment: AT011_REPO (the repository to read the candidate from, default the repository this script is in),
 # AT011_GH_REPO (the GitHub repository owner/name the previous release is read from; default the owner/name of AT011_REPO
-# when that is a github.com URL, else bogworks/mash), AT011_IMAGE (default golang:1.27), AT011_ARCH (amd64 or arm64,
+# when that is a github.com URL, or of its origin remote when it is a checkout; the script stops if neither names one), AT011_IMAGE (default golang:1.27), AT011_ARCH (amd64 or arm64,
 # default amd64).
 #
 # The previous release's SHA256SUMS comes from the same place as the files it vouches for, so it is verified here, on
@@ -47,8 +47,10 @@ command -v gh >/dev/null 2>&1 || die "gh (the GitHub CLI) is not installed on th
 command -v curl >/dev/null 2>&1 || die "curl is not installed on this host"
 GHREPO=${AT011_GH_REPO:-}
 if [ -z "$GHREPO" ]; then
-  GHREPO=$(printf '%s' "$REPO" | sed -n 's#^\(https://\|git@\)github\.com[/:]\([A-Za-z0-9_.-]*/[A-Za-z0-9_.-]*\)$#\2#p' | sed 's#\.git$##')
-  [ -n "$GHREPO" ] || GHREPO=bogworks/mash
+  SRCURL=$REPO
+  [ -d "$REPO" ] && SRCURL=$(git -C "$REPO" remote get-url origin 2>/dev/null)
+  GHREPO=$(printf '%s' "$SRCURL" | sed -n 's#^\(https://\|git@\|ssh://git@\)github\.com[/:]\([A-Za-z0-9_.-]*/[A-Za-z0-9_.-]*\)$#\2#p' | sed 's#\.git$##')
+  [ -n "$GHREPO" ] || die "cannot tell which GitHub repository holds the previous release (AT011_REPO $REPO, origin ${SRCURL:-none}); set AT011_GH_REPO=owner/name"
 fi
 case $GHREPO in */*) ;; *) die "AT011_GH_REPO must be owner/name" ;; esac
 

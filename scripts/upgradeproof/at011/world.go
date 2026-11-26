@@ -156,7 +156,7 @@ func (r *runner) mashctl(args ...string) cmdResult {
 // install runs an install.sh as p for the version tag. base is the release mirror ("" for the real release); withGH says
 // whether gh is on PATH for this one invocation.
 func (r *runner) install(p *persona, script, tag, base string, withGH bool) cmdResult {
-	extra := []string{"MASH_VERSION=" + tag}
+	extra := []string{"MASH_VERSION=" + tag, "MASH_REPO=" + r.cfg.releaseRepo}
 	if base != "" {
 		extra = append(extra, "MASH_RELEASE_BASE="+base, "CURL_CA_BUNDLE="+r.mir.caPath, "SSL_CERT_FILE="+r.mir.caPath)
 	}
