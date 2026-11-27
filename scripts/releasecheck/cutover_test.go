@@ -135,14 +135,14 @@ func TestVerifyTag_keyless(t *testing.T) {
 	t.Run("an unsigned annotated tag at X passes", func(t *testing.T) {
 		f := newFixture(t)
 		f.makeKeyless(t, "v0.1.0")
-		if err := verifyTag(f.o, "v0.1.0", tagObj(f), f.x, true); err != nil {
+		if err := verifyTag(f.o, "v0.1.0", tagObj(f), f.x, tagUnsigned); err != nil {
 			t.Fatalf("refused: %v", err)
 		}
 	})
 	t.Run("the same tag is refused before the cutover", func(t *testing.T) {
 		f := newFixture(t)
 		f.makeKeyless(t, "v0.1.0")
-		if err := verifyTag(f.o, "v0.1.0", tagObj(f), f.x, false); err == nil || !strings.Contains(err.Error(), "no valid signature") {
+		if err := verifyTag(f.o, "v0.1.0", tagObj(f), f.x, tagSigned); err == nil || !strings.Contains(err.Error(), "no valid signature") {
 			t.Fatalf("an unsigned tag passed before the cutover: %v", err)
 		}
 	})
@@ -151,7 +151,7 @@ func TestVerifyTag_keyless(t *testing.T) {
 		f.makeKeyless(t, "v0.1.0")
 		gitT(t, f.repo, "tag", "-f", "v0.1.0", f.x)
 		gitT(t, f.repo, "push", "-q", "-f", "origin", "v0.1.0")
-		if err := verifyTag(f.o, "v0.1.0", tagObj(f), f.x, true); err == nil || !strings.Contains(err.Error(), "not an annotated tag") {
+		if err := verifyTag(f.o, "v0.1.0", tagObj(f), f.x, tagUnsigned); err == nil || !strings.Contains(err.Error(), "not an annotated tag") {
 			t.Fatalf("a lightweight tag passed: %v", err)
 		}
 	})
@@ -164,7 +164,7 @@ func TestVerifyTag_keyless(t *testing.T) {
 		other := gitT(t, f.repo, "rev-parse", "HEAD")
 		gitT(t, f.repo, "tag", "-f", "-a", "v0.1.0", "-m", "release", other)
 		gitT(t, f.repo, "push", "-q", "-f", "origin", "v0.1.0")
-		if err := verifyTag(f.o, "v0.1.0", tagObj(f), f.x, true); err == nil || !strings.Contains(err.Error(), "not the candidate") {
+		if err := verifyTag(f.o, "v0.1.0", tagObj(f), f.x, tagUnsigned); err == nil || !strings.Contains(err.Error(), "not the candidate") {
 			t.Fatalf("a tag at another commit passed: %v", err)
 		}
 	})
@@ -174,7 +174,7 @@ func TestVerifyTag_keyless(t *testing.T) {
 		listed := tagObj(f)
 		gitT(t, f.repo, "tag", "-f", "-a", "v0.1.0", "-m", "again", f.x)
 		gitT(t, f.repo, "push", "-q", "-f", "origin", "v0.1.0")
-		if err := verifyTag(f.o, "v0.1.0", listed, f.x, true); err == nil || !strings.Contains(err.Error(), "changed between") {
+		if err := verifyTag(f.o, "v0.1.0", listed, f.x, tagUnsigned); err == nil || !strings.Contains(err.Error(), "changed between") {
 			t.Fatalf("a swapped tag passed: %v", err)
 		}
 	})
@@ -375,6 +375,13 @@ func TestPublish_keylessStateMachine(t *testing.T) {
 		}
 		if len(f.effects()) != 0 {
 			t.Errorf("effects: %v", f.effects())
+		}
+	})
+	t.Run("at or above signed-from (also keyless) and no tag: refused, no tag made", func(t *testing.T) {
+		f := newFake()
+		f.cutover, f.keyless = "v0.4.0", true // the cutover record also holds signed-from; publish only asks Keyless
+		if err := run(f); err == nil || !strings.Contains(err.Error(), "not made here") || made(f) || len(f.effects()) != 0 {
+			t.Fatalf("err = %v, calls %v", err, f.calls)
 		}
 	})
 	t.Run("keyless and the tag exists at X: gate, assets and publish, never a tag", func(t *testing.T) {

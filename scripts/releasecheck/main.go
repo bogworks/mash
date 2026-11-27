@@ -28,6 +28,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -54,6 +56,9 @@ type Options struct {
 	GHRepo  string // the release repository (owner/name): default $RELEASE_CHECK_REPO, else origin of Repo when it is on github.com, else bogworks/mash
 	Remote  string // the release repository, for main and the tag; default https://github.com/<GHRepo>.git
 	NoFetch bool   // do not fetch main first (tests that supply their own origin/main)
+	// ReleaseKeyFingerprint is the SHA256 fingerprint the mash-release key in Signers must have; empty: releaseKeyFingerprint.
+	// Only tests set it.
+	ReleaseKeyFingerprint string
 	// Signers is the allowed_signers file a release tag must verify against: default docs/allowed_signers of Repo,
 	// the checkout running the check. Never the machine's own git config, so the gate is the same for anyone who
 	// runs it, and a key a machine happens to trust cannot pass a release.
@@ -724,8 +729,11 @@ func tagRefs(repo, remote, tag string) (object, commit string, err error) {
 // o.Signers (docs/allowed_signers): a lightweight tag has no signature, a signature by a key git does not trust fails, and a tag
 // that was swapped after the listing is not the object that was listed. The signed object must lead to commit x.
 // With keyless (the release is at or above the cutover) the tag carries no signature and none is checked: it must
-// still be annotated, unchanged between listing and fetching, and lead to x.
-func verifyTag(o Options, tag, object, x string, keyless bool) error {
+// still be annotated, unchanged between listing and fetching, and lead to x. With tagSignedFrom (at or above the
+// signed-from record, ADR 0199) it must also be SSH-signed by the release key, principal releaseSigner, and no other
+// key in o.Signers counts: the old key stays in the file for old tags only.
+func verifyTag(o Options, tag, object, x string, mode tagMode) error {
+	keyless := mode != tagSigned
 	ref := "refs/mash/release-check/tags/" + tag
 	if _, err := git(o.Repo, "fetch", "-q", o.Remote, "+refs/tags/"+tag+":"+ref); err != nil {
 		return op(err)
@@ -742,7 +750,7 @@ func verifyTag(o Options, tag, object, x string, keyless bool) error {
 	if c, err := git(o.Repo, "rev-parse", object+"^{commit}"); err != nil || c != x {
 		return fmt.Errorf("the tag object %s leads to %s, not the candidate %s (%v)", object, c, x, err)
 	}
-	if keyless {
+	if mode == tagUnsigned {
 		return nil
 	}
 	// allowedSignersFile governs SSH signatures only: git would verify a PGP or X.509 signature with this machine's
@@ -755,10 +763,102 @@ func verifyTag(o Options, tag, object, x string, keyless bool) error {
 		strings.Contains(body, "-----BEGIN SIGNED MESSAGE-----") {
 		return fmt.Errorf("tag %s has no valid signature from a trusted key: it is not SSH-signed, and only docs/allowed_signers' SSH keys sign releases", tag)
 	}
-	if _, err := git(o.Repo, "-c", "gpg.ssh.allowedSignersFile="+o.Signers, "verify-tag", object); err != nil {
+	signers := o.Signers
+	if mode == tagSignedFrom {
+		fp := o.ReleaseKeyFingerprint
+		if fp == "" {
+			fp = releaseKeyFingerprint
+		}
+		f, err := releaseSignersFile(o.Signers, fp)
+		if err != nil {
+			return err
+		}
+		defer os.Remove(f)
+		signers = f
+	}
+	if _, err := git(o.Repo, "-c", "gpg.ssh.allowedSignersFile="+signers, "verify-tag", object); err != nil {
+		if mode == tagSignedFrom {
+			return fmt.Errorf("tag %s is not signed by the release key: at or above signed-from only the %s key signs (%w)", tag, releaseSigner, err)
+		}
 		return fmt.Errorf("tag %s has no valid signature from a trusted key: %w", tag, err)
 	}
 	return nil
+}
+
+// tagMode is what the tag of a release must be: signed by a trusted key (below the cutover), annotated and unsigned
+// (from the cutover), or annotated and signed by the release key (from signed-from, which is also keyless for the sums).
+type tagMode int
+
+const (
+	tagSigned tagMode = iota
+	tagUnsigned
+	tagSignedFrom
+)
+
+// releaseSigner is the principal in docs/allowed_signers whose key signs the tags at or above signed-from.
+const releaseSigner = "mash-release"
+
+// releaseKeyFingerprint is the SHA256 fingerprint (as ssh-keygen -l prints it) of the one key that signs the tags at or
+// above signed-from. releaseSignersFile refuses a mash-release line holding any other key.
+const releaseKeyFingerprint = "SHA256:AtXzPvoOLeTfX05xeum8jJl6fvlmIB+BIFlun7qhQzA"
+
+// keyFingerprint is the SHA256 fingerprint of the public key on an allowed_signers line: the field after the key type
+// is the base64 key blob, hashed as ssh-keygen -l does.
+func keyFingerprint(line string) (string, error) {
+	f := strings.Fields(line)
+	for i, w := range f {
+		if strings.HasPrefix(w, "ssh-") || strings.HasPrefix(w, "sk-ssh-") || strings.HasPrefix(w, "ecdsa-") {
+			if i+1 >= len(f) {
+				break
+			}
+			blob, err := base64.StdEncoding.DecodeString(f[i+1])
+			if err != nil {
+				return "", fmt.Errorf("the key is not base64: %v", err)
+			}
+			sum := sha256.Sum256(blob)
+			return "SHA256:" + base64.RawStdEncoding.EncodeToString(sum[:]), nil
+		}
+	}
+	return "", fmt.Errorf("no public key on the line")
+}
+
+// releaseSignersFile writes a temporary allowed-signers file holding only the releaseSigner line of signers, and returns
+// its path; the caller removes it. Exactly one such line is required, and its key must have fingerprint fp: anything
+// else fails closed.
+func releaseSignersFile(signers, fp string) (string, error) {
+	b, err := os.ReadFile(signers)
+	if err != nil {
+		return "", op(err)
+	}
+	var keep []string
+	for _, ln := range strings.Split(string(b), "\n") {
+		if f := strings.Fields(ln); len(f) > 0 && f[0] == releaseSigner {
+			keep = append(keep, ln)
+		}
+	}
+	if len(keep) == 0 {
+		return "", fmt.Errorf("%s has no %s line, so no tag at or above signed-from can be verified", signers, releaseSigner)
+	}
+	if len(keep) != 1 {
+		return "", fmt.Errorf("%s has %d %s lines, it must have exactly one", signers, len(keep), releaseSigner)
+	}
+	got, err := keyFingerprint(keep[0])
+	if err != nil || got != fp {
+		return "", fmt.Errorf("the %s key in %s is %q (%v), not the release key %s", releaseSigner, signers, got, err, fp)
+	}
+	f, err := os.CreateTemp(os.TempDir(), "mash-release-signers-*")
+	if err != nil {
+		return "", op(err)
+	}
+	_, werr := f.WriteString(strings.Join(keep, "\n") + "\n")
+	if cerr := f.Close(); werr == nil {
+		werr = cerr
+	}
+	if werr != nil {
+		os.Remove(f.Name())
+		return "", op(werr)
+	}
+	return f.Name(), nil
 }
 
 // checkAssets verifies the draft release for v<version> belongs to X: the tag is annotated, signed by a trusted key and
@@ -781,6 +881,16 @@ func checkAssetsRecord(ctx context.Context, o Options, rec *gateRecord) error {
 	r := &report{out: o.Out}
 	tag := "v" + o.Version
 	cutover, kl, kerr := cutoverMode(o, x, tag)
+	mode, sfrom := tagSigned, ""
+	if kerr == nil { // the signed-from record is read whatever the version, so a malformed one fails closed everywhere
+		var ok bool
+		if sfrom, ok, kerr = signedFromAt(o, x); kerr == nil && kl {
+			mode = tagUnsigned
+			if t, _ := parseSemver(tag); ok && !semverLess(t, mustSemver(sfrom)) {
+				mode = tagSignedFrom
+			}
+		}
+	}
 	if !r.step("the release cutover record at X", kerr) {
 		return r.result("release " + tag + " assets")
 	}
@@ -796,10 +906,13 @@ func checkAssetsRecord(ctx context.Context, o Options, rec *gateRecord) error {
 		if o.afterTagList != nil {
 			o.afterTagList()
 		}
-		if kl {
-			r.step("tag "+tag+" is annotated and at X (keyless: no signature, trust is the tag rulesets, cutover "+cutover+")", verifyTag(o, tag, tagObj, x, true))
-		} else {
-			r.step("tag "+tag+" is signed by a trusted key", verifyTag(o, tag, tagObj, x, false))
+		switch mode {
+		case tagSignedFrom:
+			r.step("tag "+tag+" is annotated, SSH-signed by the release key "+releaseSigner+" and at X (signed-from "+sfrom+")", verifyTag(o, tag, tagObj, x, mode))
+		case tagUnsigned:
+			r.step("tag "+tag+" is annotated and at X (keyless: no signature, trust is the tag rulesets, cutover "+cutover+")", verifyTag(o, tag, tagObj, x, mode))
+		default:
+			r.step("tag "+tag+" is signed by a trusted key", verifyTag(o, tag, tagObj, x, mode))
 		}
 	}
 
@@ -941,7 +1054,7 @@ func cutoverAt(o Options, x string) (version string, ok bool, err error) {
 	}
 	var lines []string
 	for _, ln := range strings.Split(body, "\n") {
-		if ln = strings.TrimSpace(ln); ln != "" && !strings.HasPrefix(ln, "#") {
+		if ln = strings.TrimSpace(ln); ln != "" && !strings.HasPrefix(ln, "#") && !isSignedFromLine(ln) {
 			lines = append(lines, ln)
 		}
 	}
@@ -952,6 +1065,47 @@ func cutoverAt(o Options, x string) (version string, ok bool, err error) {
 		return "", false, fmt.Errorf("%s at %s: %q is not a version vMAJOR.MINOR.PATCH", cutoverFile, x, lines[0])
 	}
 	return lines[0], true, nil
+}
+
+func isSignedFromLine(ln string) bool {
+	f := strings.Fields(ln)
+	return len(f) > 0 && f[0] == "signed-from"
+}
+
+func mustSemver(v string) [3]int { s, _ := parseSemver(v); return s }
+
+// signedFromAt is the signed-from version recorded at x (ok false when the file has none, or is absent): the first
+// version whose tag must be SSH-signed by the release key (ADR 0199). Besides the one cutover line the file may hold at
+// most one `signed-from vN.N.N` line, at or above the cutover; anything else is an error, so a malformed record fails closed.
+func signedFromAt(o Options, x string) (version string, ok bool, err error) {
+	cutover, has, err := cutoverAt(o, x) // also refuses an unknown line
+	if err != nil || !has {
+		return "", false, err
+	}
+	body, _, err := fileAt(o.Repo, x, cutoverFile)
+	if err != nil {
+		return "", false, err
+	}
+	for _, ln := range strings.Split(body, "\n") {
+		if ln = strings.TrimSpace(ln); !isSignedFromLine(ln) {
+			continue
+		}
+		f := strings.Fields(ln)
+		if len(f) != 2 {
+			return "", false, fmt.Errorf("%s at %s: %q is not `signed-from vMAJOR.MINOR.PATCH`", cutoverFile, x, ln)
+		}
+		if _, good := parseSemver(f[1]); !good {
+			return "", false, fmt.Errorf("%s at %s: %q is not `signed-from vMAJOR.MINOR.PATCH`", cutoverFile, x, ln)
+		}
+		if ok {
+			return "", false, fmt.Errorf("%s at %s holds more than one signed-from line", cutoverFile, x)
+		}
+		version, ok = f[1], true
+	}
+	if ok && semverLess(mustSemver(version), mustSemver(cutover)) {
+		return "", false, fmt.Errorf("%s at %s: signed-from %s is below the cutover %s", cutoverFile, x, version, cutover)
+	}
+	return version, ok, nil
 }
 
 // cutoverMode is the cutover version recorded at x and whether tag is at or above it (keyless).

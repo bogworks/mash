@@ -44,12 +44,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - name: The tag is v<N.N.N>, annotated, and (below the cutover) carries a signature
+      - name: The tag is v<N.N.N>, annotated, and (below the cutover, or from signed-from) carries a signature
         # Shape, not validity: the runner holds no key. It stops a malformed name or a lightweight tag from producing a draft.
         # Below the cutover version (docs/release-cutover at the tag's commit) it also stops a plainly unsigned tag; at or
         # above it the tag is unsigned by design (the minting service pushes it) and release-check --assets judges it.
         # An absent cutover file keeps the signature check (the behaviour before the cutover existed); a present one that is
-        # not exactly one vN.N.N line fails closed.
+        # not exactly one vN.N.N line fails closed. An optional second record, `signed-from vN.N.N` (at most one, at or
+        # above the cutover, else the guard fails closed), makes a tag at or above it carry an SSH signature (ADR 0199);
+        # This guard checks only that an SSH signature is present (and no PGP or X.509 one); it does not verify it. The
+        # runner holds no key: release-check --assets verifies the signature against the release key.
         run: |
           # In an `if`, not bare: bash 3.2 (macOS, where the tests run this script) does not stop `set -e` on a lone [[ ]].
           if ! [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then echo "not a version tag: $GITHUB_REF_NAME" >&2; exit 1; fi
@@ -70,11 +73,23 @@ jobs:
           }
           need_signature=yes
           if raw="$(git show "$(git rev-parse "$GITHUB_REF_NAME^{commit}"):docs/release-cutover" 2>/dev/null)"; then
-            cutover="$(printf '%s\n' "$raw" | awk '!/^[[:space:]]*#/ && !/^[[:space:]]*$/')"
+            cutover="$(printf '%s\n' "$raw" | awk '!/^[[:space:]]*#/ && !/^[[:space:]]*$/ && $1 != "signed-from"')"
             if ! [[ "$cutover" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then echo "docs/release-cutover is not exactly one vN.N.N line" >&2; exit 1; fi
             if ge "$GITHUB_REF_NAME" "$cutover"; then need_signature=no; fi
+            signed_from_line="$(printf '%s\n' "$raw" | awk '!/^[[:space:]]*#/ && $1 == "signed-from"')"
+            if [ -n "$signed_from_line" ]; then
+              signed_from_re='^[[:space:]]*signed-from[[:space:]]+(v[0-9]+\.[0-9]+\.[0-9]+)[[:space:]]*$'
+              if ! [[ "$signed_from_line" =~ $signed_from_re ]]; then echo "docs/release-cutover has more than one signed-from line, or one that is not signed-from vN.N.N" >&2; exit 1; fi
+              signed_from="${BASH_REMATCH[1]}"
+              if ! ge "$signed_from" "$cutover"; then echo "docs/release-cutover: signed-from $signed_from is below the cutover $cutover" >&2; exit 1; fi
+              if ge "$GITHUB_REF_NAME" "$signed_from"; then need_signature=ssh; fi
+            fi
           fi
-          if [ "$need_signature" = yes ]; then
+          if [ "$need_signature" = ssh ]; then
+            tag_body="$(git cat-file tag "$GITHUB_REF_NAME")"
+            if ! printf '%s\n' "$tag_body" | grep -q -e '-----BEGIN SSH SIGNATURE-----'; then echo "tag $GITHUB_REF_NAME has no SSH signature" >&2; exit 1; fi
+            if printf '%s\n' "$tag_body" | grep -q -e '-----BEGIN PGP SIGNATURE-----' -e '-----BEGIN SIGNED MESSAGE-----'; then echo "tag $GITHUB_REF_NAME carries a PGP or X.509 signature: only SSH signs releases" >&2; exit 1; fi
+          elif [ "$need_signature" = yes ]; then
             git cat-file tag "$GITHUB_REF_NAME" | grep -q -e '-----BEGIN PGP SIGNATURE-----' -e '-----BEGIN SSH SIGNATURE-----'
           fi
       - name: The candidate is on main
