@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/nats-io/nats.go/jetstream"
@@ -662,9 +663,13 @@ func TestArchiveNoReplaceConcurrentLosesNothing(t *testing.T) {
 	dest := src + ".deleted"
 	os.WriteFile(src, []byte(markerCreds("eyJoriginal")), 0o600)
 	var once sync.Once
+	var fired atomic.Bool // the hook runs only if an attempt gets as far as staging src itself
 	archiveHook = func() {
 		// The first attempt to stage puts a replacement at src while the other is racing to stage too.
-		once.Do(func() { os.WriteFile(src, []byte(markerCreds("eyJreplacement")), 0o600) })
+		once.Do(func() {
+			fired.Store(true)
+			os.WriteFile(src, []byte(markerCreds("eyJreplacement")), 0o600)
+		})
 	}
 	defer func() { archiveHook = nil }()
 	var wg, ready sync.WaitGroup
@@ -708,7 +713,8 @@ func TestArchiveNoReplaceConcurrentLosesNothing(t *testing.T) {
 		if string(b) != markerCreds("eyJreplacement") {
 			t.Errorf("replacement changed: %q", b)
 		}
-	} else if repl < 1 {
+	} else if fired.Load() && repl < 1 {
+		// With no replacement put (the other attempt claimed the staged original first), there is none to lose.
 		t.Errorf("replacement lost: archived %d times", repl)
 	}
 }
