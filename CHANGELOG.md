@@ -8,17 +8,23 @@ All notable user-facing changes to mash are recorded here. The format follows [K
 
 ### Summary
 
-0.6.0 reads the sender of every message the way the SAP Go SDK does, which is strict: ten kinds of sender header that older mash accepted are now refused, on live prompts and on mail already stored. Mail mash writes is not affected. Mail that mash refuses is now listed with its reason, never its body, and `mash doctor` checks every endpoint when you have several. Every download has a build attestation; verify it.
+**mash 0.6.0 reads the sender of every message the way the SAP Go SDK does, and that is strict: ten kinds of sender header that older mash accepted are now refused, on live prompts and on mail already stored. See Upgrading.** If every endpoint on your server runs mash, you will notice little, because mash writes headers the strict reader accepts. Mail that is refused is no longer hidden: `mash inbox` and `mash read` show it as a `refused` row with the reason and never its body, and `mash status --detail`, `mash doctor` and `mashctl endpoint inbox` count it. `mash doctor` also checks every endpoint when you have several and none is chosen, and says which mash the plugin runs. Security policy is planned and is not part of this release.
 
 ### Upgrading
 
-One-way. On each machine, then on the administrator's machine:
-1. Check: `mash doctor` (and `mashctl doctor`) end clean; if not, see docs/troubleshooting.md.
-2. Install `mash` and `mashctl` 0.6.0; endpoints, keys and mail stay.
-3. Update the `mash` and `mash-setup` plugins; a session asked for mash's version says `mash v0.6.0`.
-4. Restart each Claude Code session, then check again.
-Scripts and anything that sends mail without mash: see the
-[release notes](https://github.com/bogworks/mash/blob/v0.6.0/docs/release-notes/0.6.0.md).
+**This step is one-way:** a problem found after upgrading is fixed by the next release; you do not go back to 0.5.10.
+
+On each machine with endpoints, then on the administrator's machine, in this order. The full steps, in order, are on the [compatibility page](https://github.com/bogworks/mash/blob/v0.6.0/docs/compatibility.md#upgrading-from-0510-to-060); in short:
+
+1. **Check first:** `mash version`, `mash doctor` and, as administrator, `mashctl doctor`. Good is your current release and each doctor ending with no problem and exit code 0.
+2. **Install `mash` and `mashctl` 0.6.0** from the same release, with the README's install steps. Endpoints, keys and mail stay where they are.
+3. **Update both plugins,** `mash` and `mash-setup`: at a shell `claude plugin update mash@mash` and `claude plugin update mash-setup@mash`. The 0.6.0 plugin that runs the 0.6.0 program is 0.6.0-pin.1, published shortly after the release. A plugin update before then installs 0.6.0 but still runs 0.5.10, so update once more when 0.6.0-pin.1 is out.
+4. **Restart each Claude Code session.** A session that is already open keeps running the version it started with until you restart it.
+5. **Check again** as in step 1; `mash version` now names 0.6.0.
+
+Machines at mixed versions send and read each other's mail on one server; a machine left behind keeps working. Mail that a 0.5.10 endpoint sent is read by the 0.6.0 rules when a 0.6.0 endpoint receives it.
+
+**If you send mail from something other than mash:** a message whose `Agent-Sender` header has any of the ten shapes below is now refused even when its signature is valid. Mail written by mash is not affected.
 
 ### Added
 
