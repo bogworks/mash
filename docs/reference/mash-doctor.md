@@ -259,6 +259,25 @@ refused      ok    no mail was refused
 1 problem.
 ```
 
+### At a shell, with no spool setting, when the state folder cannot be created
+
+Stream: stdout. Exit code: 0.
+
+```text
+config       ok
+claude       skip  no claude command found
+creds        ok
+server       ok    tls://myserver:4222
+sign-in      ok
+delivery     warn  cannot write
+                   ~/.local/state/mash/spool/acme/acme.demo.bob
+                   plugin sessions may get no mail
+stored mail  skip  not checked: ~/.local/state/mash/spool/acme/acme.demo.bob is not writable
+refused      ok    no mail was refused
+
+1 warning.
+```
+
 ### Another session holds the endpoint
 
 Stream: stdout. Exit code: 1.
@@ -617,7 +636,8 @@ failure means it cannot be run. The delivery row says whether mail that
 arrives can be stored on this machine for the session; it is checked inside a
 session and skipped at a shell, except that a shell fails it when the state
 folder cannot be created and MASH_SPOOL_FROM_START (which the plugin sets) or
-MASH_SPOOL_REQUIRED is set, so that mail waits for the spool; it finds the
+MASH_SPOOL_REQUIRED is set, so that mail waits for the spool, and without
+those settings a shell warns when the folder cannot be created; it finds the
 folder by asking the system without writing anything. In a session that has
 just started, the row is 'warn' until the first prompt or tool call, so
 'doctor --strict' exits 1 until then: a program that waits for a session to be

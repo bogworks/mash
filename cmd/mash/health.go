@@ -364,6 +364,9 @@ func (h *healthSvc) Health(ctx context.Context) (cmds.HealthReport, error) {
 	// settings it can read (MASH_SPOOL_REQUIRED, MASH_SPOOL_FROM_START; the plugin sets the latter) mean mail is held
 	// without the spool: otherwise mail stays on the channel and is still delivered.
 	folderBroken := !h.session && shellErr == nil && (h.cfg.SpoolRequired || h.cfg.SpoolFromStart) && endpoint.SpoolFolderUnwritable(shellDir)
+	// With neither setting visible, the shell cannot tell whether the session holds mail without the spool (the plugin sets
+	// MASH_SPOOL_FROM_START in the session), so it warns instead of failing; status is unaffected.
+	folderWarn := !h.session && shellErr == nil && !(h.cfg.SpoolRequired || h.cfg.SpoolFromStart) && endpoint.SpoolFolderUnwritable(shellDir)
 	switch {
 	case server.State == cmds.CheckFail:
 		rep.Checks = append(rep.Checks, skipped(cmds.CheckDelivery, "server"))
@@ -371,6 +374,8 @@ func (h *healthSvc) Health(ctx context.Context) (cmds.HealthReport, error) {
 		rep.Checks = append(rep.Checks, cmds.HealthCheck{Name: cmds.CheckDelivery, State: cmds.CheckSkip, Detail: "needs sign-in"})
 	case folderBroken: // the one shell case with a delivery row: no session could store mail here, and mail waits for the spool
 		rep.Checks = append(rep.Checks, cmds.HealthCheck{Name: cmds.CheckDelivery, State: cmds.CheckFail, Detail: cmds.CannotWrite + config.Tilde(shellDir)})
+	case folderWarn:
+		rep.Checks = append(rep.Checks, cmds.HealthCheck{Name: cmds.CheckDelivery, State: cmds.CheckWarn, Detail: cmds.CannotWrite + config.Tilde(shellDir) + "; " + cmds.ShellFolderWarnTail})
 	case !h.session: // a shell has no session to deliver to
 		rep.Checks = append(rep.Checks, cmds.HealthCheck{Name: cmds.CheckDelivery, State: cmds.CheckSkip, Detail: "checked only inside a Claude Code session"})
 	default:
