@@ -106,7 +106,7 @@ func TestCheckCatchesABadInventory(t *testing.T) {
 func TestSame(t *testing.T) {
 	before := []Row{{1, "acme.demo.bob", false, ""}, {2, "acme.demo.bob", false, ""}, {3, "", false, ""}}
 	after := []Row{{1, "acme.demo.bob", false, ""}, {2, "acme.demo.bob", false, ""}, {3, "", true, "header too long"}}
-	if bad := Same(before, after, inv()); len(bad) != 0 {
+	if bad := Same(before, after, inv(), false); len(bad) != 0 {
 		t.Fatalf("a correct pair differs: %v", bad)
 	}
 	for name, a := range map[string][]Row{
@@ -116,7 +116,7 @@ func TestSame(t *testing.T) {
 		"wrong reason": {after[0], after[1], {3, "", true, "name too long"}},
 		"sender moved": {{1, "acme.demo.carol", false, ""}, after[1], after[2]},
 	} {
-		if bad := Same(before, a, inv()); len(bad) == 0 {
+		if bad := Same(before, a, inv(), false); len(bad) == 0 {
 			t.Errorf("%s: not reported", name)
 		}
 	}
@@ -127,7 +127,23 @@ func TestSameRefusedHidesSender(t *testing.T) {
 	entries := []Entry{{ID: ID{Seq: 1, Sender: "acme.demo.mallory", Nonce: "s01"}, Expect: Refused, Reason: "header too long"}}
 	before := []Row{{Seq: 1, Sender: "a-name-from-the-broken-header"}}
 	after := []Row{{Seq: 1, Sender: "?", Refused: true, Reason: "header too long"}}
-	if bad := Same(before, after, entries); len(bad) != 0 {
+	if bad := Same(before, after, entries, false); len(bad) != 0 {
 		t.Fatalf("unexpected: %v", bad)
+	}
+}
+
+func TestSamePrevRefuses(t *testing.T) {
+	entries := []Entry{{ID: ID{Seq: 1, Sender: "acme.demo.mallory", Nonce: "s01"}, Expect: Refused, Reason: "header too long"}}
+	refusedAfter := []Row{{Seq: 1, Sender: "?", Refused: true, Reason: "header too long"}}
+	if bad := Same([]Row{{Seq: 1, Refused: true, Reason: "old wording"}}, refusedAfter, entries, true); len(bad) != 0 {
+		t.Fatalf("refused before and after: %v", bad)
+	}
+	bad := Same([]Row{{Seq: 1, Sender: "x"}}, refusedAfter, entries, true)
+	if len(bad) != 1 || !strings.Contains(bad[0], "not marked refused before the upgrade") {
+		t.Fatalf("not refused before: %v", bad)
+	}
+	bad = Same([]Row{{Seq: 1, Refused: true}}, []Row{{Seq: 1, Sender: "x"}}, entries, true)
+	if len(bad) != 1 || !strings.Contains(bad[0], "not marked refused after the upgrade") {
+		t.Fatalf("not refused after: %v", bad)
 	}
 }

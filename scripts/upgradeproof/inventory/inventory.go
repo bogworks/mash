@@ -167,9 +167,11 @@ type Row struct {
 
 // Same holds the listing before the upgrade and the one after to step 7 of AT-011: the same messages by identity (every
 // sequence once, none lost, none added), and each message the inventory expects refused marked refused after, with its
-// reason, and not marked so before. A sender is compared when both listings give one and the message is not refused after: a refused row shows no sender,
+// reason. Before the upgrade it must not be marked refused when the previous release did not refuse these shapes
+// (prevRefuses false), and must be marked refused when it did (prevRefuses true; its reason then is not compared, the
+// old wording may differ). A sender is compared when both listings give one and the message is not refused after: a refused row shows no sender,
 // by design, where the earlier release showed whatever the broken header said.
-func Same(before, after []Row, entries []Entry) []string {
+func Same(before, after []Row, entries []Entry, prevRefuses bool) []string {
 	var bad []string
 	index := func(rows []Row, which string) map[uint64]Row {
 		m := map[uint64]Row{}
@@ -213,8 +215,13 @@ func Same(before, after []Row, entries []Entry) []string {
 		case ar.Reason != e.Reason:
 			bad = append(bad, fmt.Sprintf("#%d (%s) is marked refused with %q, want %q", e.ID.Seq, e.Label, ar.Reason, e.Reason))
 		}
-		if br, ok := b[e.ID.Seq]; ok && br.Refused {
-			bad = append(bad, fmt.Sprintf("#%d (%s) is already marked refused before the upgrade", e.ID.Seq, e.Label))
+		if br, ok := b[e.ID.Seq]; ok {
+			switch {
+			case !prevRefuses && br.Refused:
+				bad = append(bad, fmt.Sprintf("#%d (%s) is already marked refused before the upgrade", e.ID.Seq, e.Label))
+			case prevRefuses && !br.Refused:
+				bad = append(bad, fmt.Sprintf("#%d (%s) is not marked refused before the upgrade, and the previous release refuses it", e.ID.Seq, e.Label))
+			}
 		}
 	}
 	sort.Strings(bad)

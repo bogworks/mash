@@ -177,7 +177,8 @@ func (r *runner) step7(s *stepCtx) {
 			kept = append(kept, row)
 		}
 	}
-	probs := inventory.Same(r.before, kept, r.invOf(alice.addr).Entries)
+	// The previous release refuses the ten shapes when it is the switch-on release or later.
+	probs := inventory.Same(r.before, kept, r.invOf(alice.addr).Entries, release.RequiresProofs(r.cfg.prev))
 	s.ok(len(probs) == 0, "the same messages are listed before and after, by identity, refused ones marked", "%d problems", len(probs))
 	for _, p := range probs {
 		s.note("%s", p)
