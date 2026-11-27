@@ -1,6 +1,6 @@
 package listset
 
-// The AT-004 corpus: list sets as Go values (there is no file format, DEC-004), each with the exact reach the lists
+// The AT-004 corpus: list sets as Go values (there is no file format yet), each with the exact reach the lists
 // give every sender, written out by hand and never derived from the code under test.
 
 type reachWant map[string]map[Verb][]string
