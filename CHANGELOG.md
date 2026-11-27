@@ -8,15 +8,19 @@ All notable user-facing changes to mash are recorded here. The format follows [K
 
 ### Summary
 
-**mash 0.6.1 is the same program as 0.6.0, and its release tag is now signed.** Nothing in `mash` or `mashctl` changed. If you installed 0.6.0 there is nothing to do, except that 0.6.1 is the version to install from now on.
+**mash 0.6.1 is the same as 0.6.0 except one doctor warning, and its release tag is now signed.** It also fixes one thing: at a plain shell, `mash doctor` now warns when mash cannot create its state folder ([#1907](https://github.com/bogworks/mash/issues/1907)). Nothing changes in endpoints, keys or mail. If you installed 0.6.0 there is nothing to do, except that 0.6.1 is the version to install from now on.
 
 ### Upgrading
 
-There is nothing to do if you run 0.6.0: it is the same program, so no endpoint, key or mail changes. Install `mash` and `mashctl` 0.6.1 from the same release when you next install, with the README's install steps. To check that the release tag is signed, follow [Verify a release](https://github.com/bogworks/mash/blob/v0.6.1/docs/release.md#verify-a-release).
+There is nothing to do if you run 0.6.0: no endpoint, key or mail changes. Install `mash` and `mashctl` 0.6.1 from the same release when you next install, with the README's install steps. To check that the release tag is signed, follow [Verify a release](https://github.com/bogworks/mash/blob/v0.6.1/docs/release.md#verify-a-release).
 
 ### Changed
 
-- **The release tag is now signed.** The programs are unchanged from 0.6.0 ([#1934](https://github.com/bogworks/mash/pull/1934)).
+- **The release tag is now signed.** ([#1934](https://github.com/bogworks/mash/pull/1934))
+
+### Fixed
+
+- **`mash doctor` at a plain shell warns when mash cannot create its state folder and no spool setting is visible to the shell.** Before, the delivery row said only that it is checked inside a Claude Code session. Mail still stays on the channel and is delivered unless a session holds it for the spool (the plugin sets that), so the row is a warning, not a failure, and `mash status` is unchanged. ([#1907](https://github.com/bogworks/mash/issues/1907))
 
 Known issues: 2 known issues, listed in the [release notes](https://github.com/bogworks/mash/blob/v0.6.1/docs/release-notes/0.6.1.md#known-issues)
 Links: [Release notes](https://github.com/bogworks/mash/blob/v0.6.1/docs/release-notes/0.6.1.md), [full changes](https://github.com/bogworks/mash/compare/v0.6.0...v0.6.1), [verify your download](https://github.com/bogworks/mash/blob/v0.6.1/docs/install.md#verify-what-you-download)
