@@ -48,7 +48,7 @@ func TestLinkedPolicyPackages(t *testing.T) {
 	}
 }
 
-// REQ-009: sapsdk and the SDK identity package are out of every 0.5.x binary and allowed from 0.6.0.
+// REQ-009: sapsdk and the SDK identity package are refused below 0.6.0 (or an unparseable version), allowed from 0.6.0.
 func TestSwitchOnPackagesByVersion(t *testing.T) {
 	const m = "github.com/bogworks/mash"
 	const sdk = "github.com/bogworks/synadia-agents.go"
@@ -176,6 +176,44 @@ func TestPolicyUnlinkedStepGoList(t *testing.T) {
 			var oe opError
 			if asOp(err, &oe) {
 				t.Errorf("a linked package is a refusal, got an operational error: %v", err)
+			}
+		})
+	}
+}
+
+// The reasons say what is refused and why, and name a version only where the rule depends on one; the step's label
+// covers every package the step refuses.
+func TestRefusalReasonsAndLabelByVersion(t *testing.T) {
+	const m = "github.com/bogworks/mash"
+	const sdk = "github.com/bogworks/synadia-agents.go"
+	in := strings.Join([]string{m + "/internal/policyapply", sdk + "/caller", sdk + "/host", m + "/internal/sapsdk", sdk + "/identity"}, "\n") + "\n"
+	always := []string{sdk + "/caller", sdk + "/host", "internal/policyapply"}
+	all := []string{sdk + "/caller", sdk + "/host", sdk + "/identity", "internal/policyapply", "internal/sapsdk"}
+	for _, tc := range []struct {
+		version string
+		want    []string
+	}{
+		{"0.5.10", all}, {"0.6.0", always}, {"0.6.0-rc.1", always}, {"garbage", all},
+	} {
+		t.Run(tc.version, func(t *testing.T) {
+			got := linkedPolicyPackages(m, tc.version, in)
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("refused: got %v, want %v", got, tc.want)
+			}
+			for _, p := range got {
+				r := refusalReason(p)
+				if matchesAny(p, switchOnRefused) {
+					if !strings.Contains(r, "0.6.0") {
+						t.Errorf("%s: reason %q does not name 0.6.0", p, r)
+					}
+				} else if strings.Contains(r, "0.5") || strings.Contains(r, "0.6") {
+					t.Errorf("%s: reason %q names a version, but the rule does not depend on one", p, r)
+				}
+			}
+			for _, part := range []string{"policy engine", "caller and host", "0.6.0"} {
+				if !strings.Contains(unlinkedLabel, part) {
+					t.Errorf("label %q does not contain %q", unlinkedLabel, part)
+				}
 			}
 		})
 	}

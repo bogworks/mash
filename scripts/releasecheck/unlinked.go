@@ -14,10 +14,10 @@ import (
 	"github.com/bogworks/mash/internal/release"
 )
 
-// The unlinked step (the policy packages are not part of a release): no policy-engine package is linked into the
-// released programs. internal/policy, the size constants, is allowed; every other package of the engine is refused
-// wherever it appears in the dependencies of cmd/mash or cmd/mashctl. The same step refuses the synadia-agents.go
-// caller and host packages (not linked before S5). internal/sapsdk and the SDK identity package are refused too, in
+// The unlinked step (see unlinkedLabel): no policy-engine package is linked into the released programs, in any version.
+// internal/policy, the size constants, is allowed; every other package of the engine is refused wherever it appears in
+// the dependencies of cmd/mash or cmd/mashctl. The same step refuses the synadia-agents.go caller and host packages in
+// every version: mash does not link them. internal/sapsdk and the SDK identity package are refused too, in
 // every candidate below 0.6.0 (REQ-009): they are allowed only from the switch-on release, 0.6.0 or later. The SDK root
 // package is always allowed.
 
@@ -32,7 +32,7 @@ var policyNamedElsewhere = []string{
 	"internal/listset",
 }
 
-// sdkRefused lists, by whole import path, the synadia-agents.go packages no 0.5.x release links. The SDK root package
+// sdkRefused lists, by whole import path, the synadia-agents.go packages mash links in no version. The SDK root package
 // is allowed. Each entry matches the package and its subpackages, by whole path: .../identity/x is refused, while
 // .../identityx and .../synadia-agents.go itself are not.
 var sdkRefused = []string{
@@ -103,15 +103,18 @@ func matchesAny(path string, list []string) bool {
 	return false
 }
 
+// unlinkedLabel names the unlinked step and says everything it refuses. The step's label and its error both use it.
+const unlinkedLabel = "no refused package is linked into the released programs (the policy engine and the SDK caller and host never; internal/sapsdk and the SDK identity package only from 0.6.0)"
+
 // refusalReason says why a refused package may not be linked.
 func refusalReason(pkg string) string {
 	if matchesAny(pkg, switchOnRefused) {
-		return "internal/sapsdk and the SDK identity package are not linked before 0.6.0"
+		return "internal/sapsdk and the SDK identity package are linked only from 0.6.0"
 	}
 	if matchesAny(pkg, sdkRefused) {
-		return "the SDK caller and host packages are not part of any 0.5.x release"
+		return "mash does not link the SDK caller and host packages"
 	}
-	return "the policy engine is not part of any 0.5.x release"
+	return "the policy engine is not part of a release"
 }
 
 func isPolicyPackage(rel string) bool {
@@ -221,7 +224,7 @@ func policyUnlinkedStep(ctx context.Context, o Options, x string) error {
 		links = append(links, targetLinks{t.GOOS + "/" + t.GOARCH, linkedPolicyPackages(module, o.Version, out)})
 	}
 	if s := describeLinked(links); s != "" {
-		return fmt.Errorf("refused packages are linked into the released programs (the policy packages are not part of a release): %s; %s", s, describeReasons(links))
+		return fmt.Errorf("the release requires that %s, but: %s; %s", unlinkedLabel, s, describeReasons(links))
 	}
 	return nil
 }
