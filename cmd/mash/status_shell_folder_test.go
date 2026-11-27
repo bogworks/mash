@@ -15,6 +15,12 @@ import (
 // endpoint and owner swapped for the test's own (the path keeps its shape: ~/.local/state/mash/spool/<owner>/<name>).
 func specDoctorShellFolder(t *testing.T, w *world) string {
 	t.Helper()
+	return specDoctorShellFolderCase(t, w, "At a shell, when the state folder cannot be created")
+}
+
+// specDoctorShellFolderCase is the same for the named spec case.
+func specDoctorShellFolderCase(t *testing.T, w *world, name string) string {
+	t.Helper()
 	b, err := os.ReadFile(filepath.Join("..", "..", "spec", "mash.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -27,7 +33,7 @@ func specDoctorShellFolder(t *testing.T, w *world) string {
 	find = func(v any) string {
 		switch x := v.(type) {
 		case map[string]any:
-			if x["case"] == "At a shell, when the state folder cannot be created" {
+			if x["case"] == name {
 				s, _ := x["text"].(string)
 				return s
 			}
@@ -47,7 +53,7 @@ func specDoctorShellFolder(t *testing.T, w *world) string {
 	}
 	text := find(doc)
 	if text == "" {
-		t.Fatal("the spec has no case for a shell whose state folder cannot be created")
+		t.Fatalf("the spec has no case %q", name)
 	}
 	const specPath = "~/.local/state/mash/spool/acme/acme.demo.bob"
 	if !strings.Contains(text, specPath) {
@@ -111,18 +117,37 @@ func TestShellStatusDoctorSeeAStateFolderThatCannotBeCreated(t *testing.T) {
 	}
 }
 
-// With neither setting on, mail stays on the channel and is still delivered, so a shell does not call the folder a
-// failure: status stays ready and doctor's delivery row is the skipped row of any shell.
-func TestShellStatusDoctorIgnoreABrokenStateFolderWhereMailStaysOnTheChannel(t *testing.T) {
-	w := newWorld(t, "a")
+// With neither setting visible to the shell, mail stays on the channel and is delivered unless a session sets
+// MASH_SPOOL_FROM_START (the plugin does), so a shell cannot tell: status stays ready and doctor warns instead of failing.
+func TestShellDoctorWarnsOfAStateFolderThatCannotBeCreatedWhenNoSettingIsVisible(t *testing.T) {
+	w := tlsWorld(t, "a")
 	t.Setenv("HOME", w.env["a"]["HOME"])
+	t.Run("writable folder keeps the skip row", func(t *testing.T) {
+		out, code := w.cli(t, "a", "doctor")
+		if code != 0 || strings.Contains(out, cmds.CannotWrite) || !strings.Contains(out, "delivery     skip  checked only inside a Claude Code session") && !strings.Contains(out, "delivery  skip  checked only inside a Claude Code session") {
+			t.Errorf("doctor %d:\n%s", code, out)
+		}
+	})
 	breakStateFolder(t, w)
 	out, code := w.cli(t, "a", "status")
 	if code != 0 || strings.Contains(out, cmds.ReasonMailHeld) {
 		t.Errorf("status %d:\n%s", code, out)
 	}
 	out, code = w.cli(t, "a", "doctor")
-	if code != 0 || strings.Contains(out, cmds.CannotWrite) || !strings.Contains(out, "delivery     skip  checked only inside a Claude Code session") {
-		t.Errorf("doctor %d:\n%s", code, out)
+	want := specDoctorShellFolderCase(t, w, "At a shell, when the state folder cannot be created and no spool setting is visible") + "\n"
+	if code != 0 || out != want {
+		t.Errorf("doctor %d:\n%s\nwant the spec text:\n%s", code, out, want)
+	}
+	for _, l := range strings.Split(out, "\n") {
+		if strings.HasPrefix(l, "delivery") && len(l) > 80 {
+			t.Errorf("row over 80 columns: %q", l)
+		}
+	}
+	out, code = w.cli(t, "a", "doctor", "--strict")
+	if code != 1 {
+		t.Errorf("doctor --strict %d:\n%s", code, out)
+	}
+	if out, _ := w.cli(t, "a", "doctor", "--json"); !strings.Contains(out, `"warnings": 1`) && !strings.Contains(out, `"warnings":1`) {
+		t.Errorf("doctor --json does not count one warning:\n%s", out)
 	}
 }

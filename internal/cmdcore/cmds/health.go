@@ -642,6 +642,9 @@ func (r DoctorResult) Text(cmdcore.Opts) string {
 			// a folder too long for the line goes under the detail column
 			if path, ok := strings.CutPrefix(detail, CannotWrite); ok && c.Name == CheckDelivery && len(line+detail) > 80 {
 				detail, extra = strings.TrimSpace(CannotWrite), "\n"+indent+path
+				if p, tail, ok := strings.Cut(path, "; "); ok { // a warning's reason goes on a line of its own
+					extra = "\n" + indent + p + "\n" + indent + tail
+				}
 			}
 			if w, ok := hookRowWraps[detail]; ok && c.Name == CheckDelivery {
 				detail, extra = w[0], "\n"+indent+w[1]
