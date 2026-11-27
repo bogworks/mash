@@ -92,11 +92,11 @@ func streamMsgs(t *testing.T, f *fixture, stream string) uint64 {
 // and woken, and its heartbeat is on exactly five tokens.
 func TestAddressEndToEnd(t *testing.T) {
 	f := newFixture(t)
-	sdk := f.provision(t, "x", "sap-go-sdk")
-	peer := f.provision(t, "x", "peer")
+	sdk := f.provision(t, "dev", "alice-design")
+	peer := f.provision(t, "dev", "bob")
 	key := sdk.Flat()
 	rec := f.record(t, key)
-	if rec.Instance != "sap-go-sdk" || rec.Group != "x" || rec.Owner != f.e.Owner || rec.Agent != sap.AgentName || rec.MailSubject != sdk.MailSubject() {
+	if rec.Instance != "alice-design" || rec.Group != "dev" || rec.Owner != f.e.Owner || rec.Agent != sap.AgentName || rec.MailSubject != sdk.MailSubject() {
 		t.Fatalf("record %+v", rec)
 	}
 	prompts := make(chan PromptEvent, 1)
@@ -106,7 +106,7 @@ func TestAddressEndToEnd(t *testing.T) {
 		_ = ep.Reply(p.RequestID, "from sdk", true)
 	})
 	b, bev := f.serveAt(t, peer, noPrompt)
-	if a.Key() != key || a.Name() != "sap-go-sdk" {
+	if a.Key() != key || a.Name() != "alice-design" {
 		t.Fatalf("key %q name %q", a.Key(), a.Name())
 	}
 	ctx := context.Background()
@@ -165,7 +165,7 @@ func TestAddressEndToEnd(t *testing.T) {
 		t.Fatalf("prompt event %+v", p)
 	}
 
-	// Heartbeat: exactly agents.hb.<owner>.x.sap-go-sdk. Subscribe and flush before it is published.
+	// Heartbeat: exactly agents.hb.<owner>.dev.alice-design. Subscribe and flush before it is published.
 	hbSubj := mustSubj(sdk).HB
 	sub, err := b.Conn().SubscribeSync(hbSubj)
 	if err != nil {
@@ -203,20 +203,20 @@ func TestAddressEndToEnd(t *testing.T) {
 // reply prefixes and NATS users, all keyed on the flat form, and mail reaches only its addressee.
 func TestAddressesDifferingInGroupCoexist(t *testing.T) {
 	f := newFixture(t)
-	idx := f.provision(t, "x", "svc")
-	idy := f.provision(t, "y", "svc")
+	idx := f.provision(t, "dev", "svc")
+	idy := f.provision(t, "ops", "svc")
 	kx, ky := idx.Flat(), idy.Flat()
 	if kx == ky {
 		t.Fatalf("flat %q %q", kx, ky)
 	}
-	senderX := f.clientAt(t, f.provision(t, "x", "sender"))
-	senderY := f.clientAt(t, f.provision(t, "y", "sender"))
+	senderX := f.clientAt(t, f.provision(t, "dev", "sender"))
+	senderY := f.clientAt(t, f.provision(t, "ops", "sender"))
 	ex, xev := f.serveAt(t, idx, noPrompt)
 	ey, yev := f.serveAt(t, idy, noPrompt)
 	ctx := context.Background()
 
 	// Distinct directory keys, each record with its own tokens.
-	for a, want := range map[sap.Address]string{idx: "x", idy: "y"} {
+	for a, want := range map[sap.Address]string{idx: "dev", idy: "ops"} {
 		if r := f.record(t, a.Flat()); r.Group != want || r.Instance != "svc" || r.Owner != f.e.Owner || r.Agent != sap.AgentName {
 			t.Fatalf("record %s: %+v", a.Flat(), r)
 		}
@@ -234,11 +234,11 @@ func TestAddressesDifferingInGroupCoexist(t *testing.T) {
 	}
 
 	// Mail to each reaches only that one.
-	sx, err := senderX.Send(ctx, kx, "for x svc", 0)
+	sx, err := senderX.Send(ctx, kx, "for dev svc", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	sy, err := senderY.Send(ctx, ky, "for y svc", 0)
+	sy, err := senderY.Send(ctx, ky, "for ops svc", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,17 +249,17 @@ func TestAddressesDifferingInGroupCoexist(t *testing.T) {
 	// The delivery text is the full batch, body included: the endpoint has no spool, so it is not hooked and deliverBatch
 	// renders render.Batch, which shows every message in full while there are at most BatchMsgs (10) and BatchBytes
 	// (16384) of them. So each text starts with its count line naming its own peer and carries only its own body.
-	xs, ys := f.e.Owner+".x.sender", f.e.Owner+".y.sender"
+	xs, ys := f.e.Owner+".dev.sender", f.e.Owner+".ops.sender"
 	if len(xg) != 1 || !strings.HasPrefix(xg[0], "1 message from "+xs+" (") || strings.Contains(xg[0], ys) {
 		t.Fatalf("x count line: %q", xg)
 	}
 	if len(yg) != 1 || !strings.HasPrefix(yg[0], "1 message from "+ys+" (") || strings.Contains(yg[0], xs) {
 		t.Fatalf("y count line: %q", yg)
 	}
-	if !strings.Contains(xg[0], "for x svc") || strings.Contains(xg[0], "for y svc") {
+	if !strings.Contains(xg[0], "for dev svc") || strings.Contains(xg[0], "for ops svc") {
 		t.Fatalf("x got %q", xg)
 	}
-	if !strings.Contains(yg[0], "for y svc") || strings.Contains(yg[0], "for x svc") {
+	if !strings.Contains(yg[0], "for ops svc") || strings.Contains(yg[0], "for dev svc") {
 		t.Fatalf("y got %q", yg)
 	}
 	for stream, want := range map[string]uint64{idx.InboxStream(): 1, idy.InboxStream(): 1} {
@@ -267,14 +267,14 @@ func TestAddressesDifferingInGroupCoexist(t *testing.T) {
 			t.Fatalf("%s holds %d, want %d", stream, n, want)
 		}
 	}
-	if m, err := ex.Read(ctx, sx); err != nil || string(m.Body) != "for x svc" || m.Trust != sap.TrustVerified {
+	if m, err := ex.Read(ctx, sx); err != nil || string(m.Body) != "for dev svc" || m.Trust != sap.TrustVerified {
 		t.Fatalf("x read: %+v %v", m, err)
-	} else if one := render.One(m); !strings.Contains(one, "[verified]") || !strings.Contains(one, "> for x svc") || strings.Contains(one, "for y svc") {
+	} else if one := render.One(m); !strings.Contains(one, "[verified]") || !strings.Contains(one, "> for dev svc") || strings.Contains(one, "for ops svc") {
 		t.Fatalf("x rendered: %s", one)
 	}
-	if m, err := ey.Read(ctx, sy); err != nil || string(m.Body) != "for y svc" || m.Trust != sap.TrustVerified {
+	if m, err := ey.Read(ctx, sy); err != nil || string(m.Body) != "for ops svc" || m.Trust != sap.TrustVerified {
 		t.Fatalf("y read: %+v %v", m, err)
-	} else if one := render.One(m); !strings.Contains(one, "[verified]") || !strings.Contains(one, "> for y svc") || strings.Contains(one, "for x svc") {
+	} else if one := render.One(m); !strings.Contains(one, "[verified]") || !strings.Contains(one, "> for ops svc") || strings.Contains(one, "for dev svc") {
 		t.Fatalf("y rendered: %s", one)
 	}
 	// Leases are two keys; a second open of one address conflicts without touching the other.
