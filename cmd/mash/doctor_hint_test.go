@@ -198,8 +198,8 @@ func TestDoctorNoProblemNoHint(t *testing.T) {
 	// real mail and checks doctor and doctor --strict after it
 }
 
-// Standing order 17: other users in the account never make a mash doctor row fail. mash doctor reads nothing about the
-// other users (its rows are config, creds, server, sign-in, delivery and refused: its own); with a second endpoint
+// mash is a tenant of the NATS account: other users in the account never make a mash doctor row fail. mash doctor reads
+// nothing about the other users (its rows are config, creds, server, sign-in, delivery and refused: its own); with a second endpoint
 // minted on the same server it is still clean.
 func TestDoctorIsNotAboutOtherUsers(t *testing.T) {
 	w := tlsWorld(t, "a", "b", "c")

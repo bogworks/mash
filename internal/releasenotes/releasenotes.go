@@ -1,4 +1,4 @@
-// Package releasenotes is the one place that judges a release's notes (ADR 0105, release standard rule 23): a release's
+// Package releasenotes is the one place that judges a release's notes (ADR 0105): a release's
 // notes and its change-log section are the same text, and it opens with prose before any list.
 //
 // The opening test (Opening): the first heading is "### Summary" and at least MinSummaryWords words of paragraph text

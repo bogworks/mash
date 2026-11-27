@@ -142,8 +142,8 @@ func TestAtLeast(t *testing.T) {
 		v, from string
 		want    bool
 	}{
-		{"0.5.7", Rule23From, true}, {"0.5.6", Rule23From, false}, {"0.5.10", Rule23From, true}, {"0.6.0", Rule23From, true},
-		{"1.0.0", Rule23From, true}, {"0.4.9", Rule23From, false}, {"v0.5.7", Rule23From, true}, {"nightly", Rule23From, false},
+		{"0.5.7", NotesFileFrom, true}, {"0.5.6", NotesFileFrom, false}, {"0.5.10", NotesFileFrom, true}, {"0.6.0", NotesFileFrom, true},
+		{"1.0.0", NotesFileFrom, true}, {"0.4.9", NotesFileFrom, false}, {"v0.5.7", NotesFileFrom, true}, {"nightly", NotesFileFrom, false},
 	} {
 		if got := AtLeast(c.v, c.from); got != c.want {
 			t.Errorf("AtLeast(%q, %q) = %v", c.v, c.from, got)

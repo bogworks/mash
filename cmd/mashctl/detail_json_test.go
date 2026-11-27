@@ -1,6 +1,6 @@
 package main
 
-// Rule 24: --detail adds nothing unless the specification writes the form out, and the only form it writes out is
+// --detail only adds: it adds nothing unless the specification writes the form out, and the only form it writes out is
 // `endpoint reissue`'s: `servers acknowledged: N` in the text, and a `servers_acknowledged` key in --json. Every other
 // command prints the same bytes, on stdout and on stderr, in text and in --json, with --detail or without.
 

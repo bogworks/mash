@@ -501,7 +501,7 @@ func TestMergify_actionsChecksAreAppQualified(t *testing.T) {
 // codeRegexMatches evaluates the code regex (the text of the docs queue's `-files ~=` condition) on one path. Mergify's regular
 // expressions are Python's; Go's RE2 has no lookahead, and the expression has exactly one, in its first alternative,
 // `^(?!(.*\.md$|docs/))`: a path is code unless it is a Markdown file or is under docs/ (rules 20 and 21), which is evaluated here as
-// that sentence. The second alternative is plain RE2: the data files under docs/ that the release tooling reads (rule 20, 0.8.1).
+// that sentence. The second alternative is plain RE2: the data files under docs/ that the release tooling reads.
 func codeRegexMatches(t *testing.T, re, path string) bool {
 	t.Helper()
 	const lookahead = `^(?!(.*\.md$|docs/))`

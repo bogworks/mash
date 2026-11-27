@@ -18,8 +18,8 @@ func objectOf(t *testing.T, r ran) map[string]any {
 	return m
 }
 
-// contains checks rule 24: the fuller object holds every key of the usual one, with the same value (skip names the keys
-// whose values differ from one run to the next).
+// contains checks that --detail only adds: the fuller object holds every key of the usual one, with the same value
+// (skip names the keys whose values differ from one run to the next).
 func contains(t *testing.T, what string, usual, fuller map[string]any, skip ...string) {
 	t.Helper()
 next:

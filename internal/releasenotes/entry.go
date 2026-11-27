@@ -1,6 +1,6 @@
 package releasenotes
 
-// Release standard rule 23: a release has two documents. The change-log entry is the record, about one screen, in a fixed
+// From 0.5.7 a release has two documents. The change-log entry is the record, about one screen, in a fixed
 // format; the release notes (docs/release-notes/<version>.md) are the reading document, and the release page is built from
 // that file. ChangelogEntry judges the entry against the machine-checkable questions of the rule's rubric; ReleaseNotesFile
 // judges the notes file and that it shares the entry's Summary and Upgrading text.
@@ -14,9 +14,9 @@ import (
 )
 
 const (
-	// Rule23From is the first version released under rule 23. Earlier versions keep the ADR 0105 rule: their release
-	// notes are their change-log section, byte for byte.
-	Rule23From = "0.5.7"
+	// NotesFileFrom is the first version whose release page is the release notes file. Earlier versions keep the
+	// ADR 0105 rule: their release notes are their change-log section, byte for byte.
+	NotesFileFrom = "0.5.7"
 	// MaxEntryLines is the most lines a change-log entry may have (rubric 1).
 	MaxEntryLines = 60
 )
@@ -117,8 +117,8 @@ func headingName(text string) string {
 }
 
 // ChangelogEntry judges one change-log entry body (the text under "## [X.Y.Z] - date", without that heading) for version
-// against the machine-checkable questions of the rule 23 rubric: 1, 2, 4, 6, 7, 8, 9, 10 and 12. Questions 3, 5, 11 and 13
-// are a reader's call. It returns every failure, each naming its rubric number.
+// against the machine-checkable questions of the change-log rubric: 1, 2, 4, 6, 7, 8, 9, 10 and 12. Questions 3, 5, 11
+// and 13 are a reader's call. It returns every failure, each naming its rubric number.
 func ChangelogEntry(body, version string) error {
 	body = strings.ReplaceAll(body, "\r\n", "\n")
 	raw := strings.Split(strings.TrimRight(body, " \t\n"), "\n")
@@ -339,7 +339,7 @@ func summaryProse(text string) (string, bool) {
 
 // ReleaseNotesFile judges a release notes file (docs/release-notes/<version>.md) against the change-log entry of the same
 // release: it opens with a Summary and an Upgrading section, holds no placeholder and no line ending in a commit hash, and
-// its Summary prose and Upgrading section are the entry's, whitespace aside (rule 23: the same sentences in both).
+// its Summary prose and Upgrading section are the entry's, whitespace aside (the same sentences in both).
 func ReleaseNotesFile(notes, entry string) error {
 	errs := []error{NoPlaceholder(notes), Opening(notes), NoCommitHashLines(notes)}
 	ns, ok1 := summaryProse(notes)

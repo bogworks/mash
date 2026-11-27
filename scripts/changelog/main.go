@@ -31,12 +31,12 @@
 // heading, without the heading line) and exits 1 with a message when there is no such section. The release workflow's
 // draft job writes it as the release notes.
 //
-// release-page prints the text of the release page for X.Y.Z. Below releasenotes.Rule23From (0.5.7) that is the change-log
-// section, as section prints it (ADR 0105); from it, the contents of docs/release-notes/X.Y.Z.md (release standard rule
-// 23: the release page is built from the release notes file, not from the change log). It exits 1 with a message when
-// the section or the file is missing. The release workflow's draft job writes it as the release notes.
+// release-page prints the text of the release page for X.Y.Z. Below releasenotes.NotesFileFrom (0.5.7) that is the
+// change-log section, as section prints it (ADR 0105); from it, the contents of docs/release-notes/X.Y.Z.md (the
+// release page is built from the release notes file, not from the change log). It exits 1 with a message when the section or
+// the file is missing. The release workflow's draft job writes it as the release notes.
 //
-// check-entry judges the change-log section of X.Y.Z against the rubric of rule 23 (releasenotes.ChangelogEntry) and
+// check-entry judges the change-log section of X.Y.Z against the change-log rubric (releasenotes.ChangelogEntry) and
 // prints one line per failure; exit 1 when there is one. It is the rule for 0.5.7 and later; the workflow runs it only
 // for those versions.
 //
@@ -523,13 +523,13 @@ func runReleasePage(args []string, e env) int {
 		fmt.Fprintf(e.stderr, "changelog: version %q must be X.Y.Z\n", *version)
 		return 1
 	}
-	if !releasenotes.AtLeast(*version, releasenotes.Rule23From) {
+	if !releasenotes.AtLeast(*version, releasenotes.NotesFileFrom) {
 		return runSection([]string{"--version", *version, "--root", *root, "--changelog", *cl}, e)
 	}
 	path := filepath.Join(resolve(*root, *dir), *version+".md")
 	b, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		fmt.Fprintf(e.stderr, "changelog: %s does not exist: the release notes for %s were not written (release standard rule 23)\n", path, *version)
+		fmt.Fprintf(e.stderr, "changelog: %s does not exist: the release notes for %s were not written (the release page is built from the release notes file)\n", path, *version)
 		return 1
 	}
 	if err != nil {

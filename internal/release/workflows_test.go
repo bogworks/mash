@@ -751,7 +751,7 @@ func TestRelease_candidateIsDerivedFromTheTagNotGITHUB_SHA(t *testing.T) {
 }
 
 // The notes step, run in a real repository with the tagged checkout's change log, writes the change log section of the
-// released version (below 0.5.7, ADR 0105) or its release notes file (0.5.7 and later, rule 23) as the notes with the
+// released version (below 0.5.7, ADR 0105) or its release notes file (0.5.7 and later) as the notes with the
 // compare link last, and refuses before any draft exists when the section or file is missing, does not open with prose,
 // still holds the placeholder, or (0.5.7 and later) the change log entry fails the rubric.
 func TestRelease_notesAreTheChangeLogSectionWithTheCompareLink(t *testing.T) {
@@ -762,14 +762,14 @@ func TestRelease_notesAreTheChangeLogSectionWithTheCompareLink(t *testing.T) {
 			script = st.Run
 		}
 		if strings.Contains(st.Run, "scripts/changelog section") {
-			t.Errorf("the notes step builds the release page from the change log section, not the release notes file (rule 23):\n%s", st.Run)
+			t.Errorf("the notes step builds the release page from the change log section, not the release notes file:\n%s", st.Run)
 		}
 	}
 	if script == "" {
 		t.Fatal("no notes step")
 	}
 	if !strings.Contains(script, "scripts/changelog check-entry") {
-		t.Errorf("the notes step does not hold the change log entry to the rubric (rule 23):\n%s", script)
+		t.Errorf("the notes step does not hold the change log entry to the change-log rubric:\n%s", script)
 	}
 	for _, st := range w.Jobs["draft"].Steps {
 		if strings.Contains(st.Run, "gh release create") && !strings.Contains(st.Run, "--notes-file dist/RELEASE-NOTES.md") {
@@ -922,7 +922,7 @@ echo '[{"tagName":"v0.1.0","isDraft":false,"isPrerelease":false}]'
 		t.Fatalf("the draft changed SHA256SUMS:\n%s", got)
 	}
 
-	// Rule 23: for 0.5.7 the page is docs/release-notes/0.5.7.md, not the change log section, and the entry is held to the
+	// From 0.5.7: the page is docs/release-notes/0.5.7.md, not the change log section, and the entry is held to the
 	// rubric before the draft exists.
 	g("tag", "v0.5.7", "HEAD")
 	run23 := func() ([]byte, error) {
@@ -1359,7 +1359,7 @@ func TestCI_prCheckGatesOnEveryRequiredJob(t *testing.T) {
 		t.Errorf("pr-check needs test-macos, which is advisory (TODO(macos-gate) in ci.yml): %v", j.Needs)
 	}
 	if _, ok := w.Jobs["test-macos"]; ok {
-		t.Error("ci.yml has test-macos: macOS runs on tagged releases only (release.yml, rule 21)")
+		t.Error("ci.yml has test-macos: macOS runs on tagged releases only (release.yml)")
 	}
 	if mj := load(t, "release.yml").Jobs["test-macos"]; mj.ContinueOnError != nil || mj.If != "${{ github.event_name == 'push' }}" || !strings.Contains(fmt.Sprint(mj.RunsOn), "rh-macos") {
 		t.Errorf("release.yml test-macos must run on every tag push (not the dry run), on rh-macos, and never with continue-on-error: %+v", mj)
@@ -2214,7 +2214,7 @@ func TestRelease_dryRunVerifiesAndNeverReleases(t *testing.T) {
 	}
 }
 
-// The dry run also proves the release-notes path (ADR 0105, rule 23): dry-run-notes runs the draft job's notes commands on the latest
+// The dry run also proves the release-notes path (ADR 0105): dry-run-notes runs the draft job's notes commands on the latest
 // released version (its release notes file from 0.5.7, its change log section before), on a dispatch on main only, and can neither create a release nor affect one.
 func TestRelease_dryRunNotesProvesTheNotesPathAndReleasesNothing(t *testing.T) {
 	w := load(t, "release.yml")
@@ -2558,7 +2558,7 @@ func TestRelease_everyUploadArtifactKeepsOneDay(t *testing.T) {
 func TestCI_ephShadowJobGatesNothing(t *testing.T) {
 	w := load(t, "ci.yml")
 	if _, ok := w.Jobs["test-eph"]; ok {
-		t.Fatal("ci.yml has test-eph: the eph pilot runs nightly (nightly.yml), never per change (rule 21)")
+		t.Fatal("ci.yml has test-eph: the eph pilot runs nightly (nightly.yml), never per change")
 	}
 	n := load(t, "nightly.yml")
 	ej, ok := n.Jobs["test-eph"]
