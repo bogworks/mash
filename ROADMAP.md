@@ -37,16 +37,15 @@ Shipped in 0.6.0:
 ## Now
 
 - Weekly 0.6.x fixes and cleanup.
-- Security policy, which is being designed and built switched off. It is not
-  in any release, and it has no version or date.
+- Security policy: you say who may send to whom. mash ships open, and
+  narrowing the mesh is a choice you make. It is being designed and built
+  switched off, is not in any release, and has no version or date.
 
 ## Next
 
 Next is planned and may change. These are the items we expect to work on
 after Now.
 
-- Policy: you say who may send to whom. mash ships open, and narrowing the
-  mesh is a choice you make.
 - Prompting an agent through the SAP protocol, as a first-class action beside
   mail.
 - Sharing one server between owners. Today a deployment has one owner (ADR 0006); a change to that is a decision still to be made.
