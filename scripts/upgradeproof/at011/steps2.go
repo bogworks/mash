@@ -9,27 +9,48 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bogworks/mash/internal/release"
 	"github.com/bogworks/mash/scripts/upgradeproof/inventory"
 )
+
+// fallbackOrder reads the order of the upgrade from the previous release's notes (docs/release-notes/<prev>.md at the
+// candidate). Notes that cannot be read, or that do not give the five actions in order, fail a check and the canonical
+// order is returned.
+func (r *runner) fallbackOrder(s *stepCtx) []string {
+	name := "docs/release-notes/" + r.cfg.prev + ".md"
+	b, err := os.ReadFile(filepath.Join(r.src, filepath.FromSlash(name)))
+	if !s.ok(err == nil, "read "+name+" at the candidate, for the fallback order", "%v", err) {
+		return upgradeActions
+	}
+	order, unknown := orderFrom(notesSteps(string(b)))
+	problem := orderProblem(order, unknown)
+	if problem == "" {
+		return order
+	}
+	s.ok(false, name+" gives all five actions in order in its Upgrading steps", "%s", problem)
+	return upgradeActions
+}
 
 // upgradeOrder reads the upgrade page of the candidate and returns the order of actions the run follows. A page with no
 // numbered steps fails the check and the run follows the previous release's notes instead.
 func (r *runner) upgradeOrder(s *stepCtx) []string {
 	b, err := os.ReadFile(filepath.Join(r.src, "docs", "compatibility.md"))
 	if !s.need(err == nil, "read the upgrade page docs/compatibility.md at the candidate", "%v", err) {
-		return fallbackOrder
+		return r.fallbackOrder(s)
 	}
 	steps := pageSteps(string(b), r.cfg.prev)
 	has := s.ok(len(steps) > 0, "the upgrade page has numbered steps in its \"Upgrading from "+r.cfg.prev+"\" section", "%d found", len(steps))
 	if !has {
-		s.note("falling back to the order of the 0.5.10 release notes: %s", strings.Join(fallbackOrder, "; "))
-		return fallbackOrder
+		order := r.fallbackOrder(s)
+		s.note("falling back to the order of docs/release-notes/%s.md: %s", r.cfg.prev, strings.Join(order, "; "))
+		return order
 	}
 	order, unknown := orderFrom(steps)
 	problem := orderProblem(order, unknown)
 	if !s.ok(problem == "", "the page gives all five actions (check, install, update the plugins, restart, check again), in that order, and nothing else", "%s", problem) {
-		s.note("falling back to the order of the 0.5.10 release notes: %s", strings.Join(fallbackOrder, "; "))
-		return fallbackOrder
+		order := r.fallbackOrder(s)
+		s.note("falling back to the order of docs/release-notes/%s.md: %s", r.cfg.prev, strings.Join(order, "; "))
+		return order
 	}
 	return order
 }
@@ -156,7 +177,8 @@ func (r *runner) step7(s *stepCtx) {
 			kept = append(kept, row)
 		}
 	}
-	probs := inventory.Same(r.before, kept, r.invOf(alice.addr).Entries)
+	// The previous release refuses the ten shapes when it is the switch-on release or later.
+	probs := inventory.Same(r.before, kept, r.invOf(alice.addr).Entries, release.RequiresProofs(r.cfg.prev))
 	s.ok(len(probs) == 0, "the same messages are listed before and after, by identity, refused ones marked", "%d problems", len(probs))
 	for _, p := range probs {
 		s.note("%s", p)
@@ -190,8 +212,12 @@ func (r *runner) step8(s *stepCtx) {
 	if len(first) > 1500 {
 		first = first[:1500]
 	}
-	s.ok(tenRefuseR.MatchString(first), "the release notes say first that the ten shapes are now refused", "")
-	s.ok(statusRE.Match(b), "the release notes name the status codes that move (400, 401, 403)", "")
+	if r.cfg.version == release.SwitchOnVersion {
+		s.ok(tenRefuseR.MatchString(first), "the release notes say first that the ten shapes are now refused", "")
+		s.ok(statusRE.Match(b), "the release notes name the status codes that move (400, 401, 403)", "")
+	} else {
+		s.note("the ten shapes and status code checks of the release notes apply to the switch-on release (%s) only", release.SwitchOnVersion)
+	}
 }
 
 // whoOnline parses the output of `mash who --json` and returns an error naming each address that is not listed or not

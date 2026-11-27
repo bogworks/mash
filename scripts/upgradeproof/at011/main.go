@@ -2,7 +2,7 @@
 // to the candidate commit, and writes the receipt release-check reads (kind at-011), a log of every step and the
 // evidence behind each verdict.
 //
-//	at011 run -commit <full sha> -version 0.6.0 -prev 0.5.10 -out <dir> -work <new absolute dir> -pack <objects.pack>
+//	at011 run -commit <full sha> -version <X.Y.Z> -prev <X.Y.Z, the previous release> -out <dir> -work <new absolute dir> -pack <objects.pack>
 //	          -prev-sums-sha256 <hex> -release-repo owner/name [-repo <url|path>] [-venue <text>]
 //	at011 finalize -out <dir> -statement <text> -container-removed=true|false
 //
@@ -18,6 +18,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"syscall"
@@ -48,8 +49,8 @@ func cmdRun(args []string) int {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	var c config
 	fs.StringVar(&c.commit, "commit", "", "the candidate's full commit id (40 hex digits)")
-	fs.StringVar(&c.version, "version", release.SwitchOnVersion, "the candidate's version, without the v")
-	fs.StringVar(&c.prev, "prev", "0.5.10", "the previous release's version, without the v")
+	fs.StringVar(&c.version, "version", "", "the candidate's version, X.Y.Z without the v; required")
+	fs.StringVar(&c.prev, "prev", "", "the previous release's version, X.Y.Z without the v; required")
 	fs.StringVar(&c.out, "out", "", "the output directory (receipt, log, evidence)")
 	fs.StringVar(&c.pack, "pack", "", "a git pack of the candidate commit's objects (git pack-objects --revs)")
 	fs.StringVar(&c.repo, "repo", "", "a repository to clone the candidate from, when there is no pack")
@@ -60,8 +61,12 @@ func cmdRun(args []string) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if len(c.commit) != 40 || c.out == "" || c.prev != "0.5.10" || (c.pack == "" && c.repo == "") {
-		fmt.Fprintln(os.Stderr, "at011 run: -commit (40 hex digits), -out, -pack or -repo are required; -prev is 0.5.10")
+	if len(c.commit) != 40 || c.out == "" || (c.pack == "" && c.repo == "") {
+		fmt.Fprintln(os.Stderr, "at011 run: -commit (40 hex digits), -out, -pack or -repo are required")
+		return 2
+	}
+	if p := versionsProblem(c.version, c.prev); p != "" {
+		fmt.Fprintln(os.Stderr, "at011 run: "+p)
 		return 2
 	}
 	if !filepath.IsAbs(c.work) {
@@ -112,10 +117,26 @@ func cmdRun(args []string) int {
 	return r.run1()
 }
 
+var releaseVersionRE = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
+
+// versionsProblem says what is wrong with -version and -prev, or "" when both are release versions (X.Y.Z, no v) and
+// they differ.
+func versionsProblem(version, prev string) string {
+	for _, v := range []struct{ flag, val string }{{"-version", version}, {"-prev", prev}} {
+		if !releaseVersionRE.MatchString(v.val) {
+			return fmt.Sprintf("%s is required and must be a release version like 1.2.3, digits only, no leading v (got %q)", v.flag, v.val)
+		}
+	}
+	if version == prev {
+		return fmt.Sprintf("-prev and -version are both %s; the proof upgrades from the previous release to the candidate", version)
+	}
+	return ""
+}
+
 func (r *runner) run1() int {
 	start := time.Now().UTC()
 	r.log.printf("AT-011 upgrade proof: %s -> candidate %s (version %s) on %s/%s, %s, user uid %d",
-		oldTag, r.cfg.commit, r.cfg.version, r.goos, r.goarch, start.Format(time.RFC3339), os.Getuid())
+		r.oldTag(), r.cfg.commit, r.cfg.version, r.goos, r.goarch, start.Format(time.RFC3339), os.Getuid())
 	r.log.printf("venue: %s", r.cfg.venue)
 	defer r.cleanup()
 
