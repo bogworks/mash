@@ -1604,7 +1604,7 @@
        },
        {
         "case": "--json, no plugin",
-        "text": "{\n  \"version\": \"0.5.9\",\n  \"commit\": \"3f9a41c2e0b7d5a1c4e08b2d77f3a95e1b6c4098\",\n  \"plugin\": null\n}",
+        "text": "{\n  \"version\": \"0.6.1\",\n  \"commit\": \"3f9a41c2e0b7d5a1c4e08b2d77f3a95e1b6c4098\",\n  \"plugin\": null\n}",
         "stream": "stdout",
         "exit": 0,
         "note": "--json is shown as it prints at a terminal (indented); piped it is one compact line (rule \"--json prints one object\"). When there is no plugin the value is null. The key is always present.",
@@ -1615,7 +1615,7 @@
      {
       "name": "x-json",
       "value": {
-       "version": "0.5.9",
+       "version": "0.6.1",
        "commit": "3f9a41c2e0b7d5a1c4e08b2d77f3a95e1b6c4098",
        "plugin": null
       }
