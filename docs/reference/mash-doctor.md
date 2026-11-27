@@ -242,6 +242,23 @@ Stream: stdout. Exit code: 0.
 delivery  skip  checked only inside a Claude Code session
 ```
 
+### At a shell, when the state folder cannot be created
+
+Stream: stdout. Exit code: 1.
+
+```text
+config       ok
+claude       skip  no claude command found
+creds        ok
+server       ok    tls://myserver:4222
+sign-in      ok
+delivery     FAIL  cannot write ~/.local/state/mash/spool/acme/acme.demo.bob
+stored mail  skip  not checked: ~/.local/state/mash/spool/acme/acme.demo.bob is not writable
+refused      ok    no mail was refused
+
+1 problem.
+```
+
 ### Another session holds the endpoint
 
 Stream: stdout. Exit code: 1.
@@ -597,31 +614,34 @@ flutter doctor do. It reports on stdout and exits 1 when it found a problem.
 Every row is always printed, and 'checks' in the JSON always lists every row,
 each with a state of ok, warn, fail or skip; a row is skipped when an earlier
 failure means it cannot be run. The delivery row says whether mail that
-arrives can be stored on this machine for the session; it is checked only
-inside a session and skipped at a shell. In a session that has just started,
-the row is 'warn' until the first prompt or tool call, so 'doctor --strict'
-exits 1 until then: a program that waits for a session to be ready repeats the
-check. The 'hooks not run yet' warning has no hint, because no command fixes
-it. Whether storage is failing is decided by whoever asks, by trying the
-folder, not from a record kept in it. An agent host that has no hooks would
-warn for as long as it runs; only Claude Code is in scope for 0.5.6. The
-refused count is kept on this machine, so its row shows even when the server
-is down. The 'refused' row counts the refused messages the inbox still holds,
-for any reason: a message whose sender header was refused, and mail that was
-not verified on arrival (see mash serve); a message on both counts once. Its
-state is always ok: nothing a person can do removes a refused message before
-it ages out. Mail that was verified on arrival and whose sender was deleted
-afterwards is not counted: mash read shows it as refused, and that is where it
-is seen. The JSON adds refused (an integer, 0 when none) and refused_by_class
-(an object with the count of each class, {} when none); the classes are in
-refused_by_class only, and the refused entry of checks has no more than the
-usual four keys. While the first start's check of the stored mail is skipped
-because the state directory cannot be written, and only then, a row named
-`stored mail` with state skip follows the delivery row; it changes neither the
-problem count nor the exit status. The launcher row, which says which mash the
-plugin's launcher started, reports how the mash it runs in was launched: it
-shows in a session's own doctor (the MCP tool), and a mash doctor typed in a
-shell has no launcher row.
+arrives can be stored on this machine for the session; it is checked inside a
+session and skipped at a shell, except that a shell fails it when the state
+folder cannot be created and MASH_SPOOL_FROM_START (which the plugin sets) or
+MASH_SPOOL_REQUIRED is set, so that mail waits for the spool; it finds the
+folder by asking the system without writing anything. In a session that has
+just started, the row is 'warn' until the first prompt or tool call, so
+'doctor --strict' exits 1 until then: a program that waits for a session to be
+ready repeats the check. The 'hooks not run yet' warning has no hint, because
+no command fixes it. Whether storage is failing is decided by whoever asks, by
+trying the folder, not from a record kept in it. An agent host that has no
+hooks would warn for as long as it runs; only Claude Code is in scope for
+0.5.6. The refused count is kept on this machine, so its row shows even when
+the server is down. The 'refused' row counts the refused messages the inbox
+still holds, for any reason: a message whose sender header was refused, and
+mail that was not verified on arrival (see mash serve); a message on both
+counts once. Its state is always ok: nothing a person can do removes a refused
+message before it ages out. Mail that was verified on arrival and whose sender
+was deleted afterwards is not counted: mash read shows it as refused, and that
+is where it is seen. The JSON adds refused (an integer, 0 when none) and
+refused_by_class (an object with the count of each class, {} when none); the
+classes are in refused_by_class only, and the refused entry of checks has no
+more than the usual four keys. While the first start's check of the stored
+mail is skipped because the state directory cannot be written, and only then,
+a row named `stored mail` with state skip follows the delivery row; it changes
+neither the problem count nor the exit status. The launcher row, which says
+which mash the plugin's launcher started, reports how the mash it runs in was
+launched: it shows in a session's own doctor (the MCP tool), and a mash doctor
+typed in a shell has no launcher row.
 
 ## What it replaces
 

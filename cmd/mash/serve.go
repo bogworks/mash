@@ -378,7 +378,10 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 			return // stdin closed or a signal came: no spool or service to start, and nothing to report
 		}
 		if err != nil {
-			if sdir != "" && !(spool.Spool{Dir: sdir}).Writable() { // the folder is the cause; a lock wait or inbox request that failed is not reported as one
+			// Storage is reported failing only when the mail is held without the spool (the cases below that hold it):
+			// where mail stays on the channel it is still delivered, so status must not say it cannot be stored.
+			// The folder must be the cause; a lock wait or inbox request that failed is not reported as one.
+			if (failClosed || noChannel || cfg.SpoolFromStart) && sdir != "" && !(spool.Spool{Dir: sdir}).Writable() {
 				ep.NoteSpoolUnbound(err)
 			}
 			if failClosed {

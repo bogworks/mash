@@ -314,7 +314,7 @@ func (h *healthSvc) sessionOnDisk() *cmds.SessionState {
 
 // Health runs the checks in order: config, creds, server, sign-in, delivery, refused, and always returns all six rows. A
 // row that an earlier failure means it cannot run is skipped: a failed config skips all five after it; sign-in needs
-// creds and server; delivery needs the server and sign-in, and a session (at a shell it is always skipped); refused needs nothing but the configuration. The creds row and the server row do not wait on each other (the server is probed
+// creds and server; delivery needs the server and sign-in, and a session (at a shell it is skipped, unless the state folder cannot be created and mail waits for the spool: MASH_SPOOL_REQUIRED or MASH_SPOOL_FROM_START); refused needs nothing but the configuration. The creds row and the server row do not wait on each other (the server is probed
 // with no credentials). At a shell with no endpoint chosen and none installed it returns cmds.ErrNoEndpointInstalled.
 func (h *healthSvc) Health(ctx context.Context) (cmds.HealthReport, error) {
 	var se *config.SeveralEndpointsError
@@ -359,11 +359,18 @@ func (h *healthSvc) Health(ctx context.Context) (cmds.HealthReport, error) {
 		rep.Online = online
 		signedIn = sign.State == cmds.CheckOK
 	}
+	shellDir, shellErr := endpoint.SpoolDir(h.cfg)
+	// A shell has no record of its own and cannot see the session's host, so it asks the system, and only where the
+	// settings it can read (MASH_SPOOL_REQUIRED, MASH_SPOOL_FROM_START; the plugin sets the latter) mean mail is held
+	// without the spool: otherwise mail stays on the channel and is still delivered.
+	folderBroken := !h.session && shellErr == nil && (h.cfg.SpoolRequired || h.cfg.SpoolFromStart) && endpoint.SpoolFolderUnwritable(shellDir)
 	switch {
 	case server.State == cmds.CheckFail:
 		rep.Checks = append(rep.Checks, skipped(cmds.CheckDelivery, "server"))
 	case !signedIn:
 		rep.Checks = append(rep.Checks, cmds.HealthCheck{Name: cmds.CheckDelivery, State: cmds.CheckSkip, Detail: "needs sign-in"})
+	case folderBroken: // the one shell case with a delivery row: no session could store mail here, and mail waits for the spool
+		rep.Checks = append(rep.Checks, cmds.HealthCheck{Name: cmds.CheckDelivery, State: cmds.CheckFail, Detail: cmds.CannotWrite + config.Tilde(shellDir)})
 	case !h.session: // a shell has no session to deliver to
 		rep.Checks = append(rep.Checks, cmds.HealthCheck{Name: cmds.CheckDelivery, State: cmds.CheckSkip, Detail: "checked only inside a Claude Code session"})
 	default:
@@ -378,6 +385,9 @@ func (h *healthSvc) Health(ctx context.Context) (cmds.HealthReport, error) {
 	}
 	if !h.session { // a shell on the session's machine reads what its serve recorded, as the tool would say it, whatever the sign-in said
 		if rep.Session = h.sessionOnDisk(); rep.Session != nil && rep.Session.Storage == cmds.StorageFailing {
+			rep.MailHeld = true
+		}
+		if folderBroken {
 			rep.MailHeld = true
 		}
 		if dir, err := endpoint.SpoolDir(h.cfg); err == nil && endpoint.ScanOnDisk(spool.Spool{Dir: dir}) {
