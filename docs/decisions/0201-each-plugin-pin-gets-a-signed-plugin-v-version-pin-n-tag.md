@@ -4,7 +4,7 @@ date: 2026-11-27
 decision-makers: the planner (a planner ruling of 2026-11-27, which Randy Bias, the mash maintainer, may overturn)
 ---
 
-# Each plugin pin gets a signed plugin-v&lt;version&gt;-pin.&lt;n&gt; tag
+# Each plugin pin gets a signed `plugin-v<version>-pin.<n>` tag
 
 ## Context and Problem Statement
 
