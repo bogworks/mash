@@ -17,7 +17,7 @@ func TestPageStepsAndOrder(t *testing.T) {
 		t.Fatalf("steps = %q", steps)
 	}
 	order, unknown := orderFrom(steps)
-	if len(unknown) != 0 || !reflect.DeepEqual(order, fallbackOrder) {
+	if len(unknown) != 0 || !reflect.DeepEqual(order, upgradeActions) {
 		t.Fatalf("order %v unknown %v", order, unknown)
 	}
 	if got := pageSteps("# Upgrading from 0.5.10\n\nSome prose, no list.\n", "0.5.10"); len(got) != 0 {
@@ -93,13 +93,13 @@ func TestOrderProblem(t *testing.T) {
 	if strings.Contains(p, "missing: "+actInstall) || strings.Contains(p, actRestart+";") {
 		t.Errorf("problem %q names actions that are present", p)
 	}
-	if p := orderProblem(fallbackOrder, nil); p != "" {
+	if p := orderProblem(upgradeActions, nil); p != "" {
 		t.Errorf("the full order is refused: %s", p)
 	}
 	if p := orderProblem([]string{actCheck, actPlugins, actInstall, actRestart, actAfter}, nil); !strings.Contains(p, "out of order") {
 		t.Errorf("out of order accepted: %q", p)
 	}
-	if p := orderProblem(fallbackOrder, []string{"reboot the machine"}); p == "" {
+	if p := orderProblem(upgradeActions, []string{"reboot the machine"}); p == "" {
 		t.Error("an unknown step was accepted")
 	}
 }
@@ -203,5 +203,82 @@ func TestWhoOnline(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestVersionsProblem(t *testing.T) {
+	for _, c := range []struct{ version, prev string }{
+		{"0.6.1", ""}, {"", "0.6.0"}, {"0.6.1", "v0.6.0"}, {"v0.6.1", "0.6.0"}, {"0.6.1", "0.6"},
+		{"0.6.1", "abc"}, {"0.6.1", "0.6.0-rc1"}, {"0.6.1", "0.6.0\n"}, {"0.6.0", "0.6.0"},
+	} {
+		if p := versionsProblem(c.version, c.prev); p == "" {
+			t.Errorf("version %q prev %q passed validation", c.version, c.prev)
+		}
+	}
+	for _, c := range []struct{ version, prev string }{{"0.6.1", "0.6.0"}, {"0.6.0", "0.5.10"}, {"1.10.0", "1.9.12"}} {
+		if p := versionsProblem(c.version, c.prev); p != "" {
+			t.Errorf("version %q prev %q refused: %s", c.version, c.prev, p)
+		}
+	}
+}
+
+func TestRunFlags(t *testing.T) {
+	sha := strings.Repeat("a", 40)
+	base := []string{"run", "-commit", sha, "-out", "/nonexistent/out", "-pack", "p", "-release-repo", "o/n", "-work", "/nonexistent/work"}
+	for name, extra := range map[string][]string{
+		"no prev":     {"-version", "0.6.1"},
+		"v prefix":    {"-version", "0.6.1", "-prev", "v0.6.0"},
+		"short":       {"-version", "0.6.1", "-prev", "0.6"},
+		"word":        {"-version", "0.6.1", "-prev", "abc"},
+		"same":        {"-version", "0.6.0", "-prev", "0.6.0"},
+		"no version":  {"-prev", "0.6.0"},
+		"bad version": {"-version", "v0.6.1", "-prev", "0.6.0"},
+	} {
+		if code := realMain(append(append([]string{}, base...), extra...)); code != 2 {
+			t.Errorf("%s: exit %d, want 2", name, code)
+		}
+	}
+}
+
+func TestNotesStepsReal(t *testing.T) {
+	b, err := os.ReadFile("../../../docs/release-notes/0.6.0.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	steps := notesSteps(string(b))
+	order, unknown := orderFrom(steps)
+	if p := orderProblem(order, unknown); p != "" || !reflect.DeepEqual(order, upgradeActions) {
+		t.Fatalf("0.6.0 notes: order %v, problem %q, steps %q", order, p, steps)
+	}
+}
+
+func TestNotesStepsSynthetic(t *testing.T) {
+	good := "### Summary\n\n1. not this\n\n### Upgrading\n\nSome words.\n\n1. Check first: `mash doctor`.\n2. Install both programs.\n3. Update the plugins.\n4. Restart each session.\n5. Check again.\n\n#### Detail\n\n6. still inside\n\n### Next\n\n1. not this\n"
+	if steps := notesSteps(good); len(steps) != 6 {
+		t.Fatalf("steps %q", steps)
+	}
+	if got := notesSteps("### upgrading from x\n1. Install both programs.\n2. Restart each session.\n"); len(got) != 2 {
+		t.Fatalf("case-insensitive heading: %q", got)
+	}
+	order, unknown := orderFrom(notesSteps("### Upgrading\n\n1. Install both programs.\n2. Restart each session.\n"))
+	if p := orderProblem(order, unknown); !strings.Contains(p, "missing") {
+		t.Errorf("missing steps accepted: %q", p)
+	}
+	order, unknown = orderFrom(notesSteps("### Upgrading\n\n1. Check first.\n2. Update the plugins.\n3. Install both programs.\n4. Restart each session.\n5. Check again.\n"))
+	if p := orderProblem(order, unknown); !strings.Contains(p, "out of order") {
+		t.Errorf("out of order accepted: %q", p)
+	}
+	if got := notesSteps("### Summary\n\n1. Install both programs.\n"); len(got) != 0 {
+		t.Errorf("steps without an Upgrading section: %q", got)
+	}
+}
+
+func TestPageStepsPicksPrevSection(t *testing.T) {
+	page := "# Compatibility\n\n## Upgrading from 0.5.10 to 0.6.0\n\n1. Old check.\n2. Old install.\n\n## Upgrading from 0.6.0 to 0.6.1\n\n1. Check first.\n2. Install both programs.\n3. Update the plugins.\n4. Restart each session.\n5. Check again.\n\n## Other\n\n1. not this\n"
+	if got := pageSteps(page, "0.6.0"); len(got) != 5 || got[0] != "Check first." {
+		t.Fatalf("0.6.0 section: %q", got)
+	}
+	if got := pageSteps(page, "0.5.10"); len(got) != 2 || got[0] != "Old check." {
+		t.Fatalf("0.5.10 section: %q", got)
 	}
 }

@@ -24,10 +24,12 @@ type config struct {
 }
 
 const (
-	owner  = "acme"
-	group  = "demo"
-	oldTag = "v0.5.10"
+	owner = "acme"
+	group = "demo"
 )
+
+// oldTag is the previous release's tag, from -prev.
+func (r *runner) oldTag() string { return "v" + r.cfg.prev }
 
 // The longest a command of the run may take, by kind.
 const (
@@ -46,8 +48,8 @@ const certLife = 24 * time.Hour
 var repoRE = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 
 // relBase is the directory the previous release's files are downloaded from.
-func relBase(repo string) string {
-	return "https://github.com/" + repo + "/releases/download/" + oldTag
+func relBase(repo, tag string) string {
+	return "https://github.com/" + repo + "/releases/download/" + tag
 }
 
 // persona is one person on the machine with a home of their own: Alice and Bob run sessions, the admin runs mashctl.
