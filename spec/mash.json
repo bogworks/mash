@@ -2290,7 +2290,7 @@
      },
      {
       "name": "x-today",
-      "value": "In 0.5.5, this did not exist, and it does not exist in 0.5.6. Planned: mash prompt and the reply tool move here, which is a breaking change."
+      "value": "Planned: mash prompt and the reply tool move here. This is a breaking change."
      }
     ]
    }
