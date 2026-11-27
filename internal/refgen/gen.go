@@ -12,12 +12,14 @@ import (
 
 const (
 	banner      = "Generated from spec/*.json by go run ./scripts/refgen. Do not edit."
+	// nextRelease is only the old form of planning an entry (x-release at this value). It is a placeholder, not a
+	// promise: no page names it, and the spec plans with x-plan instead.
 	nextRelease = "0.6.0"
 	// closeRelease is the one release after the current one that a command may
 	// already carry: a command whose behaviour closed in it is documented with
 	// the rest, and its page says "Release: 0.5.10".
 	closeRelease = "0.5.10"
-	comingPage   = "coming-in-0-6-0.md"
+	comingPage   = "planned-not-yet-released.md"
 	width        = 78
 )
 
@@ -944,7 +946,7 @@ func (g *gen) toolIndex(n *node) {
 			}
 		}
 		for _, l := range labels {
-			b.para(esc(l) + ": " + strings.Join(byLabel[l], ", ") + ". See [coming in " + nextRelease + "](" + comingPage + ").")
+			b.para(esc(l) + ": " + strings.Join(byLabel[l], ", ") + ". See [planned, not yet released](" + comingPage + ").")
 		}
 	}
 	g.put(n.page(), b)
@@ -1079,12 +1081,12 @@ func (g *gen) setupPage() {
 	g.put("setup.md", b)
 }
 
-// ---- coming in 0.6.0 ----
+// ---- planned, not yet released ----
 
 func (g *gen) comingPageOut() {
-	b := newPage("Coming in " + nextRelease)
+	b := newPage("Planned, not yet released")
 	b.blank()
-	b.para("What changes in " + nextRelease + ". None of it is in " + g.current + ".")
+	b.para("What is planned and not yet released. None of it is in " + g.current + ".")
 	if len(g.rules.Coming) > 0 {
 		b.heading(2, "Changes")
 		for _, c := range g.rules.Coming {
@@ -1145,7 +1147,7 @@ func (g *gen) readme() {
 	b.blank()
 	b.heading(2, "Concepts")
 	b.WriteString("- [Glossary](glossary.md)\n- [Rules](rules.md)\n- [Setup scripts](setup.md)\n")
-	b.WriteString("- [Coming in " + nextRelease + "](" + comingPage + ")\n")
+	b.WriteString("- [Planned, not yet released](" + comingPage + ")\n")
 	g.put("README.md", b)
 }
 

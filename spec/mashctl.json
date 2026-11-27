@@ -5,7 +5,7 @@
   "title": "mashctl",
   "version": "0.6.1-spec.0",
   "description": "Speaks for the mesh, through a server: set it up, check it, make and remove endpoints.",
-  "x-source": "v0.5.8 (8e8fe56)"
+  "x-source": "v0.6.1 (e3a6e8e)"
  },
  "command": {
   "name": "mashctl",
@@ -2170,8 +2170,8 @@
       "value": "Owners"
      },
      {
-      "name": "x-release",
-      "value": "0.6.0"
+      "name": "x-plan",
+      "value": "later"
      },
      {
       "name": "x-output",

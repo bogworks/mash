@@ -5,7 +5,7 @@
   "title": "mash",
   "version": "0.6.1-spec.0",
   "description": "Speaks as one endpoint: send and read mail, see who is there, check itself.",
-  "x-source": "v0.5.8 (8e8fe56)"
+  "x-source": "v0.6.1 (e3a6e8e)"
  },
  "command": {
   "name": "mash",
@@ -2267,8 +2267,8 @@
       "value": "Raw SAP"
      },
      {
-      "name": "x-release",
-      "value": "0.6.0"
+      "name": "x-plan",
+      "value": "later"
      },
      {
       "name": "x-output",

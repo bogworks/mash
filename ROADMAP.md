@@ -11,7 +11,7 @@ today is in the [guide](docs/guide/) and the
 [reference](docs/reference/README.md).
 
 The generated reference lists what is planned, as it stands today. See
-[planned commands](docs/reference/coming-in-0-6-0.md). It is not a promise
+[planned commands](docs/reference/planned-not-yet-released.md). It is not a promise
 of any syntax.
 
 ## Now

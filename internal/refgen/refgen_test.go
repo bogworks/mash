@@ -64,7 +64,7 @@ func TestFixturePages(t *testing.T) {
 	}
 	sort.Strings(names)
 	want := []string{
-		"README.md", "coming-in-0-6-0.md", "glossary.md", "mash-alpha.md",
+		"README.md", "planned-not-yet-released.md", "glossary.md", "mash-alpha.md",
 		"mash-zed.md", "mash.md", "mashctl-grp-leaf.md", "mashctl-grp.md",
 		"mashctl.md", "mcp-server.md", "mcp-zed.md", "mcp.md", "rules.md",
 		"setup.md",
@@ -106,7 +106,7 @@ func TestComingSeparated(t *testing.T) {
 	if _, ok := p["mash-future.md"]; ok {
 		t.Error("a next-release command got its own page")
 	}
-	c := p["coming-in-0-6-0.md"]
+	c := p["planned-not-yet-released.md"]
 	for _, want := range []string{"`mash future`", "Comes later.", "A thing changes. Later."} {
 		if !strings.Contains(c, want) {
 			t.Errorf("coming page lacks %q", want)
@@ -559,7 +559,7 @@ func TestCloseReleaseRendersAndUnknownFails(t *testing.T) {
 	if p := string(pages["mash-future.md"]); !strings.Contains(p, "Release: "+closeRelease+".") {
 		t.Errorf("mash-future.md lacks its release:\n%s", p)
 	}
-	if strings.Contains(string(pages["coming-in-0-6-0.md"]), "`mash future`") {
+	if strings.Contains(string(pages["planned-not-yet-released.md"]), "`mash future`") {
 		t.Error("a close-release command is listed as coming")
 	}
 	if !strings.Contains(string(pages["mash.md"]), "[`mash future`]") {
@@ -636,7 +636,7 @@ func TestPlanTextRenders(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if c := string(p["coming-in-0-6-0.md"]); !strings.Contains(c, tc.want+".") {
+		if c := string(p["planned-not-yet-released.md"]); !strings.Contains(c, tc.want+".") {
 			t.Errorf("%s: coming page lacks %q", tc.plan, tc.want)
 		}
 		if m := string(p["mash.md"]); !strings.Contains(m, tc.want+": `mash future`") {
@@ -658,7 +658,7 @@ func TestPlanNowUsesNowRelease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c := string(p["coming-in-0-6-0.md"]); !strings.Contains(c, "Planned for 1.0.1.") {
+	if c := string(p["planned-not-yet-released.md"]); !strings.Contains(c, "Planned for 1.0.1.") {
 		t.Errorf("coming page lacks the now text:\n%s", c)
 	}
 	if m := string(p["mash.md"]); !strings.Contains(m, "Planned for 1.0.1: `mash future`") {
@@ -684,7 +684,7 @@ func TestNowReleaseFilesMustAgree(t *testing.T) {
 
 func TestOldPlannedFormStillRenders(t *testing.T) {
 	p := fixturePages(t)
-	if c := p["coming-in-0-6-0.md"]; !strings.Contains(c, "Release: 0.6.0.") {
+	if c := p["planned-not-yet-released.md"]; !strings.Contains(c, "Release: 0.6.0.") {
 		t.Errorf("coming page lacks the old release line:\n%s", c)
 	}
 	if m := p["mash.md"]; !strings.Contains(m, "Planned for 0.6.0: `mash future`.") {
@@ -720,7 +720,7 @@ func TestPlanInherits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c := string(p["coming-in-0-6-0.md"])
+	c := string(p["planned-not-yet-released.md"])
 	for _, want := range []string{"`mash future kid`", "`mash future own`"} {
 		if !strings.Contains(c, want) {
 			t.Errorf("coming page lacks %s", want)

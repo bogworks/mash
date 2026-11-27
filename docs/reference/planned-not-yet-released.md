@@ -1,8 +1,8 @@
 Generated from spec/*.json by go run ./scripts/refgen. Do not edit.
 
-# Coming in 0.6.0
+# Planned, not yet released
 
-What changes in 0.6.0. None of it is in 0.6.1.
+What is planned and not yet released. None of it is in 0.6.1.
 
 ## Changes
 
@@ -23,7 +23,7 @@ What changes in 0.6.0. None of it is in 0.6.1.
 
 Plain Synadia Agent Protocol operations, for experts. Experimental.
 
-Release: 0.6.0. Group: Raw SAP.
+Planned: later. Group: Raw SAP.
 
 #### Usage
 
@@ -65,7 +65,7 @@ In 0.5.5, this did not exist, and it does not exist in 0.5.6. Planned for
 
 Create, list and remove owners.
 
-Release: 0.6.0. Group: Owners.
+Planned: later. Group: Owners.
 
 #### Usage
 
