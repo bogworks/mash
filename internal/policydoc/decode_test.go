@@ -60,6 +60,14 @@ func TestDecodeRefusesJWS(t *testing.T) {
 	}
 }
 
+// next_submitter (the withdrawn rotation field) is an unknown field.
+func TestDecodeRefusesNextSubmitter(t *testing.T) {
+	_, err := Decode(doc(7, 6, func(m map[string]any) { m["next_submitter"] = "UABC" }), DecodeOptions{})
+	if !errors.Is(err, ErrBadDocument) || !strings.Contains(err.Error(), "next_submitter") {
+		t.Fatalf("next_submitter: %v", err)
+	}
+}
+
 // An unknown field is refused, and the refusal names it.
 func TestDecodeRefusesAnUnknownField(t *testing.T) {
 	_, err := Decode(doc(7, 6, func(m map[string]any) { m["extra_field"] = "UABC" }), DecodeOptions{})
