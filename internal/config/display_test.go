@@ -10,7 +10,7 @@ func TestDisplayName(t *testing.T) {
 	}{
 		{"three tokens", Config{Name: "build-bot", Owner: "dev", Group: "acme"}, "dev.acme.build-bot"},
 		{"no group falls back to the name", Config{Name: "team-a", Owner: "acme"}, "team-a"},
-		{"invalid tokens fall back to the name", Config{Name: "Bad", Owner: "x", Group: "bogworks"}, "Bad"},
+		{"invalid tokens fall back to the name", Config{Name: "Bad", Owner: "acme", Group: "dev"}, "Bad"},
 		{"unset", Config{}, ""},
 	} {
 		if got := c.cfg.DisplayName(); got != c.want {

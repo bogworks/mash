@@ -194,7 +194,7 @@ type dropWorld struct {
 	keys        storeKeys
 	acct        string
 	plain       string
-	otherRange  string
+	otherOwner  string
 	iss         *Issuer
 	compiled    *listset.Compiled
 	targetGroup string
@@ -206,11 +206,11 @@ func newDropWorld(t *testing.T) *dropWorld {
 	acct, _ := nkeys.CreateAccount()
 	w := &dropWorld{acct: pubOf(acct), plain: pubOf(newGroupKey()), targetGroup: "foo.c"}
 	w.keys = storeKeys{op: op, groups: map[string]nkeys.KeyPair{"foo.c": newGroupKey(), "bar.d": newGroupKey()}}
-	w.otherRange = pubOf(w.keys.groups["bar.d"])
+	w.otherOwner = pubOf(w.keys.groups["bar.d"])
 	ac := jwt.NewAccountClaims(w.acct)
 	addForeignScoped(ac, w.plain)
 	sc := jwt.NewUserScope()
-	sc.Key, sc.Role = w.otherRange, "bar.d"
+	sc.Key, sc.Role = w.otherOwner, "bar.d"
 	sc.Template.Pub.Allow.Add("keep.bar.d")
 	ac.SigningKeys.AddScopedSigner(sc)
 	tok, err := ac.Encode(op)
@@ -267,11 +267,11 @@ func TestSignRefusesANonMashKeyWithoutTheDropFields(t *testing.T) {
 func TestSignDropsANonMashKeyAfterTheIssuerCheckAndKeepsOtherOwners(t *testing.T) {
 	w := newDropWorld(t)
 	other := newGroupKey()
-	w.enable(w.acct, map[string][]string{"UCONN": {w.acct, w.otherRange}, "USYS": {pubOf(other)}}) // USYS is under a key that is neither kept nor in the JWT
+	w.enable(w.acct, map[string][]string{"UCONN": {w.acct, w.otherOwner}, "USYS": {pubOf(other)}}) // USYS is under a key that is neither kept nor in the JWT
 	if _, err := w.iss.Sign(listset.Record{Generation: 1}, w.compiled); err == nil {
 		t.Fatal("a connected user under an unknown key passed the check")
 	}
-	w.enable(w.acct, map[string][]string{"UCONN": {w.acct, w.otherRange}})
+	w.enable(w.acct, map[string][]string{"UCONN": {w.acct, w.otherOwner}})
 	out, err := w.iss.Sign(listset.Record{Generation: 1}, w.compiled)
 	if err != nil {
 		t.Fatal(err)
@@ -283,14 +283,14 @@ func TestSignDropsANonMashKeyAfterTheIssuerCheckAndKeepsOtherOwners(t *testing.T
 	if _, ok := got.SigningKeys.GetScope(w.plain); ok {
 		t.Error("the non-mash key stays")
 	}
-	if us := scopeOf(t, got, w.otherRange); us.Role != "bar.d" {
+	if us := scopeOf(t, got, w.otherOwner); us.Role != "bar.d" {
 		t.Errorf("the other owner's key changed: %+v", us)
 	}
 	scopeOf(t, got, pubOf(w.keys.groups["foo.c"]))
 	if len(got.SigningKeys) != 2 {
 		t.Errorf("signing keys: %d", len(got.SigningKeys))
 	}
-	if k, err := w.iss.Kept(context.Background(), 1); err != nil || k["bar.d"] != w.otherRange || len(k) != 1 {
+	if k, err := w.iss.Kept(context.Background(), 1); err != nil || k["bar.d"] != w.otherOwner || len(k) != 1 {
 		t.Errorf("Kept: %v %v", k, err)
 	}
 }
@@ -336,7 +336,7 @@ func tokOf(t *testing.T, w *dropWorld, plain bool) string {
 		addForeignScoped(ac, w.plain)
 	}
 	sc := jwt.NewUserScope()
-	sc.Key, sc.Role = w.otherRange, "bar.d"
+	sc.Key, sc.Role = w.otherOwner, "bar.d"
 	ac.SigningKeys.AddScopedSigner(sc)
 	tok, err := ac.Encode(w.keys.op)
 	if err != nil {
@@ -347,7 +347,7 @@ func tokOf(t *testing.T, w *dropWorld, plain bool) string {
 
 func TestSignDropsANonMashKeyOnlyOnTheFirstGeneration(t *testing.T) {
 	w := newDropWorld(t)
-	w.enable(w.acct, map[string][]string{"UCONN": {w.acct, w.otherRange}})
+	w.enable(w.acct, map[string][]string{"UCONN": {w.acct, w.otherOwner}})
 	if _, err := w.iss.Sign(listset.Record{Generation: 1}, w.compiled); err != nil {
 		t.Fatalf("generation 1: %v", err)
 	}

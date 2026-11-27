@@ -474,7 +474,7 @@ type RunInput struct {
 	// holds the state at partial and nothing is committed. See RotationsAfterPush.
 	AfterPush func(ctx context.Context) (revoked map[string][]string, notConnected []string, finalJWT string, err error)
 	// BeforeWrite, if set, is the fencing hook of a caller that holds a lock which could expire during a long run
-	// (the apply intake's account lock). It is called immediately before each protected write with its label:
+	// (a lock on the account). It is called immediately before each protected write with its label:
 	// FencePush ("push": the target account JWT push, and any re-push of it in Converge), FenceRevoke ("revoke":
 	// each revocation push, made through the Revoker of RotationsAfterPush; a custom AfterPush calls
 	// CheckBeforeWrite itself), FenceProvision ("provision": before Provisioner.CreateInbox and before
