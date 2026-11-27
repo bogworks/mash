@@ -13,34 +13,49 @@ import (
 )
 
 func TestCheckIssuersKept(t *testing.T) {
-	const acct, scoped, plain = "AACCT", "ASCOPED", "APLAIN"
+	const acct, scoped, plain, plain2 = "AACCT", "ASCOPED", "APLAIN", "APLAIN2"
 	kept := map[string]bool{scoped: true}
 
-	// the account key and a kept scoped key are fine for the admin user
-	for _, iss := range []string{acct, scoped} {
-		if err := admin.CheckIssuersKept(acct, "UADMIN", iss, kept); err != nil {
-			t.Errorf("admin under a kept key %s refused: %v", iss, err)
-		}
+	// the account key and a kept scoped key are fine, for the admin user and for a connected user
+	if err := admin.CheckIssuersKept(acct, "UADMIN", acct, map[string][]string{"USVC": {scoped}, "USVC2": {acct}}, kept); err != nil {
+		t.Errorf("kept issuers refused: %v", err)
+	}
+	// no connected user: only the admin is checked
+	if err := admin.CheckIssuersKept(acct, "UADMIN", scoped, nil, kept); err != nil {
+		t.Errorf("admin under a kept key refused: %v", err)
 	}
 
-	// the admin user under a key that does not stay is refused, named with its key
-	err := admin.CheckIssuersKept(acct, "UADMIN", plain, kept)
+	// the admin user and a connected user under keys that do not stay are refused, each named with its key
+	err := admin.CheckIssuersKept(acct, "UADMIN", plain, map[string][]string{"USVC": {plain2}, "UOK": {acct}}, kept)
 	var nk *admin.IssuersNotKeptError
 	if !errors.As(err, &nk) {
 		t.Fatalf("err = %v", err)
 	}
-	if len(nk.Problems) != 1 || nk.Problems[0] != (admin.IssuerProblem{Role: "admin", User: "UADMIN", Issuer: plain}) {
+	if len(nk.Problems) != 2 || nk.Problems[0] != (admin.IssuerProblem{Role: "admin", User: "UADMIN", Issuer: plain}) ||
+		nk.Problems[1] != (admin.IssuerProblem{Role: "connected", User: "USVC", Issuer: plain2}) {
 		t.Errorf("problems = %+v", nk.Problems)
 	}
-	for _, want := range []string{"UADMIN", plain, "reissue it under the account key first"} {
+	for _, want := range []string{"UADMIN", plain, "USVC", plain2, "reissue them under the account key first"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("%q is not in %q", want, err)
 		}
 	}
+	if strings.Contains(err.Error(), "UOK") {
+		t.Errorf("a user under the account key is named: %v", err)
+	}
+
+	// two connections of one connected user, one issuer kept and one not: refused, naming the one that leaves
+	err = admin.CheckIssuersKept(acct, "UADMIN", acct, map[string][]string{"USVC": {scoped, plain}}, kept)
+	if !errors.As(err, &nk) || len(nk.Problems) != 1 || nk.Problems[0] != (admin.IssuerProblem{Role: "connected", User: "USVC", Issuer: plain}) {
+		t.Errorf("a user with one kept and one removed issuer: %v", err)
+	}
 
 	// an issuer that is not known is not known to stay
-	if err := admin.CheckIssuersKept(acct, "UADMIN", "", kept); err == nil {
+	if err := admin.CheckIssuersKept(acct, "UADMIN", "", nil, kept); err == nil {
 		t.Error("an empty admin issuer passed")
+	}
+	if err := admin.CheckIssuersKept(acct, "UADMIN", acct, map[string][]string{"USVC": {""}}, kept); err == nil {
+		t.Error("an empty connected issuer passed")
 	}
 }
 

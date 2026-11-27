@@ -50,11 +50,15 @@ type Issuer struct {
 	Servers int
 	// Now gives the time; nil means time.Now.
 	Now func() time.Time
-	// AdminUser and AdminIssuer are the public key and the `iss` of the admin credentials' user JWT. Both optional: when
-	// AdminIssuer is "", Sign refuses an account JWT that carries a signing key that is not an owner group key of the key
-	// store. When it is set, Sign drops such a key instead, provided admin.CheckIssuersKept shows that the admin
-	// credentials' user issuer stays signed by a key that is kept.
+	// AdminUser and AdminIssuer are the public key and the `iss` of the admin credentials' user JWT, and ConnectedIssuers
+	// reads the issuer of every connection of every connected user of the account (CONNZ's
+	// issuer keys): user public key -> issuers. All optional, and only together: when AdminIssuer is "" or ConnectedIssuers
+	// is nil, Sign refuses an account JWT that carries a signing key that is not an owner group key of the key store. When
+	// they are set, Sign drops such a key instead, provided admin.CheckIssuersKept shows that the admin user and every
+	// connected user stay signed by a key that is kept; ConnectedIssuers returns an error when it cannot say (an
+	// incomplete scan), and that refuses too.
 	AdminUser, AdminIssuer string
+	ConnectedIssuers       func(ctx context.Context) (map[string][]string, error)
 
 	mu   sync.Mutex
 	last int64 // the issue time of the JWT this Issuer made last
@@ -110,9 +114,10 @@ func (s *Issuer) current(ctx context.Context) (*jwt.AccountClaims, error) {
 }
 
 // canDrop is true when the issuer may drop the non-mash signing keys of an account JWT (after the issuer check): the
-// admin issuer is set, and generation, the one being signed, is the first (ADR 0124): a non-mash key that appears later is refused, not dropped by a routine update.
+// admin issuer and the source of the connected users' issuers are set, and generation, the one being signed, is the
+// first (ADR 0124): a non-mash key that appears later is refused, not dropped by a routine update.
 func (s *Issuer) canDrop(generation uint64) bool {
-	return generation == 1 && s.AdminIssuer != ""
+	return generation == 1 && s.AdminIssuer != "" && s.ConnectedIssuers != nil
 }
 
 // errNonMashKey is the refusal of a non-mash signing key by an Issuer that may not drop it.
@@ -150,7 +155,7 @@ func (s *Issuer) keptFrom(base *jwt.AccountClaims) (kept map[string]string, mine
 }
 
 // splitKeys is keptFrom that also returns plain: every plain (unscoped) signing key of base. A plain key is never
-// non-mash: the account's other issuers (the admin user's, the configured signing_key) use them, and they
+// non-mash: the account's other issuers (the admin and connected users', the configured signing_key) use them, and they
 // are carried unchanged. Only a scoped key that is not an owner group key of the key store is non-mash.
 func (s *Issuer) splitKeys(base *jwt.AccountClaims) (kept map[string]string, mine, nonMash, plain []string, err error) {
 	ours, err := s.Keys.GroupPublics()
@@ -219,11 +224,11 @@ func (s *Issuer) Kept(ctx context.Context, generation uint64) (map[string]string
 // replaced by one per owner group of c (the group's key from the key store, role = group, the template compiled from c).
 // The other ranges' signing keys it carries are kept (see Kept). Everything else in it (limits, exports, revocations,
 // the account's own settings) is kept. A signing key that is not an owner group key of the key store is not dropped
-// silently: without AdminIssuer the apply is refused; with it the key is dropped once admin.CheckIssuersKept shows that
-// the admin credentials' user issuer stays signed by a kept key (the account key, an owner group
+// silently: without AdminIssuer and ConnectedIssuers the apply is refused; with them it is dropped once admin.CheckIssuersKept
+// shows that the admin user and the connected users stay signed by a kept key (the account key, an owner group
 // key of another range that the JWT carries, or a key of the list set), and refused with that check's error otherwise.
-// Only the first generation's apply drops (ADR 0124): from the second on, a non-mash key is refused as without
-// AdminIssuer. It implements policyapply.Signer.
+// Only the first generation's apply drops (ADR 0124): from the second on, a non-mash key is refused as without the
+// fields. It implements policyapply.Signer.
 func (s *Issuer) Sign(rec listset.Record, c *listset.Compiled) (string, error) {
 	base, err := s.current(s.Ctx)
 	if err != nil {
@@ -261,7 +266,11 @@ func (s *Issuer) Sign(rec listset.Record, c *listset.Compiled) (string, error) {
 		for _, p := range plain {
 			stay[p] = true // a plain key is carried
 		}
-		if err := admin.CheckIssuersKept(s.Account, s.AdminUser, s.AdminIssuer, stay); err != nil {
+		connected, err := s.ConnectedIssuers(s.Ctx)
+		if err != nil {
+			return "", fmt.Errorf("the non-mash signing key is not dropped: the connected users' issuers: %w", err)
+		}
+		if err := admin.CheckIssuersKept(s.Account, s.AdminUser, s.AdminIssuer, connected, stay); err != nil {
 			return "", fmt.Errorf("the non-mash signing key is not dropped: %w", err)
 		}
 		for _, k := range nonMash {

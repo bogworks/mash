@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/nats-io/nats.go/jetstream"
@@ -13,7 +14,7 @@ import (
 
 // IssuerProblem is one user whose JWT is signed by a signing key that does not stay in the account JWT.
 type IssuerProblem struct {
-	// Role is "admin" (the user of the admin credentials), the only role there is.
+	// Role is "admin" (the user of the admin credentials) or "connected" (a connected user of the account).
 	Role string `json:"role"`
 	// User is the user's public key ("" for the admin user when its key is not known to the caller).
 	User string `json:"user"`
@@ -21,8 +22,8 @@ type IssuerProblem struct {
 	Issuer string `json:"issuer"`
 }
 
-// IssuersNotKeptError is returned by CheckIssuersKept: the admin user would stop working when the signing key that
-// signed them leaves the account JWT. The fix is to reissue it under the account key first.
+// IssuersNotKeptError is returned by CheckIssuersKept: the users it names would stop working when the signing key that
+// signed them leaves the account JWT. The fix is to reissue them under the account key first.
 type IssuersNotKeptError struct {
 	Problems []IssuerProblem
 }
@@ -40,23 +41,40 @@ func (e *IssuersNotKeptError) Error() string {
 		}
 		parts = append(parts, fmt.Sprintf("%s is signed by %s", who, issuer))
 	}
-	return "mash: " + strings.Join(parts, "; ") + ", a signing key that does not stay in the account JWT: reissue it under the account key first"
+	return "mash: " + strings.Join(parts, "; ") + ", a signing key that does not stay in the account JWT: reissue them under the account key first"
 }
 
-// CheckIssuersKept refuses when the admin user is signed by a key that is not kept. account is the account's own
-// identity key, which always counts as kept; kept holds the signing keys that stay: every scoped key the key store
-// holds for an owner group of any owner, and the list set's (reconcile.KeptSigners). adminIssuer is the `iss` of the
-// admin credentials' user JWT. An empty issuer is not known to be kept, so it is refused. The error is an
-// *IssuersNotKeptError naming the user and key; nothing is changed.
-func CheckIssuersKept(account, adminUser, adminIssuer string, kept map[string]bool) error {
+// CheckIssuersKept refuses when the admin user, or any connected user, is signed by a key that is not kept.
+// account is the account's own identity key, which always counts as kept; kept holds the signing keys that stay: every
+// scoped key the key store holds for an owner group of any owner, and the list set's (reconcile.KeptSigners). adminIssuer is the `iss` of the admin credentials' user JWT; connectedIssuers maps the public
+// key of each connected user to every issuer CONNZ reported for it, one per connection (two connections of one
+// user may carry JWTs signed by different keys, and every one of them must be kept). An empty issuer is not known to be kept, so it
+// is refused. The error is an *IssuersNotKeptError naming every user and key, sorted; nothing is changed.
+func CheckIssuersKept(account, adminUser, adminIssuer string, connectedIssuers map[string][]string, kept map[string]bool) error {
 	ok := func(issuer string) bool { return issuer != "" && (issuer == account || kept[issuer]) }
 	var ps []IssuerProblem
 	if !ok(adminIssuer) {
 		ps = append(ps, IssuerProblem{Role: "admin", User: adminUser, Issuer: adminIssuer})
 	}
+	for user, issuers := range connectedIssuers {
+		for _, issuer := range issuers {
+			if !ok(issuer) {
+				ps = append(ps, IssuerProblem{Role: "connected", User: user, Issuer: issuer})
+			}
+		}
+	}
 	if len(ps) == 0 {
 		return nil
 	}
+	slices.SortFunc(ps, func(a, b IssuerProblem) int {
+		if c := strings.Compare(a.Role, b.Role); c != 0 {
+			return c
+		}
+		if c := strings.Compare(a.User, b.User); c != 0 {
+			return c
+		}
+		return strings.Compare(a.Issuer, b.Issuer)
+	})
 	return &IssuersNotKeptError{Problems: ps}
 }
 

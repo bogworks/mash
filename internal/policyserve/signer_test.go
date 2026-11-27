@@ -236,18 +236,23 @@ func newDropWorld(t *testing.T) *dropWorld {
 	return w
 }
 
-// enable sets the drop fields: the admin user signed by adminIssuer.
-func (w *dropWorld) enable(adminIssuer string) {
+// enable sets the drop fields: the admin user signed by adminIssuer, and the connected users' issuers.
+func (w *dropWorld) enable(adminIssuer string, connected map[string][]string) {
 	w.iss.AdminUser, w.iss.AdminIssuer = "UADMIN", adminIssuer
+	w.iss.ConnectedIssuers = func(context.Context) (map[string][]string, error) { return connected, nil }
 }
 
 func TestSignRefusesANonMashKeyWithoutTheDropFields(t *testing.T) {
 	w := newDropWorld(t)
 	for name, set := range map[string]func(){
-		"none":            func() {},
-		"no admin issuer": func() { w.iss.AdminUser, w.iss.AdminIssuer = "UADMIN", "" },
+		"none":                func() {},
+		"no connected source": func() { w.iss.AdminUser, w.iss.AdminIssuer = "UADMIN", w.acct },
+		"no admin issuer": func() {
+			w.iss.AdminIssuer = ""
+			w.iss.ConnectedIssuers = func(context.Context) (map[string][]string, error) { return nil, nil }
+		},
 	} {
-		w.iss.AdminUser, w.iss.AdminIssuer = "", ""
+		w.iss.AdminUser, w.iss.AdminIssuer, w.iss.ConnectedIssuers = "", "", nil
 		set()
 		_, err := w.iss.Sign(listset.Record{Generation: 1}, w.compiled)
 		if err == nil || !strings.Contains(err.Error(), "not an owner group key of the key store") || !strings.Contains(err.Error(), w.plain[:8]) {
@@ -262,11 +267,11 @@ func TestSignRefusesANonMashKeyWithoutTheDropFields(t *testing.T) {
 func TestSignDropsANonMashKeyAfterTheIssuerCheckAndKeepsOtherRanges(t *testing.T) {
 	w := newDropWorld(t)
 	other := newGroupKey()
-	w.enable(pubOf(other)) // the admin user is under a key that is neither kept nor in the JWT
+	w.enable(w.acct, map[string][]string{"UCONN": {w.acct, w.otherRange}, "USYS": {pubOf(other)}}) // USYS is under a key that is neither kept nor in the JWT
 	if _, err := w.iss.Sign(listset.Record{Generation: 1}, w.compiled); err == nil {
-		t.Fatal("an admin user under an unknown key passed the check")
+		t.Fatal("a connected user under an unknown key passed the check")
 	}
-	w.enable(w.otherRange) // under another range's key the JWT carries: kept
+	w.enable(w.acct, map[string][]string{"UCONN": {w.acct, w.otherRange}})
 	out, err := w.iss.Sign(listset.Record{Generation: 1}, w.compiled)
 	if err != nil {
 		t.Fatal(err)
@@ -292,11 +297,26 @@ func TestSignDropsANonMashKeyAfterTheIssuerCheckAndKeepsOtherRanges(t *testing.T
 
 func TestSignRefusesWhenTheAdminIssuerIsANonMashKey(t *testing.T) {
 	w := newDropWorld(t)
-	w.enable(w.plain)
+	w.enable(w.plain, nil)
 	_, err := w.iss.Sign(listset.Record{Generation: 1}, w.compiled)
 	var nk *admin.IssuersNotKeptError
 	if !errors.As(err, &nk) || len(nk.Problems) != 1 || nk.Problems[0].Role != "admin" || nk.Problems[0].Issuer != w.plain {
 		t.Fatalf("err %v", err)
+	}
+}
+
+func TestSignRefusesWhenAConnectedUserIsUnderANonMashKey(t *testing.T) {
+	w := newDropWorld(t)
+	w.enable(w.acct, map[string][]string{"UCONN": {w.acct, w.plain}})
+	_, err := w.iss.Sign(listset.Record{Generation: 1}, w.compiled)
+	var nk *admin.IssuersNotKeptError
+	if !errors.As(err, &nk) || len(nk.Problems) != 1 || nk.Problems[0].Role != "connected" || nk.Problems[0].User != "UCONN" {
+		t.Fatalf("err %v", err)
+	}
+	// an unreadable scan refuses too
+	w.iss.ConnectedIssuers = func(context.Context) (map[string][]string, error) { return nil, errors.New("scan incomplete") }
+	if _, err := w.iss.Sign(listset.Record{Generation: 1}, w.compiled); err == nil || !strings.Contains(err.Error(), "scan incomplete") {
+		t.Errorf("err %v", err)
 	}
 }
 
@@ -327,7 +347,7 @@ func tokOf(t *testing.T, w *dropWorld, plain bool) string {
 
 func TestSignDropsANonMashKeyOnlyOnTheFirstGeneration(t *testing.T) {
 	w := newDropWorld(t)
-	w.enable(w.acct)
+	w.enable(w.acct, map[string][]string{"UCONN": {w.acct, w.otherRange}})
 	if _, err := w.iss.Sign(listset.Record{Generation: 1}, w.compiled); err != nil {
 		t.Fatalf("generation 1: %v", err)
 	}
@@ -353,7 +373,7 @@ func addForeignScoped(ac *jwt.AccountClaims, key string) {
 	ac.SigningKeys.AddScopedSigner(sc)
 }
 
-// Foreign plain signing keys (the admin user's other issuers) are carried: never non-mash, never dropped,
+// Foreign plain signing keys (the admin's and connected users' other issuers) are carried: never non-mash, never dropped,
 // and a first-generation Sign with no drop fields does not refuse them.
 func TestSignCarriesEveryPlainSigningKey(t *testing.T) {
 	op, _ := nkeys.CreateOperator()
@@ -427,7 +447,7 @@ func foreignScopedWorld(t *testing.T) (*dropWorld, string) {
 		t.Fatal(err)
 	}
 	w.iss.Resolver = oneJWT{tok}
-	w.enable(w.acct)
+	w.enable(w.acct, map[string][]string{"UCONN": {w.acct}})
 	return w, pubOf(signing)
 }
 
