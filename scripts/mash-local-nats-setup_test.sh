@@ -1730,7 +1730,7 @@ RUN useradd -m -s /bin/bash tester && useradd -m -s /bin/bash other \
 CF
 
 for tag in $IMAGES; do
-    short=$(printf '%s' "$tag" | tr ':.@' '---' | cut -c1-40)
+    short=$(printf '%s' "$tag" | tr ':.@' '---' | cut -c1-30)-$(printf '%s' "$tag" | sha256sum | cut -c1-8)
     img=localhost/mlnt-$RUN-$short
     echo "== building $img from $tag"
     if ! podman build -q --pull=missing --build-arg "BASE=$tag" -t "$img" -f "$CTX/Containerfile" "$CTX" \
@@ -1751,7 +1751,7 @@ for tag in $IMAGES; do
 done
 
 for tag in $IMAGES; do
-    short=$(printf '%s' "$tag" | tr ':.@' '---' | cut -c1-40)
+    short=$(printf '%s' "$tag" | tr ':.@' '---' | cut -c1-30)-$(printf '%s' "$tag" | sha256sum | cut -c1-8)
     img=localhost/mlnt-$RUN-$short
     podman image exists "$img" 2>/dev/null || continue
     RESULTS="$RESULTS
