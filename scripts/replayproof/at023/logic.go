@@ -100,6 +100,7 @@ type Replay struct {
 const (
 	baselineAnswer = "the date is today"
 	replayAnswer   = "answer to the replayed prompt"
+	freshAnswer    = "answer to the fresh prompt"
 )
 
 // StreamEnded reports whether the last chunk is the end of the stream (an error chunk is not a completed stream).
@@ -143,10 +144,13 @@ func RefusedAfterRestartProblem(r Replay) string {
 	if !strings.HasPrefix(r.Outcome, "refused") {
 		p = append(p, "not refused ("+r.Outcome+")")
 	} else {
-		if !strings.Contains(r.Outcome, "401") {
+		// Outcome is "refused " + the error code and text; the first field after the prefix is the status.
+		rest := strings.TrimSpace(strings.TrimPrefix(r.Outcome, "refused"))
+		status, text, _ := strings.Cut(rest, " ")
+		if status != "401" {
 			p = append(p, "the refusal is not status 401 ("+r.Outcome+")")
 		}
-		if !strings.Contains(r.Outcome, RestartedText) {
+		if !strings.Contains(text, RestartedText) {
 			p = append(p, "the refusal text does not say \""+RestartedText+"\" ("+r.Outcome+")")
 		}
 	}

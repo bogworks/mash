@@ -120,6 +120,7 @@ type Build struct {
 	Baseline    Replay   `json:"baseline_prompt"`
 	Control     Replay   `json:"control_replay_no_restart"`
 	Replay      Replay   `json:"replay_after_restart"`
+	Fresh       Replay   `json:"fresh_prompt_after_restart"`
 	Result      Result   `json:"result"`
 	Notes       []string `json:"notes,omitempty"`
 }
@@ -284,6 +285,7 @@ func assertBuild(rec *Record, b *Build) bool {
 	ok = rec.check(p+"the endpoint was restarted and the replay was sent inside the 30 s window", b.Timings.ReplayWindow.Inside,
 		fmt.Sprintf("replay sent %.2f s after the captured ts, %.2f s left", b.Timings.ReplayWindow.Elapsed.Seconds(), b.Timings.ReplayWindow.Remaining.Seconds())) && ok
 	ok = rec.check(p+"the restarted endpoint is a new process", b.Timings.OldPID != 0 && b.Timings.NewPID != 0 && b.Timings.OldPID != b.Timings.NewPID, b.PIDs) && ok
+	ok = rec.check(p+"a fresh prompt sent after the restart is accepted and answered (reply tool succeeded, exact answer received, stream complete)", AnswerProblem(b.Fresh) == "", b.Fresh.Summary()) && ok
 	if b.Role == "candidate" {
 		ok = rec.check(p+"the replay signed before the restart is refused with 401 \""+RestartedText+"\" and never reaches the session", RefusedAfterRestartProblem(b.Replay) == "", b.Replay.Summary()) && ok
 	} else {
@@ -805,6 +807,37 @@ func runBuild(rec *Record, b *Build, bin, dir string) error {
 	b.Timings.ReplaySentAt = b.Replay.SentAt
 	b.Timings.ReplayWindow = InWindow(b.Capture.TS, b.Replay.SentAt)
 	lg.f("replay sent %.2f s after the captured ts (inside the window: %v)", b.Timings.ReplayWindow.Elapsed.Seconds(), b.Timings.ReplayWindow.Inside)
+
+	// A fresh, newly signed prompt after the restart is accepted and answered (ADR 0198).
+	fc := make(chan pout, 1)
+	fsent := time.Now().UTC()
+	go func() {
+		o, e := k.Mash("bob", "", "prompt", k.To("alice"), "what day is it after the restart?")
+		fc <- pout{o, e}
+	}()
+	fid, fok := alice2.prompt(10 * time.Second)
+	b.Fresh = Replay{SentAt: fsent, SessionSaw: fok, Outcome: "no reply", Chunks: []Chunk{}, ExpectedText: freshAnswer}
+	if !fok {
+		return errors.New("alice's restarted session never saw the fresh prompt")
+	}
+	if err := alice2.reply(fid, freshAnswer); err != nil {
+		lg.f("fresh prompt: %v", err)
+	} else {
+		b.Fresh.ReplyToolOK = true
+	}
+	select {
+	case p := <-fc:
+		if p.err != nil {
+			b.Fresh.Outcome = "refused " + p.err.Error()
+		} else {
+			b.Fresh.Outcome = "accepted"
+			b.Fresh.ReplyText = strings.TrimSpace(p.out)
+			b.Fresh.StreamComplete = true // mash prompt exits 0 only after the reply stream's end
+		}
+	case <-time.After(20 * time.Second):
+		return errors.New("`mash prompt` did not return after the restarted Alice answered the fresh prompt")
+	}
+	lg.f("fresh prompt after restart: %s", b.Fresh.Summary())
 	b.Result = Result{Baseline: b.Baseline.Summary(), Control: b.Control.Summary(), Replay: b.Replay.Summary()}
 	return nil
 }

@@ -192,6 +192,9 @@ func TestRefusedAfterRestartProblem(t *testing.T) {
 		{"accepted", Replay{Outcome: "accepted", SessionSaw: true, ReplyToolOK: true}, false},
 		{"refused, other text", Replay{Outcome: "refused 401 bad signature"}, false},
 		{"refused, other status", Replay{Outcome: "refused 403 this endpoint " + RestartedText}, false},
+		{"refused 403, text mentions 401", Replay{Outcome: "refused 403 this endpoint " + RestartedText + " 401"}, false},
+		{"refused 500, text mentions 401", Replay{Outcome: "refused 500 this endpoint " + RestartedText + " 401"}, false},
+		{"refused, no status", Replay{Outcome: "refused this endpoint " + RestartedText + " 401"}, false},
 		{"refused, right text, session saw it", Replay{Outcome: good, SessionSaw: true}, false},
 		{"refused, right text, reply ok", Replay{Outcome: good, ReplyToolOK: true}, false},
 	} {
