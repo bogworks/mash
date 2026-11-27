@@ -16,7 +16,7 @@
 set -uo pipefail
 
 root=$(cd "$(dirname "$0")/../.." && pwd)
-image=golang:1.27
+image=golang:1.27@sha256:5f1b98fa02fe396ebce2a0227a0e08309e11792915b9dd2e1f71053d7e7e6666
 name=mash-at006-$$-$RANDOM
 rc=0
 
