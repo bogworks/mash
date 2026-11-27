@@ -33,8 +33,10 @@ var upgradeActions = []string{actCheck, actInstall, actPlugins, actRestart, actA
 var numberedRE = regexp.MustCompile(`(?m)^\s*\d+[.)]\s+(.+)$`)
 
 // upgradeHeadRE reads a heading "Upgrading from <from>"; the rest of the line is kept for the "to" clause. The from
-// version takes an optional leading "v" and is a whole token, so 0.6.1 never matches 0.6.10.
-var upgradeHeadRE = regexp.MustCompile(`(?i)upgrading from v?(\d+(?:\.\d+)*)(.*)$`)
+// version takes an optional leading "v" and is a whole token, so 0.6.1 never matches 0.6.10 and 0.6.0 never matches
+// 0.6.0-rc.1: it ends at end of line, at whitespace, or at one of ,;:) ; a "." ends it only at end of line or before
+// whitespace (a trailing period), never before a digit or a letter.
+var upgradeHeadRE = regexp.MustCompile(`(?i)upgrading from v?(\d+(?:\.\d+)*)((?:[\s,;:)].*|\.(?:\s.*)?)?)$`)
 
 // toClauseRE finds the word "to" after whitespace in the text that follows the from version; group 1 is what follows it.
 var toClauseRE = regexp.MustCompile(`(?i)\sto(?:\s+(.*))?$`)

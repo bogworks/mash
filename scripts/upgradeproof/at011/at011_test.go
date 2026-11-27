@@ -407,6 +407,33 @@ func TestPageSectionWholeTokens(t *testing.T) {
 	}
 }
 
+func TestPageSectionFromWholeToken(t *testing.T) {
+	rc := "## Upgrading from 0.6.0-rc.1 to 0.6.1\n\n1. rc\n"
+	if got, err := pageSection(rc, "0.6.0", "0.6.1"); err != nil || got != "" {
+		t.Fatalf("a prerelease from version must not match 0.6.0: %q %v", got, err)
+	}
+	both := rc + "\n## Upgrading from 0.6.0 to 0.6.1\n\n1. stable\n"
+	if got, err := pageSteps(both, "0.6.0", "0.6.1"); err != nil || !reflect.DeepEqual(got, []string{"stable"}) {
+		t.Fatalf("the stable heading must be picked, not ambiguous: %q %v", got, err)
+	}
+	for _, h := range []string{"Upgrading from 0.6.0rc1 to 0.6.1", "Upgrading from 0.6.0+b to 0.6.1", "Upgrading from 0.6.0x", "Upgrading from 0.6.0-rc.1"} {
+		if got, err := pageSection("## "+h+"\n\n1. x\n", "0.6.0", "0.6.1"); err != nil || got != "" {
+			t.Errorf("%q must not match prev 0.6.0: %q %v", h, got, err)
+		}
+	}
+	if got, err := pageSection("## Upgrading from 0.6.0-rc.1 to 0.6.1\n\n1. x\n", "0.6", "0.6.1"); err != nil || got != "" {
+		t.Errorf("0.6.0-rc.1 must not match prev 0.6: %q %v", got, err)
+	}
+	for _, h := range []string{"Upgrading from 0.6.0: notes", "Upgrading from 0.6.0.", "Upgrading from 0.6.0:", "Upgrading from 0.6.0, then more", "Upgrading from 0.6.0 to 0.6.1"} {
+		if got, err := pageSection("## "+h+"\n\n1. x\n", "0.6.0", "0.6.1"); err != nil || got == "" {
+			t.Errorf("%q must match prev 0.6.0: %q %v", h, got, err)
+		}
+	}
+	if _, err := pageSection("## Upgrading from 0.6.0 to 0.6.1-rc.1\n", "0.6.0", "0.6.1"); err == nil {
+		t.Error("a prerelease destination is an error, not a match of 0.6.1")
+	}
+}
+
 func TestCrossesSwitchOn(t *testing.T) {
 	for _, c := range []struct {
 		prev, version string
