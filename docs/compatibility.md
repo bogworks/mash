@@ -33,6 +33,26 @@ Notes:
 - The automated tests run on the project's own machines: Linux amd64 and macOS arm64.
 - Version numbers above are those we saw, not promises that other versions fail.
 
+## Upgrading from 0.6.0 to 0.6.1
+
+0.6.1 is the same as 0.6.0 except one doctor warning, with a signed release tag; nothing changes in endpoints, keys or mail. Do the steps in this order, on each machine that has endpoints, and then on the administrator's machine. There is nothing to do if you run 0.6.0 and do not want the new version.
+
+1. Check what you run now. `mash version` shows the version and should say `mash v0.6.0`. `mash doctor` should end with no problem and exit 0. As administrator, run `mashctl doctor` too. If one of them reports a problem, fix that first; see [troubleshooting](troubleshooting.md).
+2. Install both programs of 0.6.1 together, `mash` and `mashctl`, with the install script of the release. It checks each file before it installs anything. It installs into `~/.local/bin`. If your current `mash` is in another folder (`command -v mash` shows where), add `MASH_INSTALL_DIR=<that folder>` before `bash install.sh`, so the new programs replace the old ones.
+
+   ```sh
+   BASE=https://github.com/bogworks/mash/releases/download/v0.6.1
+   curl -fsSLO $BASE/install.sh -O $BASE/SHA256SUMS &&
+   grep ' install.sh$' SHA256SUMS | sha256sum -c - &&
+   MASH_VERSION=v0.6.1 bash install.sh
+   ```
+
+   On macOS use `shasum -a 256 -c -` instead of `sha256sum -c -`. Without `gh` the install script prints `warning: gh not found: checked checksums only, not verified`; the install still works, and you can verify the build attestation later as [install.md](install.md#verify-what-you-download) describes.
+
+3. Update both plugins in Claude Code: `claude plugin update mash@mash` and `claude plugin update mash-setup@mash`. The plugin that runs the 0.6.1 program comes out shortly after the release. Ask a session "which mash version is this?": it says `mash v0.6.1` when you have it. Until then, update again.
+4. Restart each Claude Code session. Installing the new release, or updating the plugin, does not change the program that an open session uses. An open session keeps running the old version, and keeps sending and receiving mail, until you restart it. Each endpoint has its own session, so restart every one of them. If you run `mash serve` yourself, outside Claude Code, stop it with Ctrl-C, or end the process you started it as, and start `mash serve` again after installing.
+5. Check again: `mash version` now says `mash v0.6.1`. Run `mash doctor` and, as administrator, `mashctl doctor`. Each should end with no problem; a bare `mash doctor` with more than one endpoint prints one row for each and ends `No problems.` when none has one.
+
 ## Upgrading from 0.5.10 to 0.6.0
 
 This is how to move a machine that runs 0.5.10 to 0.6.0. Your endpoints, keys and mail stay where they are. The upgrade is one-way: there is no supported way back to 0.5.10. Do the steps in this order, on each machine that has endpoints, and then on the administrator's machine.
