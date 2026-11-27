@@ -4,7 +4,7 @@ All notable user-facing changes to mash are recorded here. The format follows [K
 
 ## [Unreleased]
 
-## [0.6.0] - YYYY-MM-DD
+## [0.6.0] - 2026-11-27
 
 ### Summary
 
@@ -22,21 +22,25 @@ Scripts and anything that sends mail without mash: see the
 
 ### Added
 
-- **`mashctl endpoint inbox --json` shows when each message arrived.** Each message has a `when` field: the time the server stored it, in RFC 3339 and UTC, with a fraction of a second when there is one, for example `2026-11-26T15:04:05Z` or `2026-11-26T15:04:05.12Z`. The text table is unchanged.
-- **Mail that mash refuses is now listed, not hidden.** A message with a faulty header, or one that could not be verified, shows in `mash inbox` and `mash read` as a `refused` row with its reason, and never with its body. `mash status --detail` and `mash doctor` count them, and `mashctl endpoint inbox` adds a `reason` to each refused message. A refused message is not counted as waiting.
-- **`mash who` now says when discovery answers failed verification.** It prints one `warning:` line on standard error with the count, and `mash who --json` and the MCP `who` tool gain `answers_not_verified`, an integer that is 0 when none failed; the table and the entries are unchanged.
+- **`mashctl endpoint inbox --json` shows when each message arrived.** Each message has a `when` field: the time the server stored it, in RFC 3339 and UTC, with a fraction of a second when there is one, for example `2026-11-26T15:04:05Z` or `2026-11-26T15:04:05.12Z`. The text table is unchanged. ([#1750](https://github.com/bogworks/mash/pull/1750)).
+- **Mail that mash refuses is now listed, not hidden.** A message with a faulty header, or one that could not be verified, shows in `mash inbox` and `mash read` as a `refused` row with its reason, and never with its body. `mash status --detail` and `mash doctor` count them, and `mashctl endpoint inbox` adds a `reason` to each refused message. A refused message is not counted as waiting. ([#1571](https://github.com/bogworks/mash/pull/1571)).
+- **`mash who` now says when discovery answers failed verification.** It prints one `warning:` line on standard error with the count, and `mash who --json` and the MCP `who` tool gain `answers_not_verified`, an integer that is 0 when none failed; the table and the entries are unchanged. ([#1847](https://github.com/bogworks/mash/issues/1847)).
 
 ### Changed
 
-- **`mash doctor` checks every endpoint when you have several.** It used to stop and ask for `--endpoint`. Now it checks each installed endpoint and prints one row for each, with the number of problems and warnings and the first problem, then names the command that shows the first endpoint with a problem. It exits 1 if any endpoint has a problem. `--json` prints each endpoint's report and the totals. With one endpoint, or `--endpoint`, nothing changes, and `mash status` and the other commands still ask you to choose one
-  ([ADR 0192](https://github.com/bogworks/mash/blob/main/docs/decisions/0192-doctor-checks-every-installed-endpoint-when-none-is-chosen.md)).
-- **The plugin re-checks its downloaded mash once per session, and `mash doctor` says which mash runs.** When the plugin
-  starts a session it now confirms its cached copy of mash still matches the release it pins, and replaces a copy that
-  does not (the old file is kept beside it). In a session the plugin started, `mash doctor` shows a `launcher` row: `ok`
-  for the pinned mash, and a warning when the plugin fell back to the mash on your PATH instead
-  ([issue 1290](https://github.com/bogworks/mash/issues/1290)).
-- **mash reads the sender of every message the way the SAP Go SDK does, and ten kinds of sender header that older mash accepted are now refused.** The header is refused when it is over 2,048 bytes; when its `ts` is not in UTC; when its `name` has a control character, is over 64 characters or has a broken character escape; when a field appears twice; when its `sub` has a space; when its `sig` is not 64 bytes of base64url text; when it is empty; or when a message carries two. This holds on live prompts and on mail already stored, and a validly signed message with such a header is no longer delivered; headers mash writes are not affected. A live prompt with a malformed header is refused with status 400, and one past the limit on recent prompts with status 401 and `too many recent prompts: try again shortly`; two of the ten shapes used to get 401 and now get 400, and a prompt replayed by a sender who is not in the directory gets 403 both times, where the replay used to get 401. `mash prompt` now starts every error line with `error:` where it used to start some with `mash:`, for example `error: prompt refused: 400 malformed Agent-Sender header`; a script that matches `^mash: ` on its output will miss these lines
-  ([ADR 0173](https://github.com/bogworks/mash/blob/main/docs/decisions/0173-mash-adopts-the-sap-sdks-strict-agent-sender-parser-outright-and-ten-shapes-it-read-before-are-now-malformed.md)).
+- **`mash doctor` checks every endpoint when you have several.** It used to stop and ask for `--endpoint`. Now it checks each installed endpoint and prints one row for each, with the number of problems and warnings and the first problem, then names the command that shows the first endpoint with a problem. It exits 1 if any endpoint has a problem. `--json` prints each endpoint's report and the totals. With one endpoint, or `--endpoint`, nothing changes, and `mash status` and the other commands still ask you to choose one ([#1785](https://github.com/bogworks/mash/pull/1785)).
+- **The plugin re-checks its downloaded mash once per session, and `mash doctor` says which mash runs.** When the plugin starts a session it now confirms its cached copy of mash still matches the release it pins, and replaces a copy that does not (the old file is kept beside it). In a session the plugin started, `mash doctor` shows a `launcher` row: `ok` for the pinned mash, and a warning when the plugin fell back to the mash on your PATH instead ([issue 1290](https://github.com/bogworks/mash/issues/1290)).
+- **mash reads the sender of every message the way the SAP Go SDK does, and ten kinds of sender header that older mash accepted are now refused.** The header is refused when it is over 2,048 bytes; when its `ts` is not in UTC; when its `name` has a control character, is over 64 characters or has a broken character escape; when a field appears twice; when its `sub` has a space; when its `sig` is not 64 bytes of base64url text; when it is empty; or when a message carries two. This holds on live prompts and on mail already stored, and a validly signed message with such a header is no longer delivered; headers mash writes are not affected. A live prompt with a malformed header is refused with status 400, and one past the limit on recent prompts with status 401 and `too many recent prompts: try again shortly`; two of the ten shapes used to get 401 and now get 400, and a prompt replayed by a sender who is not in the directory gets 403 both times, where the replay used to get 401. `mash prompt` now starts every error line with `error:` where it used to start some with `mash:`, for example `error: prompt refused: 400 malformed Agent-Sender header`; a script that matches `^mash: ` on its output will miss these lines ([#1564](https://github.com/bogworks/mash/pull/1564)).
+- **`mashctl init` no longer creates the unused `mash-adoption` bucket.** A server set up earlier keeps that bucket; nothing reads it, and you can delete it. ([#1884](https://github.com/bogworks/mash/pull/1884)).
+
+### Fixed
+
+- **`mash status` and `mash doctor` now notice a state folder mash cannot create.** When mash cannot create its state folder, `mash status` no longer says ready and `mash doctor` reports a failed delivery row that names the folder it cannot write. This is when mail waits for the spool, as the plugin sets it up (`MASH_SPOOL_FROM_START`, or `MASH_SPOOL_REQUIRED`); otherwise mail stays on the channel and is still delivered. ([#1893](https://github.com/bogworks/mash/issues/1893)).
+- **A plain `mash status` run outside a session now sees a state folder mash cannot create.** It checks the folder without writing to it, and says mail cannot be stored when mail waits for the spool, as the plugin sets it up (`MASH_SPOOL_FROM_START`, or `MASH_SPOOL_REQUIRED`). ([#1907](https://github.com/bogworks/mash/issues/1907)).
+- **A restarted endpoint refuses a prompt signed before it started.** The message tells the sender to send the prompt again. A prompt signed in the second the endpoint started, or sent by a sender whose clock runs ahead, can still be replayed for up to about 60 seconds after a restart (#1829).
+
+Known issues: 2 known issues, listed in the [release notes](https://github.com/bogworks/mash/blob/v0.6.0/docs/release-notes/0.6.0.md#known-issues)
+Links: [Release notes](https://github.com/bogworks/mash/blob/v0.6.0/docs/release-notes/0.6.0.md), [full changes](https://github.com/bogworks/mash/compare/v0.5.10...v0.6.0), [verify your download](https://github.com/bogworks/mash/blob/v0.6.0/docs/install.md#verify-what-you-download)
 
 ## [0.5.10] - 2026-11-26
 
