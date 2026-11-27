@@ -72,7 +72,8 @@ func breakStateFolder(t *testing.T, w *world) spool.Spool {
 	if err := os.MkdirAll(filepath.Dir(state), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(state, []byte("not a folder"), 0o600); err != nil {
+	// mode 0700: a file with write and search bits still blocks the path
+	if err := os.WriteFile(state, []byte("not a folder"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	return sp

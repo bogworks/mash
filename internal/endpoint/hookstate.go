@@ -272,20 +272,9 @@ func ScanOnDisk(sp spool.Spool) bool {
 // not block a root test.
 var DirAccessible = func(dir string) bool { return unix.Access(dir, unix.W_OK|unix.X_OK) == nil }
 
-// writableDir is DirAccessible for the nearest existing directory at or above dir: the scan makes the directory, so one
-// that does not exist yet is as writable as the first ancestor that does.
-func writableDir(dir string) bool {
-	for {
-		if _, err := os.Stat(dir); err == nil {
-			return DirAccessible(dir)
-		}
-		up := filepath.Dir(dir)
-		if up == dir {
-			return false
-		}
-		dir = up
-	}
-}
+// writableDir is true when the scan could make dir: the nearest existing path component at or above it is a directory
+// this process can write and search. A file in the way, whatever its mode, is not writable.
+func writableDir(dir string) bool { return !SpoolFolderUnwritable(dir) }
 
 // SpoolFolderUnwritable is true when this process cannot create or write dir, decided without writing anything: the
 // nearest existing path component is not a directory (a file or a dangling link in the way, where mkdir fails though
