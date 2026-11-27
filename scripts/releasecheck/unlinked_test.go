@@ -181,8 +181,8 @@ func TestPolicyUnlinkedStepGoList(t *testing.T) {
 	}
 }
 
-// The reasons say what is refused and why, and name a version only where the rule depends on one; the step's label
-// covers every package the step refuses.
+// The reasons say what is refused and why, and name a version only where the rule depends on one; the step's label is
+// short and names no version.
 func TestRefusalReasonsAndLabelByVersion(t *testing.T) {
 	const m = "github.com/bogworks/mash"
 	const sdk = "github.com/bogworks/synadia-agents.go"
@@ -210,10 +210,8 @@ func TestRefusalReasonsAndLabelByVersion(t *testing.T) {
 					t.Errorf("%s: reason %q names a version, but the rule does not depend on one", p, r)
 				}
 			}
-			for _, part := range []string{"policy engine", "caller and host", "0.6.0"} {
-				if !strings.Contains(unlinkedLabel, part) {
-					t.Errorf("label %q does not contain %q", unlinkedLabel, part)
-				}
+			if len(unlinkedLabel) >= 80 || strings.Contains(unlinkedLabel, "0.") {
+				t.Errorf("label %q: want under 80 columns and no version; the reasons carry the detail", unlinkedLabel)
 			}
 		})
 	}

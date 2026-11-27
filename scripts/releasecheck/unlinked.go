@@ -103,8 +103,9 @@ func matchesAny(path string, list []string) bool {
 	return false
 }
 
-// unlinkedLabel names the unlinked step and says everything it refuses. The step's label and its error both use it.
-const unlinkedLabel = "no refused package is linked into the released programs (the policy engine and the SDK caller and host never; internal/sapsdk and the SDK identity package only from 0.6.0)"
+// unlinkedLabel names the unlinked step; the reasons from refusalReason carry the detail. The step's label and its error
+// both use it.
+const unlinkedLabel = "no refused package is linked into mash or mashctl"
 
 // refusalReason says why a refused package may not be linked.
 func refusalReason(pkg string) string {
@@ -224,7 +225,7 @@ func policyUnlinkedStep(ctx context.Context, o Options, x string) error {
 		links = append(links, targetLinks{t.GOOS + "/" + t.GOARCH, linkedPolicyPackages(module, o.Version, out)})
 	}
 	if s := describeLinked(links); s != "" {
-		return fmt.Errorf("the release requires that %s, but: %s; %s", unlinkedLabel, s, describeReasons(links))
+		return fmt.Errorf("%s: %s; %s", unlinkedLabel, s, describeReasons(links))
 	}
 	return nil
 }
