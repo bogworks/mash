@@ -157,6 +157,12 @@ Check:
 
 `who` lists only the endpoints of your own owner, and `mash who --wide` adds the role, host and description on record; other endpoints' live host is not shown without admin access.
 
+## `warning: N discovery answers could not be verified` from `mash who`
+
+Message, on stderr: `warning: 1 discovery answer could not be verified` (or `2 discovery answers` and so on). It is not an error: `who` still lists the directory. Something in the account answered the discovery request, but mash could not match the answer to an endpoint in its directory: its signature or key did not verify, or its address is not one mash's directory can hold.
+
+The usual cause is an agent hosted by another SAP SDK whose session id is outside mash's token rule, such as a UUID or a name with capitals. mash cannot find such an agent. Fix: give it a mash address and run it under that, as [mash and SAP](sap.md#the-departure) shows.
+
 ## Mail does not arrive and `mash doctor` counts refused messages
 
 By default `mash serve` delivers only mail whose trust is `verified`. Mail that is unsigned (`[absent]`), signed by an unknown key (`[unknown-signer]`), `[claimed]` or `[stale]` is not delivered and is counted as `not verified`; serve writes one line to its log for each: `refused message 12 from acme.demo.x: not verified (absent)`. The sender is not told. The `refused` row of `mash doctor` shows the count and a count for each class, and its state is `ok`: it reports mail, it is not a fault of this machine. `mash inbox` lists the message as a `refused` row with the sender `?` and the class as the reason, and `mash read 12` says `error: message 12 was refused: it was not verified` with the hint `mash doctor`. Neither shows the text. See "A refused message" above for the other classes. Find out why the sender is not verified (below). To receive such mail anyway, with its label, start the session with `MASH_ACCEPT_UNVERIFIED=1` (or set `accept_unverified` in `config.json`, or run `mash serve --accept-unverified`). Mail refused earlier is not delivered afterwards.
