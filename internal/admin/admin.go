@@ -232,7 +232,7 @@ func (a *Admin) Init(ctx context.Context) error {
 // MissingBuckets names the buckets Init makes that do not exist yet. It reads and changes nothing.
 func (a *Admin) MissingBuckets(ctx context.Context) ([]string, error) {
 	var missing []string
-	for _, b := range []string{store.DirectoryBucket, store.LeaseBucket, store.RetiredBucket, store.IssuedBucket, store.AdoptionBucket} {
+	for _, b := range []string{store.DirectoryBucket, store.LeaseBucket, store.RetiredBucket, store.IssuedBucket} {
 		_, err := a.js.KeyValue(ctx, b)
 		switch {
 		case errors.Is(err, jetstream.ErrBucketNotFound):
@@ -296,7 +296,7 @@ func (a *Admin) initBuckets(ctx context.Context) error {
 	if err := a.initIssued(ctx); err != nil {
 		return err
 	}
-	return a.initAdoption(ctx)
+	return nil
 }
 
 // initLease creates the lease bucket, or brings an existing one to cfg's limits, and leaves it refusing rollup. An

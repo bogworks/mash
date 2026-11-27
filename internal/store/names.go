@@ -8,6 +8,5 @@ const (
 	LeaseBucket     = "mash-leases"
 	RetiredBucket   = "mash-retired"
 	IssuedBucket    = "mash-issued"
-	AdoptionBucket  = "mash-adoption"
 	Consumer        = "deliver"
 )
