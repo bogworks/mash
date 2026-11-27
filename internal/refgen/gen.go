@@ -925,7 +925,7 @@ func (g *gen) toolIndex(n *node) {
 		if err := json.Unmarshal(raw, &rs); err != nil {
 			g.fail(n.full(), "x-removed", err)
 		} else if len(rs) > 0 {
-			b.heading(2, "Removed in "+g.current)
+			b.heading(2, "Removed")
 			var rows [][]string
 			for _, r := range rs {
 				rows = append(rows, []string{code(r.What), esc(r.Why)})
