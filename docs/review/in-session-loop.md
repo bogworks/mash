@@ -4,9 +4,8 @@ This page describes the maintainers' own pre-push review gate. Outside contribut
 
 [ADR 0080](../decisions/0080-review-is-a-gate-in-the-implementers-loop-adopted-from-a-sibling-project.md): a maintainer
 reviews their own diff before pushing, so findings come back into the same session in minutes instead of through a pull
-request comment hours later. The process is adopted from ADR 0047 of a sibling project
-(`docs/decisions/0047-review-is-a-gate-in-the-implementers-loop.md`), whose gate this one is a port of; this page says what
-differs for mash.
+request comment hours later. The process is adopted from the review gate of another project of the maintainers, whose gate this one is a port of; this
+page says what differs for mash.
 
 Needs on the host: `git`, `go`, `jq`, `flock` and [`ocr`](https://github.com/alibaba/open-code-review) (the review
 engine), signed in to whichever provider the models use. `codex` and `claude` are needed only by the full merge gate
@@ -77,7 +76,7 @@ which reviews each pull request head with Codex.
 - **No mash CI job verifies a receipt.** `ci.yml` has no reviewgate job, and neither does the source project's. CI runs
   `go vet ./...` and `go test -race ./...`, which build and test `scripts/reviewgate` and check this policy file
   (`TestRepoPolicy`) like any other package. `pr-check` and the queue conditions are unchanged.
-- **Verification is the watcher's, and optional.** `reviewgate verify` is the function the watcher calls before it reviews:
+- **Verification is the watcher's, and optional.** `reviewgate verify` is the function the review check calls before it reviews:
   the record is found by the diff's patch-id, but a patch-id match is only the lookup. The watcher also passes the
   checkout it is verifying (`-base` and `-head`, the full commits of the range the gate reviewed, and `-source-sha`, the
   source artifact hash OCR reports for it), and every run's recorded `exact_range` must be exactly `base..head` and its

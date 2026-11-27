@@ -321,7 +321,7 @@ The admin commands also read `MASH_ADMIN_CREDS`.
 1. **Archive.** A NATS leaf node with its own JetStream domain, on the archive host. One `archive` stream sources every inbox (no subject transform), so mail outlives the 30 days. `mash admin provision` adds the source. An outage loses nothing that is still within an inbox's 30 days.
 2. **Monitoring.** One endpoint watches heartbeats, unread counts, archive lag and server health, and mails the operator's endpoint when something is wrong.
 3. **Approvals.** A blocklist-driven approval flow, with a small mobile client on NATS.
-4. **Other agents**, such as swamp workflows, as endpoints with their own agent token.
+4. **Other agents**, such as automated workflows, as endpoints with their own agent token.
 5. **Migration from codev** in the reference deployment: every named session gets an endpoint, launchers set `MASH_NAME` and `--channels`, and codev is removed.
 
 ## Appendix: reference deployment
