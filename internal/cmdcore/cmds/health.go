@@ -446,7 +446,8 @@ func (r StatusResult) noSessionEndpoint() bool {
 	return !r.Ready && r.Endpoint == nil && r.Reason != nil && *r.Reason == ReasonNoSessionEndpoint
 }
 
-// Text is "<endpoint>: ready, offline", "<endpoint>: ready, online" or "<endpoint>: not ready: <reason>"; with no
+// Text is "<endpoint>: ready, offline", "<endpoint>: ready, online" (online: the lease is held and the endpoint's own
+// registration answers, as who counts it) or "<endpoint>: not ready: <reason>"; with no
 // endpoint chosen the name is "mash". A session that names no endpoint says "No endpoint is chosen for this session."
 func (r StatusResult) Text(cmdcore.Opts) string {
 	if r.noSessionEndpoint() {

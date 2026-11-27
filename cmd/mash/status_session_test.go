@@ -59,8 +59,9 @@ func TestSessionStatusAnotherSessionHolds(t *testing.T) {
 	if row := deliveryRow(t, sc); row["state"] != "fail" || row["detail"] != "another session holds this endpoint" || sc["problems"] != float64(1) {
 		t.Fatalf("doctor object: %v", sc)
 	}
-	// at a shell nothing changes: it sees the endpoint held, and no session to deliver to
-	if r := runMash(w.env["a"], "status"); r.out != tTo("a")+": ready, online\n" || r.code != 0 {
+	// at a shell it sees the endpoint held, and no session to deliver to; the other holder here is a bare lease key with
+	// no registration behind it, so the endpoint is not online (#1794)
+	if r := runMash(w.env["a"], "status"); r.out != tTo("a")+": ready, offline\n" || r.code != 0 {
 		t.Fatalf("shell status: %+v", r)
 	}
 	if r := runMash(w.env["a"], "doctor"); !strings.Contains(r.out, "delivery  skip  checked only inside a Claude Code session\n") || r.code != 0 {
