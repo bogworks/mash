@@ -1,3 +1,7 @@
 # The first release that is keyless: its tag is annotated and unsigned, pushed by the minting service, and its SHA256SUMS
 # is attested instead of signed. Below it, SSH-signed tags and SHA256SUMS.sig stay as they were. One version, one line.
 v0.4.0
+# The first release whose tag the gate requires to be signed (ADR 0199; v0.6.1 is signed but was gated as keyless): from this version the tag is annotated and SSH-signed by the
+# mash-release key in docs/allowed_signers. Between the cutover and this version the tag stays unsigned. SHA256SUMS stays
+# attested. At most one such line; its position in the file does not matter.
+signed-from v0.6.2

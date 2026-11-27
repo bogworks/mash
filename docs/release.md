@@ -1,12 +1,12 @@
 # Releasing mash
 
-A release is a **tag `vN.N.N` at a candidate commit X on main** (SSH-signed below the cutover version in `docs/release-cutover`; annotated and unsigned, pushed by the minting service, at or above it). X is built from fresh clones in different
+A release is a **tag `vN.N.N` at a candidate commit X on main** (SSH-signed below the cutover version in `docs/release-cutover`; annotated and unsigned from it up to the `signed-from` version; annotated and SSH-signed with the `mash-release` key at or above `signed-from`, the first being v0.6.2; v0.6.1 is also signed, by the same key, but its gate is the keyless one). X is built from fresh clones in different
 directories with a pinned toolchain; the build is byte-reproducible and `mash version` prints
 `mash v<N.N.N> (<first 7 characters of X>)`. The tag is made (see below); CI builds and drafts; the maintainer publishes after the gate.
 
 ## Publishing: one command
 
-The cutover version is recorded in `docs/release-cutover` (v0.4.0). Below it, the command runs on the maintainer's machine, which signs the tag with the release SSH key; at or above it, the tag is made by the minting service (see "Keyless releases"). In both cases `gh` must be authenticated for the release repository:
+The cutover version (v0.4.0) and the `signed-from` version (v0.6.2) are recorded in `docs/release-cutover`. Below the cutover, the command runs on the maintainer's machine, which signs the tag with the release SSH key; at or above it, the tag is made outside the command and `release-check publish` never makes it: between the cutover and `signed-from` the minting service pushes an unsigned tag (see "Keyless releases"), and from `signed-from` the release operations make and sign the tag and the deploy key pushes it (see step 4 and "Verify a release"). In every case `gh` must be authenticated for the release repository:
 
     scripts/release-check publish [--wait 45m] [--not-latest] [--receipts <dir>] <version> <X>
 
@@ -28,7 +28,7 @@ Run one publish of a release at a time: nothing stops a second `release-check pu
 Then do step 7 (record the version and commit, optional).
 
 The paragraph above describes releases below the cutover. For a release **at or above the cutover** the differences
-are in "Keyless releases" below.
+are in "Keyless releases" below; from `signed-from` the tag is also signed (step 4).
 
 ### Keyless releases (at or above the cutover version)
 
@@ -49,6 +49,9 @@ commands download from `releases/latest/download`, so a release that is not Late
 assets are not changed.
 
 ### What a keyless release does not prove
+
+Where the tag is signed (from `signed-from`), the signature proves that the holder of the `mash-release` key made the
+tag; it does not prove that the gate ran. The items below still apply.
 
 - That a checked gate run authorized the release: only that the maintainer asked for the tag and ran the gate by hand.
 - That the tag rulesets held: others could still edit them, and this repository does not verify them.
@@ -180,8 +183,8 @@ The numbered steps are what the command does in each state, and the manual path 
    the section of the version being released is judged, and only when X records a cutover (`docs/release-cutover`) and
    the version is at or above it; below it, or with no cutover record, nothing is judged.
    It also refuses while any earlier `vN.N.N` tag has a release that is a draft or missing, unless `docs/skipped-releases.txt` at X lists that tag with a reason (a bare tag line without one does not count; publish it with `gh release edit <tag> --draft=false`); pre-release tags are ignored.
-4. **Tag** (state: no tag). Below the cutover: `git tag -s v<version> X && git push origin v<version>` (annotated and signed; the maintainer's key). At or above it: the maintainer asks the minting service to push the annotated, unsigned tag at X with its deploy key; nobody signs it, and `release-check publish` refuses when no tag exists.
-5. **CI** (state: tag at X, no release): `release.yml` guards the tag (name `vN.N.N`, annotated, signature present, X on main), builds the four
+4. **Tag** (state: no tag). Below the cutover: `git tag -s v<version> X && git push origin v<version>` (annotated and signed; the maintainer's key). At or above the cutover and below `signed-from`: the maintainer asks the minting service to push the annotated, unsigned tag at X with its deploy key; nobody signs it. At or above `signed-from` (v0.6.2): release operations make the tag on the release host with `git tag -s v<version> X`, using the `mash-release` key (`gpg.format` ssh, `user.signingkey` set to that key), and the deploy key pushes it. In both keyless cases `release-check publish` refuses when no tag exists.
+5. **CI** (state: tag at X, no release): `release.yml` guards the tag (name `vN.N.N`, annotated, X on main, and below the cutover or at or above `signed-from` an SSH signature present), builds the four
    targets of both programs (`mash-{linux,darwin}-{amd64,arm64}` and `mashctl-{linux,darwin}-{amd64,arm64}`) twice each in
    fresh clones and fails on any mismatch, and an `attest` job
    attests build provenance for the eight binaries (see "Build provenance"). From 0.3.2 the workflow also generates a
@@ -503,7 +506,7 @@ publishing, and it does not run `release-check`. It must be green on `main` befo
     gh attestation verify <file> -R bogworks/mash --signer-workflow bogworks/mash/.github/workflows/release.yml \
       --source-ref refs/tags/v0.6.1 --source-digest <X>
 
-The first command prints `Good "git" signature` when the tag was signed by a key in `docs/allowed_signers`; the key for v0.6.1 and later is the one with fingerprint `SHA256:AtXzPvoOLeTfX05xeum8jJl6fvlmIB+BIFlun7qhQzA`. `<X>` is the commit the tag points to (`git rev-parse v0.6.1^{commit}`). Tags from v0.4.0 to v0.6.0 are not signed; v0.3.x and older were signed with the earlier key.
+The first command prints `Good "git" signature` when the tag was signed by a key in `docs/allowed_signers`; the key for v0.6.1 and later is the one with fingerprint `SHA256:AtXzPvoOLeTfX05xeum8jJl6fvlmIB+BIFlun7qhQzA`. `<X>` is the commit the tag points to (`git rev-parse v0.6.1^{commit}`). Checking an SSH tag signature needs git 2.34 or later. Tags from v0.4.0 to v0.6.0 are not signed; v0.3.x and older were signed with the earlier key.
 
 These commands apply to releases from 0.3.2 on. 0.3.1 and older have no SBOM and no `mash.intoto.jsonl`, and 0.3.1 is the
 first release with build provenance. Download the assets of `v<version>` into one directory (for example

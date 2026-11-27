@@ -719,6 +719,103 @@ func cutoverCases(t *testing.T, dir string, runGuard func(tag, sha string) error
 			}
 		}
 	}
+	// signed-from (ADR 0199): at or above it the tag must carry an SSH signature; below it nothing changes.
+	sf := commitCutover(str(header + "v0.4.0\nsigned-from v0.6.1\n"))
+	unsigned("v0.6.0", sf)
+	if err := runGuard("v0.6.0", sf); err != nil {
+		t.Errorf("an unsigned tag below signed-from was refused: %v", err)
+	}
+	signed("-s", "v0.6.1", "-m", "signed", sf)
+	if err := runGuard("v0.6.1", sf); err != nil {
+		t.Errorf("an SSH-signed tag at signed-from was refused: %v", err)
+	}
+	signed("-s", "v0.6.2", "-m", "signed", sf)
+	if err := runGuard("v0.6.2", sf); err != nil {
+		t.Errorf("an SSH-signed tag above signed-from was refused: %v", err)
+	}
+	unsigned("v0.6.3", sf)
+	if err := runGuard("v0.6.3", sf); err == nil {
+		t.Error("an unsigned annotated tag at or above signed-from passed the guard")
+	}
+	light("v0.6.4", sf)
+	if err := runGuard("v0.6.4", sf); err == nil {
+		t.Error("a lightweight tag above signed-from passed the guard")
+	}
+	for i, bad := range []struct{ what, body string }{
+		{"below the cutover", "v0.4.0\nsigned-from v0.3.0\n"},
+		{"two signed-from lines", "v0.4.0\nsigned-from v0.6.1\nsigned-from v0.6.1\n"},
+		{"no v", "v0.4.0\nsigned-from 0.6.1\n"},
+		{"no version", "v0.4.0\nsigned-from\n"},
+		{"a trailing word", "v0.4.0\nsigned-from v0.6.1 now\n"},
+		{"an unknown line", "v0.4.0\nsigned-from v0.6.1\nsomething else\n"},
+	} {
+		cc := commitCutover(str(bad.body))
+		u, sg := fmt.Sprintf("v6.%d.0", i), fmt.Sprintf("v6.%d.1", i)
+		unsigned(u, cc)
+		signed("-s", sg, "-m", "signed", cc)
+		for _, name := range []string{u, sg} {
+			if err := runGuard(name, cc); err == nil {
+				t.Errorf("tag %s passed with a malformed signed-from record (%s): the guard must fail closed", name, bad.what)
+			}
+		}
+	}
+	// The compare is numeric: v0.6.10 and v0.10.2 are above signed-from v0.6.1 (a string compare puts them below).
+	for _, v := range []string{"v0.6.10", "v0.10.2"} {
+		unsigned(v, sf)
+		if err := runGuard(v, sf); err == nil {
+			t.Errorf("an unsigned tag %s above signed-from v0.6.1 passed the guard", v)
+		}
+	}
+	// A tag at or above signed-from with a PGP or X.509 block and no SSH signature is refused, and so is one that carries
+	// both an SSH signature and such a block.
+	forge := func(name, base, block string) {
+		t.Helper()
+		out, err := exec.Command("git", "-C", dir, "cat-file", "tag", base).Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		f := filepath.Join(t.TempDir(), "tag")
+		if err := os.WriteFile(f, append(out, []byte("\n"+block+"\n")...), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		obj, err := exec.Command("git", "-C", dir, "hash-object", "-t", "tag", "-w", f).Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		git("update-ref", "refs/tags/"+name, strings.TrimSpace(string(obj)))
+		git("push", "-q", "-f", "origin", "refs/tags/"+name)
+	}
+	const pgp = "-----BEGIN PGP SIGNATURE-----\n\nAAAA\n-----END PGP SIGNATURE-----"
+	const x509 = "-----BEGIN SIGNED MESSAGE-----\nAAAA\n-----END SIGNED MESSAGE-----"
+	unsigned("v0.7.0", sf)
+	forge("v0.7.0", "v0.7.0", pgp)
+	if err := runGuard("v0.7.0", sf); err == nil {
+		t.Error("a PGP-signed tag above signed-from passed the guard")
+	}
+	unsigned("v0.7.1", sf)
+	forge("v0.7.1", "v0.7.1", x509)
+	if err := runGuard("v0.7.1", sf); err == nil {
+		t.Error("an X.509-signed tag above signed-from passed the guard")
+	}
+	signed("-s", "v0.7.2", "-m", "signed", sf)
+	forge("v0.7.2", "v0.7.2", pgp)
+	if err := runGuard("v0.7.2", sf); err == nil {
+		t.Error("a tag with an SSH signature and a PGP block above signed-from passed the guard")
+	}
+	// Order in the record is not enforced: signed-from before the cutover line judges the same.
+	rv := commitCutover(str(header + "signed-from v0.6.1\nv0.4.0\n"))
+	unsigned("v0.6.5", rv)
+	if err := runGuard("v0.6.5", rv); err == nil {
+		t.Error("an unsigned tag at signed-from passed with the record reversed")
+	}
+	signed("-s", "v0.6.6", "-m", "signed", rv)
+	if err := runGuard("v0.6.6", rv); err != nil {
+		t.Errorf("an SSH-signed tag was refused with the record reversed: %v", err)
+	}
+	unsigned("v0.5.9", rv)
+	if err := runGuard("v0.5.9", rv); err != nil {
+		t.Errorf("an unsigned tag below signed-from was refused with the record reversed: %v", err)
+	}
 	// No cutover file: the signature is still required.
 	n := commitCutover(nil)
 	unsigned("v8.0.0", n)
