@@ -252,7 +252,7 @@ func TestDiff(t *testing.T) {
 		t.Fatalf("%+v, %v", p, err)
 	}
 	golden(t, "plan_first", RenderPlan(p))
-	for _, sec := range []string{"first credential (not issued by the apply: make the endpoint with `mashctl endpoint create`): ", "new credential (not issued by the apply: reissue the endpoint with `mashctl endpoint reissue`): "} {
+	for _, sec := range []string{"first credential (not issued by the apply; an existing endpoint needs a credential with its tags): ", "new credential (not issued by the apply; the sender's endpoint needs a credential with its new tags): "} {
 		if !strings.Contains(RenderPlan(p), sec) {
 			t.Errorf("the plan does not say the apply issues no credential (%q):\n%s", sec, RenderPlan(p))
 		}

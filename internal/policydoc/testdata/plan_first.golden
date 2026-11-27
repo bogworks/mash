@@ -11,7 +11,7 @@ template foo.c: added
 tags foo.c.core: (none) -> allow:d.build, deny:_none
 tags foo.c.lead: (none) -> deny:c.core
 rotate and revoke: (none)
-new credential (not issued by the apply: reissue the endpoint with `mashctl endpoint reissue`): (none)
+new credential (not issued by the apply; the sender's endpoint needs a credential with its new tags): (none)
 revoke: (none)
-first credential (not issued by the apply: make the endpoint with `mashctl endpoint create`): foo.c.core, foo.c.lead
+first credential (not issued by the apply; an existing endpoint needs a credential with its tags): foo.c.core, foo.c.lead
 inbox not checked: the apply's inbox and narrowing checks were not run, so it may still refuse
