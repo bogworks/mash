@@ -123,6 +123,9 @@ const (
 // CannotWrite begins the delivery row's detail for a folder that cannot be written; the folder follows.
 const CannotWrite = "cannot write "
 
+// ShellFolderWarnTail ends the delivery warning a shell gives for a state folder it cannot create, after a "; ".
+const ShellFolderWarnTail = "plugin sessions may get no mail"
+
 // The delivery row's words for a session whose hooks have not delivered mail yet (a warning) and for one whose hooks
 // are suspected, degraded or refused (a failure).
 const (
@@ -642,8 +645,8 @@ func (r DoctorResult) Text(cmdcore.Opts) string {
 			// a folder too long for the line goes under the detail column
 			if path, ok := strings.CutPrefix(detail, CannotWrite); ok && c.Name == CheckDelivery && len(line+detail) > 80 {
 				detail, extra = strings.TrimSpace(CannotWrite), "\n"+indent+path
-				if p, tail, ok := strings.Cut(path, "; "); ok { // a warning's reason goes on a line of its own
-					extra = "\n" + indent + p + "\n" + indent + tail
+				if p, ok := strings.CutSuffix(path, "; "+ShellFolderWarnTail); ok { // a warning's reason goes on a line of its own
+					extra = "\n" + indent + p + "\n" + indent + ShellFolderWarnTail
 				}
 			}
 			if w, ok := hookRowWraps[detail]; ok && c.Name == CheckDelivery {

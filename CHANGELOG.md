@@ -4,10 +4,6 @@ All notable user-facing changes to mash are recorded here. The format follows [K
 
 ## [Unreleased]
 
-### Fixed
-
-- **`mash doctor` at a plain shell warns when mash cannot create its state folder and no spool setting is visible to the shell.** Before, the delivery row said only that it is checked inside a Claude Code session. Mail still stays on the channel and is delivered unless a session holds it for the spool (the plugin sets that), so the row is a warning, not a failure, and `mash status` is unchanged. (#1907)
-
 ## [0.6.0] - 2026-11-27
 
 ### Summary

@@ -271,7 +271,7 @@ server       ok    tls://myserver:4222
 sign-in      ok
 delivery     warn  cannot write
                    ~/.local/state/mash/spool/acme/acme.demo.bob
-                   plugin sessions get no mail until fixed
+                   plugin sessions may get no mail
 stored mail  skip  not checked: ~/.local/state/mash/spool/acme/acme.demo.bob is not writable
 refused      ok    no mail was refused
 

@@ -375,7 +375,7 @@ func (h *healthSvc) Health(ctx context.Context) (cmds.HealthReport, error) {
 	case folderBroken: // the one shell case with a delivery row: no session could store mail here, and mail waits for the spool
 		rep.Checks = append(rep.Checks, cmds.HealthCheck{Name: cmds.CheckDelivery, State: cmds.CheckFail, Detail: cmds.CannotWrite + config.Tilde(shellDir)})
 	case folderWarn:
-		rep.Checks = append(rep.Checks, cmds.HealthCheck{Name: cmds.CheckDelivery, State: cmds.CheckWarn, Detail: cmds.CannotWrite + config.Tilde(shellDir) + "; plugin sessions get no mail until fixed"})
+		rep.Checks = append(rep.Checks, cmds.HealthCheck{Name: cmds.CheckDelivery, State: cmds.CheckWarn, Detail: cmds.CannotWrite + config.Tilde(shellDir) + "; " + cmds.ShellFolderWarnTail})
 	case !h.session: // a shell has no session to deliver to
 		rep.Checks = append(rep.Checks, cmds.HealthCheck{Name: cmds.CheckDelivery, State: cmds.CheckSkip, Detail: "checked only inside a Claude Code session"})
 	default:
