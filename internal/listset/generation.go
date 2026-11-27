@@ -90,7 +90,7 @@ type Record struct {
 // ls was decoded from; Record.Received is their SHA-256. Nil or empty received is refused with ErrNoReceivedBytes, so
 // Received is never zero on an accepted Record.
 //
-// No file format exists yet (DEC-004), so Accept cannot check that received decodes to ls; that is the caller's
+// No file format exists yet, so Accept cannot check that received decodes to ls; that is the caller's
 // responsibility. Once a decoder exists it must hand over the very bytes it decoded.
 //
 // It refuses a list set whose Base is not inForce.Generation with a *StaleBaseError (matching ErrStaleBase) before it

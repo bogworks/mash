@@ -3,7 +3,7 @@
 //
 // The contract is mash-messaging-policy draft-2 (REQ-001 to REQ-006, AT-002, AT-004; ADR 0102). A list set is, for one
 // NATS account (one owner), a shared or closed switch per group and verb, and per sending address an allow list
-// and a deny list of exact three-part addresses. This package has no file format (DEC-004 is open): ListSet is the
+// and a deny list of exact three-part addresses. This package has no file format yet: ListSet is the
 // shape a decoded list set would have, so that bad shapes can be refused.
 //
 // Validate is pure. Compile validates, builds, and then runs Check on its own output; Check expands every sender's
