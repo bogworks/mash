@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	banner      = "Generated from spec/*.json by go run ./scripts/refgen. Do not edit."
+	banner = "Generated from spec/*.json by go run ./scripts/refgen. Do not edit."
 	// nextRelease is only the old form of planning an entry (x-release at this value). It is a placeholder, not a
 	// promise: no page names it, and the spec plans with x-plan instead.
 	nextRelease = "0.6.0"
