@@ -126,10 +126,10 @@ func confWalk(root confCmd, f func(path string, c confCmd)) {
 	}
 }
 
-// confTrack names the releases the conformance test holds the build to: the commands of 0.5.9. sap is 0.6.0.
+// confTrack names the release the conformance test holds the build to: the commands of 0.6.1. sap is planned, not built.
 func confTrack(c confCmd) bool {
 	r := c.meta("x-release")
-	return r == "0.5.9"
+	return r == "0.6.1"
 }
 
 func confFlat(s string) string { return strings.Join(strings.Fields(s), " ") }

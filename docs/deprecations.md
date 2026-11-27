@@ -16,9 +16,9 @@ nothing else that still works. These were removed outright, and the old form is 
 row:
 
 - `mash admin` (all of it), `mash plugin export`, `mash credential create` and the 0.5.6 draft commands `mash server
-  status` and `mash endpoint status` ([mash reference](reference/mash.md#removed-in-058)). Each answers as an unknown
+  status` and `mash endpoint status` ([mash reference](reference/mash.md#removed)). Each answers as an unknown
   command does (`TestAdminIsAnUnknownCommand`, `TestCredentialIsRemoved` in `cmd/mash`).
-- The `mashctl` verbs and options listed in the [mashctl reference](reference/mashctl.md#removed-in-058), and the
+- The `mashctl` verbs and options listed in the [mashctl reference](reference/mashctl.md#removed), and the
   options of `mashctl endpoint create` that took metadata (`TestEndpointCreateRemovedOptions`).
 - The environment variables `MASH_OWNER`, `MASH_GROUP`, `MASH_NAME`, `MASH_URL` and `MASH_TLS_CA` and the config keys
   `url`, `owner` and `tls_ca`: they are ignored (`TestOldSettingNamesAreIgnored` in `internal/config`).
