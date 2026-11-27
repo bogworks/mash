@@ -1,0 +1,1 @@
+**A plain `mash status` run outside a session now sees a state folder mash cannot create.** It checks the folder without writing to it, and says mail cannot be stored when mail waits for the spool, as the plugin sets it up (`MASH_SPOOL_FROM_START`, or `MASH_SPOOL_REQUIRED`).

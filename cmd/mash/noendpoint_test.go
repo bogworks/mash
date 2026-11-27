@@ -113,6 +113,48 @@ func TestStatusToolSaysNotReadyWhileTheRequiredSpoolFails(t *testing.T) {
 	})
 }
 
+// The plugin's setting, MASH_SPOOL_FROM_START, holds mail without a spool as well, so a spool that cannot be made is
+// reported the same way.
+func TestStatusToolSaysNotReadyWhileTheFromStartSpoolFails(t *testing.T) {
+	w := newWorld(t, "a")
+	w.env["a"]["MASH_SPOOL_FROM_START"] = "1"
+	state := filepath.Join(t.TempDir(), "state")
+	w.env["a"]["MASH_STATE_DIR"] = state
+	if err := os.WriteFile(state, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := startServe(t, w.env["a"])
+	s.initialize(t)
+	s.tools(t)
+	want := tTo("a") + ": not ready: mail is held: its folder cannot be written\nhint: mash doctor"
+	id := 10
+	eventually(t, 15*time.Second, "status says mail is held", func() bool {
+		id++
+		return reportText(t, s, id, "status") == want
+	})
+}
+
+// With neither setting on, a spool that cannot be made leaves mail on the channel, where it is delivered: status stays
+// ready and doctor shows no failed delivery row for the folder.
+func TestStatusToolReadyWhileTheSpoolFailsAndMailStaysOnTheChannel(t *testing.T) {
+	w := newWorld(t, "a")
+	state := filepath.Join(t.TempDir(), "state")
+	w.env["a"]["MASH_STATE_DIR"] = state
+	if err := os.WriteFile(state, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := startServe(t, w.env["a"])
+	s.initialize(t)
+	s.tools(t)
+	time.Sleep(2 * time.Second) // serve has tried the spool by now
+	if got := toolText(t, s, 10, "status"); !strings.HasPrefix(got, tTo("a")+": ready") {
+		t.Errorf("status: %q", got)
+	}
+	if got := reportText(t, s, 11, "doctor"); strings.Contains(got, "delivery     FAIL") || strings.Contains(got, "cannot write") {
+		t.Errorf("doctor shows a failed delivery row: %q", got)
+	}
+}
+
 func TestStatusToolReadyWithAHealthySpool(t *testing.T) {
 	w := newWorld(t, "a")
 	w.env["a"]["MASH_SPOOL_REQUIRED"] = "1"

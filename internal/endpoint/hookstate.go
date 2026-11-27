@@ -267,23 +267,32 @@ func ScanOnDisk(sp spool.Spool) bool {
 	return ok && rec.Scanning
 }
 
-// DirAccessible is whether this process can write to dir, by asking the system without writing anything (the hook record
+// DirAccessible is whether this process can write to dir and search it (a directory it cannot search cannot take a new entry), by asking the system without writing anything (the hook record
 // lives in the same directory, so an unwritable one cannot say so itself). Exported as a var so that a test sets it: a chmod does
 // not block a root test.
-var DirAccessible = func(dir string) bool { return unix.Access(dir, unix.W_OK) == nil }
+var DirAccessible = func(dir string) bool { return unix.Access(dir, unix.W_OK|unix.X_OK) == nil }
 
-// writableDir is DirAccessible for the nearest existing directory at or above dir: the scan makes the directory, so one
-// that does not exist yet is as writable as the first ancestor that does.
-func writableDir(dir string) bool {
-	for {
-		if _, err := os.Stat(dir); err == nil {
-			return DirAccessible(dir)
+// writableDir is true when the scan could make dir: the nearest existing path component at or above it is a directory
+// this process can write and search. A file in the way, whatever its mode, is not writable.
+func writableDir(dir string) bool { return !SpoolFolderUnwritable(dir) }
+
+// SpoolFolderUnwritable is true when this process cannot create or write dir, decided without writing anything: the
+// nearest existing path component is not a directory (a file or a dangling link in the way, where mkdir fails though
+// access on an ancestor would pass), or it is not writable.
+func SpoolFolderUnwritable(dir string) bool {
+	for p := dir; ; p = filepath.Dir(p) {
+		if fi, err := os.Stat(p); err == nil {
+			if !fi.IsDir() {
+				return true
+			}
+			return !DirAccessible(p)
 		}
-		up := filepath.Dir(dir)
-		if up == dir {
-			return false
+		if _, err := os.Lstat(p); err == nil { // a link that points nowhere
+			return true
 		}
-		dir = up
+		if filepath.Dir(p) == p {
+			return true
+		}
 	}
 }
 
