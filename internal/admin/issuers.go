@@ -14,7 +14,7 @@ import (
 
 // IssuerProblem is one user whose JWT is signed by a signing key that does not stay in the account JWT.
 type IssuerProblem struct {
-	// Role is "admin" (the user of the admin credentials) or "exempt" (a connected user the adoption marker exempts).
+	// Role is "admin" (the user of the admin credentials) or "connected" (a connected user of the account).
 	Role string `json:"role"`
 	// User is the user's public key ("" for the admin user when its key is not known to the caller).
 	User string `json:"user"`
@@ -44,22 +44,22 @@ func (e *IssuersNotKeptError) Error() string {
 	return "mash: " + strings.Join(parts, "; ") + ", a signing key that does not stay in the account JWT: reissue them under the account key first"
 }
 
-// CheckIssuersKept refuses when the admin user, or any connected exempt user, is signed by a key that is not kept.
+// CheckIssuersKept refuses when the admin user, or any connected user, is signed by a key that is not kept.
 // account is the account's own identity key, which always counts as kept; kept holds the signing keys that stay: every
-// scoped key the key store holds for an owner group of any owner, and the list set's (reconcile.KeptSigners). adminIssuer is the `iss` of the admin credentials' user JWT; exemptIssuers maps the public
-// key of each connected exempt user to every issuer CONNZ reported for it, one per connection (two connections of one
+// scoped key the key store holds for an owner group of any owner, and the list set's (reconcile.KeptSigners). adminIssuer is the `iss` of the admin credentials' user JWT; connectedIssuers maps the public
+// key of each connected user to every issuer CONNZ reported for it, one per connection (two connections of one
 // user may carry JWTs signed by different keys, and every one of them must be kept). An empty issuer is not known to be kept, so it
 // is refused. The error is an *IssuersNotKeptError naming every user and key, sorted; nothing is changed.
-func CheckIssuersKept(account, adminUser, adminIssuer string, exemptIssuers map[string][]string, kept map[string]bool) error {
+func CheckIssuersKept(account, adminUser, adminIssuer string, connectedIssuers map[string][]string, kept map[string]bool) error {
 	ok := func(issuer string) bool { return issuer != "" && (issuer == account || kept[issuer]) }
 	var ps []IssuerProblem
 	if !ok(adminIssuer) {
 		ps = append(ps, IssuerProblem{Role: "admin", User: adminUser, Issuer: adminIssuer})
 	}
-	for user, issuers := range exemptIssuers {
+	for user, issuers := range connectedIssuers {
 		for _, issuer := range issuers {
 			if !ok(issuer) {
-				ps = append(ps, IssuerProblem{Role: "exempt", User: user, Issuer: issuer})
+				ps = append(ps, IssuerProblem{Role: "connected", User: user, Issuer: issuer})
 			}
 		}
 	}
