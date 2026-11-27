@@ -48,8 +48,9 @@ type hookless struct {
 	mu        sync.Mutex
 	sp        spool.Spool
 	since     time.Time
-	bound     bool // SetSpool has run
-	armed     bool // SpoolFromStart has run
+	bound     bool   // SetSpool has run
+	unbound   string // why the spool could not be bound ("" if it could, or serve has not tried)
+	armed     bool   // SpoolFromStart has run
 	first     time.Time
 	last      time.Time
 	wakes     int
@@ -59,7 +60,14 @@ type hookless struct {
 func (h *hookless) bind(sp spool.Spool, since time.Time) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.sp, h.since, h.bound = sp, since, true
+	h.sp, h.since, h.bound, h.unbound = sp, since, true, ""
+}
+
+// noteUnbound records that serve could not bind the spool; a later bind clears it.
+func (h *hookless) noteUnbound(err error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.unbound = err.Error()
 }
 
 func (h *hookless) fromStart() {

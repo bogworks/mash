@@ -378,6 +378,9 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 			return // stdin closed or a signal came: no spool or service to start, and nothing to report
 		}
 		if err != nil {
+			if sdir != "" && !(spool.Spool{Dir: sdir}).Writable() { // the folder is the cause; a lock wait or inbox request that failed is not reported as one
+				ep.NoteSpoolUnbound(err)
+			}
 			if failClosed {
 				ep.NoteSpoolFault(err)
 				go retrySpool(ctx, ep, func() (spool.Spool, error) {
