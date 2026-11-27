@@ -332,6 +332,20 @@ type Health interface {
 	Health(ctx context.Context) (HealthReport, error)
 }
 
+type probePresenceKey struct{}
+
+// WithPresenceProbe marks ctx as asking for status's online answer, which costs one presence probe of the server.
+// Only status sets it: doctor never uses online, so a Health run without the mark sends no probe (#1794).
+func WithPresenceProbe(ctx context.Context) context.Context {
+	return context.WithValue(ctx, probePresenceKey{}, true)
+}
+
+// PresenceProbeAsked says whether ctx came through WithPresenceProbe.
+func PresenceProbeAsked(ctx context.Context) bool {
+	v, _ := ctx.Value(probePresenceKey{}).(bool)
+	return v
+}
+
 // ClaudeChecker is the optional service only doctor uses: the claude row, the installed Claude Code against the tested
 // range. Status never asks for it, so status never looks for claude (ADR 0169).
 type ClaudeChecker interface {
@@ -511,7 +525,7 @@ var Status = cmdcore.Command[StatusParams, StatusResult]{
 	Globals:     cmdcore.GlobalsAll,
 	Examples:    []string{"mash status", "mash status --endpoint acme.demo.alice"},
 	Run: func(ctx context.Context, env *cmdcore.Env, _ StatusParams) (StatusResult, error) {
-		rep, err := healthOf(ctx, env, "status")
+		rep, err := healthOf(WithPresenceProbe(ctx), env, "status")
 		if err != nil {
 			return StatusResult{}, err
 		}
