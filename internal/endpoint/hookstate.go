@@ -112,6 +112,13 @@ func (e *Endpoint) recordHookState(ctx context.Context) {
 		return
 	}
 	defer unlock()
+	// Serve's shutdown clear (clearHookState, run from recordHookStates once Run's context is cancelled) removes the
+	// record under this lock. LockContext can still succeed on a cancelled context when the lock is free, so a late
+	// caller (the stored-mail scan's deferred RecordHookState, a tool call) would write the record back after the clear.
+	// Checking under the lock rules that out.
+	if ctx.Err() != nil {
+		return
+	}
 	if !e.holdsLease() { // the lease may have been lost while waiting for the lock
 		e.hookRecorded.Store(nil)
 		return
