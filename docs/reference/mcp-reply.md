@@ -38,4 +38,4 @@ Answered.
 ## Notes
 
 Unchanged from 0.5.5. It has no mash command of its own; it is the answering
-half of mash prompt. Planned for 0.6.0: it moves under sap.
+half of mash prompt. Planned: it moves under sap.

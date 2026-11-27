@@ -635,7 +635,7 @@
     }
    ],
    "errors": [],
-   "note": "Unchanged from 0.5.5. It has no mash command of its own; it is the answering half of mash prompt. Planned for 0.6.0: it moves under sap."
+   "note": "Unchanged from 0.5.5. It has no mash command of its own; it is the answering half of mash prompt. Planned: it moves under sap."
   }
  ],
  "server": [
@@ -645,7 +645,7 @@
   ],
   [
    "MCP revisions",
-   "2024-11-05, 2025-03-26 and 2025-06-18. Not 2026-07-28: that revision does not let a server send what the client did not ask for, and Claude Code does not register a channel server that negotiates it. This is to be looked at again for 0.6.0."
+   "2024-11-05, 2025-03-26 and 2025-06-18. Not 2026-07-28: that revision does not let a server send what the client did not ask for, and Claude Code does not register a channel server that negotiates it. This is to be looked at again."
   ],
   [
    "Every tool result",

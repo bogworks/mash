@@ -5,7 +5,7 @@ Generated from spec/*.json by go run ./scripts/refgen. Do not edit.
 | Topic | Detail |
 | --- | --- |
 | Started by | The agent host, as 'mash serve', once per session. It speaks MCP over standard input and output. |
-| MCP revisions | 2024-11-05, 2025-03-26 and 2025-06-18. Not 2026-07-28: that revision does not let a server send what the client did not ask for, and Claude Code does not register a channel server that negotiates it. This is to be looked at again for 0.6.0. |
+| MCP revisions | 2024-11-05, 2025-03-26 and 2025-06-18. Not 2026-07-28: that revision does not let a server send what the client did not ask for, and Claude Code does not register a channel server that negotiates it. This is to be looked at again. |
 | Every tool result | Carries two things: the structured result, which is exactly the object the matching command prints with --json; and a text block, which is exactly what the command prints without it. In 0.5.5, tools returned text only. No output schema is declared in 0.5.6. The text block being the command's own text, not JSON, is a deliberate departure from MCP's suggestion. |
 | A tool that fails | Returns an error result whose text is the command's 'error:' line and its 'hint:' line, and whose structured result is {"error": ..., "hint": ...}. |
 | Setup skills | The marketplace carries two plugins: 'mash' (this server and its hooks) and 'mash-setup' (two skills, one to set mash up and one to run it day to day). A person installs mash-setup first and asks their agent to set mash up; the skill installs mash, the NATS server if wanted, and the mash plugin, asking before each step. A skill cannot install the plugin it ships in, which is why there are two. |

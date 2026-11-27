@@ -128,7 +128,7 @@ The rules every mash command and tool follows.
    wording. The sender cannot tell the two apart: all it sees is that no
    stream took the message, and a recipient deleted while the sender's
    directory cache still lists it looks the same; a marker in the directory
-   record that tells them apart is planned for 0.6.0. When the set-aside file
+   record that tells them apart is planned. When the set-aside file
    &lt;address&gt;.creds.deleted is present, send, inbox, read and who say
    'error: &lt;address&gt;: this endpoint was deleted; its address cannot be
    used again' with 'hint: mash doctor', as mash status does.

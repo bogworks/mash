@@ -2193,7 +2193,7 @@
      },
      {
       "name": "x-today",
-      "value": "In 0.5.5, this did not exist. In 0.5.6 a mesh has the one owner named at mashctl init, and nothing in the grammar assumes one. Several owners per mesh are planned for 0.6.0."
+      "value": "In 0.5.5, this did not exist. In 0.5.6 a mesh has the one owner named at mashctl init, and nothing in the grammar assumes one. Several owners per mesh are planned."
      }
     ]
    },

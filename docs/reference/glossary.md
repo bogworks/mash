@@ -19,7 +19,7 @@ The words mash uses, and what each one means.
 | `message` | mash | One item of mail. |
 | `name` | mash | The third part: this one endpoint. |
 | `online / offline` | mash | Whether something is holding the endpoint open right now. |
-| `owner` | mash | The first part of an address: a namespace. In 0.5.6 a mesh has one owner, named at mashctl init. Several owners per mesh are planned for 0.6.0. |
+| `owner` | mash | The first part of an address: a namespace. In 0.5.6 a mesh has one owner, named at mashctl init. Several owners per mesh are planned. |
 | `public key` | NATS | The half that can be shared. |
 | `seed` | NATS | The private half of a key pair. |
 | `sender identity` | SAP | SAP's optional signature on a message, which mash requires. |
