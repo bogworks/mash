@@ -564,25 +564,3 @@ func TestRunSameContentRefusedAsUnchanged(t *testing.T) {
 		t.Error("the stored JWT changed")
 	}
 }
-
-// A submission that starts or completes a planned submitter rotation applies as a new generation even when its
-// content is the content in force, because the rotation completes only after a successful apply (ADR 0119, 0112).
-func TestRunRotationStepAppliesSameContent(t *testing.T) {
-	w := newWorld(t)
-	set := set1()
-	l := NewMemLedgerWith(w.rec1(), InForceDetail{JWT: w.j1, ListSet: &set})
-	same := set1()
-	same.Base = 1
-	in := w.run(l, same, "bytes-same")
-	in.RotationStep = true
-	st, err := Run(context.Background(), in)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if st.State != StateApplied || !st.InForce || st.Generation != 2 || len(st.Refusals) != 0 {
-		t.Fatalf("%+v", st)
-	}
-	if rec, _ := l.InForce(); rec.Generation != 2 {
-		t.Errorf("in force = %d, want 2", rec.Generation)
-	}
-}

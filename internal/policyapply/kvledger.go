@@ -613,8 +613,8 @@ func (l *KVLedger) LatestStatus(ctx context.Context) (Status, bool, error) {
 	return *v.Status, true, nil
 }
 
-// WriteRefusal stores st as the latest status for a refusal the intake makes before Apply (a bad signature, the wrong
-// submitter, an account or owner mismatch, an unknown schema, an account not adopted). It takes the ledger's lease, as
+// WriteRefusal stores st as the latest status for a refusal the intake makes before Apply (a bad signature, an
+// account or owner mismatch, an unknown schema). It takes the ledger's lease, as
 // a run does (waiting for another holder until ctx is done), writes st with the fenced WriteStatus and releases the
 // lease. st.State must be StateRefused and st must carry at least one refusal, else ErrNotRefusal and nothing is
 // taken or written. st.Generation 0 means the generation is unknown. It never changes the record in force, the
