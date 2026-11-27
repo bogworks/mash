@@ -33,6 +33,10 @@ Notes:
 - The automated tests run on the project's own machines: Linux amd64 and macOS arm64.
 - Version numbers above are those we saw, not promises that other versions fail.
 
+## Upgrading from 0.6.0 to 0.6.1
+
+0.6.1 is the same program as 0.6.0; only the release is different (its release tag is signed). Your endpoints, keys and mail stay where they are, and no state changes. There is nothing to do if you run 0.6.0. To move to 0.6.1 anyway, do the steps of "Upgrading from 0.5.10 to 0.6.0" below with `v0.6.1` in place of `v0.6.0`, in the same order. No step is needed for the sake of 0.6.1 alone: an open session keeps working, and `mash version` says `mash v0.6.1` once you have installed and restarted.
+
 ## Upgrading from 0.5.10 to 0.6.0
 
 This is how to move a machine that runs 0.5.10 to 0.6.0. Your endpoints, keys and mail stay where they are. The upgrade is one-way: there is no supported way back to 0.5.10. Do the steps in this order, on each machine that has endpoints, and then on the administrator's machine.
