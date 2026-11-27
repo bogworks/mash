@@ -43,7 +43,7 @@ These options work with every `mashctl` command.
 | --- | --- |
 | [`mashctl endpoint`](mashctl-endpoint.md) | Create, change and remove endpoints. |
 
-## Removed in 0.5.9
+## Removed
 
 | Removed | Why |
 | --- | --- |
@@ -56,4 +56,5 @@ These options work with every `mashctl` command.
 | `inbox inspect` | Now endpoint inbox. |
 | `add, reissue, retire (messages only)` | Left over from 0.5.5's renames; nobody uses 0.5.5. |
 
-Planned for 0.6.0: `mashctl owner`. See [coming in 0.6.0](coming-in-0-6-0.md).
+Planned: later: `mashctl owner`. See [planned, not yet
+released](planned-not-yet-released.md).

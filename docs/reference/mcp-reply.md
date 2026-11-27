@@ -4,7 +4,7 @@ Generated from spec/*.json by go run ./scripts/refgen. Do not edit.
 
 Answer a live prompt.
 
-Release: 0.5.9. Command line equivalent: ``.
+Release: 0.6.1. Command line equivalent: ``.
 
 ## Parameters
 
@@ -38,4 +38,4 @@ Answered.
 ## Notes
 
 Unchanged from 0.5.5. It has no mash command of its own; it is the answering
-half of mash prompt. Planned for 0.6.0: it moves under sap.
+half of mash prompt. Planned: it moves under sap.

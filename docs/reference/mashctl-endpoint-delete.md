@@ -5,7 +5,7 @@ Generated from spec/*.json by go run ./scripts/refgen. Do not edit.
 Delete an endpoint, its inbox and its credentials. The address can never be
 used again.
 
-Release: 0.5.9. Group: Endpoints.
+Release: 0.6.1. Group: Endpoints.
 
 ## Usage
 

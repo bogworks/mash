@@ -5,7 +5,7 @@ Generated from spec/*.json by go run ./scripts/refgen. Do not edit.
 Make a key pair: a secret seed and its public key. For when the seed must
 never leave this machine.
 
-Release: 0.5.9. Group: Setup.
+Release: 0.6.1. Group: Setup.
 
 ## Usage
 

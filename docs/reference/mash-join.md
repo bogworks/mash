@@ -4,7 +4,7 @@ Generated from spec/*.json by go run ./scripts/refgen. Do not edit.
 
 Install an endpoint's credentials on this machine from a join file.
 
-Release: 0.5.9. Group: Setup.
+Release: 0.6.1. Group: Setup.
 
 ## Usage
 
@@ -212,9 +212,9 @@ its three parts into the configuration folder: the server address or
 addresses, the certificate authority's certificate if the server uses its own,
 and a NATS creds file (a user JWT and its seed). After that, mash status
 works. When the endpoint made its own key, the join file holds no seed and
---key supplies it. Planned for 0.6.0: a way for mash join to ask to join and
-wait for approval. THE JOIN FILE is JSON, written with mode 600, with these
-fields: "mash_join": 1 (the format's version); "address"; "servers": a list of
+--key supplies it. Planned: a way for mash join to ask to join and wait for
+approval. THE JOIN FILE is JSON, written with mode 600, with these fields:
+"mash_join": 1 (the format's version); "address"; "servers": a list of
 addresses; "ca": the certificate authority's certificate as PEM text, or null;
 and either "creds": the whole text of a NATS creds file, or, when the endpoint
 made its own key, "user_jwt": the user JWT alone. One configuration folder

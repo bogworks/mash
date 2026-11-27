@@ -4,7 +4,7 @@ Generated from spec/*.json by go run ./scripts/refgen. Do not edit.
 
 Say in one line whether the server is working, and how many endpoints it has.
 
-Release: 0.5.9. Group: Mesh.
+Release: 0.6.1. Group: Mesh.
 
 ## Usage
 

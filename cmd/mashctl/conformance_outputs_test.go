@@ -1,6 +1,6 @@
 package main
 
-// The output half of the conformance test: every x-output case of every command of release 0.5.9 in spec/mashctl.json
+// The output half of the conformance test: every x-output case of every command of release 0.6.1 in spec/mashctl.json
 // (text, stream and exit code) is run against the build and compared exactly, with one exception the specification's
 // rules make: a case whose whole text stands in round brackets is a description and is skipped (confIsDescription). A
 // case that is not run and not such a description fails: there are no waivers.
@@ -750,7 +750,7 @@ func init() {
 	})
 	reg("version --json", func(t *testing.T) confOutRun {
 		prevV, prevC, prevB := endpoint.CurrentVersion(), commit, readBuildInfo
-		endpoint.SetVersion("0.5.9")
+		endpoint.SetVersion("0.6.1")
 		commit = "3f9a41c2e0b7d5a1c4e08b2d77f3a95e1b6c4098"
 		readBuildInfo = func() (*debug.BuildInfo, bool) { return nil, false }
 		t.Cleanup(func() { endpoint.SetVersion(prevV); commit, readBuildInfo = prevC, prevB })

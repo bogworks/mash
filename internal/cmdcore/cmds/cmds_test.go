@@ -223,7 +223,7 @@ func TestSendText(t *testing.T) {
 type noPluginSvc struct{}
 
 func (noPluginSvc) Version() (string, string, string) {
-	return "0.5.9", "3f9a41c2e0b7d5a1c4e08b2d77f3a95e1b6c4098", ""
+	return "0.6.1", "3f9a41c2e0b7d5a1c4e08b2d77f3a95e1b6c4098", ""
 }
 
 func TestVersion(t *testing.T) {

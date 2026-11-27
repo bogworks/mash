@@ -11,7 +11,7 @@ today is in the [guide](docs/guide/) and the
 [reference](docs/reference/README.md).
 
 The generated reference lists what is planned, as it stands today. See
-[planned commands](docs/reference/coming-in-0-6-0.md). It is not a promise
+[planned commands](docs/reference/planned-not-yet-released.md). It is not a promise
 of any syntax.
 
 ## Now
@@ -31,10 +31,10 @@ configuration folder, and fixes what `mash doctor` reports.
 Next is planned and may change. These are the items we expect to work on
 after Now.
 
-- The SDK move, planned for 0.6.0. mash's internals change over to the SAP Go
-  SDK. Nothing you do with mash changes, and nothing you have set up has to
-  change. A few malformed sender headers that older mash accepted are refused
-  instead.
+- The SDK move, which shipped in 0.6.0. mash's internals changed over to the
+  SAP Go SDK. Nothing you do with mash changes, and nothing you have set up has
+  to change. A few malformed sender headers that older mash accepted are
+  refused instead.
 - Policy: you say who may send to whom. mash ships open, and narrowing the
   mesh is a choice you make.
 - Prompting an agent through the SAP protocol, as a first-class action beside

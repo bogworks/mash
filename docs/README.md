@@ -32,7 +32,7 @@ Start with the [README](../README.md). What changed in each release: [CHANGELOG]
 - [TLS, clusters and a second mashctl machine](tls-and-clusters.md)
 - [Name rule file](name-rule.md)
 - [Synadia Cloud](synadia.md): not supported
-- [Coming in 0.6.0](reference/coming-in-0-6-0.md)
+- [Planned, not yet released](reference/planned-not-yet-released.md)
 
 ## Security
 

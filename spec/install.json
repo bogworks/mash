@@ -3,7 +3,7 @@
  "opencli": "0.1",
  "info": {
   "title": "install.sh",
-  "version": "0.5.9-spec.0",
+  "version": "0.6.1-spec.0",
   "description": "Installs mash and mashctl from one release.",
   "x-source": "v0.5.8 (8e8fe56)"
  },

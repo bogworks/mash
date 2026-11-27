@@ -3,9 +3,9 @@
  "opencli": "0.1",
  "info": {
   "title": "mash",
-  "version": "0.5.9-spec.0",
+  "version": "0.6.1-spec.0",
   "description": "Speaks as one endpoint: send and read mail, see who is there, check itself.",
-  "x-source": "v0.5.8 (8e8fe56)"
+  "x-source": "v0.6.1 (e3a6e8e)"
  },
  "command": {
   "name": "mash",
@@ -280,7 +280,7 @@
      },
      {
       "name": "x-release",
-      "value": "0.5.9"
+      "value": "0.6.1"
      },
      {
       "name": "x-output",
@@ -477,7 +477,7 @@
      },
      {
       "name": "x-release",
-      "value": "0.5.9"
+      "value": "0.6.1"
      },
      {
       "name": "x-output",
@@ -692,7 +692,7 @@
      },
      {
       "name": "x-release",
-      "value": "0.5.9"
+      "value": "0.6.1"
      },
      {
       "name": "x-output",
@@ -871,7 +871,7 @@
      },
      {
       "name": "x-release",
-      "value": "0.5.9"
+      "value": "0.6.1"
      },
      {
       "name": "x-output",
@@ -1014,7 +1014,7 @@
      },
      {
       "name": "x-release",
-      "value": "0.5.9"
+      "value": "0.6.1"
      },
      {
       "name": "x-output",
@@ -1206,7 +1206,7 @@
      },
      {
       "name": "x-release",
-      "value": "0.5.9"
+      "value": "0.6.1"
      },
      {
       "name": "x-output",
@@ -1585,7 +1585,7 @@
      },
      {
       "name": "x-release",
-      "value": "0.5.9"
+      "value": "0.6.1"
      },
      {
       "name": "x-output",
@@ -1604,7 +1604,7 @@
        },
        {
         "case": "--json, no plugin",
-        "text": "{\n  \"version\": \"0.5.9\",\n  \"commit\": \"3f9a41c2e0b7d5a1c4e08b2d77f3a95e1b6c4098\",\n  \"plugin\": null\n}",
+        "text": "{\n  \"version\": \"0.6.1\",\n  \"commit\": \"3f9a41c2e0b7d5a1c4e08b2d77f3a95e1b6c4098\",\n  \"plugin\": null\n}",
         "stream": "stdout",
         "exit": 0,
         "note": "--json is shown as it prints at a terminal (indented); piped it is one compact line (rule \"--json prints one object\"). When there is no plugin the value is null. The key is always present.",
@@ -1615,7 +1615,7 @@
      {
       "name": "x-json",
       "value": {
-       "version": "0.5.9",
+       "version": "0.6.1",
        "commit": "3f9a41c2e0b7d5a1c4e08b2d77f3a95e1b6c4098",
        "plugin": null
       }
@@ -1700,7 +1700,7 @@
      },
      {
       "name": "x-release",
-      "value": "0.5.9"
+      "value": "0.6.1"
      },
      {
       "name": "x-output",
@@ -1825,7 +1825,7 @@
      },
      {
       "name": "x-notes",
-      "value": "It asks nothing: the file came from whoever runs your mesh. How it works. Whoever runs the mesh runs 'mashctl endpoint create acme.demo.bob --out acme.demo.bob.join' and gets one text file. They get that file to the other machine by any route they trust. There, 'mash join acme.demo.bob.join' copies its three parts into the configuration folder: the server address or addresses, the certificate authority's certificate if the server uses its own, and a NATS creds file (a user JWT and its seed). After that, mash status works. When the endpoint made its own key, the join file holds no seed and --key supplies it. Planned for 0.6.0: a way for mash join to ask to join and wait for approval. THE JOIN FILE is JSON, written with mode 600, with these fields: \"mash_join\": 1 (the format's version); \"address\"; \"servers\": a list of addresses; \"ca\": the certificate authority's certificate as PEM text, or null; and either \"creds\": the whole text of a NATS creds file, or, when the endpoint made its own key, \"user_jwt\": the user JWT alone. One configuration folder serves one mesh; a join file for another mesh needs another folder. The certificate authority's certificate is kept in the folder as ca.pem, and every endpoint in the folder trusts it; a join file that brings a different one, or none where the folder has one, or one where the folder has none and already holds an endpoint or names servers in config.json, is refused, with or without --replace. The first join into an empty folder sets it; a folder that already holds an endpoint and has no ca.pem refuses a join file that brings one, with the same 'different ca' line, and a folder whose config.json already names servers but holds no endpoint refuses it with 'this folder has a server but no endpoint'. A JOIN FILE THAT HOLDS A SEED IS A SECRET FILE, and so is the file --key names: the file --key names is checked before it is read, and a join file is opened to see whether it holds a seed and then checked before anything is installed: it must be a plain file, owned by you, readable by you alone, or join refuses with the two cases above. A join file that holds only a user JWT is not checked for owner or mode, but any join file that is not a plain file (a directory, a FIFO, a device) gets the 'not a plain file of your own' line."
+      "value": "It asks nothing: the file came from whoever runs your mesh. How it works. Whoever runs the mesh runs 'mashctl endpoint create acme.demo.bob --out acme.demo.bob.join' and gets one text file. They get that file to the other machine by any route they trust. There, 'mash join acme.demo.bob.join' copies its three parts into the configuration folder: the server address or addresses, the certificate authority's certificate if the server uses its own, and a NATS creds file (a user JWT and its seed). After that, mash status works. When the endpoint made its own key, the join file holds no seed and --key supplies it. Planned: a way for mash join to ask to join and wait for approval. THE JOIN FILE is JSON, written with mode 600, with these fields: \"mash_join\": 1 (the format's version); \"address\"; \"servers\": a list of addresses; \"ca\": the certificate authority's certificate as PEM text, or null; and either \"creds\": the whole text of a NATS creds file, or, when the endpoint made its own key, \"user_jwt\": the user JWT alone. One configuration folder serves one mesh; a join file for another mesh needs another folder. The certificate authority's certificate is kept in the folder as ca.pem, and every endpoint in the folder trusts it; a join file that brings a different one, or none where the folder has one, or one where the folder has none and already holds an endpoint or names servers in config.json, is refused, with or without --replace. The first join into an empty folder sets it; a folder that already holds an endpoint and has no ca.pem refuses a join file that brings one, with the same 'different ca' line, and a folder whose config.json already names servers but holds no endpoint refuses it with 'this folder has a server but no endpoint'. A JOIN FILE THAT HOLDS A SEED IS A SECRET FILE, and so is the file --key names: the file --key names is checked before it is read, and a join file is opened to see whether it holds a seed and then checked before anything is installed: it must be a plain file, owned by you, readable by you alone, or join refuses with the two cases above. A join file that holds only a user JWT is not checked for owner or mode, but any join file that is not a plain file (a directory, a FIFO, a device) gets the 'not a plain file of your own' line."
      }
     ]
    },
@@ -1876,7 +1876,7 @@
        },
        {
         "name": "x-release",
-        "value": "0.5.9"
+        "value": "0.6.1"
        },
        {
         "name": "x-output",
@@ -1950,7 +1950,7 @@
      },
      {
       "name": "x-release",
-      "value": "0.5.9"
+      "value": "0.6.1"
      }
     ]
    },
@@ -2030,7 +2030,7 @@
      },
      {
       "name": "x-release",
-      "value": "0.5.9"
+      "value": "0.6.1"
      },
      {
       "name": "x-output",
@@ -2095,7 +2095,7 @@
      },
      {
       "name": "x-release",
-      "value": "0.5.9"
+      "value": "0.6.1"
      },
      {
       "name": "x-output",
@@ -2188,7 +2188,7 @@
      },
      {
       "name": "x-release",
-      "value": "0.5.9"
+      "value": "0.6.1"
      },
      {
       "name": "x-output",
@@ -2235,7 +2235,7 @@
       "name": "x-mcp",
       "value": {
        "tool": "reply",
-       "note": "The other half: an agent answers a live prompt with the reply tool. Both stay as they are in 0.5.6 and move under 'sap' in 0.6.0."
+       "note": "The other half: an agent answers a live prompt with the reply tool. Both stay as they are in 0.5.6 and move under 'sap' later."
       }
      },
      {
@@ -2267,8 +2267,8 @@
       "value": "Raw SAP"
      },
      {
-      "name": "x-release",
-      "value": "0.6.0"
+      "name": "x-plan",
+      "value": "later"
      },
      {
       "name": "x-output",
@@ -2285,12 +2285,12 @@
       "name": "x-mcp",
       "value": {
        "tool": null,
-       "why": "To be decided with the 0.6.0 design."
+       "why": "To be decided with the design."
       }
      },
      {
       "name": "x-today",
-      "value": "In 0.5.5, this did not exist, and it does not exist in 0.5.6. Planned for 0.6.0: mash prompt and the reply tool move here, which is a breaking change."
+      "value": "In 0.5.5, this did not exist, and it does not exist in 0.5.6. Planned: mash prompt and the reply tool move here, which is a breaking change."
      }
     ]
    }

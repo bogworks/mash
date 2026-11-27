@@ -60,7 +60,7 @@ These options work with every `mash` command.
 | --- | --- |
 | [`mash prompt`](mash-prompt.md) | Ask an endpoint a live question and wait for its answer. Not stored: if the recipient is not there, it fails. |
 
-## Removed in 0.5.9
+## Removed
 
 | Removed | Why |
 | --- | --- |
@@ -70,4 +70,5 @@ These options work with every `mash` command.
 | `mash server status, mash endpoint status (0.5.6 drafts)` | mash has no server point of view. Peers are mash who; the server is mashctl status. |
 | `MASH_OWNER, MASH_GROUP, MASH_NAME, MASH_URL, MASH_TLS_CA` | One name each: MASH_ENDPOINT, MASH_SERVER, MASH_CA. |
 
-Planned for 0.6.0: `mash sap`. See [coming in 0.6.0](coming-in-0-6-0.md).
+Planned: later: `mash sap`. See [planned, not yet
+released](planned-not-yet-released.md).

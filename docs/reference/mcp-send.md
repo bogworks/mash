@@ -15,7 +15,7 @@ pass a message on, set relay to its number. Do not send a reply that only
 acknowledges. A reply marked question that asks nothing is sent as fyi. Use id
 when you retry after a timeout, so the message is not delivered twice.
 
-Release: 0.5.9. Command line equivalent: `mash send`.
+Release: 0.6.1. Command line equivalent: `mash send`.
 
 ## Parameters
 

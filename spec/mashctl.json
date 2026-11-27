@@ -3,9 +3,9 @@
  "opencli": "0.1",
  "info": {
   "title": "mashctl",
-  "version": "0.5.9-spec.0",
+  "version": "0.6.1-spec.0",
   "description": "Speaks for the mesh, through a server: set it up, check it, make and remove endpoints.",
-  "x-source": "v0.5.8 (8e8fe56)"
+  "x-source": "v0.6.1 (e3a6e8e)"
  },
  "command": {
   "name": "mashctl",
@@ -173,7 +173,7 @@
      },
      {
       "name": "x-release",
-      "value": "0.5.9"
+      "value": "0.6.1"
      },
      {
       "name": "x-output",
@@ -346,7 +346,7 @@
      },
      {
       "name": "x-release",
-      "value": "0.5.9"
+      "value": "0.6.1"
      },
      {
       "name": "x-output",
@@ -452,7 +452,7 @@
      },
      {
       "name": "x-release",
-      "value": "0.5.9"
+      "value": "0.6.1"
      },
      {
       "name": "x-output",
@@ -647,7 +647,7 @@
        },
        {
         "name": "x-release",
-        "value": "0.5.9"
+        "value": "0.6.1"
        },
        {
         "name": "x-output",
@@ -729,7 +729,7 @@
        },
        {
         "name": "x-release",
-        "value": "0.5.9"
+        "value": "0.6.1"
        },
        {
         "name": "x-output",
@@ -794,7 +794,7 @@
      },
      {
       "name": "x-release",
-      "value": "0.5.9"
+      "value": "0.6.1"
      },
      {
       "name": "x-mcp",
@@ -883,7 +883,7 @@
        },
        {
         "name": "x-release",
-        "value": "0.5.9"
+        "value": "0.6.1"
        },
        {
         "name": "x-output",
@@ -1032,7 +1032,7 @@
        },
        {
         "name": "x-release",
-        "value": "0.5.9"
+        "value": "0.6.1"
        },
        {
         "name": "x-output",
@@ -1220,7 +1220,7 @@
        },
        {
         "name": "x-release",
-        "value": "0.5.9"
+        "value": "0.6.1"
        },
        {
         "name": "x-output",
@@ -1329,7 +1329,7 @@
        },
        {
         "name": "x-release",
-        "value": "0.5.9"
+        "value": "0.6.1"
        },
        {
         "name": "x-output",
@@ -1453,7 +1453,7 @@
        },
        {
         "name": "x-release",
-        "value": "0.5.9"
+        "value": "0.6.1"
        },
        {
         "name": "x-output",
@@ -1549,7 +1549,7 @@
        },
        {
         "name": "x-release",
-        "value": "0.5.9"
+        "value": "0.6.1"
        },
        {
         "name": "x-output",
@@ -1631,7 +1631,7 @@
        },
        {
         "name": "x-release",
-        "value": "0.5.9"
+        "value": "0.6.1"
        },
        {
         "name": "x-output",
@@ -1711,7 +1711,7 @@
        },
        {
         "name": "x-release",
-        "value": "0.5.9"
+        "value": "0.6.1"
        },
        {
         "name": "x-output",
@@ -1825,7 +1825,7 @@
        },
        {
         "name": "x-release",
-        "value": "0.5.9"
+        "value": "0.6.1"
        },
        {
         "name": "x-output",
@@ -1947,7 +1947,7 @@
        },
        {
         "name": "x-release",
-        "value": "0.5.9"
+        "value": "0.6.1"
        },
        {
         "name": "x-output",
@@ -2052,7 +2052,7 @@
        },
        {
         "name": "x-release",
-        "value": "0.5.9"
+        "value": "0.6.1"
        },
        {
         "name": "x-output",
@@ -2122,7 +2122,7 @@
      },
      {
       "name": "x-release",
-      "value": "0.5.9"
+      "value": "0.6.1"
      },
      {
       "name": "x-mcp",
@@ -2170,8 +2170,8 @@
       "value": "Owners"
      },
      {
-      "name": "x-release",
-      "value": "0.6.0"
+      "name": "x-plan",
+      "value": "later"
      },
      {
       "name": "x-output",
@@ -2193,7 +2193,7 @@
      },
      {
       "name": "x-today",
-      "value": "In 0.5.5, this did not exist. In 0.5.6 a mesh has the one owner named at mashctl init, and nothing in the grammar assumes one. Several owners per mesh are planned for 0.6.0."
+      "value": "In 0.5.5, this did not exist. In 0.5.6 a mesh has the one owner named at mashctl init, and nothing in the grammar assumes one. Several owners per mesh are planned."
      }
     ]
    },
@@ -2225,7 +2225,7 @@
      },
      {
       "name": "x-release",
-      "value": "0.5.9"
+      "value": "0.6.1"
      },
      {
       "name": "x-output",
@@ -2244,7 +2244,7 @@
        },
        {
         "case": "--json",
-        "text": "{\n  \"version\": \"0.5.9\",\n  \"commit\": \"3f9a41c2e0b7d5a1c4e08b2d77f3a95e1b6c4098\",\n  \"plugin\": null\n}",
+        "text": "{\n  \"version\": \"0.6.1\",\n  \"commit\": \"3f9a41c2e0b7d5a1c4e08b2d77f3a95e1b6c4098\",\n  \"plugin\": null\n}",
         "stream": "stdout",
         "exit": 0,
         "note": "--json is shown as it prints at a terminal (indented); piped it is one compact line (rule \"--json prints one object\"). The same three keys as mash version --json; mashctl has no plugin, so it is null. Text is unchanged.",
@@ -2255,7 +2255,7 @@
      {
       "name": "x-json",
       "value": {
-       "version": "0.5.9",
+       "version": "0.6.1",
        "commit": "3f9a41c2e0b7d5a1c4e08b2d77f3a95e1b6c4098",
        "plugin": null
       }

@@ -1,8 +1,8 @@
 Generated from spec/*.json by go run ./scripts/refgen. Do not edit.
 
-# Coming in 0.6.0
+# Planned, not yet released
 
-What changes in 0.6.0. None of it is in 0.5.9.
+What is planned and not yet released. None of it is in 0.6.1.
 
 ## Changes
 
@@ -13,9 +13,8 @@ What changes in 0.6.0. None of it is in 0.5.9.
   open; narrowing is a choice.
 - Asking to join. An endpoint can ask to join and be approved by an
   administrator or by policy.
-- The MCP revision and how a session is woken. Planned for 0.6.0: a study of
-  the MCP Events extension as the way to wake a session. Channels stay until
-  then.
+- The MCP revision and how a session is woken. Planned: a study of the MCP
+  Events extension as the way to wake a session. Channels stay until then.
 
 ## Commands
 
@@ -23,7 +22,7 @@ What changes in 0.6.0. None of it is in 0.5.9.
 
 Plain Synadia Agent Protocol operations, for experts. Experimental.
 
-Release: 0.6.0. Group: Raw SAP.
+Planned: later. Group: Raw SAP.
 
 #### Usage
 
@@ -54,18 +53,18 @@ Stream: stdout. Exit code: 0.
 
 #### MCP tool
 
-None. To be decided with the 0.6.0 design.
+None. To be decided with the design.
 
 #### What it replaces
 
-In 0.5.5, this did not exist, and it does not exist in 0.5.6. Planned for
-0.6.0: mash prompt and the reply tool move here, which is a breaking change.
+In 0.5.5, this did not exist, and it does not exist in 0.5.6. Planned: mash
+prompt and the reply tool move here, which is a breaking change.
 
 ### `mashctl owner`
 
 Create, list and remove owners.
 
-Release: 0.6.0. Group: Owners.
+Planned: later. Group: Owners.
 
 #### Usage
 
@@ -102,4 +101,4 @@ None. Administration. There are no MCP tools for mashctl.
 
 In 0.5.5, this did not exist. In 0.5.6 a mesh has the one owner named at
 mashctl init, and nothing in the grammar assumes one. Several owners per mesh
-are planned for 0.6.0.
+are planned.

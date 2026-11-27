@@ -2,10 +2,10 @@ Generated from spec/*.json by go run ./scripts/refgen. Do not edit.
 
 # Reference
 
-The mash and mashctl command reference for release 0.5.9, generated from the
+The mash and mashctl command reference for release 0.6.1, generated from the
 spec files in spec/.
 
-Source: v0.5.8 (8e8fe56).
+Source: v0.6.1 (e3a6e8e).
 
 Regenerate: `go run ./scripts/refgen`. A test fails when these pages differ
 from the spec.
@@ -97,4 +97,4 @@ from the spec.
 - [Glossary](glossary.md)
 - [Rules](rules.md)
 - [Setup scripts](setup.md)
-- [Coming in 0.6.0](coming-in-0-6-0.md)
+- [Planned, not yet released](planned-not-yet-released.md)
