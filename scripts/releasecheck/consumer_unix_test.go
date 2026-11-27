@@ -6,7 +6,9 @@ import (
 	"bytes"
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -16,9 +18,48 @@ import (
 
 func alive(pid int) bool { return syscall.Kill(pid, 0) == nil }
 
+// requireReaper skips a test that needs orphans to be reaped. runConsumer counts a process group as alive while
+// kill(-pgid, 0) succeeds, and that succeeds for a zombie. Where PID 1 never reaps (a container run without --init),
+// a child orphaned by the exiting script stays a zombie in the group and runConsumer waits out its whole grace.
+func requireReaper(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS != "linux" {
+		return
+	}
+	out, err := exec.Command("sh", "-c", "sleep 0.2 & echo $!").Output()
+	if err != nil {
+		t.Fatalf("starting an orphan: %v", err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil {
+		t.Fatalf("orphan pid %q: %v", out, err)
+	}
+	stat := "/proc/" + strconv.Itoa(pid) + "/stat"
+	state := ""
+	for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+		b, err := os.ReadFile(stat)
+		if err != nil {
+			return // gone: orphans are reaped
+		}
+		s := string(b)
+		i := strings.LastIndex(s, ")")
+		if i < 0 {
+			return
+		}
+		if f := strings.Fields(s[i+1:]); len(f) > 0 {
+			state = f[0]
+		}
+	}
+	if state == "Z" {
+		t.Skip("skipped: PID 1 here does not reap orphaned processes, so a finished child stays a zombie in its process group and runConsumer waits out its whole grace; run the container with --init (issue #1887)")
+	}
+	t.Skipf("skipped: an orphaned sleep 0.2 was still present in state %q after 3s, so orphan reaping cannot be checked here (issue #1887)", state)
+}
+
 // A timeout sends TERM to the shell only (which forwards it); a child that ignores TERM survives that, so the grace
 // ends with the whole group killed and nothing left behind.
 func TestRunConsumer_theGroupIsKilledAfterTheGrace(t *testing.T) {
+	requireReaper(t)
 	old := consumerKillGrace
 	consumerKillGrace = 500 * time.Millisecond
 	defer func() { consumerKillGrace = old }()
@@ -60,6 +101,7 @@ func TestRunConsumer_theGroupIsKilledAfterTheGrace(t *testing.T) {
 
 // With a runner that exits on TERM promptly, nothing waits out the grace.
 func TestRunConsumer_aRunnerThatStopsOnTermIsNotWaitedOn(t *testing.T) {
+	requireReaper(t)
 	old := consumerKillGrace
 	consumerKillGrace = time.Minute
 	defer func() { consumerKillGrace = old }()

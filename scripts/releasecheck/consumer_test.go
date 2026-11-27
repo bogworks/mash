@@ -501,8 +501,16 @@ func TestRunConsumer_runsTheScriptInTheCheckoutAndStreamsItsOutput(t *testing.T)
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 	write(t, dir, consumerScript, "sleep 30\n")
+	// TERM ends the shell but not the orphaned sleep, which keeps the group alive; a short grace ends the wait.
+	old := consumerKillGrace
+	consumerKillGrace = 500 * time.Millisecond
+	defer func() { consumerKillGrace = old }()
+	start := time.Now()
 	if _, err := runConsumer(ctx, dir, consumerScript, nil, []string{"PATH=" + os.Getenv("PATH")}, &out); err == nil {
 		t.Errorf("a run past its deadline reported no error")
+	}
+	if d := time.Since(start); d > 10*time.Second {
+		t.Errorf("a run past its deadline took %v to return, want under 10s", d)
 	}
 }
 
