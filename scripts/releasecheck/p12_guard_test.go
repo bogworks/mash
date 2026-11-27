@@ -11,9 +11,9 @@ import (
 	"github.com/bogworks/mash/internal/release"
 )
 
-// TestP12_ReleaseGuardUnlinkedEveryTarget is acceptance test P-12 (no policy before 0.6.0, the release guard of #1542):
-// no policy package is linked into mash or mashctl until the commands are added on purpose, and the guard refuses a
-// linked policy package for both programs on every release target.
+// TestP12_ReleaseGuardUnlinkedEveryTarget is acceptance test P-12 (the policy packages are not part of a release; the
+// release guard of #1542): no policy package is linked into mash or mashctl until the commands are added on purpose,
+// and the guard refuses a linked policy package for both programs on every release target.
 //
 // Already covered elsewhere (unlinked_test.go): the matching rules on fixed listings, and the step against a scratch
 // module for linux and darwin imports. Added here: (a) the real tree, through the step's own goListDeps for every

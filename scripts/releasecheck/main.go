@@ -502,7 +502,7 @@ func check(ctx context.Context, o Options) error {
 	r.step("the render contract is unchanged since the previous release, or the change is called out", renderContract(o, x))
 	r.step("fresh-session mail arrives no slower than the previous release", latencyStep(ctx, o, bins))
 	r.step("the policy tests pass (REQ-020)", policyTestsStep(ctx, o, x))
-	r.step("no policy package is linked into the released programs (policy is not switched on before 0.6.0)", policyUnlinkedStep(ctx, o, x))
+	r.step("no policy package is linked into the released programs (the policy packages are not part of a release)", policyUnlinkedStep(ctx, o, x))
 	if o.Consumer != "" { // opt-in: it takes 30+ minutes,
 		r.step("the consumer's check passes against the candidate", consumerStep(ctx, o, x, bins))
 	}

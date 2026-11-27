@@ -119,7 +119,7 @@ func TestDocsWalk_realHistory(t *testing.T) {
 			t.Fatalf("want accepted: %v", err)
 		}
 	})
-	t.Run("agent instructions are documentation (rules 20 and 21)", func(t *testing.T) {
+	t.Run("agent instructions are documentation, not code", func(t *testing.T) {
 		repo := walkRepo(t)
 		tested := walkCommit(t, repo, map[string]string{"internal/a.go": "package a\n"}, "code")
 		x := walkCommit(t, repo, map[string]string{"mash-setup/skills/setup/SKILL.md": "s\n", "AGENTS.md": "a\n"}, "skill")
