@@ -473,7 +473,11 @@ jobs:
             echo "::error::cyclonedx-gomod is not installed at $CDX on this runner; the runners carry it pinned at $CDX_WANT, ask operations to install it. This workflow does not fall back to go install."
             exit 1
           fi
-          found="$("$CDX" version 2>/dev/null | awk '$1=="Version:"{print $2}' || true)"
+          if ! out="$("$CDX" version 2>&1)"; then
+            echo "::error::cyclonedx-gomod at $CDX did not run ($out); ask operations to correct the runner. This workflow does not fall back to go install."
+            exit 1
+          fi
+          found="$(printf '%s\n' "$out" | awk '$1=="Version:"{print $2}')"
           if [ "$found" != "$CDX_WANT" ]; then
             echo "::error::cyclonedx-gomod at $CDX is version ${found:-none}, but this workflow wants exactly $CDX_WANT; ask operations to correct the runner. This workflow does not fall back to go install."
             exit 1

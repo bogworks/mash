@@ -349,10 +349,7 @@ func TestRelease_noJobOrStepCanBypassAFailure(t *testing.T) {
 			if st.If != "" || st.ContinueOnError != nil {
 				t.Errorf("job %s step %q has if/continue-on-error: %q %v", jn, st.Name, st.If, st.ContinueOnError)
 			}
-			// The sbom step reads the tool's version inside a command substitution so a missing or broken tool leaves it
-			// empty; the very next test compares it with the pinned version and exits 1, so nothing is swallowed.
-			run := strings.ReplaceAll(st.Run, `awk '$1=="Version:"{print $2}' || true)"`, `awk '$1=="Version:"{print $2}')"`)
-			if strings.Contains(run, "|| true") || strings.Contains(run, "|| :") {
+			if strings.Contains(st.Run, "|| true") || strings.Contains(st.Run, "|| :") {
 				t.Errorf("job %s step %q swallows a failure", jn, st.Name)
 			}
 			if (jn == "build" || jn == "draft") && st.Run != "" && !strings.Contains(st.Run, "set -euo pipefail") && !strings.Contains(st.Run, "set -eu") {
