@@ -430,7 +430,8 @@ jobs:
           retention-days: 1
   sbom:
     # One CycloneDX 1.5 SBOM per binary, made from the built binary itself (its embedded module list), so it describes
-    # exactly the bytes a consumer downloads. The tool version is pinned; the job reads and uploads, nothing else.
+    # exactly the bytes a consumer downloads. The tool is the runners' pinned copy at /opt/ci-tools/bin, checked for v1.9.0
+    # before use (no go install, no fallback); the job reads and uploads, nothing else.
     needs: build
     if: ${{ !cancelled() && needs.build.result == 'success' }} # explicit: see build
     timeout-minutes: 15
@@ -452,10 +453,6 @@ jobs:
           set -euo pipefail
           rm -rf dist provenance && mkdir -p dist
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: mash-${{ matrix.goos }}-${{ matrix.goarch }}
@@ -468,13 +465,24 @@ jobs:
         env:
           GOOS_T: ${{ matrix.goos }}
           GOARCH_T: ${{ matrix.goarch }}
+          CDX: /opt/ci-tools/bin/cyclonedx-gomod
+          CDX_WANT: v1.9.0
         run: |
           set -euo pipefail
-          GOBIN="$RUNNER_TEMP/tools" go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.9.0
+          if [ ! -x "$CDX" ]; then
+            echo "::error::cyclonedx-gomod is not installed at $CDX on this runner; the runners carry it pinned at $CDX_WANT, ask operations to install it. This workflow does not fall back to go install."
+            exit 1
+          fi
+          found="$("$CDX" version 2>/dev/null | awk '$1=="Version:"{print $2}' || true)"
+          if [ "$found" != "$CDX_WANT" ]; then
+            echo "::error::cyclonedx-gomod at $CDX is version ${found:-none}, but this workflow wants exactly $CDX_WANT; ask operations to correct the runner. This workflow does not fall back to go install."
+            exit 1
+          fi
+          echo "cyclonedx-gomod $found at $CDX"
           for program in mash mashctl; do
             name="${program}-${GOOS_T}-${GOARCH_T}"
             chmod +x "dist/$name" # artifact downloads drop the mode; the tool reads the build info of an executable
-            "$RUNNER_TEMP/tools/cyclonedx-gomod" bin -json -output-version 1.5 -version "$RELEASE_TAG" -output "dist/$name.cdx.json" "dist/$name"
+            "$CDX" bin -json -output-version 1.5 -version "$RELEASE_TAG" -output "dist/$name.cdx.json" "dist/$name"
           done
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
