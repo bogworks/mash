@@ -92,11 +92,11 @@ func streamMsgs(t *testing.T, f *fixture, stream string) uint64 {
 // and woken, and its heartbeat is on exactly five tokens.
 func TestAddressEndToEnd(t *testing.T) {
 	f := newFixture(t)
-	sdk := f.provision(t, "dev", "alice")
+	sdk := f.provision(t, "dev", "alice-design")
 	peer := f.provision(t, "dev", "bob")
 	key := sdk.Flat()
 	rec := f.record(t, key)
-	if rec.Instance != "alice" || rec.Group != "dev" || rec.Owner != f.e.Owner || rec.Agent != sap.AgentName || rec.MailSubject != sdk.MailSubject() {
+	if rec.Instance != "alice-design" || rec.Group != "dev" || rec.Owner != f.e.Owner || rec.Agent != sap.AgentName || rec.MailSubject != sdk.MailSubject() {
 		t.Fatalf("record %+v", rec)
 	}
 	prompts := make(chan PromptEvent, 1)
@@ -106,7 +106,7 @@ func TestAddressEndToEnd(t *testing.T) {
 		_ = ep.Reply(p.RequestID, "from sdk", true)
 	})
 	b, bev := f.serveAt(t, peer, noPrompt)
-	if a.Key() != key || a.Name() != "alice" {
+	if a.Key() != key || a.Name() != "alice-design" {
 		t.Fatalf("key %q name %q", a.Key(), a.Name())
 	}
 	ctx := context.Background()
@@ -165,7 +165,7 @@ func TestAddressEndToEnd(t *testing.T) {
 		t.Fatalf("prompt event %+v", p)
 	}
 
-	// Heartbeat: exactly agents.hb.<owner>.dev.alice. Subscribe and flush before it is published.
+	// Heartbeat: exactly agents.hb.<owner>.dev.alice-design. Subscribe and flush before it is published.
 	hbSubj := mustSubj(sdk).HB
 	sub, err := b.Conn().SubscribeSync(hbSubj)
 	if err != nil {
