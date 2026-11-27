@@ -171,6 +171,23 @@ func (e *Endpoint) Refresh(ctx context.Context) error {
 	return e.awaitPresence(ctx, p)
 }
 
+// SelfRegistered reports whether this endpoint's own SAP registration answers a presence probe and verifies: the test
+// who applies to every endpoint (applyPresence, or its S5 form when the hook is set), so status and who agree. It needs
+// only this endpoint's own directory record, which every client reads, not the full directory. It waits as Refresh
+// does: PresenceQuiet after the last answer, or PresenceCap when nothing answers. A probe error is returned with false.
+func (e *Endpoint) SelfRegistered(ctx context.Context) (bool, error) {
+	if err := e.Refresh(ctx); err != nil {
+		return false, err
+	}
+	key := e.ident.Flat()
+	for _, p := range e.Who() {
+		if flatOf(p.Record) == key {
+			return p.Online, nil
+		}
+	}
+	return false, nil
+}
+
 // loadDirectory reads every directory record and replaces the in-memory copy: the keys come from stream info (subjects
 // filter), the values by direct gets, many at a time. A key that is gone is dropped (the new state reflects it); a key
 // whose read failed keeps its previous record and makes the load return an error after installing what was read, so

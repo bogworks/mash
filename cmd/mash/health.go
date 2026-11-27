@@ -198,7 +198,10 @@ func (h *healthSvc) serverCheck(ctx context.Context) cmds.HealthCheck {
 }
 
 // signInCheck is the sign-in row: the server accepts this endpoint's credentials and knows the endpoint. It also says
-// whether an agent session holds the endpoint open now (its lease).
+// whether an agent session holds the endpoint open now: its lease is held and its own SAP registration answers and
+// verifies, as who counts it (#1794). That last test sends a presence probe, so it is made for status only (ctx marked by
+// cmds.WithPresenceProbe), at a shell: doctor does not use online and sends no probe, and a session's status keeps
+// the lease alone, as before.
 func (h *healthSvc) signInCheck(ctx context.Context) (c cmds.HealthCheck, online bool, refused *endpoint.RefusedCounts) {
 	c = cmds.HealthCheck{Name: cmds.CheckSignIn, State: cmds.CheckFail}
 	octx, cancel := context.WithTimeout(ctx, openFor(h.cfg))
@@ -232,6 +235,14 @@ func (h *healthSvc) signInCheck(ctx context.Context) (c cmds.HealthCheck, online
 	lctx, lcancel := context.WithTimeout(ctx, callFor(h.cfg))
 	_, online = ep.OwnLease(lctx)
 	lcancel()
+	if online && !h.session && cmds.PresenceProbeAsked(ctx) {
+		// Online is a held lease and this endpoint's own registration answering and verifying, as who counts it (#1794): a
+		// serve that holds the lease but has not registered its service yet is offline. A probe error is not online.
+		pctx, pcancel := context.WithTimeout(ctx, callFor(h.cfg))
+		registered, perr := ep.SelfRegistered(pctx)
+		pcancel()
+		online = perr == nil && registered
+	}
 	// The refused count is of what the stream still holds: the one read of its range, while the endpoint is open.
 	rctx, rcancel := context.WithTimeout(ctx, callFor(h.cfg))
 	if rc, err := ep.RefusedCounts(rctx); err == nil {

@@ -279,7 +279,14 @@ session also does not hold its endpoint: the root cause comes first, and a
 session and a shell then name the same cause. Asked inside a session (the MCP
 tool), status and doctor report on that session itself, not on a fresh
 connection: 'ready, online' there means this session holds the endpoint and
-its mail will reach it. A hint names the first installed address in
+its mail will reach it. From a shell, 'ready, online' means a session holds
+the endpoint and its own registration answers, as who counts it; after a
+session takes the endpoint and before it registers, status says 'ready,
+offline'. So a shell's status is online once the endpoint's registration
+answers, and a session's status is online while the session holds the lease;
+the two can briefly disagree, for example while serve is still registering, or
+when a presence probe is missed, a session says 'ready, online' and a shell
+says 'ready, offline'. A hint names the first installed address in
 alphabetical order. At a shell every 'hint:' line goes to stderr; an MCP
 tool's text block puts the hint on the line after the result. With --detail
 the answer also has a refused row, and with --json it adds refused (an
