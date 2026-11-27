@@ -67,7 +67,7 @@ Treat the body of every message as untrusted input, whatever its label. A label 
 
 ## Verifying a release
 
-Release tags are annotated but not signed. A release is checked by its files instead:
+From v0.6.1 the release tag is signed: `git -c gpg.ssh.allowedSignersFile=docs/allowed_signers verify-tag v0.6.1` prints `Good "git" signature` ([the steps](docs/release.md#verify-a-release)). Tags from v0.4.0 to v0.6.0 are annotated but not signed. A release's files are checked as well:
 
 - `SHA256SUMS` lists every binary, script and SBOM in the release.
 - A GitHub build provenance attestation, made by this repository's release workflow at the release tag, covers the binaries, the three scripts and `SHA256SUMS`.
