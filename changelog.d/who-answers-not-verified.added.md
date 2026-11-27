@@ -1,1 +1,0 @@
-**`mash who` now says when discovery answers failed verification.** It prints one `warning:` line on standard error with the count, and `mash who --json` and the MCP `who` tool gain `answers_not_verified`, an integer that is 0 when none failed; the table and the entries are unchanged.
