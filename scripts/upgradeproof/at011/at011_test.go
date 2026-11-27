@@ -370,6 +370,29 @@ func TestPageSectionDestination(t *testing.T) {
 	}
 }
 
+func TestPageSectionToClause(t *testing.T) {
+	page := "## Upgrading from 0.6.0 to v0.6.2\n\n1. a\n"
+	if got, err := pageSection(page, "0.6.0", "0.6.1"); err != nil || got != "" {
+		t.Fatalf("to v0.6.2 must not match 0.6.1: %q %v", got, err)
+	}
+	if got := stepsOf(page, "0.6.0", "0.6.2"); !reflect.DeepEqual(got, []string{"a"}) {
+		t.Fatalf("to v0.6.2 must match 0.6.2: %q", got)
+	}
+	page = "## Upgrading from v0.6.0 to 0.6.1\n\n1. b\n"
+	if got := stepsOf(page, "0.6.0", "0.6.1"); !reflect.DeepEqual(got, []string{"b"}) {
+		t.Fatalf("from v0.6.0 must match prev 0.6.0: %q", got)
+	}
+	for _, h := range []string{"Upgrading from 0.6.0 to the next release", "Upgrading from 0.6.0 to v0.6.x", "Upgrading from 0.6.0 to"} {
+		_, err := pageSteps("intro\n## "+h+"\n\n1. c\n", "0.6.0", "0.6.1")
+		if err == nil || !strings.Contains(err.Error(), "line 2") || !strings.Contains(err.Error(), h) {
+			t.Errorf("%q: want an error naming line 2 and the heading, got %v", h, err)
+		}
+	}
+	if _, err := pageSteps("## Upgrading from 0.5.8 to the next release\n", "0.6.0", "0.6.1"); err != nil {
+		t.Errorf("a malformed heading from another version is irrelevant: %v", err)
+	}
+}
+
 func TestPageSectionWholeTokens(t *testing.T) {
 	page := "## Upgrading from 0.6.10 to 0.6.11\n\n1. ten\n\n## Upgrading from 0.6.1 to 0.6.2\n\n1. one\n"
 	if got := stepsOf(page, "0.6.1", "0.6.2"); !reflect.DeepEqual(got, []string{"one"}) {

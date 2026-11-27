@@ -32,16 +32,39 @@ var upgradeActions = []string{actCheck, actInstall, actPlugins, actRestart, actA
 
 var numberedRE = regexp.MustCompile(`(?m)^\s*\d+[.)]\s+(.+)$`)
 
-// upgradeHeadRE reads a heading "Upgrading from <from>" with an optional " to <to>". The versions are whole tokens, so
-// 0.6.1 never matches 0.6.10.
-var upgradeHeadRE = regexp.MustCompile(`(?i)upgrading from (\d+(?:\.\d+)*)(?:\s+to\s+(\d+(?:\.\d+)*))?`)
+// upgradeHeadRE reads a heading "Upgrading from <from>"; the rest of the line is kept for the "to" clause. The from
+// version takes an optional leading "v" and is a whole token, so 0.6.1 never matches 0.6.10.
+var upgradeHeadRE = regexp.MustCompile(`(?i)upgrading from v?(\d+(?:\.\d+)*)(.*)$`)
+
+// toClauseRE finds the word "to" after whitespace in the text that follows the from version; group 1 is what follows it.
+var toClauseRE = regexp.MustCompile(`(?i)\sto(?:\s+(.*))?$`)
+
+// headVersionRE is a whole version, with an optional leading "v".
+var headVersionRE = regexp.MustCompile(`^v?(\d+(?:\.\d+)*)$`)
 
 // headMatches reports whether the heading line is the upgrade section from prev to version: it names "from <prev>" and
 // either names "to <version>" exactly or names no destination (an older page heading such as "Upgrading from 0.5.8").
-// A heading that names a different destination does not match.
-func headMatches(line, prev, version string) bool {
+// A heading that names a different destination does not match. A "to" clause that is not a version (to the next
+// release, to v0.6.x) is an error when the heading is from prev: a destination that cannot be read must not pass as
+// no destination. Both versions take an optional leading "v".
+func headMatches(line, prev, version string) (bool, error) {
 	m := upgradeHeadRE.FindStringSubmatch(line)
-	return m != nil && m[1] == prev && (m[2] == "" || m[2] == version)
+	if m == nil || m[1] != prev {
+		return false, nil
+	}
+	t := toClauseRE.FindStringSubmatch(m[2])
+	if t == nil {
+		return true, nil
+	}
+	tok := ""
+	if f := strings.Fields(t[1]); len(f) > 0 {
+		tok = strings.TrimRight(f[0], ".,;:)")
+	}
+	v := headVersionRE.FindStringSubmatch(tok)
+	if v == nil {
+		return false, fmt.Errorf("the destination of the heading %q is not a version", strings.TrimSpace(line))
+	}
+	return v[1] == version, nil
 }
 
 // pageSection is the text of the section "Upgrading from <prev> to <version>" of the page, or empty if there is none.
@@ -52,7 +75,14 @@ func pageSection(page, prev, version string) (string, error) {
 	lines := strings.Split(page, "\n")
 	var starts []int
 	for i, l := range lines {
-		if strings.HasPrefix(l, "#") && headMatches(l, prev, version) {
+		if !strings.HasPrefix(l, "#") {
+			continue
+		}
+		ok, err := headMatches(l, prev, version)
+		if err != nil {
+			return "", fmt.Errorf("line %d: %w", i+1, err)
+		}
+		if ok {
 			starts = append(starts, i)
 		}
 	}
