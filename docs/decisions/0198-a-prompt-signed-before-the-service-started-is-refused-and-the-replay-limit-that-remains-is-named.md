@@ -28,14 +28,14 @@ Chosen option: "refuse a prompt whose signed timestamp is before the service sta
 
 This amends the acceptance rule of ADR 0030 by one refusal; nothing else about prompts changes.
 
-A limit remains and is a known issue (#1829): SAP allows a sender's clock to run ahead by up to 30 seconds, so a prompt from such a sender, answered before a restart, carries a timestamp that is not before the start and can still be replayed within about 30 seconds. Closing that takes either a refusal of every prompt for 30 seconds after a start or the nonces on disk.
+Two limits remain and are one known issue (#1829). First, the rounding: a prompt signed in the same second the service started carries a timestamp that is not before the start, so a copy of a prompt answered earlier in that second is admitted again. Refusing that second too would cost a legitimate prompt sent in it one resend. Second, SAP allows a sender's clock to run ahead by up to 30 seconds, so a prompt from such a sender, answered before a restart, carries a timestamp that is not before the start and can still be replayed within about 30 seconds. Closing both takes either a refusal of every prompt for 30 seconds after a start or the nonces on disk.
 
 ### Consequences
 
 * Good, because every replay of a prompt from a sender whose clock is not ahead is refused after a restart, with no protocol change and nothing kept on disk.
 * Good, because a prompt sent after the restart is answered as before.
 * Bad, because a prompt signed just before a restart that arrives after it is refused once, and the sender sends it again.
-* Bad, because the replay of a prompt from a sender whose clock runs ahead is not closed.
+* Bad, because the replay of a prompt signed in the second the service started, or from a sender whose clock runs ahead, is not closed.
 
 ### Confirmation
 
@@ -46,7 +46,7 @@ A test signs a prompt before the service starts and one after: the first is refu
 ### Refuse a prompt signed before the start
 
 * Good, because it is a few lines, needs no disk and costs a real sender at most one resend.
-* Bad, because it leaves the fast-clock case open.
+* Bad, because it leaves the start second and the fast-clock case open.
 
 ### Refuse every prompt for 30 seconds after the start
 

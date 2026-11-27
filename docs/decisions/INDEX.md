@@ -172,5 +172,3 @@
 | [0193](0193-after-a-release-the-plugin-version-gets-a-pin-suffix-so-installed-plugins-receive-the-pin.md) | After a release the plugin version gets a `-pin.1` suffix, so installed plugins receive the pin | accepted | 2026-11-26 |
 | [0194](0194-the-policy-engine-says-owner-group-instance-and-the-range-word-is-gone.md) | The policy engine says owner, group and instance; the word `range` is gone from it | accepted | 2026-11-26 |
 | [0195](0195-submitter-only-list-sets-and-the-verified-intake-are-removed-from-the-policy-engine-for-now.md) | Submitter-only list sets and the verified intake are removed from the policy engine for now | accepted | 2026-11-26 |
-| [0196](0196-the-withdrawn-policy-adoption-and-intake-code-is-removed-from-main.md) | The withdrawn policy adoption and intake code is removed from main | accepted | 2026-11-26 |
-| [0198](0198-a-prompt-signed-before-the-service-started-is-refused-and-the-replay-limit-that-remains-is-named.md) | A prompt signed before the service started is refused, and the replay limit that remains is named | accepted | 2026-11-27 |

@@ -1,1 +1,1 @@
-**A restarted endpoint refuses a prompt signed before it started.** The message tells the sender to send the prompt again. A prompt from a sender whose clock runs ahead can still be replayed within about 30 seconds after a restart (#1829).
+**A restarted endpoint refuses a prompt signed before it started.** The message tells the sender to send the prompt again. A prompt signed in the second the endpoint started, or sent by a sender whose clock runs ahead, can still be replayed within about 30 seconds after a restart (#1829).
