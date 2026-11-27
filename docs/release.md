@@ -497,6 +497,14 @@ publishing, and it does not run `release-check`. It must be green on `main` befo
 
 ## Verify a release
 
+**From v0.6.1, the release tag is signed.** From a clone of the repository, check the tag, then check the downloaded files as the items below describe:
+
+    git -c gpg.ssh.allowedSignersFile=docs/allowed_signers verify-tag v0.6.1
+    gh attestation verify <file> -R bogworks/mash --signer-workflow bogworks/mash/.github/workflows/release.yml \
+      --source-ref refs/tags/v0.6.1 --source-digest <X>
+
+The first command prints `Good "git" signature` when the tag was signed by a key in `docs/allowed_signers`; the key for v0.6.1 and later is the one with fingerprint `SHA256:AtXzPvoOLeTfX05xeum8jJl6fvlmIB+BIFlun7qhQzA`. `<X>` is the commit the tag points to (`git rev-parse v0.6.1^{commit}`). Tags before v0.6.1 are not signed.
+
 These commands apply to releases from 0.3.2 on. 0.3.1 and older have no SBOM and no `mash.intoto.jsonl`, and 0.3.1 is the
 first release with build provenance. Download the assets of `v<version>` into one directory (for example
 `gh release download v<version> -R bogworks/mash`) and run the commands from there. Each proves something different;
