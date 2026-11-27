@@ -123,7 +123,7 @@ func RenderPlan(p DiffPlan) string {
 		fmt.Fprintf(&b, "tags %s: %s -> %s\n", t.Sender, list(t.Old), list(t.New))
 	}
 	section("rotate and revoke", p.RotateAndRevoke)
-	section("new credential (not issued by the apply: make the endpoint with `mashctl endpoint create`)", p.NewCredential)
+	section("new credential (not issued by the apply: reissue the endpoint with `mashctl endpoint reissue`)", p.NewCredential)
 	section("revoke", p.Revoke)
 	section("first credential (not issued by the apply: make the endpoint with `mashctl endpoint create`)", p.FirstCredential)
 	b.WriteString(p.signatureNote())
