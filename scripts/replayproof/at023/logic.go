@@ -132,6 +132,38 @@ func AnswerProblem(r Replay) string {
 	return strings.Join(p, "; ")
 }
 
+// RestartedText is the fragment of the candidate's refusal text for a prompt signed before the endpoint restarted.
+const RestartedText = "restarted after the prompt was signed"
+
+// RefusedAfterRestartProblem returns "" when r is a refusal with status 401 and the restarted-after-signing text, and
+// the session never saw the prompt (so no reply tool call was made either). Otherwise it returns a sentence naming
+// what is wrong.
+func RefusedAfterRestartProblem(r Replay) string {
+	var p []string
+	if !strings.HasPrefix(r.Outcome, "refused") {
+		p = append(p, "not refused ("+r.Outcome+")")
+	} else {
+		if !strings.Contains(r.Outcome, "401") {
+			p = append(p, "the refusal is not status 401 ("+r.Outcome+")")
+		}
+		if !strings.Contains(r.Outcome, RestartedText) {
+			p = append(p, "the refusal text does not say \""+RestartedText+"\" ("+r.Outcome+")")
+		}
+	}
+	if r.SessionSaw {
+		p = append(p, "the session saw the prompt")
+	}
+	if r.ReplyToolOK {
+		p = append(p, "a reply tool call succeeded")
+	}
+	return strings.Join(p, "; ")
+}
+
+// OnlyReplayDiffers reports whether d (from Diff) is exactly one entry, for replay_after_restart.
+func OnlyReplayDiffers(d []string) bool {
+	return len(d) == 1 && strings.HasPrefix(d[0], "replay_after_restart:")
+}
+
 // Summary is a replay in one line, for the comparison.
 func (r Replay) Summary() string {
 	return fmt.Sprintf("%s; session saw the prompt: %v; reply tool ok: %v; answer back to the caller: %q (expected %q); stream complete: %v",
