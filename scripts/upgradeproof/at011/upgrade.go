@@ -17,7 +17,8 @@ import (
 
 const ghMissingWarning = "warning: gh not found: checked checksums only, not verified"
 
-// The actions of an upgrade, in the order the notes of the previous release give them (docs/release-notes/0.5.10.md).
+// The actions of an upgrade, which the runner knows how to carry out. Every release's notes and the upgrade page give
+// them in the order of upgradeActions.
 const (
 	actCheck   = "check: mash version and mash doctor, mashctl doctor"
 	actInstall = "install both programs"
@@ -26,7 +27,8 @@ const (
 	actAfter   = "check again"
 )
 
-var fallbackOrder = []string{actCheck, actInstall, actPlugins, actRestart, actAfter}
+// upgradeActions is the canonical order of the five actions of an upgrade; it names no version.
+var upgradeActions = []string{actCheck, actInstall, actPlugins, actRestart, actAfter}
 
 var numberedRE = regexp.MustCompile(`(?m)^\s*\d+[.)]\s+(.+)$`)
 
@@ -58,10 +60,42 @@ func pageSteps(page, prev string) []string {
 	return out
 }
 
+var headingRE = regexp.MustCompile(`^(#+)\s+(.*)$`)
+
+// notesSteps is the numbered steps of the first section of a release notes document whose heading starts with
+// "Upgrading" (any case). The section runs to the next heading of its level or above. No such section gives none.
+func notesSteps(notes string) []string {
+	in, level := false, 0
+	var sect []string
+	for _, l := range strings.Split(notes, "\n") {
+		if m := headingRE.FindStringSubmatch(l); m != nil {
+			if in && len(m[1]) <= level {
+				break
+			}
+			if !in && strings.HasPrefix(strings.ToLower(strings.TrimSpace(m[2])), "upgrading") {
+				in, level = true, len(m[1])
+				continue
+			}
+		}
+		if in {
+			sect = append(sect, l)
+		}
+	}
+	var out []string
+	for _, m := range numberedRE.FindAllStringSubmatch(strings.Join(sect, "\n"), -1) {
+		out = append(out, strings.TrimSpace(m[1]))
+	}
+	return out
+}
+
 // orderFrom maps each page step to the action it asks for. ok is false when a step is not one the runner knows.
 func orderFrom(steps []string) (order []string, unknown []string) {
 	for _, st := range steps {
+		// A step is named by its first sentence; the rest explains (step 3 of 0.6.0 says "installs" of the plugin).
 		l := strings.ToLower(st)
+		if i := strings.Index(l, ". "); i >= 0 {
+			l = l[:i]
+		}
 		switch {
 		case strings.Contains(l, "restart"):
 			order = append(order, actRestart)
@@ -90,7 +124,7 @@ func orderProblem(order, unknown []string) string {
 		bad = append(bad, fmt.Sprintf("steps the runner does not understand: %q", unknown))
 	}
 	var missing []string
-	for _, a := range fallbackOrder {
+	for _, a := range upgradeActions {
 		if !containsAct(order, a) {
 			missing = append(missing, a)
 		}
@@ -98,8 +132,8 @@ func orderProblem(order, unknown []string) string {
 	if len(missing) > 0 {
 		bad = append(bad, fmt.Sprintf("missing: %s", strings.Join(missing, "; ")))
 	}
-	if len(unknown) == 0 && len(missing) == 0 && strings.Join(order, "|") != strings.Join(fallbackOrder, "|") {
-		bad = append(bad, fmt.Sprintf("the actions are repeated or out of order: got %s; want %s", strings.Join(order, "; "), strings.Join(fallbackOrder, "; ")))
+	if len(unknown) == 0 && len(missing) == 0 && strings.Join(order, "|") != strings.Join(upgradeActions, "|") {
+		bad = append(bad, fmt.Sprintf("the actions are repeated or out of order: got %s; want %s", strings.Join(order, "; "), strings.Join(upgradeActions, "; ")))
 	}
 	return strings.Join(bad, "; ")
 }
@@ -123,7 +157,7 @@ func (r *runner) upgrade(s *stepCtx, p *persona, order []string, mailFrom *perso
 			before = pr
 		}
 	}
-	oldVer := strings.TrimPrefix(oldTag, "v")
+	oldVer := r.cfg.prev
 	newVer := r.cfg.version
 	for _, act := range order {
 		s.note("upgrade page order: %s", act)

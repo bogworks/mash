@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
-# at011.sh COMMIT OUTDIR [VERSION [PREVIOUS]]
+# at011.sh COMMIT OUTDIR VERSION PREVIOUS
 #
-# AT-011 on linux: the upgrade proof of mash, from the previous release (default 0.5.10) to the candidate COMMIT
-# (version default 0.6.0). It starts ONE throwaway container from a clean image (`docker run --rm`), runs the proof
+# AT-011 on linux: the upgrade proof of mash, from the previous release PREVIOUS to the candidate COMMIT
+# of version VERSION (both X.Y.Z, no v; neither has a default). It starts ONE throwaway container from a clean image (`docker run --rm`), runs the proof
 # inside it as a user without privileges, copies the receipt, the log and the evidence to OUTDIR, and the container
 # is gone when the proof ends. Nothing is written on this host except OUTDIR (which must not exist yet).
 #
 #   COMMIT   the candidate's full commit id (40 hex digits)
+#   VERSION  the candidate's version, for example 0.6.1
+#   PREVIOUS the previous release's version, for example 0.6.0; its tag v<PREVIOUS> is what the proof upgrades from
 #   OUTDIR   the receipt at011 writes is OUTDIR/at-011-linux-<arch>.json, ready for `release-check --receipts OUTDIR`
 #
 # Environment: AT011_REPO (the repository to read the candidate from, default the repository this script is in),
@@ -27,17 +29,18 @@
 set -u
 COMMIT=${1:-}
 OUT=${2:-}
-VERSION=${3:-0.6.0}
-PREV=${4:-0.5.10}
+VERSION=${3:-}
+PREV=${4:-}
 IMAGE=${AT011_IMAGE:-golang:1.27@sha256:5f1b98fa02fe396ebce2a0227a0e08309e11792915b9dd2e1f71053d7e7e6666}
 ARCH=${AT011_ARCH:-amd64}
 HERE=$(cd "$(dirname "$0")" && pwd)
 REPO=${AT011_REPO:-$HERE/../..}
 
 die() { echo "at011.sh: $*" >&2; exit 2; }
-case $COMMIT in [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]*) ;; *) die "usage: at011.sh COMMIT OUTDIR [VERSION [PREVIOUS]]" ;; esac
+case $COMMIT in [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]*) ;; *) die "usage: at011.sh COMMIT OUTDIR VERSION PREVIOUS" ;; esac
+[ -n "$VERSION" ] && [ -n "$PREV" ] || die "usage: at011.sh COMMIT OUTDIR VERSION PREVIOUS (VERSION and PREVIOUS are required)"
 [ "${#COMMIT}" = 40 ] || die "COMMIT must be the full 40-digit id"
-[ -n "$OUT" ] || die "usage: at011.sh COMMIT OUTDIR [VERSION [PREVIOUS]]"
+[ -n "$OUT" ] || die "usage: at011.sh COMMIT OUTDIR VERSION PREVIOUS"
 case $OUT in /*) ;; *) OUT=$PWD/$OUT ;; esac # a bind mount needs an absolute path
 OUT=${OUT%/}
 [ ! -e "$OUT" ] || die "$OUT exists; the output directory must be new"

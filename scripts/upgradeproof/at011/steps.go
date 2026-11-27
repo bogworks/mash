@@ -15,6 +15,7 @@ import (
 
 // prereq is step 0: everything the proof needs before it touches mash. A failure here means the run could not be done.
 func (r *runner) prereq(s *stepCtx) bool {
+	oldTag := r.oldTag()
 	okAll := true
 	need := func(pass bool, name, f string, a ...any) {
 		if !s.need(pass, name, f, a...) {
@@ -48,7 +49,7 @@ func (r *runner) prereq(s *stepCtx) bool {
 	// The previous release's files and its SHA256SUMS come from the same place, so the checksums authenticate nothing by
 	// themselves. The launcher verified SHA256SUMS' attestation on its own host and hands over the digest it verified;
 	// the file fetched here must have exactly that digest before anything is checked against it.
-	base := relBase(r.cfg.releaseRepo)
+	base := relBase(r.cfg.releaseRepo, r.oldTag())
 	digestDetail := "digest " + strings.ToLower(r.cfg.prevSumsSHA)
 	if !sumsDigestOK(r.cfg.prevSumsSHA) {
 		digestDetail = fmt.Sprintf("none was given: run scripts/upgradeproof/at011.sh, which verifies the attestation of SHA256SUMS on its host with gh and passes the digest in; or run `gh attestation verify SHA256SUMS -R %s --signer-workflow %s/.github/workflows/release.yml --source-ref refs/tags/%s --source-digest <commit of the tag>` and pass the sha256 of that file", r.cfg.releaseRepo, r.cfg.releaseRepo, oldTag)
@@ -137,6 +138,7 @@ func (r *runner) startSessionFor(s *stepCtx, p *persona, n int) (*session, bool)
 
 // step1: install the previous release, the local server, mashctl init, two endpoints, two open sessions.
 func (r *runner) step1(s *stepCtx) {
+	oldTag := r.oldTag()
 	for _, n := range []string{"admin", "alice", "bob", "mallory"} {
 		p := r.personas[n]
 		for _, d := range []string{p.home, p.cfg, p.st} {
