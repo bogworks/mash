@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	banner = "Generated from spec/*.json by go run ./scripts/refgen. Do not edit."
+	banner     = "Generated from spec/*.json by go run ./scripts/refgen. Do not edit."
 	comingPage = "planned-not-yet-released.md"
 	width      = 78
 )
