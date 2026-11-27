@@ -14,6 +14,10 @@ All notable user-facing changes to mash are recorded here. The format follows [K
 
 There is nothing to do if you run 0.6.0: it is the same program, so no endpoint, key or mail changes. Install `mash` and `mashctl` 0.6.1 from the same release when you next install, with the README's install steps. To check that the release tag is signed, follow [Verify a release](https://github.com/bogworks/mash/blob/v0.6.1/docs/release.md#verify-a-release).
 
+### Changed
+
+- **The release tag is now signed.** The programs are unchanged from 0.6.0 ([#470](https://github.com/bogworks/mash/pull/470)).
+
 Known issues: 2 known issues, listed in the [release notes](https://github.com/bogworks/mash/blob/v0.6.1/docs/release-notes/0.6.1.md#known-issues)
 Links: [Release notes](https://github.com/bogworks/mash/blob/v0.6.1/docs/release-notes/0.6.1.md), [full changes](https://github.com/bogworks/mash/compare/v0.6.0...v0.6.1), [verify your download](https://github.com/bogworks/mash/blob/v0.6.1/docs/install.md#verify-what-you-download)
 
