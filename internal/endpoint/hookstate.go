@@ -76,12 +76,23 @@ func (e *Endpoint) HookState() string {
 	return hookStateOf(sp, since, e.hl.state(time.Time{}))
 }
 
+// NoteSpoolUnbound records that serve could not create or bind the spool folder, so StorageState says failing until a
+// later bind succeeds. It changes nothing about delivery.
+func (e *Endpoint) NoteSpoolUnbound(err error) {
+	if err != nil {
+		e.hl.noteUnbound(err)
+	}
+}
+
 // StorageState is StorageOK or StorageFailing for the folder this session spools to: failing when serve reports the
 // folder it requires as failing, or when a try at writing to it fails now. Before the spool is bound there is no folder.
 func (e *Endpoint) StorageState() string {
 	e.hl.mu.Lock()
-	sp, bound := e.hl.sp, e.hl.bound
+	sp, bound, unbound := e.hl.sp, e.hl.bound, e.hl.unbound
 	e.hl.mu.Unlock()
+	if !bound && unbound != "" {
+		return StorageFailing
+	}
 	if _, failing := e.SpoolFaultLine(); failing || (bound && !sp.Writable()) {
 		return StorageFailing
 	}

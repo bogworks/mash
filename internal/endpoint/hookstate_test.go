@@ -3,6 +3,7 @@ package endpoint
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"strconv"
 	"strings"
@@ -237,5 +238,21 @@ func TestHookStateAgreesWithTheRecord(t *testing.T) {
 	e.RecordHookState()
 	if h, _, ok := SessionOnDisk(sp); !ok || h != e.HookState() {
 		t.Errorf("recorded %q, shown %q (%v)", h, e.HookState(), ok)
+	}
+}
+
+// A spool serve could not bind leaves no folder to try, yet storage is failing: mail cannot be stored. A later bind ends it.
+func TestStorageFailsWhileSpoolUnbound(t *testing.T) {
+	e := &Endpoint{}
+	if got := e.StorageState(); got != StorageOK {
+		t.Fatalf("before any try: %s", got)
+	}
+	e.NoteSpoolUnbound(errors.New("cannot create the state folder"))
+	if got := e.StorageState(); got != StorageFailing {
+		t.Fatalf("after NoteSpoolUnbound: %s, want %s", got, StorageFailing)
+	}
+	e.hl.bind(spool.Spool{Dir: t.TempDir()}, time.Now())
+	if got := e.StorageState(); got != StorageOK {
+		t.Fatalf("after a bind: %s, want %s", got, StorageOK)
 	}
 }

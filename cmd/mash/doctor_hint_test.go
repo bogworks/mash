@@ -116,7 +116,7 @@ func TestDoctorOneHintACommandThatFixesIt(t *testing.T) {
 			shell(strictEnv(w, "a", map[string]string{"MASH_ENDPOINT": tTo("ghost"), "MASH_CREDS": ghostCreds})), false},
 		{"another session holds the endpoint", "delivery  FAIL  another session holds this endpoint", "", session(lease(cmds.LeaseOther)), false},
 		{"a newer session replaced this one", "delivery  FAIL  this session lost this endpoint to a newer one", "", session(lease(cmds.LeaseLost)), false},
-		{"arriving mail cannot be stored", heldRow, "", session(held), true},
+		{"arriving mail cannot be stored", heldRow, cmds.StoredMailFix, session(held), true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := tc.run()
