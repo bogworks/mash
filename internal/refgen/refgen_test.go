@@ -64,10 +64,10 @@ func TestFixturePages(t *testing.T) {
 	}
 	sort.Strings(names)
 	want := []string{
-		"README.md", "planned-not-yet-released.md", "glossary.md", "mash-alpha.md",
+		"README.md", "glossary.md", "mash-alpha.md",
 		"mash-zed.md", "mash.md", "mashctl-grp-leaf.md", "mashctl-grp.md",
-		"mashctl.md", "mcp-server.md", "mcp-zed.md", "mcp.md", "rules.md",
-		"setup.md",
+		"mashctl.md", "mcp-server.md", "mcp-zed.md", "mcp.md",
+		"planned-not-yet-released.md", "rules.md", "setup.md",
 	}
 	if !reflect.DeepEqual(names, want) {
 		t.Fatalf("pages = %v, want %v", names, want)
