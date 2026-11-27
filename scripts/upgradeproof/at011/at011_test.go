@@ -304,6 +304,19 @@ func TestPageSectionPicksPrevOnly(t *testing.T) {
 	}
 }
 
+func TestPageSectionFirstOnly(t *testing.T) {
+	page := "# Compatibility\n\n## Upgrading from 0.6.0 to 0.6.1\n\n1. a\n\n## Other\n\nText.\n\n" +
+		"## Upgrading from 0.6.0 to 0.6.2\n\nAn open session keeps its old version until it restarts.\n\n" +
+		"This upgrade is one-way: there is no way back.\n\n1. b\n"
+	sect := pageSection(page, "0.6.0")
+	if runningRE.MatchString(sect) || oneWayRE.MatchString(sect) {
+		t.Fatalf("a later matching section was appended: %q", sect)
+	}
+	if got := pageSteps(page, "0.6.0"); !reflect.DeepEqual(got, []string{"a"}) {
+		t.Fatalf("steps = %q, want [a]", got)
+	}
+}
+
 func TestPageSectionReal(t *testing.T) {
 	b, err := os.ReadFile("../../../docs/compatibility.md")
 	if err != nil {
