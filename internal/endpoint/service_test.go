@@ -511,3 +511,63 @@ func TestPromptAdvertisedMaxPayloadMatchesTheLimit(t *testing.T) {
 		t.Fatalf("a request of exactly the advertised size was refused or garbled: %q", r)
 	}
 }
+
+// signedPromptReply sends "hello" to subj, signed by ep's identity at signedAt, and returns the first reply message.
+func signedPromptReply(t *testing.T, ep *Endpoint, subj string, signedAt time.Time) *nats.Msg {
+	t.Helper()
+	nc := ep.Conn()
+	inbox := nc.NewInbox()
+	sub, err := nc.SubscribeSync(inbox)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sub.Unsubscribe()
+	payload := []byte("hello")
+	h, err := ep.Identity().Sign(subj, payload, "", signedAt, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := nats.NewMsg(subj)
+	m.Reply = inbox
+	m.Data = payload
+	m.Header.Set(sap.HeaderName, h.Encode())
+	if err := nc.PublishMsg(m); err != nil {
+		t.Fatal(err)
+	}
+	r, err := sub.NextMsg(5 * time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
+// #1829: a prompt signed before the service started may be a replay of one an earlier process answered, so it is
+// refused even though its nonce is unseen and its timestamp is within the 30 s skew; one signed after the start is
+// answered. NEEDS A NATS SERVER (testenv.Start, in process).
+func TestPromptSignedBeforeServiceStartIsRefused(t *testing.T) {
+	f := newFixture(t, "a", "b")
+	delivered := make(chan struct{}, 2)
+	f.serve(t, "a", func(*Endpoint, PromptEvent) { delivered <- struct{}{} })
+	b := f.client(t, "b")
+	subj := mustSubj(taddr("a")).Prompt
+
+	r := signedPromptReply(t, b, subj, time.Now().Add(-5*time.Second))
+	if code, text := r.Header.Get("Nats-Service-Error-Code"), r.Header.Get("Nats-Service-Error"); code != "401" || text != promptPredatesStart {
+		t.Fatalf("stale prompt: got %q %q", code, text)
+	}
+	select {
+	case <-delivered:
+		t.Fatal("a prompt signed before the start reached the session")
+	default:
+	}
+
+	r = signedPromptReply(t, b, subj, time.Now())
+	if code := r.Header.Get("Nats-Service-Error-Code"); code != "" {
+		t.Fatalf("fresh prompt refused: %q %q", code, r.Header.Get("Nats-Service-Error"))
+	}
+	select {
+	case <-delivered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a prompt signed after the start did not reach the session")
+	}
+}

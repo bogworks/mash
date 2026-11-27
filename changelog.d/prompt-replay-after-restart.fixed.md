@@ -1,0 +1,1 @@
+**A prompt captured before an endpoint restarts can no longer be replayed to the restarted endpoint.** A restarted endpoint now refuses any prompt signed before it started, and the message tells the sender to send the prompt again.
