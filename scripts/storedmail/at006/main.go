@@ -565,7 +565,7 @@ func classifyStored(stored map[string][]*storedMsg, rep *report) {
 			trust, class := sapsdk.Classify(m.subject, vals, m.data)
 			if why := kit.Candidate(vals, trust, class, m.subject); why != "" {
 				rep.candidates++
-				rep.failures = append(rep.failures, fmt.Sprintf("%s: %s #%d, class %q, header %s: goes back to the planner", why, to, m.seq, class, kit.Shape(vals)))
+				rep.failures = append(rep.failures, fmt.Sprintf("%s: %s #%d, class %q, header %s: needs an amendment to the contract", why, to, m.seq, class, kit.Shape(vals)))
 			}
 			if trust != sap.TrustVerified || class != "" {
 				rep.failures = append(rep.failures, fmt.Sprintf("classifier gave %s %q for %s #%d", trust, class, to, m.seq))

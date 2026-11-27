@@ -2,8 +2,8 @@
 // decodes the document (plain canonical JSON, unsigned) into a
 // listset.ListSet and checks the format's rules.
 //
-// DECISION D211 (and DEC-004) IS PENDING: the document's schema value and field names are the proposed author-mash
-// seam, not an agreement. Everything that spells them is in this file.
+// The seam between the policy author and mash is not settled yet: the document's schema value and field names are the
+// proposed author-mash seam, not an agreement. Everything that spells them is in this file.
 package policydoc
 
 import (
@@ -21,8 +21,8 @@ import (
 	"github.com/bogworks/mash/internal/listset"
 )
 
-// DocumentSchema is the schema value a document must carry. The seam has not fixed this value (D211 is pending): it is
-// kept here, in one place, and a document with any other value is refused.
+// DocumentSchema is the schema value a document must carry. The seam's design is not settled yet, so it has not fixed
+// this value: it is kept here, in one place, and a document with any other value is refused.
 const DocumentSchema = "mash.listset/2"
 
 // ErrBadDocument: the document is malformed, has an unknown or missing field, or breaks a rule of the format.

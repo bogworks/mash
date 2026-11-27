@@ -40,7 +40,7 @@ type GroupUserIssuer struct {
 
 var _ UserIssuer = GroupUserIssuer{}
 
-// Issue implements UserIssuer. userPub is a PUBLIC user key: mash never receives a seed (D201).
+// Issue implements UserIssuer. userPub is a PUBLIC user key: mash never receives a seed.
 func (g GroupUserIssuer) Issue(_ context.Context, address, userPub, name string, tags []string) (string, error) {
 	if g.Signer == nil || !nkeys.IsValidPublicAccountKey(g.Account) {
 		return "", errors.New("issuer: no signer or not an account public key")

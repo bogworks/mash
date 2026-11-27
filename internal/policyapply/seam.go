@@ -11,7 +11,7 @@ import (
 // written to listset.<account public key> there; mash writes one value per account at status.<account public key>
 // and nothing else, and only mash writes status.* keys.
 //
-// The bucket name is configuration, not a built-in name, because the seam (decision D211) is pending. The proposed
+// The bucket name is configuration, not a built-in name, because the seam's design is not settled yet. The proposed
 // pattern is "<prefix>_{owner}_policy", set by the administrator in PolicyBucketEnv; {owner} is replaced by the owner
 // name. The key names below are the proposal too. A change of the key names is a one-line change in this file;
 // nothing else in the package spells a key.

@@ -41,7 +41,7 @@
 // this on the live cluster.
 //
 // Rotation and removal (REQ-014, AT-013; rotate.go, connz.go). When a sender's tags narrow, Rotate issues the new
-// credential to a public key the sender's host made (mash never receives a seed, D201), records it (purpose rotation)
+// credential to a public key the sender's host made (mash never receives a seed), records it (purpose rotation)
 // before delivering it, and polls Connections (live: NATSConnections, a CONNZ query of every server) until the servers
 // show a connection with the new key. Only then does it revoke, in one call, every issue or rotation key the issue record
 // holds for the address except the new one. A delivery that reports success proves nothing. At the deadline with no
