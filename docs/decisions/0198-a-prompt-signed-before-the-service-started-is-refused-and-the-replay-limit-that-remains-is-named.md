@@ -28,13 +28,14 @@ Chosen option: "refuse a prompt whose signed timestamp is before the service sta
 
 This amends the acceptance rule of ADR 0030 by one refusal; nothing else about prompts changes.
 
-Two limits remain and are one known issue (#1829). First, the rounding: a prompt signed in the same second the service started carries a timestamp that is not before the start, so a copy of a prompt answered earlier in that second is admitted again. Refusing that second too would cost a legitimate prompt sent in it one resend. Second, SAP allows a sender's clock to run ahead by up to 30 seconds, so a prompt from such a sender, answered before a restart, carries a timestamp that is not before the start and can still be replayed within about 30 seconds. Closing both takes either a refusal of every prompt for 30 seconds after a start or the nonces on disk.
+Two limits remain and are one known issue (#1829). First, the rounding: a prompt signed in the same second the service started carries a timestamp that is not before the start, so a copy of a prompt answered earlier in that second is admitted again. Refusing that second too would cost a legitimate prompt sent in it one resend. Second, SAP allows a sender's clock to run ahead by up to 30 seconds, so a prompt from such a sender, answered before a restart, carries a timestamp that is not before the start and can still be replayed. The SDK accepts a timestamp up to 30 seconds old, so a clock 30 seconds ahead leaves such a prompt valid for up to about 60 seconds after an immediate restart. Closing both takes either a refusal of every prompt for 30 seconds after a start or the nonces on disk.
 
 ### Consequences
 
 * Good, because every replay of a prompt from a sender whose clock is not ahead is refused after a restart, with no protocol change and nothing kept on disk.
 * Good, because a prompt sent after the restart is answered as before.
 * Bad, because a prompt signed just before a restart that arrives after it is refused once, and the sender sends it again.
+* Bad, because a sender whose clock runs behind the receiver's has its first prompts after a restart refused until its clock reaches the start time, up to 30 seconds, even though the SDK allows that much skew; the refusal text tells it to send again, and a resend succeeds once its clock has caught up.
 * Bad, because the replay of a prompt signed in the second the service started, or from a sender whose clock runs ahead, is not closed.
 
 ### Confirmation
