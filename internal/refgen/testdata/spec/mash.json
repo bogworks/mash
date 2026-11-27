@@ -20,5 +20,5 @@
     "metadata":[{"name":"x-group","value":"Everyday"},{"name":"x-release","value":"1.0.0"},
      {"name":"x-mcp","value":{"tool":null,"why":"Not for agents."}}]},
    {"name":"future","description":"Comes later.",
-    "metadata":[{"name":"x-release","value":"0.6.0"}]}
+    "metadata":[{"name":"x-plan","value":"later"}]}
   ]}}

@@ -11,16 +11,9 @@ import (
 )
 
 const (
-	banner = "Generated from spec/*.json by go run ./scripts/refgen. Do not edit."
-	// nextRelease is only the old form of planning an entry (x-release at this value). It is a placeholder, not a
-	// promise: no page names it, and the spec plans with x-plan instead.
-	nextRelease = "0.6.0"
-	// closeRelease is the one release after the current one that a command may
-	// already carry: a command whose behaviour closed in it is documented with
-	// the rest, and its page says "Release: 0.5.10".
-	closeRelease = "0.5.10"
-	comingPage   = "planned-not-yet-released.md"
-	width        = 78
+	banner     = "Generated from spec/*.json by go run ./scripts/refgen. Do not edit."
+	comingPage = "planned-not-yet-released.md"
+	width      = 78
 )
 
 type metaSpec struct {
@@ -209,7 +202,7 @@ func buildTree(c *cmdSpec, path []string, current, inheritedRelease, inheritedPl
 		}
 		n.release, n.plan, builtSet = "", p, false
 	} else if r != "" {
-		n.release, n.plan, builtSet = r, "", r == current || r == closeRelease
+		n.release, n.plan, builtSet = r, "", r == current
 	}
 	for _, s := range c.Commands {
 		sub, err := buildTree(s, n.path, current, n.release, n.plan, builtSet, false)
@@ -281,7 +274,6 @@ type gen struct {
 	tools   []*node
 	mcpHas  map[string]bool
 	coming  []*node
-	comingT []mcpTool
 	err     error
 }
 
@@ -309,14 +301,10 @@ func (g *gen) put(name string, b *bld) {
 func (g *gen) run() (map[string][]byte, error) {
 	g.mcpHas = map[string]bool{}
 	for _, t := range g.mcp.Tools {
-		switch t.Release {
-		case g.current, closeRelease:
-			g.mcpHas[t.Name] = true
-		case nextRelease:
-			g.comingT = append(g.comingT, t)
-		default:
-			return nil, fmt.Errorf("mcp tool %s: release %q is neither %s, %s nor %s", t.Name, t.Release, g.current, closeRelease, nextRelease)
+		if t.Release != g.current {
+			return nil, fmt.Errorf("mcp tool %s: release %q is not %s", t.Name, t.Release, g.current)
 		}
+		g.mcpHas[t.Name] = true
 	}
 	for _, root := range g.tools {
 		if err := g.tree(root); err != nil {
@@ -346,37 +334,29 @@ func (g *gen) tree(n *node) error {
 		g.coming = append(g.coming, n)
 		return nil
 	}
-	switch n.release {
-	case g.current, closeRelease:
-		if !n.root {
-			g.cmdPage(n)
-		}
-		for _, s := range n.subs {
-			if err := g.tree(s); err != nil {
-				return err
-			}
-		}
-	case nextRelease: // the old form of planning an entry
-		if err := g.checkPlanned(n); err != nil {
+	if n.release != g.current {
+		return fmt.Errorf("%s: release %q is not %s", n.full(), n.release, g.current)
+	}
+	if !n.root {
+		g.cmdPage(n)
+	}
+	for _, s := range n.subs {
+		if err := g.tree(s); err != nil {
 			return err
 		}
-		g.coming = append(g.coming, n)
-	default:
-		return fmt.Errorf("%s: release %q is neither %s, %s nor %s", n.full(), n.release, g.current, closeRelease, nextRelease)
 	}
 	return nil
 }
 
 // checkPlanned applies to n and every descendant the rules tree applies at
 // the top level, since tree stops at a planned parent: x-plan now needs
-// x-now-release, and an entry with no plan must name the current release or
-// the next one.
+// x-now-release, and an entry with no plan must name the current release.
 func (g *gen) checkPlanned(n *node) error {
 	if n.plan == "now" && g.now == "" {
 		return fmt.Errorf("%s: x-plan now needs x-now-release in the tool file's info", n.full())
 	}
-	if n.plan == "" && n.release != g.current && n.release != nextRelease {
-		return fmt.Errorf("%s: release %q is neither %s nor %s", n.full(), n.release, g.current, nextRelease)
+	if n.plan == "" && n.release != g.current {
+		return fmt.Errorf("%s: release %q is not %s", n.full(), n.release, g.current)
 	}
 	for _, s := range n.subs {
 		if s.plan == "" && g.released(s.release) {
@@ -390,16 +370,12 @@ func (g *gen) checkPlanned(n *node) error {
 }
 
 // planLabel is the text that says when a planned entry is due: "Planned for
-// <x-now-release>" for now, "Planned: next" or "Planned: later", and for the
-// old form "Planned for <release>".
+// <x-now-release>" for now, or "Planned: next" or "Planned: later".
 func (g *gen) planLabel(n *node) string {
-	switch n.plan {
-	case "now":
+	if n.plan == "now" {
 		return "Planned for " + g.now
-	case "next", "later":
-		return "Planned: " + n.plan
 	}
-	return "Planned for " + n.release
+	return "Planned: " + n.plan
 }
 
 // ---- markdown helpers ----
@@ -841,9 +817,8 @@ func (g *gen) cmdPage(n *node) {
 	g.put(n.page(), b)
 }
 
-// released reports whether release r is documented: the current release, or
-// closeRelease.
-func (g *gen) released(r string) bool { return r == g.current || r == closeRelease }
+// released reports whether release r is documented: the current release.
+func (g *gen) released(r string) bool { return r == g.current }
 
 // subList lists the subcommands of n that are released.
 func (g *gen) subList(b *bld, n *node) {
@@ -1098,13 +1073,6 @@ func (g *gen) comingPageOut() {
 		b.heading(2, "Commands")
 		for _, n := range g.coming {
 			g.comingNode(b, n, 3)
-		}
-	}
-	if len(g.comingT) > 0 {
-		b.heading(2, "MCP tools")
-		for _, t := range g.comingT {
-			b.heading(3, code(t.Name))
-			g.mcpBody(b, t, 4)
 		}
 	}
 	g.put(comingPage, b)
