@@ -180,3 +180,47 @@ func TestOwnerToken(t *testing.T) {
 		}
 	}
 }
+
+func TestRefusedAfterRestartProblem(t *testing.T) {
+	good := "refused 401 this endpoint restarted after the prompt was signed: send the prompt again"
+	for _, c := range []struct {
+		name string
+		r    Replay
+		ok   bool
+	}{
+		{"refused, right text, no session", Replay{Outcome: good}, true},
+		{"accepted", Replay{Outcome: "accepted", SessionSaw: true, ReplyToolOK: true}, false},
+		{"refused, other text", Replay{Outcome: "refused 401 bad signature"}, false},
+		{"refused, other status", Replay{Outcome: "refused 403 this endpoint " + RestartedText}, false},
+		{"refused 403, text mentions 401", Replay{Outcome: "refused 403 this endpoint " + RestartedText + " 401"}, false},
+		{"refused 500, text mentions 401", Replay{Outcome: "refused 500 this endpoint " + RestartedText + " 401"}, false},
+		{"refused, no status", Replay{Outcome: "refused this endpoint " + RestartedText + " 401"}, false},
+		{"refused, right text, session saw it", Replay{Outcome: good, SessionSaw: true}, false},
+		{"refused, right text, reply ok", Replay{Outcome: good, ReplyToolOK: true}, false},
+	} {
+		if p := RefusedAfterRestartProblem(c.r); (p == "") != c.ok {
+			t.Errorf("%s: problem %q, want ok=%v", c.name, p, c.ok)
+		}
+	}
+}
+
+func TestOnlyReplayDiffers(t *testing.T) {
+	a := Result{Baseline: "x", Control: "y", Replay: "z"}
+	b := a
+	b.Replay = "refused 401"
+	if !OnlyReplayDiffers(Diff(a, b)) {
+		t.Error("replay-only difference not recognised")
+	}
+	if OnlyReplayDiffers(Diff(a, a)) {
+		t.Error("equal results accepted")
+	}
+	b.Control = "other"
+	if OnlyReplayDiffers(Diff(a, b)) {
+		t.Error("two differences accepted")
+	}
+	c := a
+	c.Baseline = "q"
+	if OnlyReplayDiffers(Diff(a, c)) {
+		t.Error("baseline-only difference accepted")
+	}
+}

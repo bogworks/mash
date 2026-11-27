@@ -5,8 +5,12 @@
 // candidate commit (built by scripts/buildrelease), each in its own fresh server and state: Bob sends Alice a signed live
 // prompt with the build's own `mash prompt`, a capture identity records the exact message off Alice's prompt subject,
 // Alice's endpoint is stopped and started again inside the 30-second live window, and the captured message is replayed on
-// its subject. The runner records what happened and asserts today's behaviour: the replay is accepted, on both builds, with
-// equal results. It does not assert that the window is closed.
+// its subject. The runner records what happened. The oracle accepts the replay (the known limit it still has); the candidate
+// refuses a replay signed before it restarted, with 401 "this endpoint restarted after the prompt was signed: send the
+// prompt again" (ADR 0198). The two builds are expected to differ in replay_after_restart only. The proof does NOT assert
+// the cases that remain open in #1829: a prompt signed in the same second as the start, or from a sender whose clock runs
+// ahead. To make the candidate's refusal deterministic, the runner waits until the second after the signed ts before the
+// restart, so the restarted service's start second is always later than the signed ts.
 //
 //	at023 -src <clean clone at the commit> -commit <40 hex> -version 0.6.0 -oracle-version 0.5.10 -out <dir>
 package main
@@ -116,6 +120,7 @@ type Build struct {
 	Baseline    Replay   `json:"baseline_prompt"`
 	Control     Replay   `json:"control_replay_no_restart"`
 	Replay      Replay   `json:"replay_after_restart"`
+	Fresh       Replay   `json:"fresh_prompt_after_restart"`
 	Result      Result   `json:"result"`
 	Notes       []string `json:"notes,omitempty"`
 }
@@ -134,7 +139,7 @@ type Record struct {
 	ReleaseRepo  string      `json:"oracle_release_repo"`
 	KnownIssue   KnownIssue  `json:"known_issue"`
 	Builds       []Build     `json:"builds"`
-	Equal        bool        `json:"results_equal"`
+	Equal        bool        `json:"results_equal"` // false by design: the builds differ in replay_after_restart
 	Differences  []string    `json:"differences,omitempty"`
 	Assertions   []Assertion `json:"assertions"`
 	Pass         bool        `json:"pass"`
@@ -181,7 +186,7 @@ func run() int {
 		KnownIssue: NewKnownIssue(*known), OracleSource: releaseBase(*repo) + "v" + *oracleVer + "/",
 		Environment: "each build gets its own NATS server (operator mode, generated keys) and state directories under " + wd +
 			", created at the start of the build's run and stopped at its end; the launcher creates and destroys the container",
-		Pointer: "the replay is asserted accepted because that is today's behaviour; the test does not assert that the window is closed"}
+		Pointer: "the oracle accepts the replay after the restart (the known limit it still has); the candidate refuses a replay signed before it restarted with 401 (ADR 0198); the builds differ in replay_after_restart only; the proof does not assert the cases still open in #1829 (a prompt signed in the same second as the start, or from a sender whose clock runs ahead)"}
 	lg.f("AT-023 restart-replay proof: candidate %s version %s, oracle v%s, %s/%s", *commit, *version, *oracleVer, runtime.GOOS, runtime.GOARCH)
 	lg.f("venue: %s", *venue)
 	lg.f("known-issue entry: %s", rec.KnownIssue.Status+" "+rec.KnownIssue.URL)
@@ -266,7 +271,7 @@ func execute(rec *Record, src, commit, version, oracleVer, repo, wd string) bool
 	d := Diff(builds[0].Result, builds[1].Result)
 	rec.Equal = len(d) == 0
 	rec.Differences = d
-	if !rec.check("the recorded results are equal on the oracle and the candidate", rec.Equal, strings.Join(d, "; ")) {
+	if !rec.check("the recorded results differ on the oracle and the candidate in replay_after_restart only (baseline and control_no_restart are equal)", OnlyReplayDiffers(d), strings.Join(d, "; ")) {
 		ok = false
 	}
 	return ok
@@ -280,7 +285,12 @@ func assertBuild(rec *Record, b *Build) bool {
 	ok = rec.check(p+"the endpoint was restarted and the replay was sent inside the 30 s window", b.Timings.ReplayWindow.Inside,
 		fmt.Sprintf("replay sent %.2f s after the captured ts, %.2f s left", b.Timings.ReplayWindow.Elapsed.Seconds(), b.Timings.ReplayWindow.Remaining.Seconds())) && ok
 	ok = rec.check(p+"the restarted endpoint is a new process", b.Timings.OldPID != 0 && b.Timings.NewPID != 0 && b.Timings.OldPID != b.Timings.NewPID, b.PIDs) && ok
-	ok = rec.check(p+"the replay is accepted and answered (today's behaviour: reply tool succeeded, exact answer received, stream complete)", AnswerProblem(b.Replay) == "", b.Replay.Summary()) && ok
+	ok = rec.check(p+"a fresh prompt sent after the restart is accepted and answered (reply tool succeeded, exact answer received, stream complete)", AnswerProblem(b.Fresh) == "", b.Fresh.Summary()) && ok
+	if b.Role == "candidate" {
+		ok = rec.check(p+"the replay signed before the restart is refused with 401 \""+RestartedText+"\" and never reaches the session", RefusedAfterRestartProblem(b.Replay) == "", b.Replay.Summary()) && ok
+	} else {
+		ok = rec.check(p+"the replay is accepted and answered (the known limit the oracle still has: reply tool succeeded, exact answer received, stream complete)", AnswerProblem(b.Replay) == "", b.Replay.Summary()) && ok
+	}
 	return ok
 }
 
@@ -609,6 +619,11 @@ func replayOnce(nc *nats.Conn, owner string, c Capture, s *session, label string
 		}
 	}
 	r.Outcome = Outcome(r.Chunks)
+	if strings.HasPrefix(r.Outcome, "refused") {
+		// Did the session see a prompt anyway? Do not reply to one if it did.
+		_, r.SessionSaw = s.prompt(2 * time.Second)
+		lg.f("%s replay: refused; session saw a prompt: %v", label, r.SessionSaw)
+	}
 	if r.Outcome == "accepted" {
 		if id, ok := s.prompt(5 * time.Second); ok {
 			r.SessionSaw = true
@@ -759,6 +774,13 @@ func runBuild(rec *Record, b *Build, bin, dir string) error {
 	// Restart Alice's endpoint, then replay inside the window.
 	b.Timings.RestartBegan = time.Now().UTC()
 	b.Timings.OldPID = alice.pid
+	// The signed ts has one-second resolution and the candidate compares it with its start second: wait until the
+	// second after the ts, so the restarted service's start second is always later. The replay stays inside the window.
+	if until := b.Capture.TS.Add(time.Second); time.Now().Before(until) {
+		w := time.Until(until)
+		lg.f("waiting %.2f s so the restart falls in a later second than the signed ts", w.Seconds())
+		time.Sleep(w)
+	}
 	alice.stop()
 	b.Timings.OldProcessGone = time.Now().UTC()
 	if !waitRegistered(k.Conn, k.E.Owner, subj, false, 15*time.Second) {
@@ -785,6 +807,37 @@ func runBuild(rec *Record, b *Build, bin, dir string) error {
 	b.Timings.ReplaySentAt = b.Replay.SentAt
 	b.Timings.ReplayWindow = InWindow(b.Capture.TS, b.Replay.SentAt)
 	lg.f("replay sent %.2f s after the captured ts (inside the window: %v)", b.Timings.ReplayWindow.Elapsed.Seconds(), b.Timings.ReplayWindow.Inside)
+
+	// A fresh, newly signed prompt after the restart is accepted and answered (ADR 0198).
+	fc := make(chan pout, 1)
+	fsent := time.Now().UTC()
+	go func() {
+		o, e := k.Mash("bob", "", "prompt", k.To("alice"), "what day is it after the restart?")
+		fc <- pout{o, e}
+	}()
+	fid, fok := alice2.prompt(10 * time.Second)
+	b.Fresh = Replay{SentAt: fsent, SessionSaw: fok, Outcome: "no reply", Chunks: []Chunk{}, ExpectedText: freshAnswer}
+	if !fok {
+		return errors.New("alice's restarted session never saw the fresh prompt")
+	}
+	if err := alice2.reply(fid, freshAnswer); err != nil {
+		lg.f("fresh prompt: %v", err)
+	} else {
+		b.Fresh.ReplyToolOK = true
+	}
+	select {
+	case p := <-fc:
+		if p.err != nil {
+			b.Fresh.Outcome = "refused " + p.err.Error()
+		} else {
+			b.Fresh.Outcome = "accepted"
+			b.Fresh.ReplyText = strings.TrimSpace(p.out)
+			b.Fresh.StreamComplete = true // mash prompt exits 0 only after the reply stream's end
+		}
+	case <-time.After(20 * time.Second):
+		return errors.New("`mash prompt` did not return after the restarted Alice answered the fresh prompt")
+	}
+	lg.f("fresh prompt after restart: %s", b.Fresh.Summary())
 	b.Result = Result{Baseline: b.Baseline.Summary(), Control: b.Control.Summary(), Replay: b.Replay.Summary()}
 	return nil
 }
