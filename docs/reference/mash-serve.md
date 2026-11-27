@@ -5,7 +5,7 @@ Generated from spec/*.json by go run ./scripts/refgen. Do not edit.
 Run as an MCP server, which is how an agent host such as Claude Code calls
 mash's tools. Started by the host, not by hand.
 
-Release: 0.5.9. Group: Integration.
+Release: 0.6.1. Group: Integration.
 
 Visible and documented for anyone wiring mash into an agent host other than
 Claude Code.

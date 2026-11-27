@@ -5,7 +5,7 @@ Generated from spec/*.json by go run ./scripts/refgen. Do not edit.
 Ask an endpoint a live question and wait for its answer. Not stored: if the
 recipient is not there, it fails.
 
-Release: 0.5.9. Group: Raw SAP.
+Release: 0.6.1. Group: Raw SAP.
 
 ## Usage
 

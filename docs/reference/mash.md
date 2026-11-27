@@ -60,7 +60,7 @@ These options work with every `mash` command.
 | --- | --- |
 | [`mash prompt`](mash-prompt.md) | Ask an endpoint a live question and wait for its answer. Not stored: if the recipient is not there, it fails. |
 
-## Removed in 0.5.9
+## Removed in 0.6.1
 
 | Removed | Why |
 | --- | --- |

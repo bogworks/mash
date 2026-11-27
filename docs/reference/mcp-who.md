@@ -4,7 +4,7 @@ Generated from spec/*.json by go run ./scripts/refgen. Do not edit.
 
 List the endpoints you can see, and which are online.
 
-Release: 0.5.9. Command line equivalent: `mash who`.
+Release: 0.6.1. Command line equivalent: `mash who`.
 
 ## Parameters
 

@@ -5,7 +5,7 @@ Generated from spec/*.json by go run ./scripts/refgen. Do not edit.
 Say in one line whether mail works for this endpoint, and whether it is
 online.
 
-Release: 0.5.9. Command line equivalent: `mash status`.
+Release: 0.6.1. Command line equivalent: `mash status`.
 
 ## Parameters
 

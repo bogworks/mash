@@ -3,7 +3,7 @@
  "opencli": "0.1",
  "info": {
   "title": "mash-local-nats-setup.sh",
-  "version": "0.5.9-spec.0",
+  "version": "0.6.1-spec.0",
   "description": "Makes, starts, stops or removes a local NATS server for mash.",
   "x-source": "v0.5.8 (8e8fe56)"
  },

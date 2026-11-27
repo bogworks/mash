@@ -4,7 +4,7 @@ Generated from spec/*.json by go run ./scripts/refgen. Do not edit.
 
 Print the version.
 
-Release: 0.5.9. Command line equivalent: `mash version`.
+Release: 0.6.1. Command line equivalent: `mash version`.
 
 ## Structured result
 

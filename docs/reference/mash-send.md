@@ -4,7 +4,7 @@ Generated from spec/*.json by go run ./scripts/refgen. Do not edit.
 
 Send a message to an endpoint.
 
-Release: 0.5.9. Group: Everyday.
+Release: 0.6.1. Group: Everyday.
 
 ## Usage
 
