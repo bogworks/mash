@@ -1,7 +1,7 @@
 # Roadmap
 
 This is a proposed sorting of mash's coming work into Now, Next and Later. It
-is a proposal and it may change. Now is what has shipped. Nothing under Next
+is a proposal and it may change. Only Now is being built. Nothing under Next
 or Later is a promise: an item can move, shrink or drop out, and none of them
 has a date.
 
@@ -14,10 +14,14 @@ The generated reference lists what is planned, as it stands today. See
 [planned commands](docs/reference/planned-not-yet-released.md). It is not a promise
 of any syntax.
 
-## Now
+## Shipped
 
-Now is the work after 0.6.1, the current release. What 0.6.0 and 0.6.1
-shipped is below; nothing in Next has been started on this page's say-so.
+Shipped in 0.6.1:
+
+- `mash doctor` run at a plain shell warns when mash cannot create its state
+  folder ([#1907](https://github.com/bogworks/mash/issues/1907)).
+- Release tags are signed. See the
+  [0.6.1 release notes](docs/release-notes/0.6.1.md).
 
 Shipped in 0.6.0:
 
@@ -30,19 +34,16 @@ Shipped in 0.6.0:
 - The one-time 0.5.5 migration script and the refusal of a 0.5.5
   configuration folder are gone.
 
-Shipped in 0.6.1:
+## Now
 
-- `mash doctor` run at a plain shell warns when mash cannot create its state
-  folder ([#1907](https://github.com/bogworks/mash/issues/1907)).
-- Release tags are signed. See the
-  [0.6.1 release notes](docs/release-notes/0.6.1.md).
-
-Security policy and `mash sap` are not in 0.6.0 or 0.6.1.
+- Weekly 0.6.x fixes and cleanup.
+- Security policy, which is being designed and built switched off. It is not
+  in any release, and it has no version or date.
 
 ## Next
 
 Next is planned and may change. These are the items we expect to work on
-after Now. None has a version or a date.
+after Now.
 
 - Policy: you say who may send to whom. mash ships open, and narrowing the
   mesh is a choice you make.
