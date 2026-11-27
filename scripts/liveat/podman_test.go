@@ -512,7 +512,7 @@ func TestPodmanCopyInAndOut(t *testing.T) {
 		t.Error("Remove took a relative path")
 	}
 	f.calls = nil
-	if err := m2.Remove("/node/adopt-in/sys.creds"); err != nil || !f.has("/usr/local/bin/nodeinit rm /node/adopt-in/sys.creds") {
+	if err := m2.Remove("/node/creds-in/sys.creds"); err != nil || !f.has("/usr/local/bin/nodeinit rm /node/creds-in/sys.creds") {
 		t.Errorf("remove: %v %v", err, f.lines())
 	}
 	if !m2.Exists("/x") || !f.has("/usr/local/bin/nodeinit stat /x") {

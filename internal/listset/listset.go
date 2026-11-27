@@ -62,7 +62,7 @@ const (
 type ListSet struct {
 	// Owner is the account's owner part. Every address and group must carry it.
 	Owner string
-	// Base is the generation the submitter based this list set on: the one in force when it was written, 0 when
+	// Base is the generation the writer based this list set on: the one in force when it was written, 0 when
 	// nothing was in force. Accept refuses a list set whose Base is not the generation in force (REQ-017).
 	Base uint64
 	// Switches holds the group-wide switches. A sender's group must state all four verbs, each once.

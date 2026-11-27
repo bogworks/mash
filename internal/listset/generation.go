@@ -14,7 +14,7 @@ import (
 // Generations and digests (contract mash-messaging-policy REQ-017, AT-016; ADR 0098).
 //
 // Each accepted list set is one generation. A list set states the generation it was based on (ListSet.Base); Accept
-// refuses it unless that is the generation in force, so two submitters working from the same generation cannot both
+// refuses it unless that is the generation in force, so two writers working from the same generation cannot both
 // win, and a stale one changes nothing. Accept is a pure function and does not by itself serialize submissions: two
 // callers that read the same Record and call Accept both succeed. The package holds no record in force and persists
 // nothing.
