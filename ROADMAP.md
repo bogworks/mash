@@ -14,29 +14,38 @@ The generated reference lists what is planned, as it stands today. See
 [planned commands](docs/reference/planned-not-yet-released.md). It is not a promise
 of any syntax.
 
+## Shipped
+
+Shipped in 0.6.1:
+
+- `mash doctor` run at a plain shell warns when mash cannot create its state
+  folder ([#1907](https://github.com/bogworks/mash/issues/1907)).
+- Release tags are signed. See the
+  [0.6.1 release notes](docs/release-notes/0.6.1.md).
+
+Shipped in 0.6.0:
+
+- mash's internals moved onto the SAP Go SDK. Nothing you do with mash
+  changes, and nothing you have set up has to change.
+- Sender headers are read strictly, as the SDK reads them. A few malformed
+  headers that older mash accepted are refused instead, and refused mail is
+  listed, never hidden. See the
+  [0.6.0 release notes](docs/release-notes/0.6.0.md).
+- The one-time 0.5.5 migration script and the refusal of a 0.5.5
+  configuration folder are gone.
+
 ## Now
 
-Now is the release being built, 0.5.10. It prepares the move to the SAP Go
-SDK inside mash, with no change to anything you do or have set up. It also
-removes the one-time 0.5.5 migration script and the refusal of a 0.5.5
-configuration folder, and fixes what `mash doctor` reports.
-
-- Seeing and prompting agents mash did not start
-  ([#1039](https://github.com/bogworks/mash/issues/1039)). Today mash cannot
-  discover endpoints that a SAP SDK host serves. This item makes them show up
-  and lets you prompt them. This item is proposed and not yet confirmed.
+- Weekly 0.6.x fixes and cleanup.
+- Security policy: you say who may send to whom. mash ships open, and
+  narrowing the mesh is a choice you make. It is being designed and built
+  switched off, is not in any release, and has no version or date.
 
 ## Next
 
 Next is planned and may change. These are the items we expect to work on
 after Now.
 
-- The SDK move, which shipped in 0.6.0. mash's internals changed over to the
-  SAP Go SDK. Nothing you do with mash changes, and nothing you have set up has
-  to change. A few malformed sender headers that older mash accepted are
-  refused instead.
-- Policy: you say who may send to whom. mash ships open, and narrowing the
-  mesh is a choice you make.
 - Prompting an agent through the SAP protocol, as a first-class action beside
   mail.
 - Sharing one server between owners. Today a deployment has one owner (ADR 0006); a change to that is a decision still to be made.
