@@ -136,7 +136,7 @@ func TestShellDoctorWarnsOfAStateFolderThatCannotBeCreatedWhenNoSettingIsVisible
 		t.Errorf("status %d:\n%s", code, out)
 	}
 	out, code = w.cli(t, "a", "doctor")
-	want := specDoctorShellFolderCase(t, w, "At a shell, when the state folder cannot be created and no spool setting is visible") + "\n"
+	want := specDoctorShellFolderCase(t, w, "At a shell, with no spool setting, when the state folder cannot be created") + "\n"
 	if code != 0 || out != want {
 		t.Errorf("doctor %d:\n%s\nwant the spec text:\n%s", code, out, want)
 	}

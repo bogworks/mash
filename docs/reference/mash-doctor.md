@@ -259,7 +259,7 @@ refused      ok    no mail was refused
 1 problem.
 ```
 
-### At a shell, when the state folder cannot be created and no spool setting is visible
+### At a shell, with no spool setting, when the state folder cannot be created
 
 Stream: stdout. Exit code: 0.
 
