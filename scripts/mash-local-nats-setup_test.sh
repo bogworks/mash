@@ -23,7 +23,7 @@
 # flag; it does not prove they work with the real macOS tools.
 #
 # Environment:
-#   MLNT_IMAGES   space-separated image tags (default: debian:stable ubuntu:24.04 ubuntu:26.04)
+#   MLNT_IMAGES   space-separated image tags (default: debian:stable, ubuntu:24.04 and ubuntu:26.04, each pinned by digest)
 #   MLNT_CASES    space-separated case numbers (default: 1 2 ... 27)
 #   MLNT_MODES    space-separated modes (default: linux darwin)
 #   MLNT_REPORT   receipt file (markdown; default: receipt-<run id>.md in the scratch
@@ -1567,7 +1567,7 @@ else
     SCRATCH=$(mktemp -d "${TMPDIR:-/tmp}/mlnt.XXXXXX") || exit 2
     MADE_SCRATCH=1
 fi
-IMAGES=${MLNT_IMAGES:-"debian:stable ubuntu:24.04 ubuntu:26.04"}
+IMAGES=${MLNT_IMAGES:-"debian:stable@sha256:a32b8984739287d78c4783b0825bdaaad187d157b16a98e0c0c5e5f2675d81fa ubuntu:24.04@sha256:562111b88caa79c71391c0c4d3c2114a7d5c35915c20561fd893cb1e07929e6b ubuntu:26.04@sha256:d66b366dac61b575bee2aef07e9c26e8070096fbe84a3d4d3eb0da069b5d76db"}
 CASES=${MLNT_CASES:-"1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27"}
 MODES=${MLNT_MODES:-"linux darwin"}
 NCV=${MLNT_NATSCLI:-0.5.2}
@@ -1730,7 +1730,7 @@ RUN useradd -m -s /bin/bash tester && useradd -m -s /bin/bash other \
 CF
 
 for tag in $IMAGES; do
-    short=$(printf '%s' "$tag" | tr ':.' '--')
+    short=$(printf '%s' "$tag" | tr ':.@' '---' | cut -c1-30)-$(printf '%s' "$tag" | sha256sum | cut -c1-8)
     img=localhost/mlnt-$RUN-$short
     echo "== building $img from $tag"
     if ! podman build -q --pull=missing --build-arg "BASE=$tag" -t "$img" -f "$CTX/Containerfile" "$CTX" \
@@ -1751,7 +1751,7 @@ for tag in $IMAGES; do
 done
 
 for tag in $IMAGES; do
-    short=$(printf '%s' "$tag" | tr ':.' '--')
+    short=$(printf '%s' "$tag" | tr ':.@' '---' | cut -c1-30)-$(printf '%s' "$tag" | sha256sum | cut -c1-8)
     img=localhost/mlnt-$RUN-$short
     podman image exists "$img" 2>/dev/null || continue
     RESULTS="$RESULTS
