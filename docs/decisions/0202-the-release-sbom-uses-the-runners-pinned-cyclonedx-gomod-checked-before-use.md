@@ -1,7 +1,7 @@
 ---
 status: accepted
 date: 2026-11-27
-decision-makers: operations' order (x-lead, 2026-11-27) to use the runners' pinned copy; accepted by the planner, through the mash lead, 2026-11-27
+decision-makers: operations' order (2026-11-27) to use the runners' pinned copy; accepted by the planner, 2026-11-27
 ---
 
 # The release SBOM uses the runners' pinned cyclonedx-gomod, checked before use
@@ -60,7 +60,7 @@ The digest is that of the `cyclonedx-gomod` binary in the vendor's v1.9.0 linux 
 `e6d3b3a409b1c84ccef79ad15f9127d80c430a92d5c4f9e621bc2f0f3ee6d423`, in the release's `checksums.txt`. Operations
 (x-ops2) checked the archive against that published checksum, took the binary from it and installed the same file on
 dev1, dev2, bf2 and bf3 on 2026-11-27 (19:07 UTC), and recorded both digests in their runner pins (bogworks/cicd#344).
-x-lead confirmed the same day that all four runners carry that one file.
+Operations confirmed the same day that all four runners carry that one file.
 
 ### When it takes effect
 
