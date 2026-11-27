@@ -282,3 +282,39 @@ func TestPageStepsPicksPrevSection(t *testing.T) {
 		t.Fatalf("0.5.10 section: %q", got)
 	}
 }
+
+func TestPageSectionPicksPrevOnly(t *testing.T) {
+	page := "# Compatibility\n\n## Upgrading from 0.6.0 to 0.6.1\n\n1. Check first.\n2. Install both programs.\n\n" +
+		"## Upgrading from 0.5.10 to 0.6.0\n\nAn open session keeps its old version until it restarts.\n\n" +
+		"This upgrade is one-way: there is no way back.\n\n## Other\n\nText.\n"
+	sect := pageSection(page, "0.6.0")
+	if runningRE.MatchString(sect) || oneWayRE.MatchString(sect) {
+		t.Fatalf("the 0.6.0 section borrowed text from the 0.5.10 section: %q", sect)
+	}
+	// The old whole-page match would have passed wrongly.
+	if !runningRE.MatchString(page) || !oneWayRE.MatchString(page) {
+		t.Fatal("the synthetic page must satisfy both patterns as a whole")
+	}
+	sect = pageSection(page, "0.5.10")
+	if !runningRE.MatchString(sect) || !oneWayRE.MatchString(sect) {
+		t.Fatalf("the 0.5.10 section lacks its text: %q", sect)
+	}
+	if got := pageSection(page, "0.4.0"); got != "" {
+		t.Fatalf("an absent section is empty: %q", got)
+	}
+}
+
+func TestPageSectionReal(t *testing.T) {
+	b, err := os.ReadFile("../../../docs/compatibility.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(b)
+	if s := pageSection(page, "0.6.0"); !runningRE.MatchString(s) {
+		t.Errorf("the 0.6.0 section lacks the open-session line: %q", s)
+	}
+	s := pageSection(page, "0.5.10")
+	if !runningRE.MatchString(s) || !oneWayRE.MatchString(s) {
+		t.Errorf("the 0.5.10 section lacks the open-session or one-way line: %q", s)
+	}
+}

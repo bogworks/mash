@@ -32,9 +32,9 @@ var upgradeActions = []string{actCheck, actInstall, actPlugins, actRestart, actA
 
 var numberedRE = regexp.MustCompile(`(?m)^\s*\d+[.)]\s+(.+)$`)
 
-// pageSteps is the numbered steps of the section "Upgrading from <prev>" of the page, or none. The section runs to the
-// next heading of its level or above; other upgrade sections (an older version's) are not read.
-func pageSteps(page, prev string) []string {
+// pageSection is the text of the section "Upgrading from <prev>" of the page, or empty if there is none. The section
+// runs to the next heading of its level or above; other upgrade sections (an older version's) are not read.
+func pageSection(page, prev string) string {
 	head := regexp.MustCompile(`(?i)upgrading from ` + regexp.QuoteMeta(prev) + `(?:$|[^0-9.]|\.(?:$|[^0-9]))`)
 	in, level := false, 0
 	var sect []string
@@ -53,8 +53,13 @@ func pageSteps(page, prev string) []string {
 			sect = append(sect, l)
 		}
 	}
+	return strings.Join(sect, "\n")
+}
+
+// pageSteps is the numbered steps of the section "Upgrading from <prev>" of the page, or none.
+func pageSteps(page, prev string) []string {
 	var out []string
-	for _, m := range numberedRE.FindAllStringSubmatch(strings.Join(sect, "\n"), -1) {
+	for _, m := range numberedRE.FindAllStringSubmatch(pageSection(page, prev), -1) {
 		out = append(out, strings.TrimSpace(m[1]))
 	}
 	return out

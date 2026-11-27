@@ -201,8 +201,15 @@ func (r *runner) step8(s *stepCtx) {
 	}
 	steps := pageSteps(string(page), r.cfg.prev)
 	s.ok(len(steps) > 0, "the upgrade page has numbered steps", "%d found", len(steps))
-	s.ok(runningRE.Match(page), "the upgrade page says an open session keeps its old version until it restarts (REQ-023)", "")
-	s.ok(oneWayRE.Match(page), "the upgrade page carries the one-way line (no way back)", "")
+	// Only the section for this upgrade is read: an older section ("Upgrading from 0.5.10") must not satisfy these.
+	sect := pageSection(string(page), r.cfg.prev)
+	s.ok(runningRE.MatchString(sect), "the upgrade section says an open session keeps its old version until it restarts (REQ-023)", "")
+	// The upgrade to the switch-on release is the one-way upgrade; later upgrades carry no such line.
+	if r.cfg.version == release.SwitchOnVersion {
+		s.ok(oneWayRE.MatchString(sect), "the upgrade section carries the one-way line (no way back)", "")
+	} else {
+		s.note("the one-way line is required only in the section for the upgrade to the switch-on release (%s)", release.SwitchOnVersion)
+	}
 	notes := filepath.Join(r.src, "docs", "release-notes", r.cfg.version+".md")
 	b, err := os.ReadFile(notes)
 	if !s.ok(err == nil, "docs/release-notes/"+r.cfg.version+".md exists at the candidate", "%v", err) {
