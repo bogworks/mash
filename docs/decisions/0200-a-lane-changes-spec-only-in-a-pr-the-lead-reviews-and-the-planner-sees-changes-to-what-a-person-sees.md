@@ -53,18 +53,18 @@ maintainer ruled that clause himself, this amendment goes to him.
 * Good, because a change to what a person sees still reaches the planner before it merges.
 * Bad, because the line between "behaviour" and "records what the program does" is a judgement the lead makes. <!-- adrlint:allow vocabulary -->
 
-### Pros and Cons of the Options
-
-* Keep the planner as the only editor: every change is checked, but one person is the bottleneck, and practice has
-  already moved past it.
-* Any lane, with the lead's review, and the diff to the planner on behaviour changes: two checks where they matter, and
-  no single editor.
-* No further rule: fastest, and what a person sees can change unchecked.
-
 ### Confirmation
 
 The `decision-confirmed` label on a pull request that touches `spec/` shows rule 1. Rule 2 shows in the pull request's
 record that the planner got the diff.
+
+## Pros and Cons of the Options
+
+* Keep the planner as the only editor: every change is checked, but one person is the bottleneck, and practice has
+  already moved past it.
+* Any lane, with the lead's review, and the diff to the planner on behaviour changes: two checks where they matter, and <!-- adrlint:allow vocabulary -->
+  no single editor.
+* No further rule: fastest, and what a person sees can change unchecked.
 
 ## More Information
 
