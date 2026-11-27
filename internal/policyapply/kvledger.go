@@ -46,7 +46,7 @@ type StatusReader interface {
 	LatestStatus(ctx context.Context) (st Status, ok bool, err error)
 }
 
-// RefusalWriter is what the apply intake needs to record a refusal it makes before Apply. KVLedger implements it.
+// RefusalWriter is what a caller of Apply needs to record a refusal it makes before Apply. KVLedger implements it.
 type RefusalWriter interface {
 	WriteRefusal(ctx context.Context, st Status) error
 }
@@ -613,7 +613,7 @@ func (l *KVLedger) LatestStatus(ctx context.Context) (Status, bool, error) {
 	return *v.Status, true, nil
 }
 
-// WriteRefusal stores st as the latest status for a refusal the intake makes before Apply (a bad signature, an
+// WriteRefusal stores st as the latest status for a refusal the caller makes before Apply (a bad signature, an
 // account or owner mismatch, an unknown schema). It takes the ledger's lease, as
 // a run does (waiting for another holder until ctx is done), writes st with the fenced WriteStatus and releases the
 // lease. st.State must be StateRefused and st must carry at least one refusal, else ErrNotRefusal and nothing is

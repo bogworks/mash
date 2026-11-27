@@ -17,7 +17,7 @@ var ErrBadGeneration = errors.New("the generation is not the base generation plu
 // the previous Compiled cannot be built. That is a ledger written before list sets were stored; Apply never guesses.
 var ErrNoInForceListSet = errors.New("the ledger holds no list set for the generation in force")
 
-// ApplyRequest is one submission as the intake has decoded it.
+// ApplyRequest is one submission as its caller has decoded it.
 type ApplyRequest struct {
 	// ListSet is the decoded document.
 	ListSet listset.ListSet
@@ -64,7 +64,7 @@ type ApplyDeps struct {
 	PlainSigners []string
 	// RequiredPlainSigners must be present and unscoped in the account JWT (Candidate.RequiredPlain).
 	RequiredPlainSigners []string
-	// ServerLimits are the servers' limits. Apply does not use them: the intake checks sizes with listset.SizeCheck
+	// ServerLimits are the servers' limits. Apply does not use them: the caller checks sizes with listset.SizeCheck
 	// before it calls Apply, and Run refuses a JWT over policy.AccountJWTLimit.
 	ServerLimits []listset.ServerLimits
 	// Provisioner, if set, provisions new addresses inside the run (RunOrdered); if nil, Run is used.
@@ -90,9 +90,9 @@ type ApplyDeps struct {
 	Now func() time.Time
 }
 
-// Apply is Run for the intake: it takes what the document states and reads the rest from the ledger.
+// Apply is Run for a caller that has a document: it takes what the document states and reads the rest from the ledger.
 //
-// A replay of the document in force is refused like any stale base: the intake that calls Apply skips a replayed
+// A replay of the document in force is refused like any stale base: the caller of Apply skips a replayed
 // document itself.
 //
 // It first checks, before anything else is pushed, that req.BaseGeneration is the generation in force in the ledger
