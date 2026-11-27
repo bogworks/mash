@@ -503,7 +503,7 @@ publishing, and it does not run `release-check`. It must be green on `main` befo
     gh attestation verify <file> -R bogworks/mash --signer-workflow bogworks/mash/.github/workflows/release.yml \
       --source-ref refs/tags/v0.6.1 --source-digest <X>
 
-The first command prints `Good "git" signature` when the tag was signed by a key in `docs/allowed_signers`; the key for v0.6.1 and later is the one with fingerprint `SHA256:AtXzPvoOLeTfX05xeum8jJl6fvlmIB+BIFlun7qhQzA`. `<X>` is the commit the tag points to (`git rev-parse v0.6.1^{commit}`). Tags before v0.6.1 are not signed.
+The first command prints `Good "git" signature` when the tag was signed by a key in `docs/allowed_signers`; the key for v0.6.1 and later is the one with fingerprint `SHA256:AtXzPvoOLeTfX05xeum8jJl6fvlmIB+BIFlun7qhQzA`. `<X>` is the commit the tag points to (`git rev-parse v0.6.1^{commit}`). Tags from v0.4.0 to v0.6.0 are not signed; v0.3.x and older were signed with the earlier key.
 
 These commands apply to releases from 0.3.2 on. 0.3.1 and older have no SBOM and no `mash.intoto.jsonl`, and 0.3.1 is the
 first release with build provenance. Download the assets of `v<version>` into one directory (for example
