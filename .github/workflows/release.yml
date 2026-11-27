@@ -430,8 +430,8 @@ jobs:
           retention-days: 1
   sbom:
     # One CycloneDX 1.5 SBOM per binary, made from the built binary itself (its embedded module list), so it describes
-    # exactly the bytes a consumer downloads. The tool is the runners' pinned copy at /opt/ci-tools/bin, checked for v1.9.0
-    # before use (no go install, no fallback); the job reads and uploads, nothing else.
+    # exactly the bytes a consumer downloads. The tool is the runners' pinned copy at /opt/ci-tools/bin, checked for its sha256 and
+    # for v1.9.0 before use (no go install, no fallback); the job reads and uploads, nothing else.
     needs: build
     if: ${{ !cancelled() && needs.build.result == 'success' }} # explicit: see build
     timeout-minutes: 15
@@ -467,10 +467,19 @@ jobs:
           GOARCH_T: ${{ matrix.goarch }}
           CDX: /opt/ci-tools/bin/cyclonedx-gomod
           CDX_WANT: v1.9.0
+          CDX_SHA256: 64440820e5d881ec20bc7b9937fdc9bd67d15ba4637b2e7959a8f31dd12c5b21
         run: |
           set -euo pipefail
           if [ ! -x "$CDX" ]; then
             echo "::error::cyclonedx-gomod is not installed at $CDX on this runner; the runners carry it pinned at $CDX_WANT, ask operations to install it. This workflow does not fall back to go install."
+            exit 1
+          fi
+          if ! got="$(sha256sum "$CDX" | cut -d' ' -f1)"; then
+            echo "::error::could not compute the sha256 of $CDX; ask operations to correct the runner. This workflow does not fall back to go install."
+            exit 1
+          fi
+          if [ "$got" != "$CDX_SHA256" ]; then
+            echo "::error::cyclonedx-gomod at $CDX has sha256 $got, but this workflow wants exactly $CDX_SHA256 (the vendor's v1.9.0 linux amd64 binary); ask operations to correct the runner. This workflow does not fall back to go install."
             exit 1
           fi
           if ! out="$("$CDX" version 2>&1)"; then
