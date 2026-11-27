@@ -14,9 +14,9 @@ import (
 	"github.com/bogworks/mash/internal/release"
 )
 
-// The unlinked step (standing order 16): no policy-engine package is linked into the released programs. internal/policy,
-// the size constants, is allowed; every other package of the engine is refused wherever it appears in the dependencies
-// of cmd/mash or cmd/mashctl. The same step refuses the synadia-agents.go caller and host packages (not linked before
+// The unlinked step (no policy before 0.6.0): no policy-engine package is linked into the released programs.
+// internal/policy, the size constants, is allowed; every other package of the engine is refused wherever it appears in
+// the dependencies of cmd/mash or cmd/mashctl. The same step refuses the synadia-agents.go caller and host packages (not linked before
 // S5). internal/sapsdk and the SDK identity package are refused too, in every candidate below 0.6.0 (REQ-009): they
 // are allowed only from the switch-on release, 0.6.0 or later. The SDK root package is always allowed.
 
@@ -220,7 +220,7 @@ func policyUnlinkedStep(ctx context.Context, o Options, x string) error {
 		links = append(links, targetLinks{t.GOOS + "/" + t.GOARCH, linkedPolicyPackages(module, o.Version, out)})
 	}
 	if s := describeLinked(links); s != "" {
-		return fmt.Errorf("refused packages are linked into the released programs (standing order 16): %s; %s", s, describeReasons(links))
+		return fmt.Errorf("refused packages are linked into the released programs (policy is not switched on before 0.6.0): %s; %s", s, describeReasons(links))
 	}
 	return nil
 }

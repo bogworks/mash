@@ -91,7 +91,7 @@ jobs:
           scripts/draft-guard "$GITHUB_REF_NAME" "$RUNNER_TEMP/releases.json"
   test-macos:
     name: test (macos)
-    # Runs on every v* tag (rule 21: macOS only on tagged releases), in parallel with build. ADVISORY (ADR 0079): not in release.RequiredChecks and no
+    # Runs on every v* tag (macOS runs only on tagged releases), in parallel with build. ADVISORY (ADR 0079): not in release.RequiredChecks and no
     # job needs it, so a macOS runner outage never blocks a tag; its result is on the tag's run. Not on a workflow_dispatch dry run: with the Mac
     # runner offline the job would queue for up to 24 h and the next dry run would wait behind it (concurrency release-<ref>, no cancel).
     if: ${{ github.event_name == 'push' }}
@@ -245,13 +245,13 @@ jobs:
           # runs from it. None means the first release.
           gh release list --limit 200 --json tagName,isDraft,isPrerelease > "$RUNNER_TEMP/releases.json"
           prev="$(scripts/notes-base "$GITHUB_REF_NAME" "$commit" "$RUNNER_TEMP/releases.json")"
-          # The release page is built from the release notes (release standard rule 23, ADR 0105 below it): for 0.5.7 and later
+          # The release page is built from the release notes (ADR 0105 below it): for 0.5.7 and later
           # the text of docs/release-notes/<version>.md, which shares its Summary and Upgrading with the change log entry, and
           # for earlier versions the change log section, the same text (ADR 0105). Prose first, then the lists, never raw commit
           # subjects. `release-page` fails when the version has no notes file (or, below 0.5.7, no section), and `check-notes`
           # (internal/releasenotes, the test the release gate applies too) fails when the notes do not open with a Summary and an
           # Upgrading section, still hold the REPLACE THIS placeholder, or end a line in a commit hash. From 0.5.7 `check-entry`
-          # also holds the change log entry to the rubric of rule 23. All run before the draft exists. The compare link is the
+          # also holds the change log entry to the change-log rubric. All run before the draft exists. The compare link is the
           # last paragraph; the first release has no previous one.
           version="${GITHUB_REF_NAME#v}"
           go run ./scripts/changelog release-page --version "$version" > dist/RELEASE-NOTES.md
@@ -583,7 +583,7 @@ jobs:
             fi
           done
   dry-run-notes:
-    # The dry run's proof of the release-notes path (ADR 0105, rule 23): the draft job builds the notes only on a tag push, so a
+    # The dry run's proof of the release-notes path (ADR 0105, the release notes file): the draft job builds the notes only on a tag push, so a
     # change to `scripts/changelog release-page`, `check-entry`, `check-notes` or the compare line would otherwise first run at
     # a real release. This job runs the same commands on the latest released version (its release notes file from 0.5.7, its
     # change log section before), in $RUNNER_TEMP: no dist, no draft, no release, no token.

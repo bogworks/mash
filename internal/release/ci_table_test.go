@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// ci_table_test pins docs/ci-table.md (rule 21, ADR 0160): for each job the table names, the events the workflow runs it on, read from the workflow's
+// ci_table_test pins docs/ci-table.md (ADR 0160): for each job the table names, the events the workflow runs it on, read from the workflow's
 // triggers and the job's if, must equal the table's. A job's if that this file does not understand fails the test, so a new condition cannot slip past the table.
 
 // eventsOf returns the sorted events a job of file runs on.
@@ -112,7 +112,7 @@ func TestCITable_matchesTheWorkflows(t *testing.T) {
 	// the rule itself: no macOS and no eph job per change
 	for jn := range load(t, "ci.yml").Jobs {
 		if strings.Contains(jn, "macos") || strings.Contains(jn, "eph") {
-			t.Errorf("ci.yml job %s: macOS and eph never run per change (rule 21)", jn)
+			t.Errorf("ci.yml job %s: macOS and eph never run per change", jn)
 		}
 	}
 	if !strings.Contains(string(b), "macOS runs on tagged releases only") {

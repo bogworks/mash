@@ -74,7 +74,7 @@ func TestDocsOnly_heavyJobsSkipOnTheChangesOutput(t *testing.T) {
 	if got := load(t, "ci.yml").Jobs["reproducible"].If; got != reproIf {
 		t.Errorf("ci.yml/reproducible if = %q, want %q", got, reproIf)
 	}
-	// Rule 21: no macOS or eph leg runs per change; they live in release.yml (tag) and nightly.yml (schedule on main).
+	// The macOS and eph legs never run per change; they live in release.yml (tag) and nightly.yml (schedule on main).
 	for _, jn := range []string{"test-eph", "test-macos"} {
 		if _, ok := load(t, "ci.yml").Jobs[jn]; ok {
 			t.Errorf("ci.yml has job %s: macOS runs on tags only (release.yml) and eph nightly (nightly.yml), never per change", jn)

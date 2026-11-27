@@ -45,8 +45,7 @@ the publish edit (`--draft=false --latest`), so the publish step is bound to wha
 signs nothing. Publish only with `scripts/release-check publish`; a bare `gh release edit` is not used.
 
 **Releases are published as Latest: no `--not-latest`.** `install.sh` and the one-line install
-commands download from `releases/latest/download`, so a release that is not Latest is not what they install. `release-check publish` passes `--latest` and checks the read-back itself; rerunning it re-verifies. A tag never moves (rule 25 of the release
-standard): once the release is published, its page text may still be corrected with `gh release edit`, but the tag and the
+commands download from `releases/latest/download`, so a release that is not Latest is not what they install. `release-check publish` passes `--latest` and checks the read-back itself; rerunning it re-verifies. A tag never moves: once the release is published, its page text may still be corrected with `gh release edit`, but the tag and the
 assets are not changed.
 
 ### What a keyless release does not prove
@@ -209,7 +208,7 @@ The numbered steps are what the command does in each state, and the manual path 
 
 ### Two documents for a release
 
-From 0.5.7 a release has two documents with two jobs (rule 23 of the release standard), and the release page is built
+From 0.5.7 a release has two documents with two jobs, and the release page is built
 from `docs/release-notes/<version>.md`, not from the change log. 0.5.6 and earlier used the change-log section as the page
 ([ADR 0105](decisions/0105-a-releases-notes-are-its-change-log-section-and-open-with-a-summary-and-an-upgrading-section-and-the-release-gate-refuses-one-that-does-not.md)).
 

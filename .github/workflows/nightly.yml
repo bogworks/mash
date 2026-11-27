@@ -1,5 +1,5 @@
 name: nightly
-# Nightly on main (rule 21): test (linux, eph), the ephemeral one-job runner pilot (ADR 0123), moved off the per-change path. It gates nothing:
+# Nightly on main (the eph leg never runs per change): test (linux, eph), the ephemeral one-job runner pilot (ADR 0123), moved off the per-change path. It gates nothing:
 # not in pr-check, not in release.RequiredChecks, not in .mergify.yml. It keeps the pilot's comparison with rh-linux at once a day.
 # No fallback and no hosted label: with no such runner online the run waits. docs/ci-table.md is the one table.
 on:

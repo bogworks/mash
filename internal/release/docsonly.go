@@ -8,14 +8,14 @@ import (
 )
 
 // IsDocsPath reports whether a repository path is documentation: any *.md file, or any path under docs/ except the four data files
-// the release tooling reads (rule 20, 0.8.1). It is
+// the release tooling reads. It is
 // scripts/ci-changes' is_docs, ported; docsonly_test.go runs both over the same table so they cannot drift. Everything
 // else is code: the default is code, so a new top-level path is code.
 func IsDocsPath(p string) bool {
 	p = strings.TrimSpace(p)
 	switch p {
 	case "docs/allowed_signers", "docs/review/policy.json", "docs/skipped-releases.txt", "docs/release-cutover":
-		return false // data the release tooling, a build or a test reads (dev-process 0.8.1 rule 20)
+		return false // data the release tooling, a build or a test reads (a docs-only change excludes them)
 	}
 	return strings.HasSuffix(p, ".md") || strings.HasPrefix(p, "docs/")
 }

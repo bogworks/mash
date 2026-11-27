@@ -2,7 +2,7 @@ name: ci
 # A push to main skips the heavy jobs when the paths it added are docs-only (scripts/ci-changes; the merge queue's fast-forward of
 # a docs-only batch is one): the release gate (internal/release CheckCIWalk) judges such a head by the newest commit below
 # it whose tests ran, provided every commit between is docs-only. Every job runs on a
-# self-hosted runner picked by literal labels: [self-hosted, rh-linux] or [self-hosted, rh-gate] (ADR 0079; the macOS leg runs in release.yml on tags, the eph pilot in nightly.yml, rule 21 and ADR 0160). A pull
+# self-hosted runner picked by literal labels: [self-hosted, rh-linux] or [self-hosted, rh-gate] (ADR 0079; the macOS leg runs in release.yml on tags, the eph pilot in nightly.yml; they never run per change, ADR 0160). A pull
 # request from a fork runs on them too; the repository holds an outside contributor's run for a person's approval. Every pull request runs, so it always gets the pr-check that its review waits for (scripts/review-pr); a docs-only one skips the heavy jobs (test, reproducible, conformance) at job level, so every check name still reports, and runs the cheap ones (changes, adr-numbers, pr-check). The review watcher waits only on pr-check, so conformance, which gates nothing, is skipped on docs-only too. What counts as docs-only is in scripts/ci-changes; docs/branch-protection.md states the rule. Neither a macOS nor an eph job runs here (rule 21, ADR 0160): macOS runs on tagged releases in release.yml, the eph pilot nightly on main in nightly.yml; docs/ci-table.md is the table.
 on:
   push:
@@ -102,7 +102,7 @@ jobs:
       - uses: ./.github/actions/go-test
         with:
           forbidden-words: ${{ vars.MASH_FORBIDDEN_WORDS }}
-  # Rule 21 (dev-process 0.8.x): test (macos) runs on tagged releases only (release.yml) and test (linux, eph) nightly on main
+  # The macOS and eph legs never run per change: test (macos) runs on tagged releases only (release.yml) and test (linux, eph) nightly on main
   # (nightly.yml); neither runs per change. docs/ci-table.md is the one table, pinned by internal/release/ci_table_test.go.
   # The release gate (scripts/release-check, release.RequiredChecks) requires a check run named exactly "reproducible"
   # on the candidate, so the name is explicit and the job is not matrixed. The candidate is a commit on main, which a push

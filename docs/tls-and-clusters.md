@@ -216,7 +216,7 @@ An endpoint's `servers` may list the servers the same way. An inbox lives on one
 
 ## 3. A second mashctl machine
 
-### How it signs (DEC-004)
+### How it signs
 
 The second machine signs as the first does. It holds the same operator signing seed and the same account identity seed. It does not get its own signing key: mashctl refuses a signing key in the account JWT that it did not make ([ADR 0059](decisions/0059-mashctl-checks-who-issued-the-account-jwt-carries-only-its-own-signing-keys-and-requires-tls-for-admin-connections.md)), so a machine with a key of its own is not supported.
 

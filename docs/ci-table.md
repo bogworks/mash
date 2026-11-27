@@ -1,4 +1,4 @@
-# The CI table: which job runs on which event (rule 21)
+# The CI table: which job runs on which event (macOS and eph never run per change)
 
 One table, pinned by `internal/release/ci_table_test.go`: the test reads `.github/workflows/ci.yml`, `release.yml` and `nightly.yml`, works out the events each job runs on from the workflow's triggers and the job's `if`, and fails when the result differs from this table (ADR 0160). To change what runs when, change the workflow and this table in the same pull request.
 
