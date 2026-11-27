@@ -83,6 +83,10 @@ const MaxPromptBytes = 32 << 10
 // "prompt_too_large:".
 const PromptTooLargeCode = "413"
 
+// promptPredatesStart is the 401 text for a prompt signed before this endpoint started: the nonce set is in memory, so
+// such a prompt could be a replay of one an earlier process answered (#1829).
+const promptPredatesStart = "this endpoint restarted after the prompt was signed: send the prompt again"
+
 // promptTooLarge is the error description a caller gets for a prompt over MaxPromptBytes.
 var promptTooLarge = fmt.Sprintf("prompt_too_large: a live prompt is at most %d bytes; send the longer text as mail", MaxPromptBytes)
 
@@ -124,12 +128,13 @@ func (e *Endpoint) send(p *openPrompt, data []byte, final bool, code, desc strin
 }
 
 type service struct {
-	svc      micro.Service
-	mu       sync.Mutex
-	prompts  map[string]*openPrompt
-	nonces   sapsdk.NonceSet
-	quit     chan struct{} // closed by stop: ends the heartbeat
-	stopOnce sync.Once
+	svc       micro.Service
+	mu        sync.Mutex
+	prompts   map[string]*openPrompt
+	nonces    sapsdk.NonceSet
+	startedAt time.Time     // a prompt signed before this cannot have been seen by this service's nonce set (#1829)
+	quit      chan struct{} // closed by stop: ends the heartbeat
+	stopOnce  sync.Once
 }
 
 // stop deregisters the SAP service and ends the heartbeat. Idempotent.
@@ -256,7 +261,7 @@ func (e *Endpoint) StartService(ctx context.Context, onPrompt func(PromptEvent))
 	if err != nil {
 		return err
 	}
-	s := &service{prompts: map[string]*openPrompt{}, nonces: sapsdk.NewNonceSet(2 * sapsdk.LiveSkew), quit: make(chan struct{})}
+	s := &service{prompts: map[string]*openPrompt{}, nonces: sapsdk.NewNonceSet(2 * sapsdk.LiveSkew), startedAt: time.Now(), quit: make(chan struct{})}
 	svc, err := micro.AddService(e.nc, micro.Config{
 		Name:        sap.ServiceName,
 		Version:     CurrentVersion(),
@@ -379,6 +384,11 @@ func (e *Endpoint) handlePrompt(r micro.Request, s *service, onPrompt func(Promp
 		return
 	}
 	h := res.Header
+	// ts has second resolution, so a prompt signed in the second the service started is not stale.
+	if ts, err := time.Parse(time.RFC3339Nano, h.TS); err != nil || ts.Before(s.startedAt.Truncate(time.Second)) {
+		e.end(reply, "401", promptPredatesStart)
+		return
+	}
 	e.mu.RLock()
 	from := e.byUser[h.User]
 	e.mu.RUnlock()
