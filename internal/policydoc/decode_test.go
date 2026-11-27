@@ -68,6 +68,14 @@ func TestDecodeRefusesNextSubmitter(t *testing.T) {
 	}
 }
 
+// An unknown field is refused, and the refusal names it.
+func TestDecodeRefusesAnUnknownField(t *testing.T) {
+	_, err := Decode(doc(7, 6, func(m map[string]any) { m["extra_field"] = "UABC" }), DecodeOptions{})
+	if !errors.Is(err, ErrBadDocument) || !strings.Contains(err.Error(), "extra_field") {
+		t.Fatalf("extra_field: %v", err)
+	}
+}
+
 func TestDecodeRefusals(t *testing.T) {
 	cases := map[string][]byte{
 		"unknown field":       doc(7, 6, func(m map[string]any) { m["extra"] = 1 }),

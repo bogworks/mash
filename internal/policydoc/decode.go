@@ -71,7 +71,7 @@ func bad(format string, a ...any) error {
 	return fmt.Errorf("%w: %s", ErrBadDocument, fmt.Sprintf(format, a...))
 }
 
-// Decode decodes b, a plain JSON document. Any unknown field, including next_submitter, is refused; so is input that
+// Decode decodes b, a plain JSON document. Any unknown field is refused; so is input that
 // is not a JSON object (a compact JWS, for one).
 func Decode(b []byte, _ DecodeOptions) (Document, error) {
 	trimmed := bytes.TrimSpace(b)
