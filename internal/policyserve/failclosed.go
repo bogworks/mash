@@ -160,7 +160,7 @@ func (p Provisioner) IssueCredential(_ context.Context, address string) error {
 	return nil
 }
 
-// cutLast splits "range.owner.name" into "range.owner" and "name".
+// cutLast splits "owner.group.instance" into "owner.group" and "instance".
 func cutLast(address string) (group, name string, ok bool) {
 	i := strings.LastIndex(address, ".")
 	if i < 0 {
