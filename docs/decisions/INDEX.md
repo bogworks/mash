@@ -176,3 +176,4 @@
 | [0198](0198-a-prompt-signed-before-the-service-started-is-refused-and-the-replay-limit-that-remains-is-named.md) | A prompt signed before the service started is refused, and the replay limit that remains is named | accepted | 2026-11-27 |
 | [0199](0199-from-signed-from-a-release-tag-is-signed-with-the-mash-release-key-and-the-attestations-stay.md) | From the signed-from version a release tag is signed with the mash-release key; the attestations stay | accepted | 2026-11-27 |
 | [0200](0200-a-contributor-changes-spec-only-in-a-pr-the-lead-reviews-and-the-planner-sees-changes-to-what-a-person-sees.md) | A contributor changes spec/ only in a PR the lead reviews, and the planner sees changes to what a person sees <!-- adrlint:allow vocabulary --> | accepted | 2026-11-27 |
+| [0201](0201-each-plugin-pin-gets-a-signed-plugin-v-version-pin-n-tag.md) | Each plugin pin gets a signed `plugin-v<version>-pin.<n>` tag | accepted | 2026-11-27 |

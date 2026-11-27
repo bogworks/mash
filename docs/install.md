@@ -89,7 +89,7 @@ claude plugin marketplace add bogworks/mash
 claude plugin install mash@mash
 ```
 
-Add the marketplace from the default branch, as above, and not at a release tag: the plugin at a tag still pins the previous release (at v0.6.1 it runs mash 0.6.0), because each release's pin lands after its tag.
+To pin the plugin, add the marketplace at its pin tag: `claude plugin marketplace add bogworks/mash#plugin-v0.6.1-pin.1`. Pin tags start from 0.6.1's pin. Otherwise use the default branch, as above. Do not add it at a release tag such as v0.6.1: the plugin at a release tag still pins the previous release, because each release's pin lands after its tag.
 
 The plugin declares an MCP server, `mash serve` (started through the plugin's launcher script, with `MASH_SPOOL_FROM_START=1`), a SessionStart hook that prefetches the pinned binary, and two hooks, PostToolUse and UserPromptSubmit, which run `mash hook`. Mail reaches the session through those hooks, as "mash mail" context; see [Hook delivery](operations.md). A session without a mash identity (no `MASH_ENDPOINT`) gets an inert server with only the `version`, `status` and `doctor` tools, so it is safe to install for every session.
 
