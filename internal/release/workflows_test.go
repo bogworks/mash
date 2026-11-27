@@ -1865,8 +1865,13 @@ func TestADRLint_runsTheBaseBranchsCheckerOnThePullRequestsTree(t *testing.T) {
 	}
 }
 
-// cyclonedxGomod is the SBOM tool and the one version the release builds with.
-const cyclonedxGomod = "github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.9.0"
+// cyclonedxGomod is the runners' pinned SBOM tool, and cyclonedxGomodVersion the one version the release accepts.
+const (
+	cyclonedxGomod        = "/opt/ci-tools/bin/cyclonedx-gomod"
+	cyclonedxGomodVersion = "v1.9.0"
+	// cyclonedxGomodSHA256 is the vendor's v1.9.0 linux amd64 binary.
+	cyclonedxGomodSHA256 = "64440820e5d881ec20bc7b9937fdc9bd67d15ba4637b2e7959a8f31dd12c5b21"
+)
 
 func matrixTargets(t *testing.T, j job) []string {
 	t.Helper()
@@ -1900,14 +1905,49 @@ func TestRelease_sbomJobMakesAPinnedCycloneDXSBOMPerBinary(t *testing.T) {
 	}
 	var run string
 	var uploads []string
+	var sbomEnv map[string]string
 	for _, st := range j.Steps {
 		run += st.Run + "\n"
+		if strings.Contains(st.Run, `"$CDX" bin `) {
+			sbomEnv = st.Env
+		}
+		if strings.HasPrefix(st.Uses, "actions/setup-go@") {
+			t.Errorf("the sbom job has a setup-go step; it uses the runners' pinned tool and builds nothing")
+		}
 		if strings.HasPrefix(st.Uses, "actions/upload-artifact@") {
 			uploads = append(uploads, fmt.Sprint(st.With["name"], " ", st.With["path"]))
 		}
 	}
-	if strings.Count(run, "cyclonedx-gomod/cmd/cyclonedx-gomod@") != 1 || !strings.Contains(run, "go install "+cyclonedxGomod) {
-		t.Errorf("the SBOM tool is not installed at exactly %s:\n%s", cyclonedxGomod, run)
+	if sbomEnv["CDX"] != cyclonedxGomod || sbomEnv["CDX_WANT"] != cyclonedxGomodVersion {
+		t.Errorf("the SBOM step env has CDX=%q CDX_WANT=%q, want %q and %q", sbomEnv["CDX"], sbomEnv["CDX_WANT"], cyclonedxGomod, cyclonedxGomodVersion)
+	}
+	if sbomEnv["CDX_SHA256"] != cyclonedxGomodSHA256 {
+		t.Errorf("the SBOM step env has CDX_SHA256=%q, want %q", sbomEnv["CDX_SHA256"], cyclonedxGomodSHA256)
+	}
+	// The ::error:: messages may say the workflow does not fall back to go install; no other line may run it.
+	for _, line := range strings.Split(run, "\n") {
+		if strings.Contains(line, "::error::") {
+			continue
+		}
+		for _, bad := range []string{"go install", "cyclonedx-gomod@"} {
+			if strings.Contains(line, bad) {
+				t.Errorf("the SBOM step runs %q; the tool is the runners' pinned copy, never installed here:\n%s", bad, run)
+			}
+		}
+	}
+	if strings.Contains(run, "cyclonedx-gomod@") {
+		t.Errorf("the SBOM step names a versioned module path:\n%s", run)
+	}
+	for _, must := range []string{
+		"[ ! -x \"$CDX\" ]", `sha256sum "$CDX"`, `[ "$got" != "$CDX_SHA256" ]`, "\"$CDX\" version", "\"$CDX_WANT\"", "\"$CDX\" bin ",
+	} {
+		if !strings.Contains(run, must) {
+			t.Errorf("the SBOM step lacks %q:\n%s", must, run)
+		}
+	}
+	// Each guard ends in exit 1: a missing tool, a wrong digest and a wrong version each stop the job.
+	if !regexp.MustCompile(`(?s)\[ ! -x "\$CDX" \].*?exit 1.*?sha256sum "\$CDX".*?"\$CDX_SHA256".*?exit 1.*?"\$CDX" version.*?"\$CDX_WANT".*?exit 1.*?"\$CDX" bin `).MatchString(run) {
+		t.Errorf("the SBOM step must check the tool is executable, its sha256 and its version, each exiting 1, before running it:\n%s", run)
 	}
 	for _, must := range []string{" bin ", "-json", "-output-version 1.5", `"dist/$name.cdx.json" "dist/$name"`, "set -euo pipefail"} {
 		if !strings.Contains(run, must) {
