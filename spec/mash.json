@@ -1347,14 +1347,14 @@
         "stream": "stdout",
         "exit": 1,
         "text": "config       ok\nclaude       skip  no claude command found\ncreds        ok\nserver       ok    tls://myserver:4222\nsign-in      ok\ndelivery     FAIL  cannot write ~/.local/state/mash/spool/acme/acme.demo.bob\nstored mail  skip  not checked: ~/.local/state/mash/spool/acme/acme.demo.bob is not writable\nrefused      ok    no mail was refused\n\n1 problem.",
-        "note": "Applies when MASH_SPOOL_FROM_START (the plugin sets it) or MASH_SPOOL_REQUIRED is set, in the environment or in config.json: then mail waits for the spool, and a shell cannot see the session, so it goes by these settings. The stored mail row follows, as in a session, because the first start's check cannot run there. A shell has no session record to read, so it asks the system, without writing anything, whether the folder could be created: a file or a link that points nowhere in the way of the path counts as a folder that cannot be created. With neither setting, mail stays on the channel and is delivered, and the row is skipped as at any shell. The row is the one a session shows, with no hint."
+        "note": "Applies when MASH_SPOOL_FROM_START (the plugin sets it) or MASH_SPOOL_REQUIRED is set, in the environment or in config.json: then mail waits for the spool, and a shell cannot see the session, so it goes by these settings. The stored mail row follows, as in a session, because the first start's check cannot run there. A shell has no session record to read, so it asks the system, without writing anything, whether the folder could be created: a file or a link that points nowhere in the way of the path counts as a folder that cannot be created. With neither setting, mail stays on the channel and is delivered, and a shell warns instead: see the case below for a shell with no spool setting visible."
        },
        {
         "case": "At a shell, when the state folder cannot be created and no spool setting is visible",
         "issue": "#1907",
         "stream": "stdout",
         "exit": 0,
-        "text": "config       ok\nclaude       skip  no claude command found\ncreds        ok\nserver       ok    tls://myserver:4222\nsign-in      ok\ndelivery     warn  cannot write\n                   ~/.local/state/mash/spool/acme/acme.demo.bob\n                   a session may hold mail\nstored mail  skip  not checked: ~/.local/state/mash/spool/acme/acme.demo.bob is not writable\nrefused      ok    no mail was refused\n\n1 warning.",
+        "text": "config       ok\nclaude       skip  no claude command found\ncreds        ok\nserver       ok    tls://myserver:4222\nsign-in      ok\ndelivery     warn  cannot write\n                   ~/.local/state/mash/spool/acme/acme.demo.bob\n                   plugin sessions get no mail until fixed\nstored mail  skip  not checked: ~/.local/state/mash/spool/acme/acme.demo.bob is not writable\nrefused      ok    no mail was refused\n\n1 warning.",
         "note": "Mail stays on the channel and is delivered unless a session sets MASH_SPOOL_FROM_START (the plugin does); the shell cannot see the session's settings, so it warns instead of failing. Status is unaffected: it stays ready."
        },
        {

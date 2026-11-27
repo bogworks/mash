@@ -124,7 +124,9 @@ func TestShellDoctorWarnsOfAStateFolderThatCannotBeCreatedWhenNoSettingIsVisible
 	t.Setenv("HOME", w.env["a"]["HOME"])
 	t.Run("writable folder keeps the skip row", func(t *testing.T) {
 		out, code := w.cli(t, "a", "doctor")
-		if code != 0 || strings.Contains(out, cmds.CannotWrite) || !strings.Contains(out, "delivery     skip  checked only inside a Claude Code session") && !strings.Contains(out, "delivery  skip  checked only inside a Claude Code session") {
+		hasSkipRow := strings.Contains(out, "delivery     skip  checked only inside a Claude Code session") ||
+			strings.Contains(out, "delivery  skip  checked only inside a Claude Code session")
+		if code != 0 || strings.Contains(out, cmds.CannotWrite) || !hasSkipRow {
 			t.Errorf("doctor %d:\n%s", code, out)
 		}
 	})
