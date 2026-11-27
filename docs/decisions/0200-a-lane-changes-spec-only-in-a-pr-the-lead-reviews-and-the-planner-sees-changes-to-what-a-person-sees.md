@@ -4,7 +4,7 @@ date: 2026-11-27
 decision-makers: the planner (a planner ruling of 2026-11-27, which Randy Bias, the mash maintainer, may overturn)
 ---
 
-# A lane changes spec/ only in a PR the lead reviews, and the planner sees changes to what a person sees
+# A lane changes spec/ only in a PR the lead reviews, and the planner sees changes to what a person sees <!-- adrlint:allow vocabulary -->
 
 Amends: ADR-0147
 
@@ -14,7 +14,7 @@ Amends: ADR-0147
 says the files in `spec/` "are kept in the repository unchanged from the planner's copy; the planner is their only
 editor and nothing else goes in `spec/`". That clause was the planner's own arrangement to protect the specification the
 maintainer ratified on 2026-11-20. As far as the planner can find, it is not the maintainer's words. It became a
-bottleneck, and practice had already left it behind: #1851, #1930 and #1944 were lane edits to `spec/` that the lead
+bottleneck, and practice had already left it behind: #1851, #1930 and #1944 were lane edits to `spec/` that the lead <!-- adrlint:allow vocabulary -->
 reviewed.
 
 How is `spec/` edited so that the review is real, and what a person sees still matches the ratified specification?
@@ -28,16 +28,16 @@ How is `spec/` edited so that the review is real, and what a person sees still m
 ## Considered Options
 
 * Keep the planner as the only editor of `spec/`.
-* Let any lane change `spec/` in a pull request the lead reviews, and send the planner the diff when behaviour changes.
-* Let any lane change `spec/` with no further rule.
+* Let any lane change `spec/` in a pull request the lead reviews, and send the planner the diff when behaviour changes. <!-- adrlint:allow vocabulary -->
+* Let any lane change `spec/` with no further rule. <!-- adrlint:allow vocabulary -->
 
 ## Decision Outcome
 
-Chosen option: "Let any lane change `spec/` in a pull request the lead reviews, and send the planner the diff when
+Chosen option: "Let any lane change `spec/` in a pull request the lead reviews, and send the planner the diff when <!-- adrlint:allow vocabulary -->
 behaviour changes", because it keeps one reviewer on every change and one more on the changes that matter, and it
 describes what already happens.
 
-1. A lane changes `spec/` only in a pull request that the lead reviews and labels `decision-confirmed`.
+1. A lane changes `spec/` only in a pull request that the lead reviews and labels `decision-confirmed`. <!-- adrlint:allow vocabulary -->
 2. The planner gets the `spec/` diff before merge for any change of command behaviour: a command, flag, output line,
    exit code or error text that a person sees.
 3. A change that only records what the program already does, or a version string, needs no diff to the planner.
@@ -51,9 +51,21 @@ maintainer ruled that clause himself, this amendment goes to him.
 
 * Good, because the review of `spec/` no longer waits on one person.
 * Good, because a change to what a person sees still reaches the planner before it merges.
-* Bad, because the line between "behaviour" and "records what the program does" is a judgement the lead makes.
+* Bad, because the line between "behaviour" and "records what the program does" is a judgement the lead makes. <!-- adrlint:allow vocabulary -->
+
+### Pros and Cons of the Options
+
+* Keep the planner as the only editor: every change is checked, but one person is the bottleneck, and practice has
+  already moved past it.
+* Any lane, with the lead's review, and the diff to the planner on behaviour changes: two checks where they matter, and
+  no single editor.
+* No further rule: fastest, and what a person sees can change unchecked.
 
 ### Confirmation
 
 The `decision-confirmed` label on a pull request that touches `spec/` shows rule 1. Rule 2 shows in the pull request's
 record that the planner got the diff.
+
+## More Information
+
+Amends the editor clause of [ADR 0147](0147-the-0-5-6-command-line-and-mcp-surface-is-built-from-a-specification-that-supersedes-contract-revision-26.md) only.
