@@ -291,7 +291,7 @@ func TestConfiguredSigningKeyIsKnown(t *testing.T) {
 }
 
 // groupSignerSetup registers an owner group signer in the key store and publishes it in the resolver's JWT as a
-// scoped signer, as the issue service needs it.
+// scoped signer, as an issuing signer is.
 func groupSignerSetup(t *testing.T) (ks *ctlkeys.Authority, fk *fake, pub string) {
 	t.Helper()
 	ks, fk = setup(t)

@@ -8,7 +8,7 @@ template foo.c: changed; disconnects foo.c.core, foo.c.lead
 tags foo.c.core: allow:d.build, deny:_none -> allow:d.build
 tags foo.c.lead: deny:c.core -> allow:c.core
 rotate and revoke: (none)
-new credential (not issued by the apply: request it from the issue service, `mashctl issue serve`): foo.c.core, foo.c.lead
+new credential (not issued by the apply; the sender's endpoint needs a credential with its new tags): foo.c.core, foo.c.lead
 revoke: (none)
-first credential (not issued by the apply: request it from the issue service, `mashctl issue serve`): (none)
+first credential (not issued by the apply; an existing endpoint needs a credential with its tags): (none)
 inbox not checked: the apply's inbox and narrowing checks were not run, so it may still refuse

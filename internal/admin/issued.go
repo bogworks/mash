@@ -64,7 +64,7 @@ func (a *Admin) RecordIssued(ctx context.Context, r store.Issued) error {
 	return a.recordIssued(ctx, r, false)
 }
 
-// RecordIssuedChecked is RecordIssued with the issue service's conditions made part of every compare-and-set attempt:
+// RecordIssuedChecked is RecordIssued with the issuing conditions made part of every compare-and-set attempt:
 // when the record the write would follow has revoked_at set it fails with store.ErrKeyRevoked, and when that record is
 // bound to another address it fails with store.ErrKeyBoundElsewhere, and when the write would move the key between the
 // sender class (issue, rotation) and the probe class it fails with store.ErrKeyPurposeChanged; in each case nothing is written. The conditions
