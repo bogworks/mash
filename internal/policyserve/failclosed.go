@@ -23,7 +23,7 @@ const maxNamedAddresses = 3
 const (
 	// NewAddressDetail is what a refusal for an address with no inbox says after naming the addresses. It is the
 	// status text, so it is plain and, with the names, under the intake's 500 byte limit for a refusal.
-	NewAddressDetail = "A new address needs its endpoint and credential made first, with `mashctl endpoint create`. " +
+	NewAddressDetail = "A new address needs its endpoint made first, with `mashctl endpoint create`, and then a credential with its tags, which the apply does not issue. " +
 		"The change was refused and nothing was pushed; submit it again once the endpoint exists."
 	// NarrowingDetail is the reason a change that narrows an existing sender by tags is refused. Same limits as above.
 	NarrowingDetail = "this change narrows what an existing sender may reach by tags, which needs a new credential for that sender. " +
