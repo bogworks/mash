@@ -1,1 +1,1 @@
-**`mash status` and `mash doctor` now notice a state folder mash cannot create.** When mash cannot create its state folder, `mash status` no longer says ready and `mash doctor` reports a failed delivery row that names the folder and the fix.
+**`mash status` and `mash doctor` now notice a state folder mash cannot create.** When mash cannot create its state folder, `mash status` no longer says ready and `mash doctor` reports a failed delivery row that names the folder it cannot write.

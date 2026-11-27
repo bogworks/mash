@@ -282,7 +282,7 @@ func (h *healthSvc) deliveryCheck() cmds.HealthCheck {
 		if dir, err := endpoint.SpoolDir(h.cfg); err == nil {
 			detail = cmds.CannotWrite + config.Tilde(dir)
 		}
-		return cmds.HealthCheck{Name: cmds.CheckDelivery, State: cmds.CheckFail, Detail: detail, Fix: cmds.StoredMailFix}
+		return cmds.HealthCheck{Name: cmds.CheckDelivery, State: cmds.CheckFail, Detail: detail}
 	}
 	if h.scanning != nil && h.scanning() {
 		return cmds.HealthCheck{Name: cmds.CheckDelivery, State: cmds.CheckFail, Detail: cmds.ReasonStoredScan}
