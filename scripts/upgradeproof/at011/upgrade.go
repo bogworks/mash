@@ -32,38 +32,70 @@ var upgradeActions = []string{actCheck, actInstall, actPlugins, actRestart, actA
 
 var numberedRE = regexp.MustCompile(`(?m)^\s*\d+[.)]\s+(.+)$`)
 
-// pageSection is the text of the section "Upgrading from <prev>" of the page, or empty if there is none. The section
-// runs to the next heading of its level or above; only the first matching section is read, so other upgrade sections
-// (an older version's, or a later one that also matches) are not read.
-func pageSection(page, prev string) string {
-	head := regexp.MustCompile(`(?i)upgrading from ` + regexp.QuoteMeta(prev) + `(?:$|[^0-9.]|\.(?:$|[^0-9]))`)
-	in, level := false, 0
-	var sect []string
-	for _, l := range strings.Split(page, "\n") {
-		if strings.HasPrefix(l, "#") {
-			n := len(l) - len(strings.TrimLeft(l, "#"))
-			if !in && head.MatchString(l) {
-				in, level = true, n
-				continue
-			}
-			if in && n <= level {
-				break
-			}
-		}
-		if in {
-			sect = append(sect, l)
-		}
-	}
-	return strings.Join(sect, "\n")
+// upgradeHeadRE reads a heading "Upgrading from <from>" with an optional " to <to>". The versions are whole tokens, so
+// 0.6.1 never matches 0.6.10.
+var upgradeHeadRE = regexp.MustCompile(`(?i)upgrading from (\d+(?:\.\d+)*)(?:\s+to\s+(\d+(?:\.\d+)*))?`)
+
+// headMatches reports whether the heading line is the upgrade section from prev to version: it names "from <prev>" and
+// either names "to <version>" exactly or names no destination (an older page heading such as "Upgrading from 0.5.8").
+// A heading that names a different destination does not match.
+func headMatches(line, prev, version string) bool {
+	m := upgradeHeadRE.FindStringSubmatch(line)
+	return m != nil && m[1] == prev && (m[2] == "" || m[2] == version)
 }
 
-// pageSteps is the numbered steps of the section "Upgrading from <prev>" of the page, or none.
-func pageSteps(page, prev string) []string {
+// pageSection is the text of the section "Upgrading from <prev> to <version>" of the page, or empty if there is none.
+// A heading matches when it names the previous version and either names the candidate as its destination or names none
+// (headMatches). The section runs to the next heading of its level or above. More than one matching heading is
+// ambiguous and is an error, not a silent pick; no match is empty text and no error.
+func pageSection(page, prev, version string) (string, error) {
+	lines := strings.Split(page, "\n")
+	var starts []int
+	for i, l := range lines {
+		if strings.HasPrefix(l, "#") && headMatches(l, prev, version) {
+			starts = append(starts, i)
+		}
+	}
+	switch len(starts) {
+	case 0:
+		return "", nil
+	case 1:
+	default:
+		return "", fmt.Errorf("%d headings match \"Upgrading from %s to %s\" (lines %s); the upgrade section is ambiguous", len(starts), prev, version, joinInts(starts))
+	}
+	first := starts[0]
+	level := len(lines[first]) - len(strings.TrimLeft(lines[first], "#"))
+	var sect []string
+	for _, l := range lines[first+1:] {
+		if strings.HasPrefix(l, "#") && len(l)-len(strings.TrimLeft(l, "#")) <= level {
+			break
+		}
+		sect = append(sect, l)
+	}
+	return strings.Join(sect, "\n"), nil
+}
+
+// joinInts lists 1-based line numbers for the ambiguity message.
+func joinInts(idx []int) string {
 	var out []string
-	for _, m := range numberedRE.FindAllStringSubmatch(pageSection(page, prev), -1) {
+	for _, i := range idx {
+		out = append(out, fmt.Sprint(i+1))
+	}
+	return strings.Join(out, ", ")
+}
+
+// pageSteps is the numbered steps of the section "Upgrading from <prev> to <version>" of the page, or none. An
+// ambiguous section is an error.
+func pageSteps(page, prev, version string) ([]string, error) {
+	sect, err := pageSection(page, prev, version)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, m := range numberedRE.FindAllStringSubmatch(sect, -1) {
 		out = append(out, strings.TrimSpace(m[1]))
 	}
-	return out
+	return out, nil
 }
 
 var headingRE = regexp.MustCompile(`^(#+)\s+(.*)$`)

@@ -38,7 +38,10 @@ func (r *runner) upgradeOrder(s *stepCtx) []string {
 	if !s.need(err == nil, "read the upgrade page docs/compatibility.md at the candidate", "%v", err) {
 		return r.fallbackOrder(s)
 	}
-	steps := pageSteps(string(b), r.cfg.prev)
+	steps, err := pageSteps(string(b), r.cfg.prev, r.cfg.version)
+	if err != nil {
+		s.ok(false, "the upgrade page has one section for this upgrade", "%v", err)
+	}
 	has := s.ok(len(steps) > 0, "the upgrade page has numbered steps in its \"Upgrading from "+r.cfg.prev+"\" section", "%d found", len(steps))
 	if !has {
 		order := r.fallbackOrder(s)
@@ -199,16 +202,18 @@ func (r *runner) step8(s *stepCtx) {
 	if !s.need(err == nil, "read the upgrade page", "%v", err) {
 		return
 	}
-	steps := pageSteps(string(page), r.cfg.prev)
+	steps, err := pageSteps(string(page), r.cfg.prev, r.cfg.version)
+	s.ok(err == nil, "the upgrade page has exactly one section for this upgrade", "%v", err)
 	s.ok(len(steps) > 0, "the upgrade page has numbered steps", "%d found", len(steps))
 	// Only the section for this upgrade is read: an older section ("Upgrading from 0.5.10") must not satisfy these.
-	sect := pageSection(string(page), r.cfg.prev)
+	sect, _ := pageSection(string(page), r.cfg.prev, r.cfg.version)
 	s.ok(runningRE.MatchString(sect), "the upgrade section says an open session keeps its old version until it restarts (REQ-023)", "")
-	// The upgrade to the switch-on release is the one-way upgrade; later upgrades carry no such line.
-	if r.cfg.version == release.SwitchOnVersion {
+	// The upgrade that crosses the switch-on release (prev below it, version at or above it) is the one-way upgrade;
+	// upgrades that start at or above it carry no such line.
+	if crossesSwitchOn(r.cfg.prev, r.cfg.version) {
 		s.ok(oneWayRE.MatchString(sect), "the upgrade section carries the one-way line (no way back)", "")
 	} else {
-		s.note("the one-way line is required only in the section for the upgrade to the switch-on release (%s)", release.SwitchOnVersion)
+		s.note("the one-way line is required only in the section for an upgrade that crosses the switch-on release (%s)", release.SwitchOnVersion)
 	}
 	notes := filepath.Join(r.src, "docs", "release-notes", r.cfg.version+".md")
 	b, err := os.ReadFile(notes)
@@ -257,4 +262,10 @@ func whoOnline(out string, addrs ...string) error {
 		return fmt.Errorf("%s", strings.Join(bad, "; "))
 	}
 	return nil
+}
+
+// crossesSwitchOn reports whether an upgrade from prev to version crosses the switch-on release: prev is below
+// release.SwitchOnVersion and version is at or above it.
+func crossesSwitchOn(prev, version string) bool {
+	return !release.RequiresProofs(prev) && release.RequiresProofs(version)
 }

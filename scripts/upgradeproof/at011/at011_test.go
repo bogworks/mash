@@ -12,7 +12,7 @@ import (
 
 func TestPageStepsAndOrder(t *testing.T) {
 	page := "# Compatibility\n\n## Upgrading from 0.5.10\n\n1. Run `mash version` and `mash doctor`.\n2. Install both programs.\n3. Update the plugin.\n4. Restart each session.\n5. Run `mash doctor` again.\n\n## Other\n\n1. not this\n"
-	steps := pageSteps(page, "0.5.10")
+	steps := stepsOf(page, "0.5.10", "0.6.0")
 	if len(steps) != 5 {
 		t.Fatalf("steps = %q", steps)
 	}
@@ -20,7 +20,7 @@ func TestPageStepsAndOrder(t *testing.T) {
 	if len(unknown) != 0 || !reflect.DeepEqual(order, upgradeActions) {
 		t.Fatalf("order %v unknown %v", order, unknown)
 	}
-	if got := pageSteps("# Upgrading from 0.5.10\n\nSome prose, no list.\n", "0.5.10"); len(got) != 0 {
+	if got := stepsOf("# Upgrading from 0.5.10\n\nSome prose, no list.\n", "0.5.10", "0.6.0"); len(got) != 0 {
 		t.Fatalf("prose is not steps: %q", got)
 	}
 }
@@ -65,7 +65,7 @@ func TestRealUpgradePageSection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	steps := pageSteps(string(b), "0.5.10")
+	steps := stepsOf(string(b), "0.5.10", "0.6.0")
 	if len(steps) != 5 {
 		t.Fatalf("want the 5 steps of the 0.5.10 section only, got %d: %q", len(steps), steps)
 	}
@@ -73,17 +73,17 @@ func TestRealUpgradePageSection(t *testing.T) {
 	if p := orderProblem(order, unknown); p != "" {
 		t.Fatalf("the real page fails: %s (order %v)", p, order)
 	}
-	if got := pageSteps(string(b), "0.5.8"); len(got) != 0 {
+	if got := stepsOf(string(b), "0.5.8", "0.6.0"); len(got) != 0 {
 		t.Fatalf("the 0.5.8 section is prose, got steps %q", got)
 	}
-	if got := pageSteps(string(b), "0.5.1"); len(got) != 0 {
+	if got := stepsOf(string(b), "0.5.1", "0.6.0"); len(got) != 0 {
 		t.Fatalf("0.5.1 is not 0.5.10: %q", got)
 	}
 }
 
 func TestOrderProblem(t *testing.T) {
 	short := "## Upgrading from 0.5.10\n\n1. Install both programs.\n2. Restart each session.\n"
-	order, unknown := orderFrom(pageSteps(short, "0.5.10"))
+	order, unknown := orderFrom(stepsOf(short, "0.5.10", "0.6.0"))
 	p := orderProblem(order, unknown)
 	for _, want := range []string{actCheck, actPlugins, actAfter} {
 		if !strings.Contains(p, want) {
@@ -275,10 +275,10 @@ func TestNotesStepsSynthetic(t *testing.T) {
 
 func TestPageStepsPicksPrevSection(t *testing.T) {
 	page := "# Compatibility\n\n## Upgrading from 0.5.10 to 0.6.0\n\n1. Old check.\n2. Old install.\n\n## Upgrading from 0.6.0 to 0.6.1\n\n1. Check first.\n2. Install both programs.\n3. Update the plugins.\n4. Restart each session.\n5. Check again.\n\n## Other\n\n1. not this\n"
-	if got := pageSteps(page, "0.6.0"); len(got) != 5 || got[0] != "Check first." {
+	if got := stepsOf(page, "0.6.0", "0.6.1"); len(got) != 5 || got[0] != "Check first." {
 		t.Fatalf("0.6.0 section: %q", got)
 	}
-	if got := pageSteps(page, "0.5.10"); len(got) != 2 || got[0] != "Old check." {
+	if got := stepsOf(page, "0.5.10", "0.6.0"); len(got) != 2 || got[0] != "Old check." {
 		t.Fatalf("0.5.10 section: %q", got)
 	}
 }
@@ -287,7 +287,7 @@ func TestPageSectionPicksPrevOnly(t *testing.T) {
 	page := "# Compatibility\n\n## Upgrading from 0.6.0 to 0.6.1\n\n1. Check first.\n2. Install both programs.\n\n" +
 		"## Upgrading from 0.5.10 to 0.6.0\n\nAn open session keeps its old version until it restarts.\n\n" +
 		"This upgrade is one-way: there is no way back.\n\n## Other\n\nText.\n"
-	sect := pageSection(page, "0.6.0")
+	sect := sectOf(page, "0.6.0", "0.6.1")
 	if runningRE.MatchString(sect) || oneWayRE.MatchString(sect) {
 		t.Fatalf("the 0.6.0 section borrowed text from the 0.5.10 section: %q", sect)
 	}
@@ -295,11 +295,11 @@ func TestPageSectionPicksPrevOnly(t *testing.T) {
 	if !runningRE.MatchString(page) || !oneWayRE.MatchString(page) {
 		t.Fatal("the synthetic page must satisfy both patterns as a whole")
 	}
-	sect = pageSection(page, "0.5.10")
+	sect = sectOf(page, "0.5.10", "0.6.0")
 	if !runningRE.MatchString(sect) || !oneWayRE.MatchString(sect) {
 		t.Fatalf("the 0.5.10 section lacks its text: %q", sect)
 	}
-	if got := pageSection(page, "0.4.0"); got != "" {
+	if got := sectOf(page, "0.4.0", "0.6.1"); got != "" {
 		t.Fatalf("an absent section is empty: %q", got)
 	}
 }
@@ -308,11 +308,11 @@ func TestPageSectionFirstOnly(t *testing.T) {
 	page := "# Compatibility\n\n## Upgrading from 0.6.0 to 0.6.1\n\n1. a\n\n## Other\n\nText.\n\n" +
 		"## Upgrading from 0.6.0 to 0.6.2\n\nAn open session keeps its old version until it restarts.\n\n" +
 		"This upgrade is one-way: there is no way back.\n\n1. b\n"
-	sect := pageSection(page, "0.6.0")
+	sect := sectOf(page, "0.6.0", "0.6.1")
 	if runningRE.MatchString(sect) || oneWayRE.MatchString(sect) {
 		t.Fatalf("a later matching section was appended: %q", sect)
 	}
-	if got := pageSteps(page, "0.6.0"); !reflect.DeepEqual(got, []string{"a"}) {
+	if got := stepsOf(page, "0.6.0", "0.6.1"); !reflect.DeepEqual(got, []string{"a"}) {
 		t.Fatalf("steps = %q, want [a]", got)
 	}
 }
@@ -323,11 +323,79 @@ func TestPageSectionReal(t *testing.T) {
 		t.Fatal(err)
 	}
 	page := string(b)
-	if s := pageSection(page, "0.6.0"); !runningRE.MatchString(s) {
+	if s := sectOf(page, "0.6.0", "0.6.1"); !runningRE.MatchString(s) {
 		t.Errorf("the 0.6.0 section lacks the open-session line: %q", s)
 	}
-	s := pageSection(page, "0.5.10")
+	s := sectOf(page, "0.5.10", "0.6.0")
 	if !runningRE.MatchString(s) || !oneWayRE.MatchString(s) {
 		t.Errorf("the 0.5.10 section lacks the open-session or one-way line: %q", s)
+	}
+}
+
+// stepsOf and sectOf read a page that must not be ambiguous.
+func stepsOf(page, prev, version string) []string {
+	got, err := pageSteps(page, prev, version)
+	if err != nil {
+		panic(err)
+	}
+	return got
+}
+
+func sectOf(page, prev, version string) string {
+	got, err := pageSection(page, prev, version)
+	if err != nil {
+		panic(err)
+	}
+	return got
+}
+
+func TestPageSectionAmbiguous(t *testing.T) {
+	page := "## Upgrading from 0.6.0 to 0.6.1\n\n1. a\n\n## Upgrading from 0.6.0\n\n1. b\n"
+	if _, err := pageSection(page, "0.6.0", "0.6.1"); err == nil || !strings.Contains(err.Error(), "ambiguous") {
+		t.Fatalf("two matching headings must be ambiguous: %v", err)
+	}
+	if _, err := pageSteps(page, "0.6.0", "0.6.1"); err == nil {
+		t.Fatal("pageSteps must report the ambiguity")
+	}
+}
+
+func TestPageSectionDestination(t *testing.T) {
+	page := "## Upgrading from 0.6.0 to 0.6.2\n\n1. wrong\n"
+	if got, err := pageSection(page, "0.6.0", "0.6.1"); err != nil || got != "" {
+		t.Fatalf("a heading naming another destination must not match: %q %v", got, err)
+	}
+	page = "## Upgrading from 0.5.8\n\n1. old\n"
+	if got, err := pageSteps(page, "0.5.8", "0.6.0"); err != nil || !reflect.DeepEqual(got, []string{"old"}) {
+		t.Fatalf("a heading with no destination matches: %q %v", got, err)
+	}
+}
+
+func TestPageSectionWholeTokens(t *testing.T) {
+	page := "## Upgrading from 0.6.10 to 0.6.11\n\n1. ten\n\n## Upgrading from 0.6.1 to 0.6.2\n\n1. one\n"
+	if got := stepsOf(page, "0.6.1", "0.6.2"); !reflect.DeepEqual(got, []string{"one"}) {
+		t.Fatalf("0.6.1 must not match 0.6.10: %q", got)
+	}
+	if got := stepsOf(page, "0.6.10", "0.6.11"); !reflect.DeepEqual(got, []string{"ten"}) {
+		t.Fatalf("0.6.10: %q", got)
+	}
+	page = "## Upgrading from 0.6.0 to 0.6.10\n\n1. x\n"
+	if got := stepsOf(page, "0.6.0", "0.6.1"); len(got) != 0 {
+		t.Fatalf("destination 0.6.10 must not match 0.6.1: %q", got)
+	}
+}
+
+func TestCrossesSwitchOn(t *testing.T) {
+	for _, c := range []struct {
+		prev, version string
+		want          bool
+	}{
+		{"0.5.10", "0.6.0", true},
+		{"0.5.10", "0.6.1", true},
+		{"0.6.0", "0.6.1", false},
+		{"0.5.9", "0.5.10", false},
+	} {
+		if got := crossesSwitchOn(c.prev, c.version); got != c.want {
+			t.Errorf("crossesSwitchOn(%s, %s) = %v, want %v", c.prev, c.version, got, c.want)
+		}
 	}
 }
