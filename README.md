@@ -5,6 +5,7 @@
 [![security checks](https://img.shields.io/github/actions/workflow/status/bogworks/mash/security.yml?branch=main&label=security%20checks)](https://github.com/bogworks/mash/actions/workflows/security.yml?query=branch%3Amain)
 [![SLSA Build L2](https://img.shields.io/badge/SLSA-Build%20L2-brightgreen)](#check-the-download)
 [![SBOM: CycloneDX](https://img.shields.io/badge/SBOM-CycloneDX-brightgreen)](docs/install.md#verify-what-you-download)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/bogworks/mash/badge)](https://scorecard.dev/viewer/?uri=github.com/bogworks/mash)
 [![license: Apache-2.0](https://img.shields.io/github/license/bogworks/mash?color=brightgreen)](LICENSE)
 [![quick start](https://img.shields.io/badge/quick%20start-two%20sessions-blue)](docs/guide/quickstart.md)
 [![Ask DeepWiki](https://img.shields.io/badge/Ask-DeepWiki-blue)](https://deepwiki.com/bogworks/mash)
